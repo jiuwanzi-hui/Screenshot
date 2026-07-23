@@ -19,9 +19,12 @@ Screenshot 是一款面向 Windows 10/11 的轻量截图工具。它把区域截
 
 ### 下载与安装
 
-下载最新的 x64 自包含安装包：
+下载最新的 x64 自包含版本：
 
-[Screenshot Setup 1.0.0](installer/dist/Screenshot-Setup-1.0.0-win-x64.exe)
+- [安装版 Screenshot Setup 1.0.0](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.0.0-win-x64.exe)
+- [免安装版 Screenshot Portable 1.0.0](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.0.0-win-x64.zip)
+
+免安装版解压后直接运行 `Screenshot.exe`，不需要安装或预先配置 .NET。其设置、凭据和默认截图保存在解压目录旁的 `ScreenshotData` 中，移动或删除程序前请按需备份该目录。
 
 安装程序不要求预先安装 .NET，并提供：
 
@@ -54,14 +57,14 @@ dotnet test Screenshot.sln -c Release
 dotnet run --project src/Screenshot.App
 ```
 
-生成自包含安装包还需要 Inno Setup 6：
+生成自包含安装包和免安装包还需要 Inno Setup 6：
 
 ```powershell
 winget install --id JRSoftware.InnoSetup --exact
 .\installer\build-installer.ps1
 ```
 
-安装包输出到 `installer/dist/`。项目架构见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，实现进度见 [PLAN.md](PLAN.md)。
+两个发布包都输出到 `installer/dist/`。项目架构见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，实现进度见 [PLAN.md](PLAN.md)。
 
 ---
 
@@ -80,9 +83,12 @@ Screenshot is a lightweight capture utility for Windows 10 and 11. It combines r
 
 ### Download and install
 
-Download the latest self-contained x64 installer:
+Download the latest self-contained x64 build:
 
-[Screenshot Setup 1.0.0](installer/dist/Screenshot-Setup-1.0.0-win-x64.exe)
+- [Screenshot Setup 1.0.0](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.0.0-win-x64.exe)
+- [Screenshot Portable 1.0.0](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.0.0-win-x64.zip)
+
+Extract the portable archive and run `Screenshot.exe`; neither installation nor a preinstalled .NET runtime is required. Settings, credentials, and default captures are stored in `ScreenshotData` beside the extracted executable, so back up that directory before moving or deleting the application when needed.
 
 The installer does not require a preinstalled .NET runtime and includes:
 
@@ -115,11 +121,11 @@ dotnet test Screenshot.sln -c Release
 dotnet run --project src/Screenshot.App
 ```
 
-Inno Setup 6 is also required to produce the self-contained installer:
+Inno Setup 6 is also required to produce the installer and portable package:
 
 ```powershell
 winget install --id JRSoftware.InnoSetup --exact
 .\installer\build-installer.ps1
 ```
 
-The installer is written to `installer/dist/`. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the architecture and [PLAN.md](PLAN.md) for implementation status.
+Both release packages are written to `installer/dist/`. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the architecture and [PLAN.md](PLAN.md) for implementation status.
