@@ -1,0 +1,813 @@
+<Window x:Class="Screenshot.App.Presentation.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:Screenshot.App.Presentation"
+        xmlns:core="clr-namespace:Screenshot.App.Core"
+        mc:Ignorable="d"
+        Icon="/Screenshot;component/Assets/Screenshot.ico"
+        Title="Screenshot"
+        Width="780"
+        Height="560"
+        MinWidth="680"
+        MinHeight="480"
+        ResizeMode="CanMinimize"
+        ShowInTaskbar="False"
+        Background="{DynamicResource AppWindowBackgroundBrush}"
+        FontFamily="Microsoft YaHei UI"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <Style x:Key="SecondaryButton" TargetType="Button">
+            <Setter Property="MinWidth" Value="76" />
+            <Setter Property="Padding" Value="14,7" />
+            <Setter Property="Background" Value="{DynamicResource AppPanelBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="PrimaryButton"
+               TargetType="Button"
+               BasedOn="{StaticResource SecondaryButton}">
+            <Setter Property="MinWidth" Value="92" />
+            <Setter Property="Padding" Value="16,7" />
+            <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="NavigationItem" TargetType="ListBoxItem">
+            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="Padding" Value="12,10" />
+            <Setter Property="MinHeight" Value="48" />
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Foreground" Value="{DynamicResource AppTextSecondaryBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border x:Name="NavigationBackground"
+                                Background="Transparent"
+                                CornerRadius="8"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="NavigationBackground" Property="Background" Value="{DynamicResource AppAccentMutedBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource AppAccentForegroundBrush}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="ThemeOptionButton" TargetType="RadioButton">
+            <Setter Property="MinWidth" Value="92" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Padding" Value="14,4" />
+            <Setter Property="Background" Value="{DynamicResource AppPanelBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="ThemeOptionBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="ThemeOptionBorder" Property="Background" Value="{DynamicResource AppAccentBrush}" />
+                                <Setter TargetName="ThemeOptionBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                                <Setter Property="Foreground" Value="#FFFFFF" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ThemeOptionBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="{x:Type local:HotKeyCaptureBox}">
+            <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type local:HotKeyCaptureBox}">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+                            <ScrollViewer x:Name="PART_ContentHost"
+                                          Margin="{TemplateBinding Padding}"
+                                          Focusable="False" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border Margin="8"
+            Background="{DynamicResource AppGlassBackgroundBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="20"
+            SnapsToDevicePixels="True">
+      <Grid Background="{DynamicResource AppWindowBackgroundBrush}">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="178" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0"
+                Background="{DynamicResource AppSidebarBackgroundBrush}"
+                BorderBrush="{DynamicResource AppSubtleBorderBrush}"
+                BorderThickness="0,0,1,0"
+                CornerRadius="16">
+            <Grid Margin="24,26,20,24">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <StackPanel>
+                    <TextBlock FontSize="22"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="Screenshot" />
+                    <Border Height="1"
+                            Margin="0,24,0,18"
+                            Background="{DynamicResource AppSeparatorBrush}" />
+                </StackPanel>
+
+                <ListBox x:Name="SettingsNavigation"
+                         Grid.Row="1"
+                         BorderThickness="0"
+                         Background="Transparent"
+                         SelectionChanged="OnSettingsNavigationSelectionChanged">
+                    <ListBoxItem IsSelected="True"
+                                 Style="{StaticResource NavigationItem}">
+                        <Grid Height="24">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="24" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Height="24"
+                                       FontFamily="Segoe MDL2 Assets"
+                                       FontSize="17"
+                                       LineHeight="24"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       Text="&#xE713;"
+                                       TextAlignment="Center"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1"
+                                       Height="24"
+                                       Margin="10,0,0,0"
+                                       LineHeight="24"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       Text="常规设置"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </ListBoxItem>
+                    <ListBoxItem Style="{StaticResource NavigationItem}">
+                        <Grid Height="24">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="24" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Height="24"
+                                       FontFamily="Segoe MDL2 Assets"
+                                       FontSize="17"
+                                       LineHeight="24"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       Text="&#xE765;"
+                                       TextAlignment="Center"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1"
+                                       Height="24"
+                                       Margin="10,0,0,0"
+                                       LineHeight="24"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       Text="快捷键"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </ListBoxItem>
+                    <ListBoxItem Style="{StaticResource NavigationItem}">
+                        <Grid Height="24">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="24" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Height="24"
+                                       FontFamily="Segoe MDL2 Assets"
+                                       FontSize="17"
+                                       LineHeight="24"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       Text="&#xE8A1;"
+                                       TextAlignment="Center"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1"
+                                       Height="24"
+                                       Margin="10,0,0,0"
+                                       LineHeight="24"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       Text="文字识别"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </ListBoxItem>
+                    <ListBoxItem Style="{StaticResource NavigationItem}">
+                        <Grid Height="24">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="24" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Height="24"
+                                       FontFamily="Segoe MDL2 Assets"
+                                       FontSize="17"
+                                       LineHeight="24"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       Text="&#xE774;"
+                                       TextAlignment="Center"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1"
+                                       Height="24"
+                                       Margin="10,0,0,0"
+                                       LineHeight="24"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       Text="翻译"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </ListBoxItem>
+                </ListBox>
+            </Grid>
+        </Border>
+
+        <Grid Grid.Column="1"
+              Margin="34,28,34,26">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <ScrollViewer x:Name="GeneralSettingsPanel"
+                          Grid.Row="0"
+                          Grid.RowSpan="2"
+                          VerticalScrollBarVisibility="Auto">
+              <Grid Margin="0,0,16,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <StackPanel>
+                    <TextBlock FontSize="22"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="常规" />
+                    <TextBlock Margin="0,7,0,0"
+                               FontSize="13"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               Text="保存位置和运行方式" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="1"
+                            Margin="0,28,0,0">
+                    <TextBlock FontSize="14"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="截图保存位置" />
+                    <Grid Margin="0,9,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox Height="34"
+                                 Padding="10,3"
+                                 VerticalContentAlignment="Center"
+                                 BorderBrush="{DynamicResource AppBorderBrush}"
+                                 LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
+                                 TextChanged="OnTextSettingChanged"
+                                 Text="{Binding SaveDirectory, UpdateSourceTrigger=PropertyChanged}" />
+                        <Button Grid.Column="1"
+                                Margin="10,0,0,0"
+                                Click="OnBrowseSaveDirectoryClick"
+                                Content="浏览"
+                                Style="{StaticResource SecondaryButton}"
+                                ToolTip="选择截图保存目录" />
+                    </Grid>
+
+                    <StackPanel Margin="0,18,0,0">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="界面主题" />
+                        <StackPanel Margin="0,9,0,0" Orientation="Horizontal">
+                            <RadioButton x:Name="SystemThemeOption"
+                                         Checked="OnThemeOptionChecked"
+                                         Content="跟随系统"
+                                         GroupName="AppTheme"
+                                         Style="{StaticResource ThemeOptionButton}"
+                                         Tag="{x:Static core:AppTheme.System}" />
+                            <RadioButton x:Name="LightThemeOption"
+                                         Checked="OnThemeOptionChecked"
+                                         Content="浅色"
+                                         GroupName="AppTheme"
+                                         Style="{StaticResource ThemeOptionButton}"
+                                         Tag="{x:Static core:AppTheme.Light}" />
+                            <RadioButton x:Name="DarkThemeOption"
+                                         Checked="OnThemeOptionChecked"
+                                         Content="深色"
+                                         GroupName="AppTheme"
+                                         Style="{StaticResource ThemeOptionButton}"
+                                         Tag="{x:Static core:AppTheme.Dark}" />
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+
+                <Separator Grid.Row="2"
+                           Margin="0,27,0,18"
+                           Background="{DynamicResource AppSeparatorBrush}" />
+
+                <StackPanel Grid.Row="3">
+                    <TextBlock FontSize="14"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="点击关闭按钮时" />
+                    <StackPanel Margin="0,9,0,8" Orientation="Horizontal">
+                        <RadioButton x:Name="MinimizeOnCloseOption"
+                                     Checked="OnCloseBehaviorOptionChecked"
+                                     Content="最小化到后台"
+                                     GroupName="WindowCloseBehavior"
+                                     Style="{StaticResource ThemeOptionButton}"
+                                     Tag="{x:Static core:WindowCloseBehavior.MinimizeToBackground}" />
+                        <RadioButton x:Name="ExitOnCloseOption"
+                                     Checked="OnCloseBehaviorOptionChecked"
+                                     Content="退出程序"
+                                     GroupName="WindowCloseBehavior"
+                                     Style="{StaticResource ThemeOptionButton}"
+                                     Tag="{x:Static core:WindowCloseBehavior.ExitApplication}" />
+                    </StackPanel>
+                    <CheckBox x:Name="ShowTaskbarIconCheckBox"
+                              MinHeight="30"
+                              FontSize="14"
+                              Foreground="{DynamicResource AppTextPrimaryBrush}"
+                              IsChecked="{Binding ShowTaskbarIcon}"
+                              Checked="OnImmediateSettingChanged"
+                              Unchecked="OnImmediateSettingChanged"
+                              Content="在任务栏中显示窗口图标" />
+                    <CheckBox x:Name="ShowNotificationIconCheckBox"
+                              MinHeight="30"
+                              Margin="0,12,0,0"
+                              FontSize="14"
+                              Foreground="{DynamicResource AppTextPrimaryBrush}"
+                              IsChecked="{Binding ShowNotificationIcon}"
+                              Checked="OnImmediateSettingChanged"
+                              Unchecked="OnImmediateSettingChanged"
+                              Content="显示通知区域图标" />
+                    <CheckBox MinHeight="30"
+                              Margin="0,12,0,0"
+                              FontSize="14"
+                              Foreground="{DynamicResource AppTextPrimaryBrush}"
+                              IsChecked="{Binding LaunchAtStartup}"
+                              Checked="OnImmediateSettingChanged"
+                              Unchecked="OnImmediateSettingChanged"
+                              Content="开机时启动 Screenshot" />
+                    <CheckBox MinHeight="30"
+                              Margin="0,12,0,0"
+                              FontSize="14"
+                              Foreground="{DynamicResource AppTextPrimaryBrush}"
+                              IsChecked="{Binding KeepHistory}"
+                              Checked="OnImmediateSettingChanged"
+                              Unchecked="OnImmediateSettingChanged"
+                              Content="保留本次运行的截图历史" />
+                </StackPanel>
+              </Grid>
+            </ScrollViewer>
+
+            <ScrollViewer x:Name="HotKeySettingsPanel"
+                          Grid.Row="0"
+                          Grid.RowSpan="2"
+                          VerticalScrollBarVisibility="Auto"
+                          Visibility="Collapsed">
+                <StackPanel>
+                    <TextBlock FontSize="22"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="快捷键" />
+                    <TextBlock Margin="0,7,0,0"
+                               FontSize="13"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               Text="使用修饰键加普通按键的组合" />
+
+                    <StackPanel Margin="0,25,0,0">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="区域截图" />
+                        <Grid Margin="0,8,16,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <local:HotKeyCaptureBox x:Name="RegionCaptureHotKeyBox"
+                                                    Height="34"
+                                                    Padding="10,3"
+                                                    BorderBrush="{DynamicResource AppBorderBrush}"
+                                                    GotKeyboardFocus="OnHotKeyCaptureGotKeyboardFocus"
+                                                    HotKeyCaptured="OnHotKeyCaptured"
+                                                    HotKeyCaptureCanceled="OnHotKeyCaptureCanceled"
+                                                    LostKeyboardFocus="OnHotKeyCaptureLostKeyboardFocus"
+                                                    Tag="RegionCaptureHotKey"
+                                                    Text="{Binding RegionCaptureHotKey}"
+                                                    TextAlignment="Center"
+                                                    ToolTip="单击后直接按下组合键" />
+                            <Button Grid.Column="1"
+                                    Width="68"
+                                    Margin="8,0,0,0"
+                                    Click="OnBeginHotKeyEditClick"
+                                    Content="修改"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="RegionCaptureHotKeyBox"
+                                    ToolTip="修改区域截图快捷键" />
+                            <Button Grid.Column="2"
+                                    Width="34"
+                                    Margin="6,0,0,0"
+                                    Click="OnClearHotKeyClick"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="RegionCaptureHotKeyBox"
+                                    ToolTip="不设置区域截图快捷键">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,17,0,0">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="长截图" />
+                        <Grid Margin="0,8,16,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <local:HotKeyCaptureBox x:Name="ScrollCaptureHotKeyBox"
+                                                    Height="34"
+                                                    Padding="10,3"
+                                                    BorderBrush="{DynamicResource AppBorderBrush}"
+                                                    GotKeyboardFocus="OnHotKeyCaptureGotKeyboardFocus"
+                                                    HotKeyCaptured="OnHotKeyCaptured"
+                                                    HotKeyCaptureCanceled="OnHotKeyCaptureCanceled"
+                                                    LostKeyboardFocus="OnHotKeyCaptureLostKeyboardFocus"
+                                                    Tag="ScrollCaptureHotKey"
+                                                    Text="{Binding ScrollCaptureHotKey}"
+                                                    TextAlignment="Center"
+                                                    ToolTip="单击后直接按下组合键" />
+                            <Button Grid.Column="1"
+                                    Width="68"
+                                    Margin="8,0,0,0"
+                                    Click="OnBeginHotKeyEditClick"
+                                    Content="修改"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="ScrollCaptureHotKeyBox"
+                                    ToolTip="修改长截图快捷键" />
+                            <Button Grid.Column="2"
+                                    Width="34"
+                                    Margin="6,0,0,0"
+                                    Click="OnClearHotKeyClick"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="ScrollCaptureHotKeyBox"
+                                    ToolTip="不设置长截图快捷键">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,17,0,0">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="文字识别" />
+                        <Grid Margin="0,8,16,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <local:HotKeyCaptureBox x:Name="OcrHotKeyBox"
+                                                    Height="34"
+                                                    Padding="10,3"
+                                                    BorderBrush="{DynamicResource AppBorderBrush}"
+                                                    GotKeyboardFocus="OnHotKeyCaptureGotKeyboardFocus"
+                                                    HotKeyCaptured="OnHotKeyCaptured"
+                                                    HotKeyCaptureCanceled="OnHotKeyCaptureCanceled"
+                                                    LostKeyboardFocus="OnHotKeyCaptureLostKeyboardFocus"
+                                                    Tag="OcrHotKey"
+                                                    Text="{Binding OcrHotKey}"
+                                                    TextAlignment="Center"
+                                                    ToolTip="单击后直接按下组合键" />
+                            <Button Grid.Column="1"
+                                    Width="68"
+                                    Margin="8,0,0,0"
+                                    Click="OnBeginHotKeyEditClick"
+                                    Content="修改"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="OcrHotKeyBox"
+                                    ToolTip="修改文字识别快捷键" />
+                            <Button Grid.Column="2"
+                                    Width="34"
+                                    Margin="6,0,0,0"
+                                    Click="OnClearHotKeyClick"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="OcrHotKeyBox"
+                                    ToolTip="不设置文字识别快捷键">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,17,0,0">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="钉图" />
+                        <Grid Margin="0,8,16,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <local:HotKeyCaptureBox x:Name="PinHotKeyBox"
+                                                    Height="34"
+                                                    Padding="10,3"
+                                                    BorderBrush="{DynamicResource AppBorderBrush}"
+                                                    GotKeyboardFocus="OnHotKeyCaptureGotKeyboardFocus"
+                                                    HotKeyCaptured="OnHotKeyCaptured"
+                                                    HotKeyCaptureCanceled="OnHotKeyCaptureCanceled"
+                                                    LostKeyboardFocus="OnHotKeyCaptureLostKeyboardFocus"
+                                                    Tag="PinHotKey"
+                                                    Text="{Binding PinHotKey}"
+                                                    TextAlignment="Center"
+                                                    ToolTip="单击后直接按下组合键" />
+                            <Button Grid.Column="1"
+                                    Width="68"
+                                    Margin="8,0,0,0"
+                                    Click="OnBeginHotKeyEditClick"
+                                    Content="修改"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="PinHotKeyBox"
+                                    ToolTip="修改钉图快捷键" />
+                            <Button Grid.Column="2"
+                                    Width="34"
+                                    Margin="6,0,0,0"
+                                    Click="OnClearHotKeyClick"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="PinHotKeyBox"
+                                    ToolTip="不设置钉图快捷键">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,17,16,8">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="打开设置" />
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <local:HotKeyCaptureBox x:Name="OpenSettingsHotKeyBox"
+                                                    Height="34"
+                                                    Padding="10,3"
+                                                    BorderBrush="{DynamicResource AppBorderBrush}"
+                                                    GotKeyboardFocus="OnHotKeyCaptureGotKeyboardFocus"
+                                                    HotKeyCaptured="OnHotKeyCaptured"
+                                                    HotKeyCaptureCanceled="OnHotKeyCaptureCanceled"
+                                                    LostKeyboardFocus="OnHotKeyCaptureLostKeyboardFocus"
+                                                    Tag="OpenSettingsHotKey"
+                                                    Text="{Binding OpenSettingsHotKey}"
+                                                    TextAlignment="Center"
+                                                    ToolTip="单击后直接按下组合键" />
+                            <Button Grid.Column="1"
+                                    Width="68"
+                                    Margin="8,0,0,0"
+                                    Click="OnBeginHotKeyEditClick"
+                                    Content="修改"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="OpenSettingsHotKeyBox"
+                                    ToolTip="修改打开设置快捷键" />
+                            <Button Grid.Column="2"
+                                    Width="34"
+                                    Margin="6,0,0,0"
+                                    Click="OnClearHotKeyClick"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="OpenSettingsHotKeyBox"
+                                    ToolTip="不设置打开设置快捷键">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <Grid x:Name="OcrSettingsPanel"
+                  Grid.Row="0"
+                  Grid.RowSpan="2"
+                  Visibility="Collapsed">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <StackPanel>
+                    <TextBlock FontSize="22"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="文字识别" />
+                    <TextBlock Margin="0,7,0,0"
+                               FontSize="13"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               Text="使用 Windows 已安装的 OCR 语言包" />
+                </StackPanel>
+
+                <StackPanel Grid.Row="1"
+                            Margin="0,28,0,0">
+                    <TextBlock FontSize="14"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="识别语言" />
+                    <TextBox Height="34"
+                             Margin="0,9,0,0"
+                             Padding="10,3"
+                             VerticalContentAlignment="Center"
+                             BorderBrush="{DynamicResource AppBorderBrush}"
+                             LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
+                             TextChanged="OnTextSettingChanged"
+                             Text="{Binding OcrLanguageTag, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="例如 zh-Hans 或 en-US" />
+                </StackPanel>
+            </Grid>
+
+            <ScrollViewer x:Name="TranslationSettingsPanel"
+                          Grid.Row="0"
+                          Grid.RowSpan="2"
+                          VerticalScrollBarVisibility="Auto"
+                          Visibility="Collapsed">
+                <StackPanel>
+                    <TextBlock FontSize="22"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="翻译" />
+                    <TextBlock Margin="0,7,0,0"
+                               FontSize="13"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               Text="启用后，识别文字会按需发送到你配置的翻译服务" />
+
+                    <CheckBox Margin="0,25,0,0"
+                              FontSize="14"
+                              Foreground="{DynamicResource AppTextPrimaryBrush}"
+                              IsChecked="{Binding SendTextToOnlineTranslation}"
+                              Checked="OnImmediateSettingChanged"
+                              Unchecked="OnImmediateSettingChanged"
+                              Content="允许将识别文字发送到在线翻译服务" />
+
+                    <StackPanel Margin="0,20,0,0">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="服务类型" />
+                        <Border Height="34"
+                                Margin="0,8,0,0"
+                                Padding="10,0"
+                                Background="{DynamicResource AppInputBackgroundBrush}"
+                                BorderBrush="{DynamicResource AppBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                ToolTip="兼容 DeepSeek、OpenAI 等聊天补全接口">
+                            <TextBlock VerticalAlignment="Center"
+                                       Foreground="{DynamicResource AppControlForegroundBrush}"
+                                       Text="OpenAI 兼容接口" />
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,17,0,0">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="HTTPS 接口地址" />
+                        <TextBox Height="34"
+                                 Margin="0,8,0,0"
+                                 Padding="10,3"
+                                 VerticalContentAlignment="Center"
+                                 BorderBrush="{DynamicResource AppBorderBrush}"
+                                 LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
+                                 TextChanged="OnTextSettingChanged"
+                                 Text="{Binding TranslationEndpoint, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="DeepSeek 填 https://api.deepseek.com" />
+                    </StackPanel>
+
+                    <StackPanel Margin="0,17,0,0">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="目标语言" />
+                        <TextBox Height="34"
+                                 Margin="0,8,0,0"
+                                 Padding="10,3"
+                                 VerticalContentAlignment="Center"
+                                 BorderBrush="{DynamicResource AppBorderBrush}"
+                                 LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
+                                 TextChanged="OnTextSettingChanged"
+                                 Text="{Binding TranslationTargetLanguage, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="例如 zh-Hans 或 en" />
+                    </StackPanel>
+
+                    <StackPanel Margin="0,17,0,0">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="模型名称" />
+                        <TextBox Height="34"
+                                 Margin="0,8,0,0"
+                                 Padding="10,3"
+                                 VerticalContentAlignment="Center"
+                                 BorderBrush="{DynamicResource AppBorderBrush}"
+                                 LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
+                                 TextChanged="OnTextSettingChanged"
+                                 Text="{Binding TranslationModel, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="DeepSeek 填 deepseek-chat" />
+                    </StackPanel>
+
+                    <StackPanel Margin="0,17,0,8">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="API Key" />
+                        <PasswordBox x:Name="TranslationApiKeyBox"
+                                     Height="34"
+                                     Margin="0,8,0,0"
+                                     Padding="10,3"
+                                     VerticalContentAlignment="Center"
+                                     BorderBrush="{DynamicResource AppBorderBrush}"
+                                     LostKeyboardFocus="OnTranslationApiKeyLostKeyboardFocus"
+                                     PasswordChanged="OnTranslationApiKeyPasswordChanged"
+                                     ToolTip="仅加密保存在当前 Windows 用户下" />
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <TextBlock Grid.Row="2"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource AppTextSecondaryBrush}"
+                       Text="{Binding StatusMessage}"
+                       TextTrimming="CharacterEllipsis" />
+        </Grid>
+      </Grid>
+    </Border>
+</Window>

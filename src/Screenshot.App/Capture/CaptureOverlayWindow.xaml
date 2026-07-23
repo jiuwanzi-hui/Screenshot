@@ -1,0 +1,469 @@
+<Window x:Class="Screenshot.App.Capture.CaptureOverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:editor="clr-namespace:Screenshot.App.Editor"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Focusable="True"
+        FontFamily="Microsoft YaHei UI"
+        ShowInTaskbar="False"
+        Title="Screenshot Capture"
+        Topmost="True"
+        WindowStyle="None">
+    <Window.Resources>
+        <Geometry x:Key="UndoIconGeometry">M 8,4 L 3,9 L 8,14 M 3,9 L 11,9 C 15,9 18,11.5 18,16</Geometry>
+        <Geometry x:Key="RedoIconGeometry">M 12,4 L 17,9 L 12,14 M 17,9 L 9,9 C 5,9 2,11.5 2,16</Geometry>
+        <Style x:Key="InlineToolButton" TargetType="RadioButton">
+            <Setter Property="Width" Value="36" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="{DynamicResource AppPanelBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="ToolBackground"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="ToolBackground"
+                                        Property="Background"
+                                        Value="{DynamicResource AppAccentMutedBrush}" />
+                                <Setter TargetName="ToolBackground"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource AppAccentBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource AppAccentForegroundBrush}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="InlineColorSwatch" TargetType="Button">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Margin" Value="0,4,5,0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Ellipse x:Name="Swatch"
+                                     Fill="{TemplateBinding Background}"
+                                     Stroke="{TemplateBinding BorderBrush}"
+                                     StrokeThickness="{TemplateBinding BorderThickness}" />
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Swatch" Property="Stroke" Value="#F2FFFC" />
+                                <Setter TargetName="Swatch" Property="StrokeThickness" Value="2" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="InlineStrokeSlider" TargetType="Slider">
+            <Setter Property="Width" Value="82" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Border Height="3"
+                                    Background="#405C7472"
+                                    CornerRadius="1.5" />
+                            <Track x:Name="PART_Track"
+                                   Height="16"
+                                   VerticalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}" IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="3" VerticalAlignment="Center"
+                                                        Background="{DynamicResource AppAccentBrush}"
+                                                        CornerRadius="1.5" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}" IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="14" Height="14"
+                                           Background="{DynamicResource AppAccentBrush}"
+                                           BorderBrush="#C7FFF9"
+                                           BorderThickness="2"
+                                           Cursor="Hand">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse Fill="{TemplateBinding Background}"
+                                                         Stroke="{TemplateBinding BorderBrush}"
+                                                         StrokeThickness="{TemplateBinding BorderThickness}" />
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="SelectionResizeThumb" TargetType="Thumb">
+            <Setter Property="Background" Value="#2EAFA5" />
+            <Setter Property="BorderBrush" Value="#075C59" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="ForceCursor" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <Grid x:Name="CaptureSurface"
+          Background="#48000000"
+          Cursor="Cross"
+          Focusable="True"
+           KeyDown="OnCaptureSurfaceKeyDown"
+           Loaded="OnCaptureSurfaceLoaded"
+           PreviewMouseRightButtonDown="OnCaptureSurfacePreviewMouseRightButtonDown"
+           MouseLeftButtonDown="OnCaptureSurfaceMouseLeftButtonDown"
+          MouseLeftButtonUp="OnCaptureSurfaceMouseLeftButtonUp"
+          MouseMove="OnCaptureSurfaceMouseMove">
+        <Canvas>
+            <Rectangle x:Name="TopMask"
+                       Fill="#70000000"
+                       IsHitTestVisible="False"
+                       Visibility="Collapsed" />
+            <Rectangle x:Name="LeftMask"
+                       Fill="#70000000"
+                       IsHitTestVisible="False"
+                       Visibility="Collapsed" />
+            <Rectangle x:Name="RightMask"
+                       Fill="#70000000"
+                       IsHitTestVisible="False"
+                       Visibility="Collapsed" />
+            <Rectangle x:Name="BottomMask"
+                       Fill="#70000000"
+                       IsHitTestVisible="False"
+                       Visibility="Collapsed" />
+            <Rectangle x:Name="ScrollCaptureOutline"
+                       Fill="Transparent"
+                       IsHitTestVisible="False"
+                       Panel.ZIndex="50"
+                       Stroke="#00A99D"
+                       StrokeThickness="4"
+                       Visibility="Collapsed" />
+            <Rectangle x:Name="SelectionRectangle"
+                       Cursor="SizeAll"
+                       Fill="#18007F73"
+                       ForceCursor="True"
+                       Stroke="#00A99D"
+                       StrokeThickness="2"
+                       Visibility="Collapsed"
+                       MouseLeftButtonDown="OnSelectionRectangleMouseLeftButtonDown"
+                       MouseMove="OnSelectionRectangleMouseMove"
+                       MouseLeftButtonUp="OnSelectionRectangleMouseLeftButtonUp" />
+
+            <editor:ImageEditorCanvas x:Name="InlineEditorCanvas"
+                                      Visibility="Collapsed" />
+
+            <Rectangle x:Name="InlineEditorOutline"
+                       Fill="Transparent"
+                       IsHitTestVisible="False"
+                       Panel.ZIndex="80"
+                       Stroke="#66FFF2"
+                       StrokeThickness="3"
+                       Visibility="Collapsed">
+                <Rectangle.Effect>
+                    <DropShadowEffect BlurRadius="9"
+                                      Direction="0"
+                                      Opacity="0.85"
+                                      ShadowDepth="0"
+                                      Color="#00B8AC" />
+                </Rectangle.Effect>
+            </Rectangle>
+
+            <Thumb x:Name="TopLeftResizeThumb"
+                   Width="12"
+                   Height="12"
+                   Cursor="SizeNWSE"
+                   DragDelta="OnTopLeftResizeThumbDragDelta"
+                   Style="{StaticResource SelectionResizeThumb}"
+                   Visibility="Collapsed" />
+            <Thumb x:Name="TopRightResizeThumb"
+                   Width="12"
+                   Height="12"
+                   Cursor="SizeNESW"
+                   DragDelta="OnTopRightResizeThumbDragDelta"
+                   Style="{StaticResource SelectionResizeThumb}"
+                   Visibility="Collapsed" />
+            <Thumb x:Name="TopResizeThumb"
+                   Width="18"
+                   Height="8"
+                   Cursor="SizeNS"
+                   DragDelta="OnTopResizeThumbDragDelta"
+                   Style="{StaticResource SelectionResizeThumb}"
+                   Visibility="Collapsed" />
+            <Thumb x:Name="LeftResizeThumb"
+                   Width="8"
+                   Height="18"
+                   Cursor="SizeWE"
+                   DragDelta="OnLeftResizeThumbDragDelta"
+                   Style="{StaticResource SelectionResizeThumb}"
+                   Visibility="Collapsed" />
+            <Thumb x:Name="RightResizeThumb"
+                   Width="8"
+                   Height="18"
+                   Cursor="SizeWE"
+                   DragDelta="OnRightResizeThumbDragDelta"
+                   Style="{StaticResource SelectionResizeThumb}"
+                   Visibility="Collapsed" />
+            <Thumb x:Name="BottomResizeThumb"
+                   Width="18"
+                   Height="8"
+                   Cursor="SizeNS"
+                   DragDelta="OnBottomResizeThumbDragDelta"
+                   Style="{StaticResource SelectionResizeThumb}"
+                   Visibility="Collapsed" />
+            <Thumb x:Name="BottomLeftResizeThumb"
+                   Width="12"
+                   Height="12"
+                   Cursor="SizeNESW"
+                   DragDelta="OnBottomLeftResizeThumbDragDelta"
+                   Style="{StaticResource SelectionResizeThumb}"
+                   Visibility="Collapsed" />
+            <Thumb x:Name="BottomRightResizeThumb"
+                   Width="12"
+                   Height="12"
+                   Cursor="SizeNWSE"
+                   DragDelta="OnBottomRightResizeThumbDragDelta"
+                   Style="{StaticResource SelectionResizeThumb}"
+                   Visibility="Collapsed" />
+
+            <Border x:Name="CaptureToolbar"
+                    Cursor="Arrow"
+                    Padding="8"
+                    Background="{DynamicResource AppPanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Visibility="Collapsed">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="SaveButton"
+                                Width="38"
+                                Height="32"
+                                Margin="0,0,4,0"
+                                Click="OnSaveClick"
+                                ToolTip="保存 PNG">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74E;" />
+                        </Button>
+                        <Button x:Name="EditButton"
+                                Width="38"
+                                Height="32"
+                                Margin="0,0,4,0"
+                                Click="OnEditClick"
+                                ToolTip="在选区内编辑">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE70F;" />
+                        </Button>
+                        <Button x:Name="OcrButton"
+                                Width="38"
+                                Height="32"
+                                Margin="0,0,4,0"
+                                Click="OnOcrClick"
+                                ToolTip="识别选区文字">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE8C1;" />
+                        </Button>
+                        <Button x:Name="PinButton"
+                                Width="38"
+                                Height="32"
+                                Margin="0,0,4,0"
+                                Click="OnPinClick"
+                                ToolTip="钉在最上层">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE840;" />
+                        </Button>
+                        <Button x:Name="ConfirmButton"
+                                Width="36"
+                                Height="32"
+                                Background="{DynamicResource AppAccentBrush}"
+                                BorderBrush="{DynamicResource AppAccentBrush}"
+                                Click="OnConfirmClick"
+                                Foreground="#FFFFFF"
+                                ToolTip="复制并完成截图">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE73E;" />
+                        </Button>
+                        <Button x:Name="CancelButton"
+                                Width="38"
+                                Height="32"
+                                Margin="4,0,0,0"
+                                Background="{DynamicResource AppPanelBackgroundBrush}"
+                                BorderBrush="{DynamicResource AppBorderBrush}"
+                                Click="OnCancelClick"
+                                ToolTip="取消截图">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE711;" />
+                        </Button>
+                    </StackPanel>
+
+                    <StackPanel x:Name="InlineEditorTools"
+                                Margin="0,6,0,0"
+                                Orientation="Horizontal"
+                                Visibility="Collapsed">
+                        <RadioButton GroupName="InlineEditorTool"
+                                     Checked="OnInlineEditorToolSelected"
+                                     IsChecked="True"
+                                     Style="{StaticResource InlineToolButton}"
+                                     Tag="Rectangle"
+                                     ToolTip="矩形">
+                            <TextBlock FontFamily="Segoe UI Symbol" FontSize="17" Text="□" />
+                        </RadioButton>
+                        <RadioButton GroupName="InlineEditorTool"
+                                     Checked="OnInlineEditorToolSelected"
+                                     Style="{StaticResource InlineToolButton}"
+                                     Tag="Arrow"
+                                     ToolTip="箭头">
+                            <TextBlock FontFamily="Segoe UI Symbol" FontSize="18" Text="→" />
+                        </RadioButton>
+                        <RadioButton GroupName="InlineEditorTool"
+                                     Checked="OnInlineEditorToolSelected"
+                                     Style="{StaticResource InlineToolButton}"
+                                     Tag="Brush"
+                                     ToolTip="画笔">
+                            <TextBlock FontFamily="Segoe UI Symbol" FontSize="17" Text="✎" />
+                        </RadioButton>
+                        <RadioButton GroupName="InlineEditorTool"
+                                     Checked="OnInlineEditorToolSelected"
+                                     Style="{StaticResource InlineToolButton}"
+                                     Tag="Text"
+                                     ToolTip="文字">
+                            <TextBlock FontFamily="Segoe UI" FontSize="15" FontWeight="SemiBold" Text="T" />
+                        </RadioButton>
+                        <RadioButton GroupName="InlineEditorTool"
+                                     Checked="OnInlineEditorToolSelected"
+                                     Style="{StaticResource InlineToolButton}"
+                                     Tag="Mosaic"
+                                     ToolTip="马赛克笔刷">
+                            <TextBlock FontFamily="Segoe UI Symbol" FontSize="17" Text="▧" />
+                        </RadioButton>
+                        <Button x:Name="InlineUndoButton"
+                                Width="36"
+                                Height="32"
+                                Margin="4,0,4,0"
+                                Click="OnInlineUndoClick"
+                                IsEnabled="False"
+                                ToolTip="撤销">
+                            <Viewbox Width="18" Height="18" Stretch="Uniform">
+                                <Path Width="20" Height="20"
+                                      Data="{StaticResource UndoIconGeometry}"
+                                      Fill="Transparent"
+                                      Stroke="{DynamicResource AppControlForegroundBrush}"
+                                      StrokeEndLineCap="Round"
+                                      StrokeLineJoin="Round"
+                                      StrokeStartLineCap="Round"
+                                      StrokeThickness="2" />
+                            </Viewbox>
+                        </Button>
+                        <Button x:Name="InlineRedoButton"
+                                Width="36"
+                                Height="32"
+                                Margin="0,0,8,0"
+                                Click="OnInlineRedoClick"
+                                IsEnabled="False"
+                                ToolTip="重做">
+                            <Viewbox Width="18" Height="18" Stretch="Uniform">
+                                <Path Width="20" Height="20"
+                                      Data="{StaticResource RedoIconGeometry}"
+                                      Fill="Transparent"
+                                      Stroke="{DynamicResource AppControlForegroundBrush}"
+                                      StrokeEndLineCap="Round"
+                                      StrokeLineJoin="Round"
+                                      StrokeStartLineCap="Round"
+                                      StrokeThickness="2" />
+                            </Viewbox>
+                        </Button>
+                        <Button x:Name="InlineRedColorButton"
+                                Background="#D64545"
+                                BorderBrush="#F2FFFC"
+                                BorderThickness="2"
+                                Click="OnInlineColorClick"
+                                Style="{StaticResource InlineColorSwatch}"
+                                Tag="#D64545"
+                                ToolTip="红色" />
+                        <Button x:Name="InlineCyanColorButton"
+                                Background="#007F73"
+                                BorderBrush="#00695F"
+                                Click="OnInlineColorClick"
+                                Style="{StaticResource InlineColorSwatch}"
+                                Tag="#007F73"
+                                ToolTip="青绿" />
+                        <Button x:Name="InlineDarkColorButton"
+                                Background="#25313A"
+                                BorderBrush="#1C252D"
+                                Click="OnInlineColorClick"
+                                Style="{StaticResource InlineColorSwatch}"
+                                Tag="#25313A"
+                                ToolTip="黑色" />
+                        <Button x:Name="InlineCustomColorButton"
+                                Margin="0,4,8,0"
+                                Background="#647A80"
+                                BorderBrush="#40565C"
+                                Click="OnInlineCustomColorClick"
+                                Style="{StaticResource InlineColorSwatch}"
+                                ToolTip="自定义颜色">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="11" Foreground="#FFFFFF" Text="&#xE790;" />
+                        </Button>
+                        <Slider x:Name="InlineStrokeWidthSlider"
+                                Minimum="1"
+                                Maximum="12"
+                                SmallChange="1"
+                                TickFrequency="1"
+                                Style="{StaticResource InlineStrokeSlider}"
+                                Value="3"
+                                ValueChanged="OnInlineStrokeWidthChanged"
+                                ToolTip="线条粗细" />
+                        <TextBlock x:Name="InlineStrokeWidthText"
+                                   MinWidth="30"
+                                   Margin="5,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource AppMutedTextBrush}"
+                                   Text="3 px" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Canvas>
+    </Grid>
+</Window>
