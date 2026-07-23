@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "1.0.1"
+  #define AppVersion "1.0.2"
 #endif
 
 #define AppName "Screenshot"
@@ -79,6 +79,11 @@ begin
   begin
     exit;
   end;
+
+  RegDeleteValue(
+    HKEY_CURRENT_USER,
+    'Software\Microsoft\Windows\CurrentVersion\Run',
+    'Screenshot.App');
 
   DeleteUserData := CompareText(
     ExpandConstant('{param:DELETEUSERDATA|0}'),
