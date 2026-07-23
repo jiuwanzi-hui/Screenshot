@@ -21,10 +21,10 @@ Screenshot 是一款面向 Windows 10/11 的轻量截图工具。它把区域截
 
 下载最新的 x64 自包含版本：
 
-- [安装版 Screenshot Setup 1.0.1](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.0.1-win-x64.exe)
-- [免安装版 Screenshot Portable 1.0.1](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.0.1-win-x64.zip)
+- [安装版 Screenshot Setup 1.0.2](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.0.2-win-x64.exe)
+- [免安装版 Screenshot Portable 1.0.2](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.0.2-win-x64.zip)
 
-免安装版解压后直接运行 `Screenshot.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。1.0.1 安装版首次启动时会尝试把旧版 `%LocalAppData%\Screenshot` 数据迁移到新位置，迁移成功后删除旧目录。
+免安装版解压后直接运行 `Screenshot.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。1.0.2 安装版首次启动时会尝试把 1.0.0 的 `%LocalAppData%\Screenshot` 数据迁移到新位置，迁移成功后删除旧目录。
 
 安装程序不要求预先安装 .NET，并提供：
 
@@ -34,7 +34,7 @@ Screenshot 是一款面向 Windows 10/11 的轻量截图工具。它把区域截
 - 开始菜单快捷方式和标准卸载入口
 - 跟随 Windows 深浅色模式的安装界面
 
-卸载时程序文件、快捷方式和注册信息会正常清理，并单独询问是否删除安装目录内的 `ScreenshotData`。默认选择保留以防误删截图；确认删除后会一并清理设置、历史、诊断文件、默认目录中的截图，以及当前用户可能存在的旧版数据。用户主动选择到其他目录保存的文件不会被卸载器删除。
+卸载时程序文件、快捷方式、卸载注册信息和当前用户的开机启动项会正常清理，并单独询问是否删除安装目录内的 `ScreenshotData`。默认选择保留以防误删截图；确认删除后会一并清理设置、历史、诊断文件、默认目录中的截图，以及当前用户可能存在的旧版数据。用户主动选择到其他目录保存的文件不会被卸载器删除。
 
 ### 默认快捷键
 
@@ -87,10 +87,10 @@ Screenshot is a lightweight capture utility for Windows 10 and 11. It combines r
 
 Download the latest self-contained x64 build:
 
-- [Screenshot Setup 1.0.1](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.0.1-win-x64.exe)
-- [Screenshot Portable 1.0.1](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.0.1-win-x64.zip)
+- [Screenshot Setup 1.0.2](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.0.2-win-x64.exe)
+- [Screenshot Portable 1.0.2](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.0.2-win-x64.zip)
 
-Extract the portable archive and run `Screenshot.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. On first launch, the 1.0.1 installer build attempts to migrate legacy `%LocalAppData%\Screenshot` data and removes the old directory after a successful migration.
+Extract the portable archive and run `Screenshot.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. On first launch, the 1.0.2 installer build attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data and removes the old directory after a successful migration.
 
 The installer does not require a preinstalled .NET runtime and includes:
 
@@ -100,7 +100,7 @@ The installer does not require a preinstalled .NET runtime and includes:
 - Start menu and standard uninstall entries
 - An installer UI that follows the Windows light/dark appearance
 
-Uninstall removes the program files, shortcuts, and registration entries, then separately asks whether `ScreenshotData` in the installation directory should also be deleted. The default is to keep it to prevent accidental capture loss. Confirming deletion removes settings, history, diagnostics, captures in the default directory, and any legacy data for the current user. Files saved to a user-selected external directory are never deleted by the uninstaller.
+Uninstall removes the program files, shortcuts, uninstall registration, and the current user's startup entry, then separately asks whether `ScreenshotData` in the installation directory should also be deleted. The default is to keep it to prevent accidental capture loss. Confirming deletion removes settings, history, diagnostics, captures in the default directory, and any legacy data for the current user. Files saved to a user-selected external directory are never deleted by the uninstaller.
 
 ### Default hotkeys
 
