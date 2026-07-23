@@ -30,14 +30,22 @@ public partial class App : System.Windows.Application, IDisposable
 
         var startInBackground = e.Args.Any(argument =>
             string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
+        var dataMigrationResult = InstalledDataMigration.TryMigrateLegacyData();
         var settingsStore = new SettingsStore();
         var isFirstRun = !File.Exists(settingsStore.SettingsPath);
         var loadResult = settingsStore.Load();
         var credentialStore = new DpapiTranslationCredentialStore();
-        _currentSettings = MigrateLegacyTranslationSettings(
+        var loadedSettings = MigrateLegacySaveDirectory(
             loadResult.Settings,
+            dataMigrationResult.Migrated);
+        _currentSettings = MigrateLegacyTranslationSettings(
+            loadedSettings,
             settingsStore,
             credentialStore);
+        if (dataMigrationResult.Migrated)
+        {
+            settingsStore.Save(_currentSettings);
+        }
         _themeManager = new AppThemeManager();
         _themeManager.Apply(_currentSettings.Theme);
         var startupRegistrationService = new StartupRegistrationService();
@@ -76,7 +84,11 @@ public partial class App : System.Windows.Application, IDisposable
             _translationHttpClient,
             message => _mainWindow?.ShowStatus(message));
 
-        if (loadResult.Warning is not null)
+        if (dataMigrationResult.Warning is not null)
+        {
+            _mainWindow.ShowStatus(dataMigrationResult.Warning);
+        }
+        else if (loadResult.Warning is not null)
         {
             _mainWindow.ShowStatus(loadResult.Warning);
         }
@@ -412,6 +424,36 @@ public partial class App : System.Windows.Application, IDisposable
         }
 
         return migrated;
+    }
+
+    private static AppSettings MigrateLegacySaveDirectory(
+        AppSettings settings,
+        bool dataWasMigrated)
+    {
+        if (!dataWasMigrated)
+        {
+            return settings;
+        }
+
+        var legacyCaptureDirectory = Path.Combine(
+            AppMetadata.LegacyInstalledDataDirectoryPath,
+            AppMetadata.CapturesDirectoryName);
+        try
+        {
+            return string.Equals(
+                Path.GetFullPath(settings.SaveDirectory),
+                Path.GetFullPath(legacyCaptureDirectory),
+                StringComparison.OrdinalIgnoreCase)
+                ? settings with { SaveDirectory = AppMetadata.DefaultCaptureDirectory }
+                : settings;
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException
+                or NotSupportedException
+                or PathTooLongException)
+        {
+            return settings;
+        }
     }
 
     private static string? SynchronizeStartupRegistration(

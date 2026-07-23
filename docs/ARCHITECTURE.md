@@ -27,8 +27,8 @@
 | 托盘 | System.Windows.Forms.NotifyIcon | .NET 自带，不引入额外 UI 依赖。 |
 | OCR | Windows.Media.Ocr | 优先离线处理，语言依赖系统已安装的 OCR 语言包。 |
 | 翻译 | ITranslationProvider 抽象 | 通过用户配置的服务实现，避免锁定单一供应商。 |
-| 配置 | 安装版使用 `%LocalAppData%\\Screenshot`；便携版使用程序旁的 `ScreenshotData` | 不需要管理员权限，写入采用临时文件替换避免损坏。 |
-| 日志 | %LocalAppData%\\Screenshot.App\\logs | 仅记录错误和诊断信息，不记录截图内容或 OCR 文本。 |
+| 配置 | 安装版与便携版都使用程序旁的 `ScreenshotData` | 安装器为数据目录配置写权限，写入采用临时文件替换避免损坏。 |
+| 诊断 | 程序旁的 `ScreenshotData\\Diagnostics` | 仅记录长截图拼接诊断，不记录 OCR 或翻译文本；最多保留 20 份事件日志。 |
 
 外部包控制原则：
 

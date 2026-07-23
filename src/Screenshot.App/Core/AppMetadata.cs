@@ -6,15 +6,22 @@ public static class AppMetadata
 {
     public const string ApplicationName = "Screenshot";
     public const string DataDirectoryName = "ScreenshotData";
-    public const string InstalledDataDirectoryName = "Screenshot";
+    public const string LegacyInstalledDataDirectoryName = "Screenshot";
     public const string InstalledMarkerFileName = "installed.marker";
     public const string CapturesDirectoryName = "Captures";
+    public const string DiagnosticsDirectoryName = "Diagnostics";
     public const string StartupRegistrationValueName = "Screenshot.App";
 
-    public static string DataDirectoryPath => ResolveDataDirectoryPath(
+    public static bool IsInstalled => File.Exists(Path.Combine(
         AppContext.BaseDirectory,
+        InstalledMarkerFileName));
+
+    public static string DataDirectoryPath => ResolveDataDirectoryPath(
+        AppContext.BaseDirectory);
+
+    public static string LegacyInstalledDataDirectoryPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        File.Exists(Path.Combine(AppContext.BaseDirectory, InstalledMarkerFileName)));
+        LegacyInstalledDataDirectoryName);
 
     public static string SettingsPath => Path.Combine(
         DataDirectoryPath,
@@ -28,13 +35,12 @@ public static class AppMetadata
         DataDirectoryPath,
         CapturesDirectoryName);
 
-    internal static string ResolveDataDirectoryPath(
-        string applicationDirectory,
-        string localApplicationDataDirectory,
-        bool isInstalled)
+    public static string DiagnosticsDirectoryPath => Path.Combine(
+        DataDirectoryPath,
+        DiagnosticsDirectoryName);
+
+    internal static string ResolveDataDirectoryPath(string applicationDirectory)
     {
-        return isInstalled
-            ? Path.Combine(localApplicationDataDirectory, InstalledDataDirectoryName)
-            : Path.Combine(applicationDirectory, DataDirectoryName);
+        return Path.Combine(applicationDirectory, DataDirectoryName);
     }
 }

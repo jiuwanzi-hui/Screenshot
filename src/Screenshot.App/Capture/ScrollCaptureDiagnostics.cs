@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Text.Json;
+using Screenshot.App.Core;
 
 namespace Screenshot.App.Capture;
 
@@ -50,11 +51,7 @@ internal sealed class ScrollCaptureDiagnostics
     {
         try
         {
-            var directory = Path.Combine(
-                Environment.GetFolderPath(
-                    Environment.SpecialFolder.LocalApplicationData),
-                "Screenshot",
-                "Diagnostics");
+            var directory = AppMetadata.DiagnosticsDirectoryPath;
             Directory.CreateDirectory(directory);
             var path = Path.Combine(directory, $"scroll-{_sessionId}.jsonl");
             using (var writer = new StreamWriter(path, append: false))

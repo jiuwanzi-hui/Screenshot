@@ -21,6 +21,9 @@ public sealed class PortableDataDirectoryTests
         Assert.Equal(
             Path.Combine(expectedDataDirectory, AppMetadata.CapturesDirectoryName),
             AppSettings.CreateDefault().SaveDirectory);
+        Assert.Equal(
+            Path.Combine(expectedDataDirectory, AppMetadata.DiagnosticsDirectoryName),
+            AppMetadata.DiagnosticsDirectoryPath);
     }
 
     [Fact]
@@ -40,15 +43,13 @@ public sealed class PortableDataDirectoryTests
     }
 
     [Fact]
-    public void InstalledBuildsUseTheCurrentUsersLocalApplicationDataDirectory()
+    public void InstalledBuildsUseAnApplicationLocalDataDirectory()
     {
         var dataDirectory = AppMetadata.ResolveDataDirectoryPath(
-            @"C:\Program Files\Screenshot",
-            @"C:\Users\Tester\AppData\Local",
-            isInstalled: true);
+            @"D:\Apps\Screenshot");
 
         Assert.Equal(
-            @"C:\Users\Tester\AppData\Local\Screenshot",
+            @"D:\Apps\Screenshot\ScreenshotData",
             dataDirectory);
     }
 }
