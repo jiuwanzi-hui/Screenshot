@@ -1,0 +1,81 @@
+<Window x:Class="Screenshot.App.Text.OcrResultWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="文字识别"
+        Width="760"
+        Height="540"
+        MinWidth="420"
+        MinHeight="300"
+        FontFamily="Microsoft YaHei UI"
+        WindowStartupLocation="CenterScreen">
+    <Grid Background="{DynamicResource AppWindowBackgroundBrush}">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="58" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="46" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Margin="20,14,20,0">
+            <TextBlock FontSize="20"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource AppControlForegroundBrush}"
+                       Text="文字识别" />
+            <TextBlock x:Name="StatusText"
+                       Margin="0,5,0,0"
+                       FontSize="13"
+                       Foreground="{DynamicResource AppTextSecondaryBrush}"
+                       TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+
+        <TextBox x:Name="ResultTextBox"
+                 Grid.Row="1"
+                 Margin="20,10,8,12"
+                 Padding="10"
+                 AcceptsReturn="True"
+                 AcceptsTab="True"
+                 Background="{DynamicResource AppInputBackgroundBrush}"
+                 BorderBrush="{DynamicResource AppBorderBrush}"
+                 FontSize="14"
+                 TextWrapping="Wrap"
+                 VerticalScrollBarVisibility="Auto" />
+        <TextBox x:Name="TranslationTextBox"
+                 Grid.Row="1"
+                 Grid.Column="1"
+                 Margin="8,10,20,12"
+                 Padding="10"
+                 AcceptsReturn="True"
+                 AcceptsTab="True"
+                 Background="{DynamicResource AppInputBackgroundBrush}"
+                 BorderBrush="{DynamicResource AppBorderBrush}"
+                 FontSize="14"
+                 IsReadOnly="True"
+                 TextWrapping="Wrap"
+                 VerticalScrollBarVisibility="Auto" />
+
+        <DockPanel Grid.Row="2"
+                   Grid.ColumnSpan="2"
+                   Margin="20,0,20,10"
+                   LastChildFill="False">
+            <Button DockPanel.Dock="Right"
+                    MinWidth="76"
+                    Height="34"
+                    Margin="0,0,8,0"
+                    Click="OnTranslateClick"
+                    Content="翻译"
+                    ToolTip="将识别文字发送到已配置的翻译服务" />
+            <Button DockPanel.Dock="Right"
+                    MinWidth="76"
+                    Height="34"
+                    Click="OnCopyClick"
+                    Content="复制"
+                    ToolTip="复制识别文字" />
+        </DockPanel>
+    </Grid>
+</Window>
