@@ -61,4 +61,17 @@ if (-not (Test-Path -LiteralPath $installerPath)) {
     throw "Installer was not generated: $installerPath"
 }
 
-Get-Item -LiteralPath $installerPath
+$portablePath = Join-Path `
+    $installerOutputDirectory `
+    "Screenshot-Portable-$Version-win-x64.zip"
+Compress-Archive `
+    -Path (Join-Path $publishDirectory "*") `
+    -DestinationPath $portablePath `
+    -CompressionLevel Optimal `
+    -Force
+
+if (-not (Test-Path -LiteralPath $portablePath)) {
+    throw "Portable package was not generated: $portablePath"
+}
+
+Get-Item -LiteralPath $installerPath, $portablePath
