@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.0.1"
 #endif
 
 #define AppName "Screenshot"
@@ -50,6 +50,9 @@ Name: "desktopicon"; Description: "在桌面创建快捷方式"; GroupDescriptio
 Source: "..\artifacts\publish\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "installed.marker"; DestDir: "{app}"; Flags: ignoreversion
 
+[Dirs]
+Name: "{app}\ScreenshotData"; Permissions: users-modify
+
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
@@ -66,4 +69,33 @@ begin
     '此向导将安装 Screenshot。' + #13#10 + #13#10 +
     '你可以在下一步选择安装位置。';
   WizardForm.FinishedHeadingLabel.Caption := 'Screenshot 安装完成';
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  DeleteUserData: Boolean;
+begin
+  if CurUninstallStep <> usUninstall then
+  begin
+    exit;
+  end;
+
+  DeleteUserData := CompareText(
+    ExpandConstant('{param:DELETEUSERDATA|0}'),
+    '1') = 0;
+  if (not DeleteUserData) and (not UninstallSilent) then
+  begin
+    DeleteUserData := MsgBox(
+      '是否同时删除 Screenshot 的用户数据？' + #13#10 + #13#10 +
+      '包括设置、历史、诊断文件，以及默认 ScreenshotData 目录内保存的截图。' + #13#10 +
+      '选择“否”只会保留 ScreenshotData，其他程序文件和快捷方式仍会全部卸载。',
+      mbConfirmation,
+      MB_YESNO or MB_DEFBUTTON2) = IDYES;
+  end;
+
+  if DeleteUserData then
+  begin
+    DelTree(ExpandConstant('{app}\ScreenshotData'), True, True, True);
+    DelTree(ExpandConstant('{localappdata}\Screenshot'), True, True, True);
+  end;
 end;

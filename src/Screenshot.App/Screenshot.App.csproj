@@ -9,7 +9,8 @@
     <AssemblyName>Screenshot</AssemblyName>
     <RootNamespace>Screenshot.App</RootNamespace>
     <ApplicationIcon>Assets\Screenshot.ico</ApplicationIcon>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Authors>Screenshot</Authors>
     <Product>Screenshot</Product>
     <Description>轻量 Windows 截图工具</Description>

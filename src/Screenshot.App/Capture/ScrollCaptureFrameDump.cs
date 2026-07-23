@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Globalization;
 using System.IO;
+using Screenshot.App.Core;
 
 namespace Screenshot.App.Capture;
 
@@ -29,8 +30,8 @@ public sealed class ScrollCaptureFrameDump
     /// <summary>
     /// Creates a dump session for one scroll capture. When the environment
     /// variable holds a path that directory is used; when it holds any other
-    /// non-empty value a timestamped folder is created under the user's
-    /// Pictures\Screenshot\scroll-frames location. Returns a disabled instance
+    /// non-empty value a timestamped folder is created under the application's
+    /// ScreenshotData\Diagnostics\scroll-frames location. Returns a disabled instance
     /// when the variable is unset or the directory cannot be created.
     /// </summary>
     public static ScrollCaptureFrameDump Create()
@@ -47,9 +48,7 @@ public sealed class ScrollCaptureFrameDump
             var root = LooksLikePath(configured)
                 ? configured
                 : Path.Combine(
-                    Environment.GetFolderPath(
-                        Environment.SpecialFolder.MyPictures),
-                    "Screenshot",
+                    AppMetadata.DiagnosticsDirectoryPath,
                     "scroll-frames");
             var sessionDirectory = Path.Combine(
                 root,

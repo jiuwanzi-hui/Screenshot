@@ -15,16 +15,16 @@ Screenshot 是一款面向 Windows 10/11 的轻量截图工具。它把区域截
 - **本地 OCR**：使用 Windows 本地 OCR 引擎，图片不需要上传；识别语言取决于系统已安装的语言包。
 - **可控的在线翻译**：只有用户明确启用并点击翻译时才发送文字；支持 OpenAI 兼容接口，API Key 使用当前用户 DPAPI 加密保存。
 - **高效的日常操作**：支持全局快捷键、系统托盘、截图历史、钉图、开机启动、深浅色主题，以及关闭窗口时最小化到后台或彻底退出。
-- **安装版与便携版兼容**：安装版把数据保存到 `%LocalAppData%\Screenshot`，便携运行则保存在程序旁的 `ScreenshotData`，不会把个人配置提交到源码仓库。
+- **数据跟随程序目录**：安装版与免安装版都把设置、加密凭据、历史和默认截图保存在 `Screenshot.exe` 旁的 `ScreenshotData`，不会把个人配置提交到源码仓库。
 
 ### 下载与安装
 
 下载最新的 x64 自包含版本：
 
-- [安装版 Screenshot Setup 1.0.0](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.0.0-win-x64.exe)
-- [免安装版 Screenshot Portable 1.0.0](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.0.0-win-x64.zip)
+- [安装版 Screenshot Setup 1.0.1](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.0.1-win-x64.exe)
+- [免安装版 Screenshot Portable 1.0.1](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.0.1-win-x64.zip)
 
-免安装版解压后直接运行 `Screenshot.exe`，不需要安装或预先配置 .NET。其设置、凭据和默认截图保存在解压目录旁的 `ScreenshotData` 中，移动或删除程序前请按需备份该目录。
+免安装版解压后直接运行 `Screenshot.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。1.0.1 安装版首次启动时会尝试把旧版 `%LocalAppData%\Screenshot` 数据迁移到新位置，迁移成功后删除旧目录。
 
 安装程序不要求预先安装 .NET，并提供：
 
@@ -33,6 +33,8 @@ Screenshot 是一款面向 Windows 10/11 的轻量截图工具。它把区域截
 - 可选桌面快捷方式
 - 开始菜单快捷方式和标准卸载入口
 - 跟随 Windows 深浅色模式的安装界面
+
+卸载时程序文件、快捷方式和注册信息会正常清理，并单独询问是否删除安装目录内的 `ScreenshotData`。默认选择保留以防误删截图；确认删除后会一并清理设置、历史、诊断文件、默认目录中的截图，以及当前用户可能存在的旧版数据。用户主动选择到其他目录保存的文件不会被卸载器删除。
 
 ### 默认快捷键
 
@@ -79,16 +81,16 @@ Screenshot is a lightweight capture utility for Windows 10 and 11. It combines r
 - **Local OCR**: uses the Windows OCR engine without uploading images. Available languages depend on the Windows language packs installed on the machine.
 - **Translation under your control**: text is sent only after translation is explicitly enabled and requested. OpenAI-compatible endpoints are supported, and API keys are protected with per-user Windows DPAPI encryption.
 - **Fast daily workflow**: configurable global hotkeys, system tray controls, capture history, pinned images, startup behavior, light/dark themes, and a choice between minimizing or fully exiting when the window is closed.
-- **Installed and portable layouts**: installed builds store data in `%LocalAppData%\Screenshot`; portable builds keep it in `ScreenshotData` beside the executable. Personal configuration is excluded from the repository.
+- **Data stays with the application**: installed and portable builds keep settings, encrypted credentials, history, and default captures in `ScreenshotData` beside `Screenshot.exe`. Personal configuration is excluded from the repository.
 
 ### Download and install
 
 Download the latest self-contained x64 build:
 
-- [Screenshot Setup 1.0.0](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.0.0-win-x64.exe)
-- [Screenshot Portable 1.0.0](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.0.0-win-x64.zip)
+- [Screenshot Setup 1.0.1](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.0.1-win-x64.exe)
+- [Screenshot Portable 1.0.1](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.0.1-win-x64.zip)
 
-Extract the portable archive and run `Screenshot.exe`; neither installation nor a preinstalled .NET runtime is required. Settings, credentials, and default captures are stored in `ScreenshotData` beside the extracted executable, so back up that directory before moving or deleting the application when needed.
+Extract the portable archive and run `Screenshot.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. On first launch, the 1.0.1 installer build attempts to migrate legacy `%LocalAppData%\Screenshot` data and removes the old directory after a successful migration.
 
 The installer does not require a preinstalled .NET runtime and includes:
 
@@ -97,6 +99,8 @@ The installer does not require a preinstalled .NET runtime and includes:
 - An optional desktop shortcut
 - Start menu and standard uninstall entries
 - An installer UI that follows the Windows light/dark appearance
+
+Uninstall removes the program files, shortcuts, and registration entries, then separately asks whether `ScreenshotData` in the installation directory should also be deleted. The default is to keep it to prevent accidental capture loss. Confirming deletion removes settings, history, diagnostics, captures in the default directory, and any legacy data for the current user. Files saved to a user-selected external directory are never deleted by the uninstaller.
 
 ### Default hotkeys
 
