@@ -21,6 +21,7 @@ public partial class App : System.Windows.Application, IDisposable
     private PinnedImageManager? _pinnedImageManager;
     private HttpClient? _translationHttpClient;
     private AppThemeManager? _themeManager;
+    private SingleInstanceCoordinator? _singleInstanceCoordinator;
     private AppSettings _currentSettings = AppSettings.CreateDefault();
     private bool _isShuttingDown;
 
@@ -30,6 +31,16 @@ public partial class App : System.Windows.Application, IDisposable
 
         var startInBackground = e.Args.Any(argument =>
             string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
+        _singleInstanceCoordinator = SingleInstanceCoordinator.TryAcquire(
+            "Screenshot.App",
+            () => _ = Dispatcher.BeginInvoke(ShowMainWindow),
+            signalExistingInstance: !startInBackground);
+        if (_singleInstanceCoordinator is null)
+        {
+            Shutdown();
+            return;
+        }
+
         var dataMigrationResult = InstalledDataMigration.TryMigrateLegacyData();
         var settingsStore = new SettingsStore();
         var isFirstRun = !File.Exists(settingsStore.SettingsPath);
@@ -59,22 +70,23 @@ public partial class App : System.Windows.Application, IDisposable
         var hotKeyWarning = TryApplyInitialHotKeys(
             _hotKeyManager,
             _currentSettings);
+        _translationHttpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(30),
+        };
 
         _mainWindow = new MainWindow(
             _currentSettings,
             settingsStore,
             startupRegistrationService,
             _hotKeyManager,
-            credentialStore);
+            credentialStore,
+            _translationHttpClient);
         MainWindow = _mainWindow;
         _mainWindow.SettingsSaved += OnSettingsSaved;
         _mainWindow.ExitRequested += OnExitRequested;
         _mainWindow.ConfigureTaskbarVisibility(_currentSettings.ShowTaskbarIcon);
         _captureHistoryService = new CaptureHistoryService();
-        _translationHttpClient = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(30),
-        };
         _pinnedImageManager = new PinnedImageManager(RecognizePinnedImageAsync);
         _regionCaptureCoordinator = new RegionCaptureCoordinator(
             () => _currentSettings,
@@ -136,6 +148,9 @@ public partial class App : System.Windows.Application, IDisposable
             _mainWindow.SettingsSaved -= OnSettingsSaved;
             _mainWindow.ExitRequested -= OnExitRequested;
         }
+
+        _singleInstanceCoordinator?.Dispose();
+        _singleInstanceCoordinator = null;
 
         GC.SuppressFinalize(this);
     }

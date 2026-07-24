@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.IO;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -19,6 +20,8 @@ public partial class MainWindow : Window
     private readonly ITranslationCredentialStore _translationCredentialStore;
     private readonly SettingsViewModel _settingsViewModel;
     private readonly DispatcherTimer _settingsApplyTimer;
+    private readonly HttpClient _modelCatalogHttpClient;
+    private readonly bool _ownsModelCatalogHttpClient;
     private AppSettings _savedSettings;
     private IReadOnlyList<HotKeyBinding>? _suspendedHotKeyBindings;
     private bool _exitRequested;
@@ -30,7 +33,8 @@ public partial class MainWindow : Window
         SettingsStore settingsStore,
         IStartupRegistrationService startupRegistrationService,
         GlobalHotKeyManager globalHotKeyManager,
-        ITranslationCredentialStore translationCredentialStore)
+        ITranslationCredentialStore translationCredentialStore,
+        HttpClient? modelCatalogHttpClient = null)
     {
         ArgumentNullException.ThrowIfNull(initialSettings);
         ArgumentNullException.ThrowIfNull(settingsStore);
@@ -43,6 +47,11 @@ public partial class MainWindow : Window
         _startupRegistrationService = startupRegistrationService;
         _globalHotKeyManager = globalHotKeyManager;
         _translationCredentialStore = translationCredentialStore;
+        _modelCatalogHttpClient = modelCatalogHttpClient ?? new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+        _ownsModelCatalogHttpClient = modelCatalogHttpClient is null;
         _settingsViewModel = new SettingsViewModel(initialSettings);
         _settingsApplyTimer = new DispatcherTimer
         {
@@ -100,6 +109,10 @@ public partial class MainWindow : Window
         EndHotKeyCapture(restoreRegistrations: true);
         _settingsApplyTimer.Stop();
         _settingsApplyTimer.Tick -= OnSettingsApplyTimerTick;
+        if (_ownsModelCatalogHttpClient)
+        {
+            _modelCatalogHttpClient.Dispose();
+        }
         base.OnClosed(e);
     }
 
@@ -195,6 +208,60 @@ public partial class MainWindow : Window
         ApplySettingsImmediately();
     }
 
+    private async void OnFetchTranslationModelsClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_isApplyingSettings ||
+            sender is not System.Windows.Controls.Button button)
+        {
+            return;
+        }
+
+        if (!ApplySettingsImmediately())
+        {
+            return;
+        }
+
+        button.IsEnabled = false;
+        button.Content = "获取中...";
+        _settingsViewModel.SetStatus("正在从翻译服务获取模型列表...");
+        try
+        {
+            var result = await TranslationModelCatalogService.FetchAsync(
+                _settingsViewModel.TranslationEndpoint,
+                TranslationApiKeyBox.Password,
+                _modelCatalogHttpClient);
+            if (!result.IsSuccess)
+            {
+                _settingsViewModel.SetStatus(
+                    result.ErrorMessage ?? "获取模型失败。");
+                return;
+            }
+
+            _settingsViewModel.SetTranslationModels(result.Models);
+            if (result.Models.Count == 1)
+            {
+                _settingsViewModel.TranslationModel = result.Models[0];
+                ApplySettingsImmediately();
+            }
+
+            _settingsViewModel.SetStatus(
+                result.Models.Count == 1
+                    ? $"已获取并选择模型：{result.Models[0]}。"
+                    : $"已获取 {result.Models.Count} 个模型，请在下拉框中选择。" );
+        }
+        catch
+        {
+            _settingsViewModel.SetStatus("获取模型失败，请检查服务地址和网络连接。");
+        }
+        finally
+        {
+            button.Content = "获取模型";
+            button.IsEnabled = true;
+        }
+    }
+
     private void OnTextSettingChanged(object sender, TextChangedEventArgs e)
     {
         if (!_isApplyingSettings && IsLoaded)
@@ -205,10 +272,22 @@ public partial class MainWindow : Window
 
     private void OnImmediateSettingChanged(object sender, RoutedEventArgs e)
     {
+        if (!IsLoaded || _isApplyingSettings)
+        {
+            return;
+        }
+
         if (sender is System.Windows.Controls.CheckBox checkBox)
         {
             checkBox.GetBindingExpression(
                 System.Windows.Controls.CheckBox.IsCheckedProperty)?.UpdateSource();
+        }
+        else if (sender is System.Windows.Controls.ComboBox comboBox)
+        {
+            var property = comboBox.IsEditable
+                ? System.Windows.Controls.ComboBox.TextProperty
+                : System.Windows.Controls.ComboBox.SelectedValueProperty;
+            comboBox.GetBindingExpression(property)?.UpdateSource();
         }
 
         ApplySettingsImmediately();

@@ -7,6 +7,7 @@ using WpfBrushes = System.Windows.Media.Brushes;
 using WpfPoint = System.Windows.Point;
 using WpfScaleTransform = System.Windows.Media.ScaleTransform;
 using WpfTextBox = System.Windows.Controls.TextBox;
+using WpfBitmapSource = System.Windows.Media.Imaging.BitmapSource;
 
 namespace Screenshot.App.Tests;
 
@@ -179,6 +180,134 @@ public sealed class ImageEditorCanvasTests
             Assert.True(editor.TryUndoPreviousOperation());
             Assert.False(editor.CanUndo);
             Assert.False(editor.TryUndoPreviousOperation());
+        });
+    }
+
+    [Fact]
+    public void EmojiAnnotationIsRenderedAndCanBeUndone()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var bitmap = new Bitmap(80, 60, PixelFormat.Format32bppPArgb);
+            using var image = new CapturedImage((Bitmap)bitmap.Clone());
+            var editor = new ImageEditorCanvas();
+            editor.Initialize(image, displayWidth: 80, displayHeight: 60);
+            var documentField = typeof(ImageEditorCanvas).GetField(
+                "_document",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var rebuildMethod = typeof(ImageEditorCanvas).GetMethod(
+                "RebuildCanvas",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(documentField);
+            Assert.NotNull(rebuildMethod);
+            var document = Assert.IsType<EditorDocument>(
+                documentField.GetValue(editor));
+            document.Add(new EmojiAnnotation(
+                new WpfPoint(30, 24),
+                EmojiSticker.Smile,
+                28));
+            rebuildMethod.Invoke(editor, null);
+
+            Assert.Contains(
+                editor.Children.OfType<System.Windows.Controls.Image>(),
+                sticker => sticker.Source == EmojiStickerRenderer.GetImage(
+                    EmojiSticker.Smile));
+            Assert.True(editor.CanUndo);
+            editor.Undo();
+            Assert.DoesNotContain(
+                editor.Children.OfType<System.Windows.Controls.Image>(),
+                sticker => sticker.Source == EmojiStickerRenderer.GetImage(
+                    EmojiSticker.Smile));
+        });
+    }
+
+    [Fact]
+    public void EmojiStickersRenderAsColoredImages()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            foreach (var sticker in Enum.GetValues<EmojiSticker>())
+            {
+                var image = Assert.IsAssignableFrom<WpfBitmapSource>(
+                    EmojiStickerRenderer.GetImage(sticker));
+                var stride = image.PixelWidth * 4;
+                var pixels = new byte[stride * image.PixelHeight];
+                image.CopyPixels(pixels, stride, 0);
+
+                var hasOpaquePixel = false;
+                var hasColoredPixel = false;
+                for (var offset = 0; offset < pixels.Length; offset += 4)
+                {
+                    var blue = pixels[offset];
+                    var green = pixels[offset + 1];
+                    var red = pixels[offset + 2];
+                    var alpha = pixels[offset + 3];
+                    if (alpha < 180)
+                    {
+                        continue;
+                    }
+
+                    hasOpaquePixel = true;
+                    if (Math.Max(red, Math.Max(green, blue)) -
+                        Math.Min(red, Math.Min(green, blue)) >= 40)
+                    {
+                        hasColoredPixel = true;
+                        break;
+                    }
+                }
+
+                Assert.True(hasOpaquePixel, $"{sticker} should not be blank.");
+                Assert.True(hasColoredPixel, $"{sticker} should contain color.");
+            }
+        });
+    }
+
+    [Fact]
+    public void TranslationOverlayIsRenderedIntoTheImageAndCanBeUndoneAsAGroup()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var bitmap = new Bitmap(100, 60, PixelFormat.Format32bppPArgb);
+            using (var graphics = Graphics.FromImage(bitmap))
+            {
+                graphics.Clear(Color.FromArgb(255, 20, 24, 28));
+            }
+
+            using var image = new CapturedImage((Bitmap)bitmap.Clone());
+            var editor = new ImageEditorCanvas();
+            editor.Initialize(image, displayWidth: 100, displayHeight: 60);
+            editor.AddTranslationOverlay(
+            [
+                new TranslatedTextAnnotationRegion(
+                    new System.Windows.Rect(8, 8, 38, 16),
+                    "第一行",
+                    16),
+                new TranslatedTextAnnotationRegion(
+                    new System.Windows.Rect(8, 30, 46, 16),
+                    "第二行",
+                    16),
+            ]);
+
+            Assert.True(editor.HasTranslationOverlay);
+            var overlays = editor.Children
+                .OfType<System.Windows.Controls.Border>()
+                .ToArray();
+            Assert.Equal(2, overlays.Length);
+            var background = Assert.IsType<System.Windows.Media.SolidColorBrush>(
+                overlays[0].Background);
+            var translatedText = Assert.IsType<System.Windows.Controls.TextBlock>(
+                overlays[0].Child);
+            var foreground = Assert.IsType<System.Windows.Media.SolidColorBrush>(
+                translatedText.Foreground);
+            Assert.True(background.Color.R < 80);
+            Assert.True(foreground.Color.R > 220);
+            Assert.Equal(16, translatedText.FontSize);
+            Assert.Equal(System.Windows.TextWrapping.Wrap, translatedText.TextWrapping);
+
+            editor.Undo();
+
+            Assert.False(editor.HasTranslationOverlay);
+            Assert.Empty(editor.Children.OfType<System.Windows.Controls.Border>());
         });
     }
 }

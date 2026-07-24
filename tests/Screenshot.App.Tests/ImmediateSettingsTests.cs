@@ -45,6 +45,57 @@ public sealed class ImmediateSettingsTests : IDisposable
         Assert.False(loaded.Settings.ShowNotificationIcon);
     }
 
+    [Fact]
+    public void SelectionSettingsUseDropDownsAndSaveImmediately()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var settingsPath = Path.Combine(_testDirectory, "settings.json");
+        var settingsStore = new SettingsStore(settingsPath);
+        var initialSettings = CreateSettings() with
+        {
+            TranslationEndpoint = "https://api.deepseek.com",
+            TranslationModel = "DeepSeek",
+            TranslationTargetLanguage = "zh-Hans",
+        };
+
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                initialSettings,
+                settingsStore,
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+
+            window.Show();
+            var ocrLanguage = Assert.IsType<ComboBox>(
+                window.FindName("OcrLanguageComboBox"));
+            var provider = Assert.IsType<ComboBox>(
+                window.FindName("TranslationProviderComboBox"));
+            var targetLanguage = Assert.IsType<ComboBox>(
+                window.FindName("TranslationTargetLanguageComboBox"));
+            var model = Assert.IsType<ComboBox>(
+                window.FindName("TranslationModelComboBox"));
+            Assert.IsType<Button>(
+                window.FindName("FetchTranslationModelsButton"));
+
+            Assert.NotEmpty(ocrLanguage.Items);
+            Assert.Single(provider.Items);
+            Assert.True(targetLanguage.Items.Count >= 5);
+            Assert.True(model.IsEditable);
+            Assert.Equal("deepseek-v4-flash", model.Text);
+
+            targetLanguage.SelectedValue = "en";
+            window.RequestExit();
+        });
+
+        var loaded = settingsStore.Load();
+        Assert.Null(loaded.Warning);
+        Assert.Equal("en", loaded.Settings.TranslationTargetLanguage);
+        Assert.Equal("deepseek-v4-flash", loaded.Settings.TranslationModel);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_testDirectory))

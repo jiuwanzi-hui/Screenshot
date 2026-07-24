@@ -43,6 +43,7 @@
                  Background="{DynamicResource AppInputBackgroundBrush}"
                  BorderBrush="{DynamicResource AppBorderBrush}"
                  FontSize="14"
+                 PreviewKeyDown="OnSelectableTextPreviewKeyDown"
                  TextWrapping="Wrap"
                  VerticalScrollBarVisibility="Auto" />
         <TextBox x:Name="TranslationTextBox"
@@ -56,6 +57,7 @@
                  BorderBrush="{DynamicResource AppBorderBrush}"
                  FontSize="14"
                  IsReadOnly="True"
+                 PreviewKeyDown="OnSelectableTextPreviewKeyDown"
                  TextWrapping="Wrap"
                  VerticalScrollBarVisibility="Auto" />
 
@@ -70,6 +72,13 @@
                     Click="OnTranslateClick"
                     Content="翻译"
                     ToolTip="将识别文字发送到已配置的翻译服务" />
+            <Button DockPanel.Dock="Right"
+                    MinWidth="86"
+                    Height="34"
+                    Margin="0,0,8,0"
+                    Click="OnCopyTranslationClick"
+                    Content="复制译文"
+                    ToolTip="复制全部翻译文字" />
             <Button DockPanel.Dock="Right"
                     MinWidth="76"
                     Height="34"

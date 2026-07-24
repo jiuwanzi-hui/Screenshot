@@ -1,9 +1,13 @@
 using System.ComponentModel;
+using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using Screenshot.App.Core;
 using Screenshot.App.Text;
 
 namespace Screenshot.App.Presentation;
+
+public sealed record SettingOption(string Value, string Label);
 
 public sealed class SettingsViewModel : INotifyPropertyChanged
 {
@@ -50,10 +54,51 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             settings.TranslationProvider);
         _translationEndpoint = settings.TranslationEndpoint;
         _translationTargetLanguage = settings.TranslationTargetLanguage;
-        _translationModel = settings.TranslationModel;
+        _translationModel = TranslationProviderFactory.NormalizeModel(
+            settings.TranslationEndpoint,
+            settings.TranslationModel);
+        OcrLanguageOptions = CreateOcrLanguageOptions(settings.OcrLanguageTag);
+        if (!string.IsNullOrWhiteSpace(_translationModel) &&
+            !TranslationModelOptions.Contains(
+                _translationModel,
+                StringComparer.OrdinalIgnoreCase))
+        {
+            TranslationModelOptions.Insert(0, _translationModel);
+        }
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    public IReadOnlyList<SettingOption> OcrLanguageOptions { get; }
+
+    public IReadOnlyList<SettingOption> TranslationProviderOptions { get; } =
+    [
+        new(
+            TranslationProviderFactory.OpenAiCompatibleProviderId,
+            "OpenAI 兼容接口"),
+    ];
+
+    public IReadOnlyList<SettingOption> TranslationTargetLanguageOptions { get; } =
+    [
+        new("zh-Hans", "简体中文（zh-Hans）"),
+        new("zh-Hant", "繁體中文（zh-Hant）"),
+        new("en", "English（en）"),
+        new("ja", "日本語（ja）"),
+        new("ko", "한국어（ko）"),
+        new("fr", "Français（fr）"),
+        new("de", "Deutsch（de）"),
+        new("es", "Español（es）"),
+        new("ru", "Русский（ru）"),
+    ];
+
+    public ObservableCollection<string> TranslationModelOptions { get; } = new(
+    [
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "gpt-4.1-mini",
+        "gpt-4.1",
+        "gpt-4o-mini",
+    ]);
 
     public string SaveDirectory
     {
@@ -221,12 +266,38 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             settings.TranslationProvider);
         TranslationEndpoint = settings.TranslationEndpoint;
         TranslationTargetLanguage = settings.TranslationTargetLanguage;
-        TranslationModel = settings.TranslationModel;
+        TranslationModel = TranslationProviderFactory.NormalizeModel(
+            settings.TranslationEndpoint,
+            settings.TranslationModel);
     }
 
     public void SetStatus(string message)
     {
         StatusMessage = message;
+    }
+
+    public void SetTranslationModels(IReadOnlyList<string> models)
+    {
+        ArgumentNullException.ThrowIfNull(models);
+        var values = models
+            .Where(model => !string.IsNullOrWhiteSpace(model))
+            .Select(model => model.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(model => model, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (!string.IsNullOrWhiteSpace(TranslationModel) &&
+            !values.Contains(
+                TranslationModel,
+                StringComparer.OrdinalIgnoreCase))
+        {
+            values.Insert(0, TranslationModel);
+        }
+
+        TranslationModelOptions.Clear();
+        foreach (var model in values)
+        {
+            TranslationModelOptions.Add(model);
+        }
     }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
@@ -243,5 +314,41 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
         field = value;
         OnPropertyChanged(propertyName);
+    }
+
+    private static SettingOption[] CreateOcrLanguageOptions(
+        string configuredLanguageTag)
+    {
+        IReadOnlyList<string> availableLanguageTags;
+        try
+        {
+            availableLanguageTags = OcrService.GetAvailableLanguageTags();
+        }
+        catch
+        {
+            availableLanguageTags = [];
+        }
+
+        var tags = availableLanguageTags
+            .Concat([configuredLanguageTag])
+            .Where(tag => !string.IsNullOrWhiteSpace(tag))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(tag => tag, StringComparer.OrdinalIgnoreCase);
+        return tags
+            .Select(tag => new SettingOption(tag, CreateLanguageLabel(tag)))
+            .ToArray();
+    }
+
+    private static string CreateLanguageLabel(string languageTag)
+    {
+        try
+        {
+            var culture = CultureInfo.GetCultureInfo(languageTag);
+            return $"{culture.NativeName}（{languageTag}）";
+        }
+        catch (CultureNotFoundException)
+        {
+            return languageTag;
+        }
     }
 }

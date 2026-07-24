@@ -9,4 +9,10 @@ public interface ITranslationProvider
         string sourceLanguage,
         string targetLanguage,
         CancellationToken cancellationToken = default);
+
+    Task<TranslationSegmentsResult> TranslateSegmentsAsync(
+        IReadOnlyList<string> segments,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken = default);
 }

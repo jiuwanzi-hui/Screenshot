@@ -46,6 +46,11 @@ public sealed class OcrServiceTests
 
         Assert.True(result.IsSuccess, result.ErrorMessage);
         Assert.Contains("OCR", result.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            result.Regions,
+            region => region.Text.Contains("OCR", StringComparison.OrdinalIgnoreCase) &&
+                      region.Width > 0 &&
+                      region.Height > 0);
     }
 
     private static CapturedImage CreateTextImage(string text)

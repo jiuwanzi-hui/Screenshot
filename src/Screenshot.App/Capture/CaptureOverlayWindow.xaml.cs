@@ -7,6 +7,7 @@ using System.Windows.Interop;
 using System.Windows.Threading;
 using Screenshot.App.Editor;
 using Screenshot.App.Pin;
+using Screenshot.App.Text;
 using WpfBrushes = System.Windows.Media.Brushes;
 using WpfColor = System.Windows.Media.Color;
 using WpfColorConverter = System.Windows.Media.ColorConverter;
@@ -32,6 +33,15 @@ public sealed class CaptureOverlayOptions
     public required PinnedImageManager PinnedImageManager { get; init; }
 
     public required Func<CapturedImage, Task> StartOcrAsync { get; init; }
+
+    public Func<CapturedImage, Task<OcrRecognitionResult>>? RecognizeTextAsync { get; init; }
+
+    public Func<OcrRecognitionResult, Task<TranslationSegmentsResult>>?
+        TranslateTextAsync { get; init; }
+
+    public bool RecognizeTextAfterSelection { get; init; }
+
+    public Func<ScreenRegion, Task>? StartScrollCaptureAsync { get; init; }
 
     public Action? CaptureClosed { get; init; }
 }
@@ -59,6 +69,7 @@ public partial class CaptureOverlayWindow : Window
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<ScrollCaptureSelection?>?
         _scrollCaptureSelectionCompletionSource;
+    private readonly DispatcherTimer _windowSnapTimer;
     private WpfPoint _selectionStartPoint;
     private WpfPoint _dragStartPoint;
     private Rect _dragStartBounds;
@@ -67,9 +78,19 @@ public partial class CaptureOverlayWindow : Window
     private EditorTool _selectedInlineTool = EditorTool.Rectangle;
     private bool _isSelecting;
     private bool _isMovingSelection;
+    private bool _isSelectionAdjustmentInProgress;
     private bool _isActionInProgress;
     private bool _isEditorInitializing;
+    private bool _isOcrInitializing;
+    private bool _isTranslationInitializing;
+    private bool _completeAfterRightButtonUp;
+    private bool _isWindowSnapClickPending;
+    private Rect? _windowSnapBounds;
+    private IntPtr _windowHandle;
     private bool _isCompleted;
+    private OcrRecognitionResult? _inlineOcrResult;
+    private IReadOnlyList<OcrTextRegion>? _inlineTranslatedTextRegions;
+    private bool _isShowingTranslatedText;
     private bool _isScrollCaptureSelectionPublished;
     private bool _isScrollCaptureSelectionLocked;
     private WeakReference<ScrollCaptureSelection>?
@@ -87,6 +108,14 @@ public partial class CaptureOverlayWindow : Window
                 TaskCreationOptions.RunContinuationsAsynchronously)
             : null;
         InitializeComponent();
+        _windowSnapTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(50),
+        };
+        _windowSnapTimer.Tick += OnWindowSnapTimerTick;
+        ScrollCaptureButton.Visibility = options?.StartScrollCaptureAsync is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         InlineEditorCanvas.HistoryChanged += OnInlineEditorHistoryChanged;
 
         _virtualScreenBounds = VirtualScreen.GetBounds();
@@ -121,6 +150,18 @@ public partial class CaptureOverlayWindow : Window
         return overlay._scrollCaptureSelectionCompletionSource!.Task;
     }
 
+    public static Task<ScrollCaptureSelection?> SelectForScrollCaptureAsync(
+        ScreenRegion initialSelection)
+    {
+        var overlay = new CaptureOverlayWindow(
+            options: null,
+            isScrollCaptureSelection: true);
+        overlay.Show();
+        overlay.UpdateLayout();
+        overlay.ApplyInitialScrollCaptureSelection(initialSelection);
+        return overlay._scrollCaptureSelectionCompletionSource!.Task;
+    }
+
     public static CaptureOverlayWindow ShowInteractive(CaptureOverlayOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
@@ -131,6 +172,8 @@ public partial class CaptureOverlayWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _windowSnapTimer.Stop();
+        _windowSnapTimer.Tick -= OnWindowSnapTimerTick;
         if (_windowSource is not null)
         {
             _windowSource.RemoveHook(OnScrollCaptureWindowMessage);
@@ -159,6 +202,7 @@ public partial class CaptureOverlayWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         var windowHandle = new WindowInteropHelper(this).Handle;
+        _windowHandle = windowHandle;
         _ = NativeMethods.SetWindowPos(
             windowHandle,
             new IntPtr(TopmostWindow),
@@ -179,6 +223,7 @@ public partial class CaptureOverlayWindow : Window
     {
         CaptureSurface.Focus();
         Keyboard.Focus(CaptureSurface);
+        _windowSnapTimer.Start();
     }
 
     private void OnCaptureSurfaceKeyDown(object sender, WpfKeyEventArgs e)
@@ -220,11 +265,52 @@ public partial class CaptureOverlayWindow : Window
         object sender,
         MouseButtonEventArgs e)
     {
-        ReturnToPreviousCaptureState();
+        if (OcrTextOverlay.Visibility == Visibility.Visible)
+        {
+            OcrTextOverlay.Visibility = Visibility.Collapsed;
+            CaptureStatusText.Text = "已隐藏可选择文字层。";
+            CaptureStatusText.Visibility = Visibility.Visible;
+            e.Handled = true;
+            return;
+        }
+
         e.Handled = true;
+        ReturnToPreviousCaptureStateCore(deferFinalClose: true);
+    }
+
+    private void OnCaptureSurfacePreviewMouseRightButtonUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (!_completeAfterRightButtonUp)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        _completeAfterRightButtonUp = false;
+        if (CaptureSurface.IsMouseCaptured)
+        {
+            CaptureSurface.ReleaseMouseCapture();
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            () =>
+            {
+                if (!_isCompleted)
+                {
+                    CompleteSelection(result: null);
+                }
+            });
     }
 
     private void ReturnToPreviousCaptureState()
+    {
+        ReturnToPreviousCaptureStateCore(deferFinalClose: false);
+    }
+
+    private void ReturnToPreviousCaptureStateCore(bool deferFinalClose)
     {
         if (_isCompleted || _isActionInProgress || _isEditorInitializing)
         {
@@ -249,7 +335,7 @@ public partial class CaptureOverlayWindow : Window
         {
             if (!InlineEditorCanvas.TryUndoPreviousOperation())
             {
-                ExitInlineEditor();
+                CompleteOrDeferForRightButtonUp(deferFinalClose);
             }
         }
         else if (_isSelecting || HasValidSelection())
@@ -258,8 +344,20 @@ public partial class CaptureOverlayWindow : Window
         }
         else
         {
-            CompleteSelection(result: null);
+            CompleteOrDeferForRightButtonUp(deferFinalClose);
         }
+    }
+
+    private void CompleteOrDeferForRightButtonUp(bool deferFinalClose)
+    {
+        if (!deferFinalClose)
+        {
+            CompleteSelection(result: null);
+            return;
+        }
+
+        _completeAfterRightButtonUp = true;
+        CaptureSurface.CaptureMouse();
     }
 
     private void OnCaptureSurfaceMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -269,10 +367,21 @@ public partial class CaptureOverlayWindow : Window
             return;
         }
 
-        _isSelecting = true;
         _selectionStartPoint = e.GetPosition(CaptureSurface);
-        UpdateSelectionBounds(new Rect(_selectionStartPoint, _selectionStartPoint));
-        SelectionRectangle.Visibility = Visibility.Visible;
+        _isSelecting = true;
+        _windowSnapTimer.Stop();
+        _isWindowSnapClickPending =
+            WindowSnapRectangle.Visibility == Visibility.Visible &&
+            _windowSnapBounds.HasValue;
+        if (!_isWindowSnapClickPending)
+        {
+            HideWindowSnap();
+            UpdateSelectionBounds(new Rect(
+                _selectionStartPoint,
+                _selectionStartPoint));
+            SelectionRectangle.Visibility = Visibility.Visible;
+        }
+
         CaptureSurface.CaptureMouse();
         CaptureSurface.Focus();
         e.Handled = true;
@@ -282,20 +391,55 @@ public partial class CaptureOverlayWindow : Window
     {
         if (_isSelecting)
         {
-            UpdateSelectionBounds(new Rect(_selectionStartPoint, e.GetPosition(CaptureSurface)));
+            var currentPoint = e.GetPosition(CaptureSurface);
+            if (_isWindowSnapClickPending)
+            {
+                var delta = currentPoint - _selectionStartPoint;
+                if (Math.Abs(delta.X) < SystemParameters.MinimumHorizontalDragDistance &&
+                    Math.Abs(delta.Y) < SystemParameters.MinimumVerticalDragDistance)
+                {
+                    return;
+                }
+
+                _isWindowSnapClickPending = false;
+                HideWindowSnap();
+                UpdateSelectionBounds(new Rect(
+                    _selectionStartPoint,
+                    _selectionStartPoint));
+                SelectionRectangle.Visibility = Visibility.Visible;
+            }
+
+            UpdateSelectionBounds(new Rect(_selectionStartPoint, currentPoint));
+            return;
         }
+
     }
 
-    private void OnCaptureSurfaceMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    private async void OnCaptureSurfaceMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         if (!_isSelecting)
         {
             return;
         }
 
+        var snappedBounds = _isWindowSnapClickPending
+            ? _windowSnapBounds
+            : null;
+        _isWindowSnapClickPending = false;
         _isSelecting = false;
         CaptureSurface.ReleaseMouseCapture();
-        UpdateSelectionBounds(new Rect(_selectionStartPoint, e.GetPosition(CaptureSurface)));
+        if (snappedBounds.HasValue)
+        {
+            HideWindowSnap();
+            UpdateSelectionBounds(snappedBounds.Value);
+            SelectionRectangle.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            UpdateSelectionBounds(new Rect(
+                _selectionStartPoint,
+                e.GetPosition(CaptureSurface)));
+        }
 
         if (!HasValidSelection())
         {
@@ -303,17 +447,10 @@ public partial class CaptureOverlayWindow : Window
             return;
         }
 
+        e.Handled = true;
         if (_isScrollCaptureSelection)
         {
-            ShowSelectionControls();
-            SetScrollCaptureMaskVisibility(Visibility.Visible);
-            SaveButton.Visibility = Visibility.Collapsed;
-            EditButton.Visibility = Visibility.Collapsed;
-            OcrButton.Visibility = Visibility.Collapsed;
-            PinButton.Visibility = Visibility.Collapsed;
-            ConfirmButton.Visibility = Visibility.Collapsed;
-            CancelButton.Visibility = Visibility.Collapsed;
-            PublishScrollCaptureSelection();
+            PrepareScrollCaptureSelection();
             return;
         }
 
@@ -324,7 +461,79 @@ public partial class CaptureOverlayWindow : Window
         }
 
         ShowSelectionControls();
-        e.Handled = true;
+        await EnterInlineEditorForCompletedSelectionAsync();
+    }
+
+    private async Task EnterInlineEditorForCompletedSelectionAsync()
+    {
+        await EnterInlineEditorAsync();
+        if (_options?.RecognizeTextAfterSelection == true &&
+            _options.RecognizeTextAsync is not null &&
+            InlineEditorCanvas.HasImage &&
+            !_isCompleted)
+        {
+            await RecognizeInlineTextAsync(_options.RecognizeTextAsync);
+        }
+    }
+
+    private void OnWindowSnapTimerTick(object? sender, EventArgs e)
+    {
+        if (!IsVisible || _isSelecting)
+        {
+            return;
+        }
+
+        var cursorPosition = WinForms.Cursor.Position;
+        UpdateWindowSnap(cursorPosition.X, cursorPosition.Y);
+    }
+
+    private void UpdateWindowSnap(int screenX, int screenY)
+    {
+        if (_windowHandle == IntPtr.Zero ||
+            _isActionInProgress ||
+            _isEditorInitializing ||
+            InlineEditorCanvas.HasImage ||
+            SelectionRectangle.Visibility == Visibility.Visible ||
+            _isScrollCaptureSelectionPublished)
+        {
+            HideWindowSnap();
+            return;
+        }
+        if (!WindowSnapService.TryGetWindowRegionAt(
+                screenX,
+                screenY,
+                _windowHandle,
+                _virtualScreenBounds,
+                out var physicalBounds))
+        {
+            HideWindowSnap();
+            return;
+        }
+
+        var topLeft = CaptureSurface.PointFromScreen(
+            new WpfPoint(physicalBounds.X, physicalBounds.Y));
+        var bottomRight = CaptureSurface.PointFromScreen(new WpfPoint(
+            physicalBounds.X + physicalBounds.Width,
+            physicalBounds.Y + physicalBounds.Height));
+        var bounds = ClampBoundsToSurface(new Rect(topLeft, bottomRight));
+        if (bounds.Width < 2 || bounds.Height < 2)
+        {
+            HideWindowSnap();
+            return;
+        }
+
+        _windowSnapBounds = bounds;
+        Canvas.SetLeft(WindowSnapRectangle, bounds.X);
+        Canvas.SetTop(WindowSnapRectangle, bounds.Y);
+        WindowSnapRectangle.Width = bounds.Width;
+        WindowSnapRectangle.Height = bounds.Height;
+        WindowSnapRectangle.Visibility = Visibility.Visible;
+    }
+
+    private void HideWindowSnap()
+    {
+        _windowSnapBounds = null;
+        WindowSnapRectangle.Visibility = Visibility.Collapsed;
     }
 
     private void OnSelectionRectangleMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -378,6 +587,57 @@ public partial class CaptureOverlayWindow : Window
         _isMovingSelection = false;
         SelectionRectangle.ReleaseMouseCapture();
         e.Handled = true;
+    }
+
+    private void OnInlineEditorOutlineMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (!CanAdjustSelection())
+        {
+            e.Handled = true;
+            return;
+        }
+
+        _isMovingSelection = true;
+        _isSelectionAdjustmentInProgress = true;
+        _dragStartPoint = e.GetPosition(CaptureSurface);
+        _dragStartBounds = GetSelectionBounds();
+        InlineEditorOutline.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnInlineEditorOutlineMouseMove(object sender, WpfMouseEventArgs e)
+    {
+        if (!_isMovingSelection || !InlineEditorOutline.IsMouseCaptured)
+        {
+            return;
+        }
+
+        var currentPoint = e.GetPosition(CaptureSurface);
+        var delta = currentPoint - _dragStartPoint;
+        var bounds = ClampBoundsToSurface(new Rect(
+            _dragStartBounds.X + delta.X,
+            _dragStartBounds.Y + delta.Y,
+            _dragStartBounds.Width,
+            _dragStartBounds.Height));
+        UpdateSelectionBounds(bounds);
+        e.Handled = true;
+    }
+
+    private async void OnInlineEditorOutlineMouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (!_isMovingSelection || !InlineEditorOutline.IsMouseCaptured)
+        {
+            return;
+        }
+
+        _isMovingSelection = false;
+        InlineEditorOutline.ReleaseMouseCapture();
+        e.Handled = true;
+        await CompleteSelectionAdjustmentAsync();
     }
 
     private void OnTopLeftResizeThumbDragDelta(object sender, DragDeltaEventArgs e)
@@ -446,7 +706,33 @@ public partial class CaptureOverlayWindow : Window
         }
     }
 
-    private async void OnEditClick(object sender, RoutedEventArgs e)
+    private async void OnScrollCaptureClick(object sender, RoutedEventArgs e)
+    {
+        if (_options?.StartScrollCaptureAsync is null ||
+            _isCompleted ||
+            _isActionInProgress ||
+            !HasValidSelection())
+        {
+            return;
+        }
+
+        var selection = GetPhysicalSelectionBounds();
+        _isActionInProgress = true;
+        CaptureToolbar.IsEnabled = false;
+        var startScrollCaptureAsync = _options.StartScrollCaptureAsync;
+        CompleteSelection(result: null);
+
+        try
+        {
+            await startScrollCaptureAsync(selection);
+        }
+        catch
+        {
+            // The coordinator reports scroll-capture failures in the settings window.
+        }
+    }
+
+    private async Task EnterInlineEditorAsync()
     {
         if (_options is null ||
             _isCompleted ||
@@ -459,6 +745,7 @@ public partial class CaptureOverlayWindow : Window
         }
 
         _isEditorInitializing = true;
+        ClearInlineOcrText();
         CaptureToolbar.IsEnabled = false;
         CapturedImage? image = null;
 
@@ -500,10 +787,119 @@ public partial class CaptureOverlayWindow : Window
         }
     }
 
+    private async Task RefreshInlineEditorForSelectionAsync()
+    {
+        if (_options is null ||
+            _isCompleted ||
+            _isEditorInitializing ||
+            !InlineEditorCanvas.HasImage ||
+            !HasValidSelection())
+        {
+            return;
+        }
+
+        _isEditorInitializing = true;
+        CaptureToolbar.IsEnabled = false;
+        CapturedImage? image = null;
+
+        try
+        {
+            image = await CaptureCurrentSelectionAsync(restoreOverlay: true);
+            if (_isCompleted)
+            {
+                return;
+            }
+
+            var previousImage = _inlineEditorImage;
+            InlineEditorCanvas.Reset();
+            _inlineEditorImage = image;
+            image = null;
+            previousImage?.Dispose();
+
+            var selectionBounds = GetSelectionBounds();
+            InlineEditorCanvas.Initialize(
+                _inlineEditorImage,
+                selectionBounds.Width,
+                selectionBounds.Height);
+            InlineEditorCanvas.SelectTool(_selectedInlineTool);
+            Canvas.SetLeft(InlineEditorCanvas, selectionBounds.X);
+            Canvas.SetTop(InlineEditorCanvas, selectionBounds.Y);
+            InlineEditorCanvas.Visibility = Visibility.Visible;
+            InlineEditorCanvas.Focus();
+            CaptureStatusText.Visibility = Visibility.Collapsed;
+        }
+        catch
+        {
+            CaptureStatusText.Text = "无法刷新当前选区，请重新框选。";
+            CaptureStatusText.Visibility = Visibility.Visible;
+        }
+        finally
+        {
+            image?.Dispose();
+            _isEditorInitializing = false;
+
+            if (!_isCompleted)
+            {
+                CaptureToolbar.IsEnabled = true;
+            }
+        }
+    }
+
+    private bool CanAdjustSelection()
+    {
+        if (!InlineEditorCanvas.HasImage || !InlineEditorCanvas.CanUndo)
+        {
+            return true;
+        }
+
+        CaptureStatusText.Text = "请先撤销已有标注，再移动或调整截图区域。";
+        CaptureStatusText.Visibility = Visibility.Visible;
+        return false;
+    }
+
+    private async Task CompleteSelectionAdjustmentAsync()
+    {
+        if (!_isSelectionAdjustmentInProgress)
+        {
+            return;
+        }
+
+        _isSelectionAdjustmentInProgress = false;
+        await RefreshInlineEditorForSelectionAsync();
+    }
+
+    private async void OnSelectionResizeThumbDragCompleted(
+        object sender,
+        DragCompletedEventArgs e)
+    {
+        await CompleteSelectionAdjustmentAsync();
+    }
+
     private async void OnOcrClick(object sender, RoutedEventArgs e)
     {
         if (_options is null)
         {
+            return;
+        }
+
+        if (OcrTextOverlay.Visibility == Visibility.Visible)
+        {
+            OcrTextOverlay.Visibility = Visibility.Collapsed;
+            CaptureStatusText.Text = "已隐藏可选择文字层。";
+            CaptureStatusText.Visibility = Visibility.Visible;
+            InlineEditorCanvas.Focus();
+            return;
+        }
+
+        if (_inlineOcrResult is { IsSuccess: true, Regions.Count: > 0 })
+        {
+            ShowInlineOcrText(_inlineOcrResult);
+            return;
+        }
+
+        if (_options.RecognizeTextAsync is not null)
+        {
+            await RecognizeInlineTextAsync(_options.RecognizeTextAsync);
             return;
         }
 
@@ -529,6 +925,272 @@ public partial class CaptureOverlayWindow : Window
             image?.Dispose();
             CompleteSelection(result: null);
         }
+    }
+
+    private async Task RecognizeInlineTextAsync(
+        Func<CapturedImage, Task<OcrRecognitionResult>> recognizeTextAsync)
+    {
+        if (_isOcrInitializing || _isActionInProgress || !HasValidSelection())
+        {
+            return;
+        }
+
+        _isOcrInitializing = true;
+        CaptureToolbar.IsEnabled = false;
+        CaptureStatusText.Text = "正在识别图片文字...";
+        CaptureStatusText.Visibility = Visibility.Visible;
+
+        try
+        {
+            using var image = await CaptureCurrentResultAsync(restoreOverlay: true);
+            var result = await recognizeTextAsync(image);
+            _inlineOcrResult = result;
+
+            if (!result.IsSuccess)
+            {
+                CaptureStatusText.Text = result.ErrorMessage ?? "文字识别失败。";
+                return;
+            }
+
+            if (result.Regions.Count == 0)
+            {
+                CaptureStatusText.Text = "没有识别到可选择的文字。";
+                return;
+            }
+
+            ShowInlineOcrText(result);
+        }
+        catch
+        {
+            CaptureStatusText.Text = "文字识别失败，请检查 OCR 语言设置。";
+        }
+        finally
+        {
+            _isOcrInitializing = false;
+
+            if (!_isCompleted)
+            {
+                CaptureToolbar.IsEnabled = true;
+            }
+        }
+    }
+
+    private async void OnTranslateClick(object sender, RoutedEventArgs e)
+    {
+        if (_options?.RecognizeTextAsync is null ||
+            _options.TranslateTextAsync is null)
+        {
+            CaptureStatusText.Text = "当前截图模式未配置翻译功能。";
+            CaptureStatusText.Visibility = Visibility.Visible;
+            return;
+        }
+
+        if (InlineEditorCanvas.HasTranslationOverlay)
+        {
+            if (_inlineTranslatedTextRegions is { Count: > 0 })
+            {
+                ShowSelectableTextOverlay(
+                    _inlineTranslatedTextRegions,
+                    isTranslation: true);
+            }
+            else
+            {
+                CaptureStatusText.Text = "译文已经覆盖到截图；可点击撤销移除后重新翻译。";
+                CaptureStatusText.Visibility = Visibility.Visible;
+            }
+
+            return;
+        }
+
+        if (_isTranslationInitializing || _isOcrInitializing ||
+            _isActionInProgress || !HasValidSelection())
+        {
+            return;
+        }
+
+        _isTranslationInitializing = true;
+        CaptureToolbar.IsEnabled = false;
+        OcrTextOverlay.Visibility = Visibility.Collapsed;
+        CaptureStatusText.Text = "正在识别图片文字（本机处理）...";
+        CaptureStatusText.Visibility = Visibility.Visible;
+
+        try
+        {
+            var recognition = _inlineOcrResult;
+            if (recognition is not { IsSuccess: true, Regions.Count: > 0 })
+            {
+                using var image = await CaptureCurrentResultAsync(
+                    restoreOverlay: true);
+                recognition = await _options.RecognizeTextAsync(image);
+                _inlineOcrResult = recognition;
+            }
+
+            if (!recognition.IsSuccess)
+            {
+                CaptureStatusText.Text =
+                    recognition.ErrorMessage ?? "文字识别失败。";
+                return;
+            }
+
+            if (recognition.Regions.Count == 0)
+            {
+                CaptureStatusText.Text = "没有识别到可翻译的文字。";
+                return;
+            }
+
+            CaptureStatusText.Text = "文字识别完成，正在等待在线翻译服务返回...";
+            var translationTimer = System.Diagnostics.Stopwatch.StartNew();
+            var translation = await _options.TranslateTextAsync(recognition);
+            translationTimer.Stop();
+            if (!translation.IsSuccess)
+            {
+                CaptureStatusText.Text =
+                    translation.ErrorMessage ?? "翻译失败。";
+                return;
+            }
+
+            if (translation.Segments.Count != recognition.Regions.Count)
+            {
+                CaptureStatusText.Text = "翻译服务返回的分段结果不完整。";
+                return;
+            }
+
+            var translatedRegions = recognition.Regions
+                .Select((region, index) => new TranslatedTextAnnotationRegion(
+                    new Rect(
+                        Math.Max(0, region.X),
+                        Math.Max(0, region.Y - 2),
+                        Math.Max(12, region.Width),
+                        Math.Max(22, region.Height + 10)),
+                    translation.Segments[index],
+                    Math.Max(16, region.Height * 1.2)))
+                .ToArray();
+            InlineEditorCanvas.AddTranslationOverlay(translatedRegions);
+            _inlineTranslatedTextRegions = recognition.Regions
+                .Select((region, index) => new OcrTextRegion(
+                    translation.Segments[index],
+                    region.X,
+                    Math.Max(0, region.Y - 2),
+                    region.Width,
+                    Math.Max(22, region.Height + 10)))
+                .ToArray();
+            ShowSelectableTextOverlay(
+                _inlineTranslatedTextRegions,
+                isTranslation: true);
+            CaptureStatusText.Text +=
+                $" 在线翻译耗时 {translationTimer.Elapsed.TotalSeconds:F1} 秒。";
+        }
+        catch
+        {
+            CaptureStatusText.Text = "识别或翻译失败，请检查 OCR 与翻译设置。";
+        }
+        finally
+        {
+            _isTranslationInitializing = false;
+            CaptureStatusText.Visibility = Visibility.Visible;
+            if (!_isCompleted)
+            {
+                CaptureToolbar.IsEnabled = true;
+            }
+        }
+    }
+
+    private void ShowInlineOcrText(OcrRecognitionResult result)
+    {
+        ShowSelectableTextOverlay(result.Regions, isTranslation: false);
+    }
+
+    private void ShowSelectableTextOverlay(
+        IReadOnlyList<OcrTextRegion> regions,
+        bool isTranslation)
+    {
+        if (_inlineEditorImage is null)
+        {
+            return;
+        }
+
+        OcrTextOverlay.Children.Clear();
+        var selectionBounds = GetSelectionBounds();
+        var scaleX = selectionBounds.Width / _inlineEditorImage.Preview.PixelWidth;
+        var scaleY = selectionBounds.Height / _inlineEditorImage.Preview.PixelHeight;
+        Canvas.SetLeft(OcrTextOverlay, selectionBounds.X);
+        Canvas.SetTop(OcrTextOverlay, selectionBounds.Y);
+        OcrTextOverlay.Width = selectionBounds.Width;
+        OcrTextOverlay.Height = selectionBounds.Height;
+
+        foreach (var region in regions)
+        {
+            var textBox = new System.Windows.Controls.TextBox
+            {
+                Text = region.Text,
+                Width = Math.Max(20, region.Width * scaleX + 8),
+                Height = Math.Max(18, region.Height * scaleY + 4),
+                Padding = new Thickness(0),
+                Background = WpfBrushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Cursor = System.Windows.Input.Cursors.IBeam,
+                FontFamily = new System.Windows.Media.FontFamily("Microsoft YaHei UI"),
+                FontSize = isTranslation
+                    ? Math.Max(12, region.Height * scaleY * 0.72)
+                    : Math.Max(10, region.Height * scaleY * 0.78),
+                Foreground = WpfBrushes.Transparent,
+                IsReadOnly = true,
+                SelectionBrush = new WpfSolidColorBrush(
+                    WpfColor.FromArgb(120, 46, 175, 165)),
+                SelectionTextBrush = WpfBrushes.Transparent,
+                TextWrapping = isTranslation
+                    ? TextWrapping.Wrap
+                    : TextWrapping.NoWrap,
+            };
+            textBox.PreviewKeyDown += OnSelectableTextPreviewKeyDown;
+            Canvas.SetLeft(textBox, region.X * scaleX);
+            Canvas.SetTop(textBox, region.Y * scaleY);
+            OcrTextOverlay.Children.Add(textBox);
+        }
+
+        _isShowingTranslatedText = isTranslation;
+        OcrTextOverlay.Visibility = Visibility.Visible;
+        CaptureStatusText.Text = isTranslation
+            ? "译文已覆盖到截图；可直接拖选译文并按 Ctrl+C 复制，复制和保存会包含译文。"
+            : "可直接拖选图片文字并按 Ctrl+C 复制；再次点击识字可隐藏文字层。";
+        CaptureStatusText.Visibility = Visibility.Visible;
+    }
+
+    private async void OnSelectableTextPreviewKeyDown(
+        object sender,
+        WpfKeyEventArgs e)
+    {
+        if (e.Key != Key.C ||
+            !Keyboard.Modifiers.HasFlag(ModifierKeys.Control) ||
+            sender is not System.Windows.Controls.TextBox textBox ||
+            string.IsNullOrEmpty(textBox.SelectedText))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        try
+        {
+            await ClipboardTextService.SetTextAsync(textBox.SelectedText);
+            CaptureStatusText.Text = _isShowingTranslatedText
+                ? "已复制所选译文，可在 Win+V 中查看。"
+                : "已复制所选识别文字，可在 Win+V 中查看。";
+        }
+        catch
+        {
+            CaptureStatusText.Text = "复制文字失败，剪贴板可能正被其他程序使用，请重试。";
+        }
+
+        CaptureStatusText.Visibility = Visibility.Visible;
+    }
+
+    private void ClearInlineOcrText()
+    {
+        _inlineOcrResult = null;
+        _inlineTranslatedTextRegions = null;
+        _isShowingTranslatedText = false;
+        OcrTextOverlay.Children.Clear();
+        OcrTextOverlay.Visibility = Visibility.Collapsed;
     }
 
     private async void OnPinClick(object sender, RoutedEventArgs e)
@@ -573,27 +1235,24 @@ public partial class CaptureOverlayWindow : Window
             if (_options is not null)
             {
                 using var image = await CaptureCurrentResultAsync(restoreOverlay: false);
-
-                try
-                {
-                    System.Windows.Clipboard.SetImage(image.Preview);
-                }
-                catch
-                {
-                }
+                await ClipboardImageService.SetImageAsync(image.Preview);
 
                 if (_options.KeepHistory)
                 {
                     _ = _options.HistoryService.Add(image, _options.HistoryLimit);
                 }
             }
+
+            CompleteSelection(result: null);
         }
         catch
         {
-        }
-        finally
-        {
-            CompleteSelection(result: null);
+            _isActionInProgress = false;
+            CaptureToolbar.IsEnabled = true;
+            CaptureStatusText.Text = "复制失败，剪贴板可能正被其他程序使用，请重试。";
+            CaptureStatusText.Visibility = Visibility.Visible;
+            CaptureToolbar.UpdateLayout();
+            UpdateSelectionControlPositions(GetSelectionBounds());
         }
     }
 
@@ -611,13 +1270,38 @@ public partial class CaptureOverlayWindow : Window
         }
 
         _selectedInlineTool = tool;
+        OcrTextOverlay.Visibility = Visibility.Collapsed;
         UpdateInlineStrokeWidthText(InlineStrokeWidthSlider?.Value ?? 3);
+
+        if (InlineEmojiPalette is not null && InlineStrokeOptions is not null)
+        {
+            var isEmoji = tool == EditorTool.Emoji;
+            InlineEmojiPalette.Visibility = isEmoji
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            InlineStrokeOptions.Visibility = isEmoji
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+        }
 
         if (InlineEditorCanvas.HasImage)
         {
             InlineEditorCanvas.SelectTool(tool);
             InlineEditorCanvas.Focus();
         }
+    }
+
+    private void OnInlineEmojiClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { Tag: string stickerName } ||
+            !Enum.TryParse<EmojiSticker>(stickerName, out var sticker))
+        {
+            return;
+        }
+
+        InlineEditorCanvas.SelectEmoji(sticker);
+        InlineEditorCanvas.SelectTool(EditorTool.Emoji);
+        InlineEditorCanvas.Focus();
     }
 
     private void OnInlineUndoClick(object sender, RoutedEventArgs e)
@@ -716,6 +1400,17 @@ public partial class CaptureOverlayWindow : Window
     {
         InlineUndoButton.IsEnabled = InlineEditorCanvas.CanUndo;
         InlineRedoButton.IsEnabled = InlineEditorCanvas.CanRedo;
+        if (!InlineEditorCanvas.HasTranslationOverlay &&
+            _inlineTranslatedTextRegions is not null)
+        {
+            _inlineTranslatedTextRegions = null;
+            if (_isShowingTranslatedText)
+            {
+                OcrTextOverlay.Children.Clear();
+                OcrTextOverlay.Visibility = Visibility.Collapsed;
+                _isShowingTranslatedText = false;
+            }
+        }
     }
 
     private bool BeginAction()
@@ -793,6 +1488,20 @@ public partial class CaptureOverlayWindow : Window
         UpdateSelectionControlPositions(bounds);
         UpdateScrollCaptureMask(bounds);
 
+        if (InlineEditorCanvas.HasImage)
+        {
+            Canvas.SetLeft(InlineEditorCanvas, bounds.X);
+            Canvas.SetTop(InlineEditorCanvas, bounds.Y);
+            Canvas.SetLeft(InlineEditorOutline, bounds.X);
+            Canvas.SetTop(InlineEditorOutline, bounds.Y);
+            InlineEditorOutline.Width = bounds.Width;
+            InlineEditorOutline.Height = bounds.Height;
+            Canvas.SetLeft(OcrTextOverlay, bounds.X);
+            Canvas.SetTop(OcrTextOverlay, bounds.Y);
+            OcrTextOverlay.Width = bounds.Width;
+            OcrTextOverlay.Height = bounds.Height;
+        }
+
         if (_isScrollCaptureSelectionPublished &&
             !_isScrollCaptureSelectionLocked &&
             HasValidSelection())
@@ -841,6 +1550,8 @@ public partial class CaptureOverlayWindow : Window
 
     private void ShowSelectionControls()
     {
+        _windowSnapTimer.Stop();
+        HideWindowSnap();
         SelectionRectangle.Visibility = Visibility.Visible;
         TopLeftResizeThumb.Visibility = Visibility.Visible;
         TopRightResizeThumb.Visibility = Visibility.Visible;
@@ -865,35 +1576,17 @@ public partial class CaptureOverlayWindow : Window
         InlineEditorOutline.Width = bounds.Width;
         InlineEditorOutline.Height = bounds.Height;
         InlineEditorOutline.Visibility = Visibility.Visible;
-        TopLeftResizeThumb.Visibility = Visibility.Collapsed;
-        TopRightResizeThumb.Visibility = Visibility.Collapsed;
-        BottomLeftResizeThumb.Visibility = Visibility.Collapsed;
-        BottomRightResizeThumb.Visibility = Visibility.Collapsed;
-        TopResizeThumb.Visibility = Visibility.Collapsed;
-        LeftResizeThumb.Visibility = Visibility.Collapsed;
-        RightResizeThumb.Visibility = Visibility.Collapsed;
-        BottomResizeThumb.Visibility = Visibility.Collapsed;
-        InlineEditorTools.Visibility = Visibility.Visible;
-        EditButton.IsEnabled = false;
+        TopLeftResizeThumb.Visibility = Visibility.Visible;
+        TopRightResizeThumb.Visibility = Visibility.Visible;
+        BottomLeftResizeThumb.Visibility = Visibility.Visible;
+        BottomRightResizeThumb.Visibility = Visibility.Visible;
+        TopResizeThumb.Visibility = Visibility.Visible;
+        LeftResizeThumb.Visibility = Visibility.Visible;
+        RightResizeThumb.Visibility = Visibility.Visible;
+        BottomResizeThumb.Visibility = Visibility.Visible;
+        InlineEditorOptions.Visibility = Visibility.Visible;
         CaptureToolbar.UpdateLayout();
         UpdateSelectionControlPositions(GetSelectionBounds());
-    }
-
-    private void ExitInlineEditor()
-    {
-        InlineEditorCanvas.Reset();
-        InlineEditorCanvas.Visibility = Visibility.Collapsed;
-        InlineEditorOutline.Visibility = Visibility.Collapsed;
-        _inlineEditorImage?.Dispose();
-        _inlineEditorImage = null;
-        InlineEditorTools.Visibility = Visibility.Collapsed;
-        SelectionRectangle.IsHitTestVisible = true;
-        SelectionRectangle.Fill = new WpfSolidColorBrush(
-            WpfColor.FromArgb(24, 0, 127, 115));
-        EditButton.IsEnabled = true;
-        CaptureToolbar.IsEnabled = true;
-        ShowSelectionControls();
-        CaptureSurface.Focus();
     }
 
     private void ClearSelection()
@@ -918,11 +1611,14 @@ public partial class CaptureOverlayWindow : Window
         Canvas.SetTop(SelectionRectangle, 0);
         SelectionRectangle.Width = 0;
         SelectionRectangle.Height = 0;
-        EditButton.IsEnabled = true;
         HideSelectionControls();
         if (_isScrollCaptureSelection && !_isScrollCaptureSelectionLocked)
         {
             SetScrollCaptureMaskVisibility(Visibility.Collapsed);
+        }
+        if (IsVisible && !_isCompleted)
+        {
+            _windowSnapTimer.Start();
         }
         CaptureSurface.Focus();
     }
@@ -958,7 +1654,7 @@ public partial class CaptureOverlayWindow : Window
         RightResizeThumb.Visibility = Visibility.Collapsed;
         BottomResizeThumb.Visibility = Visibility.Collapsed;
         CaptureToolbar.Visibility = Visibility.Collapsed;
-        InlineEditorTools.Visibility = Visibility.Collapsed;
+        InlineEditorOptions.Visibility = Visibility.Collapsed;
     }
 
     internal Task SetScrollCaptureSelectionVisibleAsync(
@@ -1027,6 +1723,33 @@ public partial class CaptureOverlayWindow : Window
             selection);
         _scrollCaptureSelectionCompletionSource?.TrySetResult(
             selection);
+    }
+
+    private void ApplyInitialScrollCaptureSelection(ScreenRegion selection)
+    {
+        var topLeft = CaptureSurface.PointFromScreen(
+            new WpfPoint(selection.X, selection.Y));
+        var bottomRight = CaptureSurface.PointFromScreen(
+            new WpfPoint(
+                selection.X + selection.Width,
+                selection.Y + selection.Height));
+        UpdateSelectionBounds(new Rect(topLeft, bottomRight));
+        SelectionRectangle.Visibility = Visibility.Visible;
+        PrepareScrollCaptureSelection();
+    }
+
+    private void PrepareScrollCaptureSelection()
+    {
+        ShowSelectionControls();
+        SetScrollCaptureMaskVisibility(Visibility.Visible);
+        SaveButton.Visibility = Visibility.Collapsed;
+        ScrollCaptureButton.Visibility = Visibility.Collapsed;
+        OcrButton.Visibility = Visibility.Collapsed;
+        PinButton.Visibility = Visibility.Collapsed;
+        ConfirmButton.Visibility = Visibility.Collapsed;
+        CancelButton.Visibility = Visibility.Collapsed;
+        PublishScrollCaptureSelection();
+        CaptureToolbar.Visibility = Visibility.Collapsed;
     }
 
     internal CapturedImage CaptureScrollSelectionSnapshot()
@@ -1252,6 +1975,12 @@ public partial class CaptureOverlayWindow : Window
         double rightChange,
         double bottomChange)
     {
+        if (!CanAdjustSelection())
+        {
+            return;
+        }
+
+        _isSelectionAdjustmentInProgress = InlineEditorCanvas.HasImage;
         var bounds = GetSelectionBounds();
         var left = Math.Clamp(bounds.Left + leftChange, 0, CaptureSurface.ActualWidth);
         var top = Math.Clamp(bounds.Top + topChange, 0, CaptureSurface.ActualHeight);

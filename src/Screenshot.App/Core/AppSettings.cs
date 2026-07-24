@@ -34,7 +34,7 @@ public sealed record AppSettings
 
     public string RegionCaptureHotKey { get; init; } = "Ctrl+Alt+S";
 
-    public string ScrollCaptureHotKey { get; init; } = "Ctrl+Alt+L";
+    public string ScrollCaptureHotKey { get; init; } = string.Empty;
 
     public string OcrHotKey { get; init; } = "Ctrl+Alt+O";
 
