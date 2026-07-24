@@ -3,6 +3,7 @@ using Screenshot.App.Core;
 using Screenshot.App.Infrastructure;
 using Screenshot.App.Presentation;
 using Screenshot.App.Text;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 
@@ -29,6 +30,7 @@ public sealed class MainWindowLifecycleTests
 
             window.ShowFromTray();
             wasVisibleAfterShow = window.IsVisible;
+            Assert.Equal(ResizeMode.CanResize, window.ResizeMode);
 
             window.Close();
             wasVisibleAfterCloseRequest = window.IsVisible;
@@ -112,7 +114,7 @@ public sealed class MainWindowLifecycleTests
     }
 
     [Fact]
-    public void HotKeySettingsExposePinImageShortcut()
+    public void HotKeySettingsExposePinImageButNotScrollingCaptureShortcut()
     {
         WpfTestHost.Invoke(() =>
         {
@@ -129,6 +131,7 @@ public sealed class MainWindowLifecycleTests
 
             window.ShowFromTray();
             Assert.IsType<HotKeyCaptureBox>(window.FindName("PinHotKeyBox"));
+            Assert.Null(window.FindName("ScrollCaptureHotKeyBox"));
             window.RequestExit();
         });
     }

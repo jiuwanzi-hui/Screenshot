@@ -43,6 +43,16 @@ public sealed class RegionCaptureCoordinator
 
     public Task RequestCaptureAsync()
     {
+        return RequestInteractiveCaptureAsync(recognizeTextAfterSelection: false);
+    }
+
+    public Task RequestOcrCaptureAsync()
+    {
+        return RequestInteractiveCaptureAsync(recognizeTextAfterSelection: true);
+    }
+
+    private Task RequestInteractiveCaptureAsync(bool recognizeTextAfterSelection)
+    {
         if (_isCaptureInProgress)
         {
             return Task.CompletedTask;
@@ -60,6 +70,10 @@ public sealed class RegionCaptureCoordinator
                 HistoryService = _historyService,
                 PinnedImageManager = _pinnedImageManager,
                 StartOcrAsync = ShowOcrResultAndCompleteCaptureAsync,
+                RecognizeTextAsync = RecognizeTextAsync,
+                TranslateTextAsync = TranslateTextAsync,
+                RecognizeTextAfterSelection = recognizeTextAfterSelection,
+                StartScrollCaptureAsync = RequestScrollCaptureFromSelectionAsync,
                 CaptureClosed = OnInteractiveCaptureClosed,
             });
         }
@@ -70,33 +84,6 @@ public sealed class RegionCaptureCoordinator
         }
 
         return Task.CompletedTask;
-    }
-
-    public async Task RequestOcrCaptureAsync()
-    {
-        if (_isCaptureInProgress)
-        {
-            return;
-        }
-
-        _isCaptureInProgress = true;
-
-        try
-        {
-            var selection = await CaptureOverlayWindow.SelectAsync();
-
-            if (selection is null)
-            {
-                return;
-            }
-
-            using var capturedImage = ScreenCaptureService.Capture(selection.Value);
-            await ShowOcrResultAsync(capturedImage);
-        }
-        finally
-        {
-            _isCaptureInProgress = false;
-        }
     }
 
     public async Task RequestPinCaptureAsync()
@@ -134,7 +121,38 @@ public sealed class RegionCaptureCoordinator
         _isCaptureInProgress = false;
     }
 
-    public async Task RequestScrollCaptureAsync()
+    public Task RequestScrollCaptureAsync()
+    {
+        return RequestScrollCaptureAsync(initialSelection: null);
+    }
+
+    private Task RequestScrollCaptureFromSelectionAsync(ScreenRegion selection)
+    {
+        return RequestScrollCaptureAsync(selection);
+    }
+
+    private Task<OcrRecognitionResult> RecognizeTextAsync(CapturedImage image)
+    {
+        return OcrService.RecognizeAsync(
+            image,
+            _settingsProvider().OcrLanguageTag);
+    }
+
+    private Task<TranslationSegmentsResult> TranslateTextAsync(
+        OcrRecognitionResult recognition)
+    {
+        var settings = _settingsProvider();
+        var provider = TranslationProviderFactory.Create(
+            settings,
+            _translationCredentialStore,
+            _httpClient);
+        return provider.TranslateSegmentsAsync(
+            recognition.Regions.Select(region => region.Text).ToArray(),
+            "auto",
+            settings.TranslationTargetLanguage);
+    }
+
+    private async Task RequestScrollCaptureAsync(ScreenRegion? initialSelection)
     {
         if (_isCaptureInProgress)
         {
@@ -146,7 +164,10 @@ public sealed class RegionCaptureCoordinator
         try
         {
             // Scroll target is resolved under the selection when scrolling starts.
-            var scrollSelection = await CaptureOverlayWindow.SelectForScrollCaptureAsync();
+            var scrollSelection = initialSelection is null
+                ? await CaptureOverlayWindow.SelectForScrollCaptureAsync()
+                : await CaptureOverlayWindow.SelectForScrollCaptureAsync(
+                    initialSelection.Value);
 
             if (scrollSelection is null)
             {

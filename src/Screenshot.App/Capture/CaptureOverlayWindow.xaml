@@ -82,6 +82,22 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="InlineEmojiButton" TargetType="Button">
+            <Setter Property="Width" Value="38" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="Background" Value="{DynamicResource AppPanelBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style x:Key="InlineToolbarSeparator" TargetType="Border">
+            <Setter Property="Width" Value="2" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Margin" Value="14,3" />
+            <Setter Property="Background" Value="#7AF7EA" />
+            <Setter Property="CornerRadius" Value="1" />
+        </Style>
         <Style x:Key="InlineStrokeSlider" TargetType="Slider">
             <Setter Property="Width" Value="82" />
             <Setter Property="Height" Value="30" />
@@ -138,6 +154,7 @@
             </Setter>
         </Style>
         <Style x:Key="SelectionResizeThumb" TargetType="Thumb">
+            <Setter Property="Panel.ZIndex" Value="90" />
             <Setter Property="Background" Value="#2EAFA5" />
             <Setter Property="BorderBrush" Value="#075C59" />
             <Setter Property="BorderThickness" Value="1" />
@@ -161,6 +178,7 @@
            KeyDown="OnCaptureSurfaceKeyDown"
            Loaded="OnCaptureSurfaceLoaded"
            PreviewMouseRightButtonDown="OnCaptureSurfacePreviewMouseRightButtonDown"
+           PreviewMouseRightButtonUp="OnCaptureSurfacePreviewMouseRightButtonUp"
            MouseLeftButtonDown="OnCaptureSurfaceMouseLeftButtonDown"
           MouseLeftButtonUp="OnCaptureSurfaceMouseLeftButtonUp"
           MouseMove="OnCaptureSurfaceMouseMove">
@@ -188,6 +206,21 @@
                        Stroke="#00A99D"
                        StrokeThickness="4"
                        Visibility="Collapsed" />
+            <Rectangle x:Name="WindowSnapRectangle"
+                       Fill="#1800CFC1"
+                       IsHitTestVisible="False"
+                       Panel.ZIndex="45"
+                       Stroke="#66FFF2"
+                       StrokeThickness="3"
+                       Visibility="Collapsed">
+                <Rectangle.Effect>
+                    <DropShadowEffect BlurRadius="8"
+                                      Direction="0"
+                                      Opacity="0.8"
+                                      ShadowDepth="0"
+                                      Color="#00B8AC" />
+                </Rectangle.Effect>
+            </Rectangle>
             <Rectangle x:Name="SelectionRectangle"
                        Cursor="SizeAll"
                        Fill="#18007F73"
@@ -202,13 +235,22 @@
             <editor:ImageEditorCanvas x:Name="InlineEditorCanvas"
                                       Visibility="Collapsed" />
 
+            <Canvas x:Name="OcrTextOverlay"
+                    ClipToBounds="True"
+                    Panel.ZIndex="95"
+                    Visibility="Collapsed" />
+
             <Rectangle x:Name="InlineEditorOutline"
-                       Fill="Transparent"
-                       IsHitTestVisible="False"
+                       Cursor="SizeAll"
+                       Fill="{x:Null}"
+                       IsHitTestVisible="True"
                        Panel.ZIndex="80"
                        Stroke="#66FFF2"
                        StrokeThickness="3"
-                       Visibility="Collapsed">
+                       Visibility="Collapsed"
+                       MouseLeftButtonDown="OnInlineEditorOutlineMouseLeftButtonDown"
+                       MouseMove="OnInlineEditorOutlineMouseMove"
+                       MouseLeftButtonUp="OnInlineEditorOutlineMouseLeftButtonUp">
                 <Rectangle.Effect>
                     <DropShadowEffect BlurRadius="9"
                                       Direction="0"
@@ -222,6 +264,7 @@
                    Width="12"
                    Height="12"
                    Cursor="SizeNWSE"
+                   DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnTopLeftResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"
                    Visibility="Collapsed" />
@@ -229,6 +272,7 @@
                    Width="12"
                    Height="12"
                    Cursor="SizeNESW"
+                   DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnTopRightResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"
                    Visibility="Collapsed" />
@@ -236,6 +280,7 @@
                    Width="18"
                    Height="8"
                    Cursor="SizeNS"
+                   DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnTopResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"
                    Visibility="Collapsed" />
@@ -243,6 +288,7 @@
                    Width="8"
                    Height="18"
                    Cursor="SizeWE"
+                   DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnLeftResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"
                    Visibility="Collapsed" />
@@ -250,6 +296,7 @@
                    Width="8"
                    Height="18"
                    Cursor="SizeWE"
+                   DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnRightResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"
                    Visibility="Collapsed" />
@@ -257,6 +304,7 @@
                    Width="18"
                    Height="8"
                    Cursor="SizeNS"
+                   DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnBottomResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"
                    Visibility="Collapsed" />
@@ -264,6 +312,7 @@
                    Width="12"
                    Height="12"
                    Cursor="SizeNESW"
+                   DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnBottomLeftResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"
                    Visibility="Collapsed" />
@@ -271,78 +320,22 @@
                    Width="12"
                    Height="12"
                    Cursor="SizeNWSE"
+                   DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnBottomRightResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"
                    Visibility="Collapsed" />
 
             <Border x:Name="CaptureToolbar"
+                    Panel.ZIndex="100"
                     Cursor="Arrow"
-                    Padding="8"
+                    Padding="12,10"
                     Background="{DynamicResource AppPanelBackgroundBrush}"
                     BorderBrush="{DynamicResource AppBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="8"
                     Visibility="Collapsed">
                 <StackPanel>
-                    <StackPanel Orientation="Horizontal">
-                        <Button x:Name="SaveButton"
-                                Width="38"
-                                Height="32"
-                                Margin="0,0,4,0"
-                                Click="OnSaveClick"
-                                ToolTip="保存 PNG">
-                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74E;" />
-                        </Button>
-                        <Button x:Name="EditButton"
-                                Width="38"
-                                Height="32"
-                                Margin="0,0,4,0"
-                                Click="OnEditClick"
-                                ToolTip="在选区内编辑">
-                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE70F;" />
-                        </Button>
-                        <Button x:Name="OcrButton"
-                                Width="38"
-                                Height="32"
-                                Margin="0,0,4,0"
-                                Click="OnOcrClick"
-                                ToolTip="识别选区文字">
-                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE8C1;" />
-                        </Button>
-                        <Button x:Name="PinButton"
-                                Width="38"
-                                Height="32"
-                                Margin="0,0,4,0"
-                                Click="OnPinClick"
-                                ToolTip="钉在最上层">
-                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE840;" />
-                        </Button>
-                        <Button x:Name="ConfirmButton"
-                                Width="36"
-                                Height="32"
-                                Background="{DynamicResource AppAccentBrush}"
-                                BorderBrush="{DynamicResource AppAccentBrush}"
-                                Click="OnConfirmClick"
-                                Foreground="#FFFFFF"
-                                ToolTip="复制并完成截图">
-                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE73E;" />
-                        </Button>
-                        <Button x:Name="CancelButton"
-                                Width="38"
-                                Height="32"
-                                Margin="4,0,0,0"
-                                Background="{DynamicResource AppPanelBackgroundBrush}"
-                                BorderBrush="{DynamicResource AppBorderBrush}"
-                                Click="OnCancelClick"
-                                ToolTip="取消截图">
-                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE711;" />
-                        </Button>
-                    </StackPanel>
-
-                    <StackPanel x:Name="InlineEditorTools"
-                                Margin="0,6,0,0"
-                                Orientation="Horizontal"
-                                Visibility="Collapsed">
+                    <StackPanel x:Name="InlineEditorTools" Orientation="Horizontal">
                         <RadioButton GroupName="InlineEditorTool"
                                      Checked="OnInlineEditorToolSelected"
                                      IsChecked="True"
@@ -357,6 +350,13 @@
                                      Tag="Arrow"
                                      ToolTip="箭头">
                             <TextBlock FontFamily="Segoe UI Symbol" FontSize="18" Text="→" />
+                        </RadioButton>
+                        <RadioButton GroupName="InlineEditorTool"
+                                     Checked="OnInlineEditorToolSelected"
+                                     Style="{StaticResource InlineToolButton}"
+                                     Tag="Emoji"
+                                     ToolTip="表情">
+                            <editor:EmojiStickerImage Width="21" Height="21" Sticker="Smile" />
                         </RadioButton>
                         <RadioButton GroupName="InlineEditorTool"
                                      Checked="OnInlineEditorToolSelected"
@@ -379,14 +379,65 @@
                                      ToolTip="马赛克笔刷">
                             <TextBlock FontFamily="Segoe UI Symbol" FontSize="17" Text="▧" />
                         </RadioButton>
-                        <Button x:Name="InlineUndoButton"
-                                Width="36"
+
+                        <Border x:Name="ToolActionSeparator"
+                                Style="{StaticResource InlineToolbarSeparator}" />
+
+                        <Button x:Name="SaveButton"
+                                Width="38"
                                 Height="32"
-                                Margin="4,0,4,0"
+                                Margin="0,0,4,0"
+                                Click="OnSaveClick"
+                                ToolTip="保存 PNG">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74E;" />
+                        </Button>
+                        <Button x:Name="ScrollCaptureButton"
+                                Width="38"
+                                Height="32"
+                                Margin="0,0,4,0"
+                                Click="OnScrollCaptureClick"
+                                ToolTip="使用当前选区开始长截图">
+                            <TextBlock FontFamily="Segoe UI Symbol" FontSize="17" Text="↕" />
+                        </Button>
+                        <Button x:Name="OcrButton"
+                                Width="38"
+                                Height="32"
+                                Margin="0,0,4,0"
+                                Click="OnOcrClick"
+                                ToolTip="识别并直接选择图片文字">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE8C1;" />
+                        </Button>
+                        <Button x:Name="TranslateButton"
+                                Width="38"
+                                Height="32"
+                                Margin="0,0,4,0"
+                                Click="OnTranslateClick"
+                                ToolTip="识别并翻译，覆盖到截图">
+                            <TextBlock FontSize="14"
+                                       FontWeight="SemiBold"
+                                       Text="译" />
+                        </Button>
+                        <Button x:Name="PinButton"
+                                Width="38"
+                                Height="32"
+                                Margin="0,0,4,0"
+                                Click="OnPinClick"
+                                ToolTip="钉在最上层">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE840;" />
+                        </Button>
+
+                        <Border x:Name="ActionHistorySeparator"
+                                Style="{StaticResource InlineToolbarSeparator}" />
+
+                        <Button x:Name="InlineUndoButton"
+                                Width="44"
+                                Height="32"
+                                Margin="0,0,4,0"
+                                Padding="0"
                                 Click="OnInlineUndoClick"
                                 IsEnabled="False"
                                 ToolTip="撤销">
-                            <Viewbox Width="18" Height="18" Stretch="Uniform">
+                            <Viewbox Width="22" Height="22" Stretch="Uniform">
                                 <Path Width="20" Height="20"
                                       Data="{StaticResource UndoIconGeometry}"
                                       Fill="Transparent"
@@ -398,13 +449,13 @@
                             </Viewbox>
                         </Button>
                         <Button x:Name="InlineRedoButton"
-                                Width="36"
+                                Width="44"
                                 Height="32"
-                                Margin="0,0,8,0"
+                                Padding="0"
                                 Click="OnInlineRedoClick"
                                 IsEnabled="False"
                                 ToolTip="重做">
-                            <Viewbox Width="18" Height="18" Stretch="Uniform">
+                            <Viewbox Width="22" Height="22" Stretch="Uniform">
                                 <Path Width="20" Height="20"
                                       Data="{StaticResource RedoIconGeometry}"
                                       Fill="Transparent"
@@ -415,6 +466,79 @@
                                       StrokeThickness="2" />
                             </Viewbox>
                         </Button>
+
+                        <Border x:Name="HistoryFinishSeparator"
+                                Style="{StaticResource InlineToolbarSeparator}" />
+
+                        <Button x:Name="CancelButton"
+                                Width="38"
+                                Height="32"
+                                Margin="4,0,0,0"
+                                Background="{DynamicResource AppPanelBackgroundBrush}"
+                                BorderBrush="{DynamicResource AppBorderBrush}"
+                                Click="OnCancelClick"
+                                ToolTip="取消截图">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE711;" />
+                        </Button>
+                        <Button x:Name="ConfirmButton"
+                                Width="36"
+                                Height="32"
+                                Margin="4,0,0,0"
+                                Background="{DynamicResource AppAccentBrush}"
+                                BorderBrush="{DynamicResource AppAccentBrush}"
+                                Click="OnConfirmClick"
+                                Foreground="#FFFFFF"
+                                ToolTip="复制并完成截图">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE73E;" />
+                        </Button>
+                    </StackPanel>
+
+                    <StackPanel x:Name="InlineEditorOptions"
+                                Margin="0,6,0,0"
+                                Orientation="Horizontal"
+                                Visibility="Collapsed">
+                        <StackPanel x:Name="InlineEmojiPalette"
+                                    Orientation="Horizontal"
+                                    Visibility="Collapsed">
+                            <Button Tag="Smile" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="笑脸">
+                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Smile" />
+                            </Button>
+                            <Button Tag="Laugh" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="笑哭">
+                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Laugh" />
+                            </Button>
+                            <Button Tag="Wink" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="眨眼">
+                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Wink" />
+                            </Button>
+                            <Button Tag="Love" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="喜欢">
+                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Love" />
+                            </Button>
+                            <Button Tag="Cool" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="墨镜">
+                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Cool" />
+                            </Button>
+                            <Button Tag="Cry" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="哭泣">
+                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Cry" />
+                            </Button>
+                            <Button Tag="Angry" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="生气">
+                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Angry" />
+                            </Button>
+                            <Button Tag="Surprised" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="惊讶">
+                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Surprised" />
+                            </Button>
+                            <Button Tag="ThumbsUp" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="赞">
+                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="ThumbsUp" />
+                            </Button>
+                            <Button Tag="Heart" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="爱心">
+                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Heart" />
+                            </Button>
+                            <Button Tag="Party" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="庆祝">
+                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Party" />
+                            </Button>
+                            <Button Tag="Star" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="星星">
+                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Star" />
+                            </Button>
+                        </StackPanel>
+
+                        <StackPanel x:Name="InlineStrokeOptions" Orientation="Horizontal">
                         <Button x:Name="InlineRedColorButton"
                                 Background="#D64545"
                                 BorderBrush="#F2FFFC"
@@ -461,7 +585,16 @@
                                    VerticalAlignment="Center"
                                    Foreground="{DynamicResource AppMutedTextBrush}"
                                    Text="3 px" />
+                        </StackPanel>
                     </StackPanel>
+
+                    <TextBlock x:Name="CaptureStatusText"
+                               Margin="2,6,2,0"
+                               MaxWidth="460"
+                               FontSize="12"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               TextWrapping="Wrap"
+                               Visibility="Collapsed" />
                 </StackPanel>
             </Border>
         </Canvas>

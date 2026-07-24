@@ -59,11 +59,38 @@ public static class OcrService
             var decoder = await BitmapDecoder.CreateAsync(stream).AsTask(cancellationToken);
             using var softwareBitmap = await decoder.GetSoftwareBitmapAsync().AsTask(cancellationToken);
             var result = await engine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken);
+            var scaleX = (double)ocrBitmap.Width / capturedImage.Bitmap.Width;
+            var scaleY = (double)ocrBitmap.Height / capturedImage.Bitmap.Height;
             var text = string.Join(
                 Environment.NewLine,
                 result.Lines.Select(line => line.Text));
+            var regions = new List<OcrTextRegion>();
 
-            return new OcrRecognitionResult(true, text, ErrorMessage: null);
+            foreach (var line in result.Lines)
+            {
+                if (line.Words.Count == 0 || string.IsNullOrWhiteSpace(line.Text))
+                {
+                    continue;
+                }
+
+                var left = line.Words.Min(word => word.BoundingRect.X);
+                var top = line.Words.Min(word => word.BoundingRect.Y);
+                var right = line.Words.Max(
+                    word => word.BoundingRect.X + word.BoundingRect.Width);
+                var bottom = line.Words.Max(
+                    word => word.BoundingRect.Y + word.BoundingRect.Height);
+                regions.Add(new OcrTextRegion(
+                    line.Text,
+                    left / scaleX,
+                    top / scaleY,
+                    (right - left) / scaleX,
+                    (bottom - top) / scaleY));
+            }
+
+            return new OcrRecognitionResult(true, text, ErrorMessage: null)
+            {
+                Regions = regions,
+            };
         }
         catch (OperationCanceledException)
         {

@@ -10,3 +10,14 @@ public sealed record TranslationResult(
         return new TranslationResult(false, string.Empty, errorMessage);
     }
 }
+
+public sealed record TranslationSegmentsResult(
+    bool IsSuccess,
+    IReadOnlyList<string> Segments,
+    string? ErrorMessage)
+{
+    public static TranslationSegmentsResult Failure(string errorMessage)
+    {
+        return new TranslationSegmentsResult(false, [], errorMessage);
+    }
+}

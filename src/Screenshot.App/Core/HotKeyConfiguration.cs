@@ -15,7 +15,6 @@ public static class HotKeyConfiguration
 
         var bindings = new List<HotKeyBinding>();
         AddBinding(bindings, HotKeyAction.RegionCapture, settings.RegionCaptureHotKey);
-        AddBinding(bindings, HotKeyAction.ScrollCapture, settings.ScrollCaptureHotKey);
         AddBinding(bindings, HotKeyAction.RecognizeText, settings.OcrHotKey);
         AddBinding(bindings, HotKeyAction.PinImage, settings.PinHotKey);
         AddBinding(bindings, HotKeyAction.OpenSettings, settings.OpenSettingsHotKey);

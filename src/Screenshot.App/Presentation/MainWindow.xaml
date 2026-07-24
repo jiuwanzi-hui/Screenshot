@@ -12,7 +12,7 @@
         Height="560"
         MinWidth="680"
         MinHeight="480"
-        ResizeMode="CanMinimize"
+        ResizeMode="CanResize"
         ShowInTaskbar="False"
         Background="{DynamicResource AppWindowBackgroundBrush}"
         FontFamily="Microsoft YaHei UI"
@@ -485,49 +485,6 @@
                         <TextBlock FontSize="14"
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource AppTextPrimaryBrush}"
-                                   Text="长截图" />
-                        <Grid Margin="0,8,16,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <local:HotKeyCaptureBox x:Name="ScrollCaptureHotKeyBox"
-                                                    Height="34"
-                                                    Padding="10,3"
-                                                    BorderBrush="{DynamicResource AppBorderBrush}"
-                                                    GotKeyboardFocus="OnHotKeyCaptureGotKeyboardFocus"
-                                                    HotKeyCaptured="OnHotKeyCaptured"
-                                                    HotKeyCaptureCanceled="OnHotKeyCaptureCanceled"
-                                                    LostKeyboardFocus="OnHotKeyCaptureLostKeyboardFocus"
-                                                    Tag="ScrollCaptureHotKey"
-                                                    Text="{Binding ScrollCaptureHotKey}"
-                                                    TextAlignment="Center"
-                                                    ToolTip="单击后直接按下组合键" />
-                            <Button Grid.Column="1"
-                                    Width="68"
-                                    Margin="8,0,0,0"
-                                    Click="OnBeginHotKeyEditClick"
-                                    Content="修改"
-                                    Style="{StaticResource SecondaryButton}"
-                                    Tag="ScrollCaptureHotKeyBox"
-                                    ToolTip="修改长截图快捷键" />
-                            <Button Grid.Column="2"
-                                    Width="34"
-                                    Margin="6,0,0,0"
-                                    Click="OnClearHotKeyClick"
-                                    Style="{StaticResource SecondaryButton}"
-                                    Tag="ScrollCaptureHotKeyBox"
-                                    ToolTip="不设置长截图快捷键">
-                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
-                            </Button>
-                        </Grid>
-                    </StackPanel>
-
-                    <StackPanel Margin="0,17,0,0">
-                        <TextBlock FontSize="14"
-                                   FontWeight="SemiBold"
-                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
                                    Text="文字识别" />
                         <Grid Margin="0,8,16,0">
                             <Grid.ColumnDefinitions>
@@ -682,15 +639,14 @@
                                FontWeight="SemiBold"
                                Foreground="{DynamicResource AppTextPrimaryBrush}"
                                Text="识别语言" />
-                    <TextBox Height="34"
-                             Margin="0,9,0,0"
-                             Padding="10,3"
-                             VerticalContentAlignment="Center"
-                             BorderBrush="{DynamicResource AppBorderBrush}"
-                             LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
-                             TextChanged="OnTextSettingChanged"
-                             Text="{Binding OcrLanguageTag, UpdateSourceTrigger=PropertyChanged}"
-                             ToolTip="例如 zh-Hans 或 en-US" />
+                    <ComboBox x:Name="OcrLanguageComboBox"
+                              Margin="0,9,0,0"
+                              DisplayMemberPath="Label"
+                              ItemsSource="{Binding OcrLanguageOptions}"
+                              SelectedValue="{Binding OcrLanguageTag, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              SelectedValuePath="Value"
+                              SelectionChanged="OnImmediateSettingChanged"
+                              ToolTip="仅显示 Windows 当前可用的 OCR 语言包" />
                 </StackPanel>
             </Grid>
 
@@ -722,18 +678,14 @@
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource AppTextPrimaryBrush}"
                                    Text="服务类型" />
-                        <Border Height="34"
-                                Margin="0,8,0,0"
-                                Padding="10,0"
-                                Background="{DynamicResource AppInputBackgroundBrush}"
-                                BorderBrush="{DynamicResource AppBorderBrush}"
-                                BorderThickness="1"
-                                CornerRadius="8"
-                                ToolTip="兼容 DeepSeek、OpenAI 等聊天补全接口">
-                            <TextBlock VerticalAlignment="Center"
-                                       Foreground="{DynamicResource AppControlForegroundBrush}"
-                                       Text="OpenAI 兼容接口" />
-                        </Border>
+                        <ComboBox x:Name="TranslationProviderComboBox"
+                                  Margin="0,8,0,0"
+                                  DisplayMemberPath="Label"
+                                  ItemsSource="{Binding TranslationProviderOptions}"
+                                  SelectedValue="{Binding TranslationProvider, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                  SelectedValuePath="Value"
+                                  SelectionChanged="OnImmediateSettingChanged"
+                                  ToolTip="兼容 DeepSeek、OpenAI 等聊天补全接口" />
                     </StackPanel>
 
                     <StackPanel Margin="0,17,0,0">
@@ -757,15 +709,13 @@
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource AppTextPrimaryBrush}"
                                    Text="目标语言" />
-                        <TextBox Height="34"
-                                 Margin="0,8,0,0"
-                                 Padding="10,3"
-                                 VerticalContentAlignment="Center"
-                                 BorderBrush="{DynamicResource AppBorderBrush}"
-                                 LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
-                                 TextChanged="OnTextSettingChanged"
-                                 Text="{Binding TranslationTargetLanguage, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="例如 zh-Hans 或 en" />
+                        <ComboBox x:Name="TranslationTargetLanguageComboBox"
+                                  Margin="0,8,0,0"
+                                  DisplayMemberPath="Label"
+                                  ItemsSource="{Binding TranslationTargetLanguageOptions}"
+                                  SelectedValue="{Binding TranslationTargetLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                  SelectedValuePath="Value"
+                                  SelectionChanged="OnImmediateSettingChanged" />
                     </StackPanel>
 
                     <StackPanel Margin="0,17,0,0">
@@ -773,15 +723,28 @@
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource AppTextPrimaryBrush}"
                                    Text="模型名称" />
-                        <TextBox Height="34"
-                                 Margin="0,8,0,0"
-                                 Padding="10,3"
-                                 VerticalContentAlignment="Center"
-                                 BorderBrush="{DynamicResource AppBorderBrush}"
-                                 LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
-                                 TextChanged="OnTextSettingChanged"
-                                 Text="{Binding TranslationModel, UpdateSourceTrigger=PropertyChanged}"
-                                 ToolTip="DeepSeek 填 deepseek-chat" />
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ComboBox x:Name="TranslationModelComboBox"
+                                      Grid.Column="0"
+                                      IsEditable="True"
+                                      ItemsSource="{Binding TranslationModelOptions}"
+                                      LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
+                                      SelectionChanged="OnImmediateSettingChanged"
+                                      Text="{Binding TranslationModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      ToolTip="可以获取厂家模型，也可以手动输入模型标识" />
+                            <Button x:Name="FetchTranslationModelsButton"
+                                    Grid.Column="1"
+                                    MinWidth="94"
+                                    Margin="8,0,0,0"
+                                    Padding="12,3"
+                                    Click="OnFetchTranslationModelsClick"
+                                    Content="获取模型"
+                                    ToolTip="使用当前服务地址和 API Key 获取模型列表" />
+                        </Grid>
                     </StackPanel>
 
                     <StackPanel Margin="0,17,0,8">

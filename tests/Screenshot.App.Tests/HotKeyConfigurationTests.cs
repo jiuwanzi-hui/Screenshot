@@ -50,7 +50,7 @@ public sealed class HotKeyConfigurationTests
     {
         var settings = AppSettings.CreateDefault() with
         {
-            ScrollCaptureHotKey = "Ctrl+Alt+S",
+            OcrHotKey = "Ctrl+Alt+S",
         };
 
         var validation = HotKeyConfiguration.Validate(
@@ -91,6 +91,21 @@ public sealed class HotKeyConfigurationTests
             bindings,
             binding => binding.Action is HotKeyAction.RegionCapture or HotKeyAction.ScrollCapture);
         Assert.True(validation.IsValid, validation.ErrorMessage);
+    }
+
+    [Fact]
+    public void DoesNotRegisterTheLegacyScrollingCaptureShortcut()
+    {
+        var settings = AppSettings.CreateDefault() with
+        {
+            ScrollCaptureHotKey = "Ctrl+Alt+L",
+        };
+
+        var bindings = HotKeyConfiguration.CreateBindings(settings);
+
+        Assert.DoesNotContain(
+            bindings,
+            binding => binding.Action == HotKeyAction.ScrollCapture);
     }
 
     [Fact]

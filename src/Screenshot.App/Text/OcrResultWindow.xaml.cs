@@ -1,6 +1,7 @@
-using System.Runtime.InteropServices;
 using System.Net.Http;
 using System.Windows;
+using System.Windows.Input;
+using Screenshot.App.Capture;
 using Screenshot.App.Core;
 
 namespace Screenshot.App.Text;
@@ -53,14 +54,57 @@ public partial class OcrResultWindow : Window
         _settingsProvider = settingsProvider;
     }
 
-    private void OnCopyClick(object sender, RoutedEventArgs e)
+    private async void OnCopyClick(object sender, RoutedEventArgs e)
     {
         try
         {
-            System.Windows.Clipboard.SetText(ResultTextBox.Text);
+            await ClipboardTextService.SetTextAsync(ResultTextBox.Text);
             StatusText.Text = "已复制识别文字。";
         }
-        catch (COMException)
+        catch
+        {
+            StatusText.Text = "剪贴板正被其他程序使用，请重试。";
+        }
+    }
+
+    private async void OnCopyTranslationClick(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(TranslationTextBox.Text))
+        {
+            StatusText.Text = "当前没有可复制的译文。";
+            return;
+        }
+
+        try
+        {
+            await ClipboardTextService.SetTextAsync(TranslationTextBox.Text);
+            StatusText.Text = "已复制全部译文。";
+        }
+        catch
+        {
+            StatusText.Text = "剪贴板正被其他程序使用，请重试。";
+        }
+    }
+
+    private async void OnSelectableTextPreviewKeyDown(
+        object sender,
+        System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key != Key.C ||
+            !Keyboard.Modifiers.HasFlag(ModifierKeys.Control) ||
+            sender is not System.Windows.Controls.TextBox textBox ||
+            string.IsNullOrEmpty(textBox.SelectedText))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        try
+        {
+            await ClipboardTextService.SetTextAsync(textBox.SelectedText);
+            StatusText.Text = "已复制所选文字。";
+        }
+        catch
         {
             StatusText.Text = "剪贴板正被其他程序使用，请重试。";
         }
@@ -109,7 +153,7 @@ public partial class OcrResultWindow : Window
                 _httpClient);
             var result = await provider.TranslateAsync(
                 ResultTextBox.Text,
-                settings.OcrLanguageTag,
+                "auto",
                 settings.TranslationTargetLanguage);
 
             if (result.IsSuccess)

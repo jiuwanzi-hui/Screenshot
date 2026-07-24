@@ -14,6 +14,25 @@ public static class TranslationProviderFactory
         return OpenAiCompatibleProviderId;
     }
 
+    public static string NormalizeModel(string? endpoint, string? configuredModel)
+    {
+        var model = configuredModel?.Trim() ?? string.Empty;
+        if (!(endpoint?.Contains(
+                "deepseek.com",
+                StringComparison.OrdinalIgnoreCase) ?? false))
+        {
+            return model;
+        }
+
+        return model.ToLowerInvariant() switch
+        {
+            "" or "deepseek" or "deepseek chat" or "deepseek-chat" or
+                "deepseek reasoner" or "deepseek-reasoner" or
+                "gpt-4.1-mini" => "deepseek-v4-flash",
+            _ => model,
+        };
+    }
+
     public static ITranslationProvider Create(
         AppSettings settings,
         ITranslationCredentialStore credentialStore,

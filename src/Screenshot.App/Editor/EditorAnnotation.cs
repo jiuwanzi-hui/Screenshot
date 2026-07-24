@@ -28,6 +28,19 @@ public sealed record TextAnnotation(
     WpfColor Color,
     double FontSize) : EditorAnnotation;
 
+public sealed record EmojiAnnotation(
+    WpfPoint Position,
+    EmojiSticker Sticker,
+    double FontSize) : EditorAnnotation;
+
+public sealed record TranslatedTextAnnotationRegion(
+    WpfRect Bounds,
+    string Text,
+    double FontSize);
+
+public sealed record TranslationOverlayAnnotation(
+    IReadOnlyList<TranslatedTextAnnotationRegion> Regions) : EditorAnnotation;
+
 public sealed record MosaicAnnotation(
     IReadOnlyList<WpfPoint> Points,
     double StrokeWidth,

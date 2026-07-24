@@ -25,6 +25,7 @@ public sealed class ImageEditorCanvas : Canvas
     private EditorDocument _document = new();
     private EditorTool _selectedTool = EditorTool.Rectangle;
     private WpfColor _selectedColor = WpfColor.FromRgb(214, 69, 69);
+    private EmojiSticker _selectedEmoji = EmojiSticker.Smile;
     private double _strokeWidth = 3;
     private WpfPoint _drawingStartPoint;
     private List<WpfPoint>? _brushPoints;
@@ -51,6 +52,10 @@ public sealed class ImageEditorCanvas : Canvas
     public bool CanUndo => _document.CanUndo;
 
     public bool CanRedo => _document.CanRedo;
+
+    public bool HasTranslationOverlay =>
+        _document.Annotations.Any(annotation =>
+            annotation is TranslationOverlayAnnotation);
 
     public double Zoom => _zoom;
 
@@ -102,9 +107,35 @@ public sealed class ImageEditorCanvas : Canvas
         _selectedColor = color;
     }
 
+    public void SelectEmoji(EmojiSticker emoji)
+    {
+        _selectedEmoji = emoji;
+    }
+
     public void SetStrokeWidth(double strokeWidth)
     {
         _strokeWidth = Math.Clamp(strokeWidth, 1, 24);
+    }
+
+    public void AddTranslationOverlay(
+        IReadOnlyList<TranslatedTextAnnotationRegion> regions)
+    {
+        ArgumentNullException.ThrowIfNull(regions);
+        var validRegions = regions
+            .Where(region =>
+                !string.IsNullOrWhiteSpace(region.Text) &&
+                region.Bounds.Width > 0 &&
+                region.Bounds.Height > 0)
+            .ToArray();
+        if (validRegions.Length == 0)
+        {
+            return;
+        }
+
+        CommitPendingText();
+        _document.Add(new TranslationOverlayAnnotation(validRegions));
+        RebuildCanvas();
+        RaiseHistoryChanged();
     }
 
     public void Undo()
@@ -242,6 +273,18 @@ public sealed class ImageEditorCanvas : Canvas
 
         CommitPendingText();
         var point = ClampPoint(e.GetPosition(this));
+
+        if (_selectedTool == EditorTool.Emoji)
+        {
+            _document.Add(new EmojiAnnotation(
+                point,
+                _selectedEmoji,
+                Math.Max(24, _strokeWidth * 9)));
+            RebuildCanvas();
+            RaiseHistoryChanged();
+            e.Handled = true;
+            return;
+        }
 
         if (_selectedTool == EditorTool.Text)
         {
@@ -595,6 +638,12 @@ public sealed class ImageEditorCanvas : Canvas
             case TextAnnotation text:
                 AddTextVisual(text);
                 break;
+            case EmojiAnnotation emoji:
+                AddEmojiVisual(emoji);
+                break;
+            case TranslationOverlayAnnotation translation:
+                AddTranslationOverlayVisual(translation);
+                break;
             case MosaicAnnotation mosaic:
                 AddMosaicVisual(mosaic);
                 break;
@@ -681,6 +730,134 @@ public sealed class ImageEditorCanvas : Canvas
         SetLeft(text, annotation.Position.X);
         SetTop(text, annotation.Position.Y);
         Children.Add(text);
+    }
+
+    private void AddEmojiVisual(EmojiAnnotation annotation)
+    {
+        var image = new WpfImage
+        {
+            Source = EmojiStickerRenderer.GetImage(annotation.Sticker),
+            Width = annotation.FontSize,
+            Height = annotation.FontSize,
+            Stretch = Stretch.Uniform,
+            IsHitTestVisible = false,
+        };
+        SetLeft(image, annotation.Position.X - (annotation.FontSize / 2));
+        SetTop(image, annotation.Position.Y - (annotation.FontSize / 2));
+        Children.Add(image);
+    }
+
+    private void AddTranslationOverlayVisual(
+        TranslationOverlayAnnotation annotation)
+    {
+        foreach (var region in annotation.Regions)
+        {
+            var palette = GetTranslationPalette(region.Bounds);
+            var contentWidth = Math.Max(8, region.Bounds.Width - 6);
+            var text = new TextBlock
+            {
+                Text = region.Text,
+                FontFamily = new System.Windows.Media.FontFamily(
+                    "Microsoft YaHei UI"),
+                FontSize = Math.Max(10, region.FontSize),
+                FontWeight = FontWeights.SemiBold,
+                Foreground = new SolidColorBrush(palette.Foreground),
+                Width = contentWidth,
+                TextWrapping = TextWrapping.Wrap,
+                IsHitTestVisible = false,
+            };
+            text.Measure(new WpfSize(contentWidth, double.PositiveInfinity));
+            var desiredHeight = Math.Max(
+                region.Bounds.Height,
+                text.DesiredSize.Height + 4);
+            var availableHeight = Math.Max(12, Height - region.Bounds.Y);
+            var border = new Border
+            {
+                Width = Math.Max(12, region.Bounds.Width),
+                Height = Math.Min(desiredHeight, availableHeight),
+                Padding = new Thickness(3, 1, 3, 1),
+                Background = new SolidColorBrush(palette.Background),
+                CornerRadius = new CornerRadius(2),
+                IsHitTestVisible = false,
+                Child = text,
+            };
+            SetLeft(border, region.Bounds.X);
+            SetTop(border, region.Bounds.Y);
+            Children.Add(border);
+        }
+    }
+
+    private (WpfColor Background, WpfColor Foreground)
+        GetTranslationPalette(Rect bounds)
+    {
+        if (_capturedImage is null)
+        {
+            return (
+                WpfColor.FromArgb(246, 35, 42, 46),
+                WpfColor.FromRgb(248, 251, 251));
+        }
+
+        var bitmap = _capturedImage.Bitmap;
+        var left = Math.Clamp((int)Math.Floor(bounds.Left), 0, bitmap.Width - 1);
+        var top = Math.Clamp((int)Math.Floor(bounds.Top), 0, bitmap.Height - 1);
+        var right = Math.Clamp((int)Math.Ceiling(bounds.Right), left + 1, bitmap.Width);
+        var bottom = Math.Clamp((int)Math.Ceiling(bounds.Bottom), top + 1, bitmap.Height);
+        var stepX = Math.Max(1, (right - left) / 10);
+        var stepY = Math.Max(1, (bottom - top) / 5);
+        long red = 0;
+        long green = 0;
+        long blue = 0;
+        var samples = 0;
+
+        for (var y = top; y < bottom; y += stepY)
+        {
+            for (var x = left; x < right; x += stepX)
+            {
+                var pixel = bitmap.GetPixel(x, y);
+                if (pixel.A < 32)
+                {
+                    continue;
+                }
+
+                red += pixel.R;
+                green += pixel.G;
+                blue += pixel.B;
+                samples++;
+            }
+        }
+
+        if (samples == 0)
+        {
+            return (
+                WpfColor.FromArgb(246, 35, 42, 46),
+                WpfColor.FromRgb(248, 251, 251));
+        }
+
+        var averageRed = (byte)(red / samples);
+        var averageGreen = (byte)(green / samples);
+        var averageBlue = (byte)(blue / samples);
+        var luminance =
+            (0.2126 * averageRed) +
+            (0.7152 * averageGreen) +
+            (0.0722 * averageBlue);
+        if (luminance < 145)
+        {
+            return (
+                WpfColor.FromArgb(
+                    246,
+                    (byte)(averageRed * 0.82),
+                    (byte)(averageGreen * 0.82),
+                    (byte)(averageBlue * 0.82)),
+                WpfColor.FromRgb(248, 251, 251));
+        }
+
+        return (
+            WpfColor.FromArgb(
+                246,
+                (byte)Math.Min(255, averageRed + 12),
+                (byte)Math.Min(255, averageGreen + 12),
+                (byte)Math.Min(255, averageBlue + 12)),
+            WpfColor.FromRgb(25, 32, 36));
     }
 
     private void AddMosaicVisual(MosaicAnnotation annotation)
