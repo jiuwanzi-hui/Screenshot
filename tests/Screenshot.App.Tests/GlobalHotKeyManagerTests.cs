@@ -7,6 +7,33 @@ namespace Screenshot.App.Tests;
 public sealed class GlobalHotKeyManagerTests
 {
     [Fact]
+    public void PreCapturesBeforeAltCanDismissTransientUi()
+    {
+        var modifiers = HotKeyModifiers.Control | HotKeyModifiers.Alt;
+        var bindings = new[]
+        {
+            new HotKeyBinding(
+                HotKeyAction.RegionCapture,
+                new HotKeyGesture(modifiers, 'S')),
+            new HotKeyBinding(
+                HotKeyAction.RecognizeText,
+                new HotKeyGesture(modifiers, 'O')),
+            new HotKeyBinding(
+                HotKeyAction.OpenSettings,
+                new HotKeyGesture(modifiers, 0xBC)),
+        };
+
+        var actions = GlobalHotKeyManager.GetPreCaptureActions(
+            bindings,
+            virtualKey: 0x12,
+            modifiers: HotKeyModifiers.Alt);
+
+        Assert.Contains(HotKeyAction.RegionCapture, actions);
+        Assert.Contains(HotKeyAction.RecognizeText, actions);
+        Assert.DoesNotContain(HotKeyAction.OpenSettings, actions);
+    }
+
+    [Fact]
     public void RegistersAndReleasesUncommonGlobalHotKeys()
     {
         using var completed = new ManualResetEventSlim();

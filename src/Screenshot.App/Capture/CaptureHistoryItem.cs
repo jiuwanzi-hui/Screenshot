@@ -6,17 +6,21 @@ public sealed class CaptureHistoryItem
 {
     public CaptureHistoryItem(
         BitmapSource thumbnail,
+        BitmapSource fullImage,
         DateTimeOffset capturedAt,
         int pixelWidth,
         int pixelHeight)
     {
         Thumbnail = thumbnail;
+        FullImage = fullImage;
         CapturedAt = capturedAt;
         PixelWidth = pixelWidth;
         PixelHeight = pixelHeight;
     }
 
     public BitmapSource Thumbnail { get; }
+
+    private BitmapSource FullImage { get; }
 
     public DateTimeOffset CapturedAt { get; }
 
@@ -38,5 +42,10 @@ public sealed class CaptureHistoryItem
         ArgumentException.ThrowIfNullOrWhiteSpace(savedPath);
 
         SavedPath = savedPath;
+    }
+
+    public CapturedImage CreateCapturedImage()
+    {
+        return CapturedImage.FromBitmapSource(FullImage);
     }
 }

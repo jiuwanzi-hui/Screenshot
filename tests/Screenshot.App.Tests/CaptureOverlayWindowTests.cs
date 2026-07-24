@@ -43,6 +43,10 @@ public sealed class CaptureOverlayWindowTests
                 Assert.NotNull(overlay.FindName("BottomRightResizeThumb"));
                 Assert.NotNull(overlay.FindName("CaptureToolbar"));
                 Assert.NotNull(overlay.FindName("TranslateButton"));
+                var frozenScreen = Assert.IsType<System.Windows.Controls.Image>(
+                    overlay.FindName("FrozenScreenImage"));
+                Assert.False(frozenScreen.IsHitTestVisible);
+                Assert.NotNull(frozenScreen.Source);
                 var snapOutline = Assert.IsType<System.Windows.Shapes.Rectangle>(
                     overlay.FindName("WindowSnapRectangle"));
                 Assert.False(snapOutline.IsHitTestVisible);
@@ -116,6 +120,86 @@ public sealed class CaptureOverlayWindowTests
                 Assert.Equal(40, bounds.Height);
                 Assert.Equal(width - 40, bounds.X);
                 Assert.Equal(height - 40, bounds.Y);
+                var shade = Assert.IsType<Border>(overlay.FindName("CaptureShade"));
+                var topMask = Assert.IsType<System.Windows.Shapes.Rectangle>(
+                    overlay.FindName("TopMask"));
+                var rightMask = Assert.IsType<System.Windows.Shapes.Rectangle>(
+                    overlay.FindName("RightMask"));
+                Assert.Equal(Visibility.Collapsed, shade.Visibility);
+                Assert.Equal(Visibility.Visible, topMask.Visibility);
+                Assert.Equal(Visibility.Visible, rightMask.Visibility);
+                Assert.Equal(bounds.Top, topMask.Height);
+                Assert.Equal(width - bounds.Right, rightMask.Width);
+            }
+            finally
+            {
+                overlay.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void EditedSelectionResizeStopsBeforeCroppingAnnotationInk()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var pinnedImageManager = new PinnedImageManager();
+            using var bitmap = new System.Drawing.Bitmap(120, 90);
+            using var image = new CapturedImage(
+                (System.Drawing.Bitmap)bitmap.Clone());
+            var overlay = CaptureOverlayWindow.ShowInteractive(new CaptureOverlayOptions
+            {
+                SaveDirectory = Path.GetTempPath(),
+                KeepHistory = false,
+                HistoryLimit = 0,
+                HistoryService = new CaptureHistoryService(),
+                PinnedImageManager = pinnedImageManager,
+                StartOcrAsync = capturedImage =>
+                {
+                    capturedImage.Dispose();
+                    return Task.CompletedTask;
+                },
+            });
+
+            try
+            {
+                overlay.UpdateLayout();
+                var updateMethod = typeof(CaptureOverlayWindow).GetMethod(
+                    "UpdateSelectionBounds",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var resizeMethod = typeof(CaptureOverlayWindow).GetMethod(
+                    "ResizeSelection",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var readMethod = typeof(CaptureOverlayWindow).GetMethod(
+                    "GetSelectionBounds",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.NotNull(updateMethod);
+                Assert.NotNull(resizeMethod);
+                Assert.NotNull(readMethod);
+                updateMethod.Invoke(overlay, [new Rect(30, 30, 120, 90)]);
+
+                var editor = Assert.IsType<ImageEditorCanvas>(
+                    overlay.FindName("InlineEditorCanvas"));
+                editor.Initialize(image, displayWidth: 120, displayHeight: 90);
+                Canvas.SetLeft(editor, 30);
+                Canvas.SetTop(editor, 30);
+                var documentField = typeof(ImageEditorCanvas).GetField(
+                    "_document",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var document = Assert.IsType<EditorDocument>(
+                    documentField?.GetValue(editor));
+                document.Add(new RectangleAnnotation(
+                    new Rect(20, 20, 30, 25),
+                    System.Windows.Media.Colors.Red,
+                    StrokeWidth: 4));
+
+                resizeMethod.Invoke(overlay, [70d, 0d, 0d, 0d]);
+
+                var resized = Assert.IsType<Rect>(readMethod.Invoke(overlay, null));
+                Assert.InRange(resized.Left, 46, 48);
+                Assert.Equal(150, resized.Right);
+                Assert.Equal(30, Canvas.GetLeft(editor));
+                Assert.Equal(30, Canvas.GetTop(editor));
             }
             finally
             {

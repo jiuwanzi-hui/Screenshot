@@ -73,6 +73,8 @@ public partial class CaptureOverlayWindow : Window
     private WpfPoint _selectionStartPoint;
     private WpfPoint _dragStartPoint;
     private Rect _dragStartBounds;
+    private ScreenRegion? _selectionAdjustmentStartPhysicalBounds;
+    private Rect? _selectionAdjustmentProtectedBounds;
     private CapturedImage? _inlineEditorImage;
     private CapturedImage? _screenSnapshot;
     private EditorTool _selectedInlineTool = EditorTool.Rectangle;
@@ -99,7 +101,8 @@ public partial class CaptureOverlayWindow : Window
 
     private CaptureOverlayWindow(
         CaptureOverlayOptions? options,
-        bool isScrollCaptureSelection = false)
+        bool isScrollCaptureSelection = false,
+        CapturedImage? initialScreenSnapshot = null)
     {
         _options = options;
         _isScrollCaptureSelection = isScrollCaptureSelection;
@@ -121,11 +124,15 @@ public partial class CaptureOverlayWindow : Window
         _virtualScreenBounds = VirtualScreen.GetBounds();
         try
         {
-            _screenSnapshot = ScreenCaptureService.Capture(_virtualScreenBounds);
+            _screenSnapshot = initialScreenSnapshot ??
+                ScreenCaptureService.Capture(_virtualScreenBounds);
+            FrozenScreenImage.Source = _screenSnapshot.Preview;
         }
         catch
         {
+            _screenSnapshot?.Dispose();
             _screenSnapshot = null;
+            FrozenScreenImage.Source = null;
         }
         Left = _virtualScreenBounds.X;
         Top = _virtualScreenBounds.Y;
@@ -162,10 +169,14 @@ public partial class CaptureOverlayWindow : Window
         return overlay._scrollCaptureSelectionCompletionSource!.Task;
     }
 
-    public static CaptureOverlayWindow ShowInteractive(CaptureOverlayOptions options)
+    public static CaptureOverlayWindow ShowInteractive(
+        CaptureOverlayOptions options,
+        CapturedImage? initialScreenSnapshot = null)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var overlay = new CaptureOverlayWindow(options);
+        var overlay = new CaptureOverlayWindow(
+            options,
+            initialScreenSnapshot: initialScreenSnapshot);
         overlay.Show();
         return overlay;
     }
@@ -183,6 +194,7 @@ public partial class CaptureOverlayWindow : Window
         InlineEditorCanvas.HistoryChanged -= OnInlineEditorHistoryChanged;
         _inlineEditorImage?.Dispose();
         _inlineEditorImage = null;
+        FrozenScreenImage.Source = null;
         _screenSnapshot?.Dispose();
         _screenSnapshot = null;
 
@@ -593,14 +605,14 @@ public partial class CaptureOverlayWindow : Window
         object sender,
         MouseButtonEventArgs e)
     {
-        if (!CanAdjustSelection())
+        if (!CanMoveSelection())
         {
             e.Handled = true;
             return;
         }
 
         _isMovingSelection = true;
-        _isSelectionAdjustmentInProgress = true;
+        BeginSelectionAdjustment();
         _dragStartPoint = e.GetPosition(CaptureSurface);
         _dragStartBounds = GetSelectionBounds();
         InlineEditorOutline.CaptureMouse();
@@ -787,7 +799,8 @@ public partial class CaptureOverlayWindow : Window
         }
     }
 
-    private async Task RefreshInlineEditorForSelectionAsync()
+    private async Task RefreshInlineEditorForSelectionAsync(
+        ScreenRegion previousSelection)
     {
         if (_options is null ||
             _isCompleted ||
@@ -811,16 +824,20 @@ public partial class CaptureOverlayWindow : Window
             }
 
             var previousImage = _inlineEditorImage;
-            InlineEditorCanvas.Reset();
-            _inlineEditorImage = image;
-            image = null;
-            previousImage?.Dispose();
 
             var selectionBounds = GetSelectionBounds();
-            InlineEditorCanvas.Initialize(
-                _inlineEditorImage,
+            var currentSelection = GetPhysicalSelectionBounds();
+            var replacementImage = image;
+            InlineEditorCanvas.Reframe(
+                replacementImage,
                 selectionBounds.Width,
-                selectionBounds.Height);
+                selectionBounds.Height,
+                new Vector(
+                    previousSelection.X - currentSelection.X,
+                    previousSelection.Y - currentSelection.Y));
+            _inlineEditorImage = replacementImage;
+            image = null;
+            previousImage?.Dispose();
             InlineEditorCanvas.SelectTool(_selectedInlineTool);
             Canvas.SetLeft(InlineEditorCanvas, selectionBounds.X);
             Canvas.SetTop(InlineEditorCanvas, selectionBounds.Y);
@@ -845,16 +862,55 @@ public partial class CaptureOverlayWindow : Window
         }
     }
 
-    private bool CanAdjustSelection()
+    private bool CanMoveSelection()
     {
         if (!InlineEditorCanvas.HasImage || !InlineEditorCanvas.CanUndo)
         {
             return true;
         }
 
-        CaptureStatusText.Text = "请先撤销已有标注，再移动或调整截图区域。";
+        CaptureStatusText.Text = "已有标注时不能移动整个选区；可拖动边缘调整，且不会裁掉标注。";
         CaptureStatusText.Visibility = Visibility.Visible;
         return false;
+    }
+
+    private void BeginSelectionAdjustment()
+    {
+        if (_isSelectionAdjustmentInProgress || !InlineEditorCanvas.HasImage)
+        {
+            return;
+        }
+
+        _isSelectionAdjustmentInProgress = true;
+        _selectionAdjustmentStartPhysicalBounds = GetPhysicalSelectionBounds();
+        _selectionAdjustmentProtectedBounds = GetProtectedAnnotationBounds();
+        ClearInlineOcrText();
+    }
+
+    private Rect? GetProtectedAnnotationBounds()
+    {
+        var annotationBounds = InlineEditorCanvas.GetAnnotationBounds();
+        if (!annotationBounds.HasValue || annotationBounds.Value.IsEmpty)
+        {
+            return null;
+        }
+
+        var selection = GetSelectionBounds();
+        var scaleX = selection.Width / InlineEditorCanvas.Width;
+        var scaleY = selection.Height / InlineEditorCanvas.Height;
+        var bounds = Rect.Intersect(
+            annotationBounds.Value,
+            new Rect(0, 0, InlineEditorCanvas.Width, InlineEditorCanvas.Height));
+        if (bounds.IsEmpty)
+        {
+            return null;
+        }
+
+        return new Rect(
+            selection.X + (bounds.X * scaleX),
+            selection.Y + (bounds.Y * scaleY),
+            bounds.Width * scaleX,
+            bounds.Height * scaleY);
     }
 
     private async Task CompleteSelectionAdjustmentAsync()
@@ -864,8 +920,14 @@ public partial class CaptureOverlayWindow : Window
             return;
         }
 
+        var previousSelection = _selectionAdjustmentStartPhysicalBounds;
         _isSelectionAdjustmentInProgress = false;
-        await RefreshInlineEditorForSelectionAsync();
+        _selectionAdjustmentStartPhysicalBounds = null;
+        _selectionAdjustmentProtectedBounds = null;
+        if (previousSelection.HasValue)
+        {
+            await RefreshInlineEditorForSelectionAsync(previousSelection.Value);
+        }
     }
 
     private async void OnSelectionResizeThumbDragCompleted(
@@ -1057,13 +1119,13 @@ public partial class CaptureOverlayWindow : Window
 
             var translatedRegions = recognition.Regions
                 .Select((region, index) => new TranslatedTextAnnotationRegion(
-                    new Rect(
-                        Math.Max(0, region.X),
-                        Math.Max(0, region.Y - 2),
-                        Math.Max(12, region.Width),
-                        Math.Max(22, region.Height + 10)),
-                    translation.Segments[index],
-                    Math.Max(16, region.Height * 1.2)))
+                     new Rect(
+                         Math.Max(0, region.X),
+                         Math.Max(0, region.Y - 2),
+                         Math.Max(12, region.Width),
+                         Math.Max(22, region.Height + 10)),
+                     translation.Segments[index],
+                     Math.Max(10, region.Height * 0.78)))
                 .ToArray();
             InlineEditorCanvas.AddTranslationOverlay(translatedRegions);
             _inlineTranslatedTextRegions = recognition.Regions
@@ -1120,19 +1182,29 @@ public partial class CaptureOverlayWindow : Window
 
         foreach (var region in regions)
         {
+            var textWidth = Math.Max(12, region.Width * scaleX + 2);
+            var textHeight = Math.Max(16, region.Height * scaleY + 2);
+            var preferredFontSize = Math.Max(
+                10,
+                region.Height * scaleY * 0.78);
+            var fontSize = isTranslation
+                ? TranslationTextLayout.FitFontSize(
+                    region.Text,
+                    Math.Max(8, textWidth - 4),
+                    Math.Max(8, textHeight - 2),
+                    preferredFontSize)
+                : preferredFontSize;
             var textBox = new System.Windows.Controls.TextBox
             {
                 Text = region.Text,
-                Width = Math.Max(20, region.Width * scaleX + 8),
-                Height = Math.Max(18, region.Height * scaleY + 4),
+                Width = textWidth,
+                Height = textHeight,
                 Padding = new Thickness(0),
                 Background = WpfBrushes.Transparent,
                 BorderThickness = new Thickness(0),
                 Cursor = System.Windows.Input.Cursors.IBeam,
                 FontFamily = new System.Windows.Media.FontFamily("Microsoft YaHei UI"),
-                FontSize = isTranslation
-                    ? Math.Max(12, region.Height * scaleY * 0.72)
-                    : Math.Max(10, region.Height * scaleY * 0.78),
+                FontSize = fontSize,
                 Foreground = WpfBrushes.Transparent,
                 IsReadOnly = true,
                 SelectionBrush = new WpfSolidColorBrush(
@@ -1486,20 +1558,35 @@ public partial class CaptureOverlayWindow : Window
         SelectionRectangle.Height = bounds.Height;
 
         UpdateSelectionControlPositions(bounds);
-        UpdateScrollCaptureMask(bounds);
+        UpdateSelectionMask(bounds);
+
+        if (bounds.Width >= MinimumSelectionEdge &&
+            bounds.Height >= MinimumSelectionEdge)
+        {
+            CaptureShade.Visibility = Visibility.Collapsed;
+            SetSelectionMaskVisibility(Visibility.Visible);
+        }
+        else
+        {
+            CaptureShade.Visibility = Visibility.Visible;
+            SetSelectionMaskVisibility(Visibility.Collapsed);
+        }
 
         if (InlineEditorCanvas.HasImage)
         {
-            Canvas.SetLeft(InlineEditorCanvas, bounds.X);
-            Canvas.SetTop(InlineEditorCanvas, bounds.Y);
             Canvas.SetLeft(InlineEditorOutline, bounds.X);
             Canvas.SetTop(InlineEditorOutline, bounds.Y);
             InlineEditorOutline.Width = bounds.Width;
             InlineEditorOutline.Height = bounds.Height;
-            Canvas.SetLeft(OcrTextOverlay, bounds.X);
-            Canvas.SetTop(OcrTextOverlay, bounds.Y);
-            OcrTextOverlay.Width = bounds.Width;
-            OcrTextOverlay.Height = bounds.Height;
+            if (!_isSelectionAdjustmentInProgress)
+            {
+                Canvas.SetLeft(InlineEditorCanvas, bounds.X);
+                Canvas.SetTop(InlineEditorCanvas, bounds.Y);
+                Canvas.SetLeft(OcrTextOverlay, bounds.X);
+                Canvas.SetTop(OcrTextOverlay, bounds.Y);
+                OcrTextOverlay.Width = bounds.Width;
+                OcrTextOverlay.Height = bounds.Height;
+            }
         }
 
         if (_isScrollCaptureSelectionPublished &&
@@ -1612,9 +1699,10 @@ public partial class CaptureOverlayWindow : Window
         SelectionRectangle.Width = 0;
         SelectionRectangle.Height = 0;
         HideSelectionControls();
-        if (_isScrollCaptureSelection && !_isScrollCaptureSelectionLocked)
+        if (!_isScrollCaptureSelectionLocked)
         {
-            SetScrollCaptureMaskVisibility(Visibility.Collapsed);
+            CaptureShade.Visibility = Visibility.Visible;
+            SetSelectionMaskVisibility(Visibility.Collapsed);
         }
         if (IsVisible && !_isCompleted)
         {
@@ -1712,10 +1800,11 @@ public partial class CaptureOverlayWindow : Window
         // The first bounds update happens before the selection is published,
         // so the scroll masks and outline have not been laid out yet. Compute
         // them now before the coordinator can lock the selection for scrolling.
-        UpdateScrollCaptureMask(GetSelectionBounds());
+        UpdateSelectionMask(GetSelectionBounds());
         ShowSelectionControls();
         CaptureSurface.Background = WpfBrushes.Transparent;
-        SetScrollCaptureMaskVisibility(Visibility.Visible);
+        CaptureShade.Visibility = Visibility.Collapsed;
+        SetSelectionMaskVisibility(Visibility.Visible);
         var selection = new ScrollCaptureSelection(
             this,
             GetPhysicalSelectionBounds());
@@ -1741,7 +1830,8 @@ public partial class CaptureOverlayWindow : Window
     private void PrepareScrollCaptureSelection()
     {
         ShowSelectionControls();
-        SetScrollCaptureMaskVisibility(Visibility.Visible);
+        CaptureShade.Visibility = Visibility.Collapsed;
+        SetSelectionMaskVisibility(Visibility.Visible);
         SaveButton.Visibility = Visibility.Collapsed;
         ScrollCaptureButton.Visibility = Visibility.Collapsed;
         OcrButton.Visibility = Visibility.Collapsed;
@@ -1820,13 +1910,8 @@ public partial class CaptureOverlayWindow : Window
         _screenSnapshot = null;
     }
 
-    private void UpdateScrollCaptureMask(Rect bounds)
+    private void UpdateSelectionMask(Rect bounds)
     {
-        if (!_isScrollCaptureSelectionPublished)
-        {
-            return;
-        }
-
         TopMask.Width = CaptureSurface.ActualWidth;
         TopMask.Height = Math.Max(0, bounds.Top);
         Canvas.SetLeft(TopMask, 0);
@@ -1850,14 +1935,17 @@ public partial class CaptureOverlayWindow : Window
         // Rectangle strokes occupy the inside of their layout bounds. Keep the
         // complete stroke plus an anti-aliasing gap outside the capture hole;
         // otherwise its cyan inner edge becomes a row in every sampled frame.
-        var outlineOffset = ScrollCaptureOutline.StrokeThickness + 2;
-        ScrollCaptureOutline.Width = bounds.Width + (outlineOffset * 2);
-        ScrollCaptureOutline.Height = bounds.Height + (outlineOffset * 2);
-        Canvas.SetLeft(ScrollCaptureOutline, bounds.Left - outlineOffset);
-        Canvas.SetTop(ScrollCaptureOutline, bounds.Top - outlineOffset);
+        if (_isScrollCaptureSelectionPublished)
+        {
+            var outlineOffset = ScrollCaptureOutline.StrokeThickness + 2;
+            ScrollCaptureOutline.Width = bounds.Width + (outlineOffset * 2);
+            ScrollCaptureOutline.Height = bounds.Height + (outlineOffset * 2);
+            Canvas.SetLeft(ScrollCaptureOutline, bounds.Left - outlineOffset);
+            Canvas.SetTop(ScrollCaptureOutline, bounds.Top - outlineOffset);
+        }
     }
 
-    private void SetScrollCaptureMaskVisibility(Visibility visibility)
+    private void SetSelectionMaskVisibility(Visibility visibility)
     {
         TopMask.Visibility = visibility;
         LeftMask.Visibility = visibility;
@@ -1975,12 +2063,7 @@ public partial class CaptureOverlayWindow : Window
         double rightChange,
         double bottomChange)
     {
-        if (!CanAdjustSelection())
-        {
-            return;
-        }
-
-        _isSelectionAdjustmentInProgress = InlineEditorCanvas.HasImage;
+        BeginSelectionAdjustment();
         var bounds = GetSelectionBounds();
         var left = Math.Clamp(bounds.Left + leftChange, 0, CaptureSurface.ActualWidth);
         var top = Math.Clamp(bounds.Top + topChange, 0, CaptureSurface.ActualHeight);
@@ -2008,6 +2091,29 @@ public partial class CaptureOverlayWindow : Window
             else
             {
                 bottom = Math.Min(CaptureSurface.ActualHeight, top + MinimumSelectionEdge);
+            }
+        }
+
+        if (_selectionAdjustmentProtectedBounds is { } protectedBounds)
+        {
+            if (leftChange != 0)
+            {
+                left = Math.Min(left, protectedBounds.Left);
+            }
+
+            if (topChange != 0)
+            {
+                top = Math.Min(top, protectedBounds.Top);
+            }
+
+            if (rightChange != 0)
+            {
+                right = Math.Max(right, protectedBounds.Right);
+            }
+
+            if (bottomChange != 0)
+            {
+                bottom = Math.Max(bottom, protectedBounds.Bottom);
             }
         }
 

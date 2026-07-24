@@ -39,4 +39,23 @@ public sealed class EditorDocument
             _undoStack.Push(command);
         }
     }
+
+    public void TransformAnnotations(
+        Func<EditorAnnotation, EditorAnnotation> transform)
+    {
+        ArgumentNullException.ThrowIfNull(transform);
+
+        for (var index = 0; index < _annotations.Count; index++)
+        {
+            _annotations[index] = transform(_annotations[index]);
+        }
+
+        _undoStack.Clear();
+        foreach (var annotation in _annotations)
+        {
+            _undoStack.Push(new AddAnnotationCommand(annotation));
+        }
+
+        _redoStack.Clear();
+    }
 }

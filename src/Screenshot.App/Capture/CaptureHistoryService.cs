@@ -19,6 +19,7 @@ public sealed class CaptureHistoryService
 
         var item = new CaptureHistoryItem(
             CreateThumbnail(capturedImage.Preview),
+            capturedImage.Preview,
             DateTimeOffset.Now,
             capturedImage.Bitmap.Width,
             capturedImage.Bitmap.Height);
@@ -46,4 +47,5 @@ public sealed class CaptureHistoryService
 
         return thumbnail;
     }
+
 }

@@ -10,7 +10,8 @@ Screenshot 是一款面向 Windows 10/11 的轻量截图工具。它把区域截
 
 ### 主要优点
 
-- **截图后直接调整和编辑**：鼠标悬停到其他软件时可自动吸附整个窗口，单击直接选取，也可继续拖动自由框选；框选后可以移动、缩放选区，并使用矩形、箭头、画笔、文字、12 种彩色表情贴纸、马赛克、颜色、线宽、撤销和重做。
+- **菜单、下拉框和悬浮提示也能截到**：快捷键触发时先冻结当前桌面画面，尽量保留右键菜单、通知区域菜单、下拉列表、悬浮提示等容易因失去焦点而消失的临时界面，再进入框选和编辑。
+- **截图后直接调整和编辑**：鼠标悬停到其他软件时可自动吸附整个窗口，单击直接选取，也可继续拖动自由框选；移动选区时底图保持固定，框内明亮、框外变暗。编辑后仍可用八个控制点扩展或缩小选区，边缘不会越过已有标注；并提供矩形、箭头、画笔、文字、12 种彩色表情贴纸、马赛克、颜色、线宽、撤销和重做。
 - **双向长截图**：普通截图框选后直接点击工具栏的 `↕` 图标，沿用当前选区开始向上或向下滚动采集；支持重叠区域匹配、实时预览和结果编辑。
 - **本地 OCR 与图片文字选择**：使用 Windows 本地 OCR 引擎，图片不需要上传；识别后可直接在截图上拖选文字并通过原生 Unicode 剪贴板复制，译文覆盖完成后同样可以选择和复制，识别语言取决于系统已安装的语言包。
 - **可控的在线翻译**：截图工具栏可自动检测原文语言、批量翻译 OCR 文字并按原行位置覆盖到图片，复制和保存会包含译文，整组译文可一步撤销；支持不同厂家的 OpenAI 兼容接口，配置服务地址和 API Key 后可主动获取该厂家的模型列表，也可手动输入模型标识。服务原样返回原文时会明确提示而不生成假译文。只有用户明确启用并点击翻译时才发送文字，API Key 使用当前用户 DPAPI 加密保存。
@@ -21,12 +22,12 @@ Screenshot 是一款面向 Windows 10/11 的轻量截图工具。它把区域截
 
 下载最新的 x64 自包含版本：
 
-- [安装版 Screenshot Setup 1.1.1](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.1.1-win-x64.exe)
-- [免安装版 Screenshot Portable 1.1.1](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.1.1-win-x64.zip)
+- [安装版 Screenshot Setup 1.2.0](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.2.0-win-x64.exe)
+- [免安装版 Screenshot Portable 1.2.0](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.2.0-win-x64.zip)
 
-免安装版解压后直接运行 `Screenshot.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。1.1.1 延续 1.0.2 的数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+免安装版解压后直接运行 `Screenshot.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。1.2.0 延续 1.0.2 的数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
 
-1.1.1 修复了截图进入编辑状态后点击框外导致图片跟随移动、工具栏消失的问题，并会忽略 NVIDIA GeForce Overlay 等透明全屏覆盖层，使窗口吸附优先命中微信等真实应用窗口。
+1.2.0 会在快捷键按下阶段预先冻结桌面，使右键菜单、下拉框和悬浮提示更容易被截取；截图历史支持查看和复制原图；OCR 与翻译直接在当前截图区域完成，译文可覆盖、选择和复制；同时改进了窗口吸附、选区明暗遮罩、编辑后受标注边界保护的缩放，以及深色托盘菜单的悬停可读性。
 
 安装程序不要求预先安装 .NET，并提供：
 
@@ -77,7 +78,8 @@ Screenshot is a lightweight capture utility for Windows 10 and 11. It combines r
 
 ### Why Screenshot
 
-- **Adjust and edit before finishing**: hover over another application to snap to its full window and click to select it, or drag to make a free-form selection. Move or resize the selection, then use rectangles, arrows, freehand drawing, text, 12 colored emoji stickers, mosaic, colors, stroke widths, undo, and redo.
+- **Capture menus, drop-downs, and tooltips**: the hotkey freezes the visible desktop before focus-sensitive UI can close, preserving transient surfaces such as context menus, notification-area menus, drop-down lists, and hover tooltips for selection and editing.
+- **Adjust and edit before finishing**: hover over another application to snap to its full window and click to select it, or drag to make a free-form selection. The desktop stays fixed while the selection moves, with a bright interior and dimmed exterior. After annotating, all eight handles remain available while protected bounds prevent existing ink from being cropped. Editing includes rectangles, arrows, freehand drawing, text, 12 colored emoji stickers, mosaic, colors, stroke widths, undo, and redo.
 - **Bidirectional scrolling capture**: make a normal region selection and click the `↕` toolbar icon to reuse that region for upward or downward scrolling capture, with overlap matching, live preview, and result editing.
 - **Local OCR with selectable image text**: uses the Windows OCR engine without uploading images, then overlays selectable text directly on the capture and copies it through the native Unicode clipboard. Translated overlays are selectable and copyable as well. Available languages depend on installed Windows language packs.
 - **Translation under your control**: the capture toolbar automatically detects the source language, batch-translates OCR lines, and places translations over their original image locations. Copied and saved images include the translations, and the whole overlay can be undone in one step. Different OpenAI-compatible vendors are supported: after entering an endpoint and API key, users can explicitly fetch that vendor's model list or type a model id manually. An unchanged provider response is reported instead of being presented as a translation. Text is sent only after translation is explicitly enabled and requested, and API keys are protected with per-user Windows DPAPI encryption.
@@ -88,12 +90,12 @@ Screenshot is a lightweight capture utility for Windows 10 and 11. It combines r
 
 Download the latest self-contained x64 build:
 
-- [Screenshot Setup 1.1.1](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.1.1-win-x64.exe)
-- [Screenshot Portable 1.1.1](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.1.1-win-x64.zip)
+- [Screenshot Setup 1.2.0](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.2.0-win-x64.exe)
+- [Screenshot Portable 1.2.0](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.2.0-win-x64.zip)
 
-Extract the portable archive and run `Screenshot.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 1.1.1 keeps the 1.0.2 data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+Extract the portable archive and run `Screenshot.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 1.2.0 keeps the 1.0.2 data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
 
-Version 1.1.1 fixes an editor-state bug where clicking outside a completed selection moved the image and hid the toolbar. It also skips transparent full-screen overlays such as NVIDIA GeForce Overlay so window snapping reaches real application windows such as WeChat.
+Version 1.2.0 freezes the desktop during the hotkey press so context menus, drop-downs, and tooltips are easier to capture. Capture history can view and copy original images; OCR and translation run directly in the active capture with selectable overlays; and window snapping, dimmed selection movement, annotation-safe resizing, and dark tray-menu hover contrast are improved.
 
 The installer does not require a preinstalled .NET runtime and includes:
 

@@ -41,20 +41,27 @@ public sealed class RegionCaptureCoordinator
         _statusReporter = statusReporter;
     }
 
-    public Task RequestCaptureAsync()
+    public Task RequestCaptureAsync(CapturedImage? initialScreenSnapshot = null)
     {
-        return RequestInteractiveCaptureAsync(recognizeTextAfterSelection: false);
+        return RequestInteractiveCaptureAsync(
+            recognizeTextAfterSelection: false,
+            initialScreenSnapshot);
     }
 
-    public Task RequestOcrCaptureAsync()
+    public Task RequestOcrCaptureAsync(CapturedImage? initialScreenSnapshot = null)
     {
-        return RequestInteractiveCaptureAsync(recognizeTextAfterSelection: true);
+        return RequestInteractiveCaptureAsync(
+            recognizeTextAfterSelection: true,
+            initialScreenSnapshot);
     }
 
-    private Task RequestInteractiveCaptureAsync(bool recognizeTextAfterSelection)
+    private Task RequestInteractiveCaptureAsync(
+        bool recognizeTextAfterSelection,
+        CapturedImage? initialScreenSnapshot)
     {
         if (_isCaptureInProgress)
         {
+            initialScreenSnapshot?.Dispose();
             return Task.CompletedTask;
         }
 
@@ -62,23 +69,26 @@ public sealed class RegionCaptureCoordinator
         var settings = _settingsProvider();
         try
         {
-            CaptureOverlayWindow.ShowInteractive(new CaptureOverlayOptions
-            {
-                SaveDirectory = settings.SaveDirectory,
-                KeepHistory = settings.KeepHistory,
-                HistoryLimit = settings.HistoryLimit,
-                HistoryService = _historyService,
-                PinnedImageManager = _pinnedImageManager,
-                StartOcrAsync = ShowOcrResultAndCompleteCaptureAsync,
-                RecognizeTextAsync = RecognizeTextAsync,
-                TranslateTextAsync = TranslateTextAsync,
-                RecognizeTextAfterSelection = recognizeTextAfterSelection,
-                StartScrollCaptureAsync = RequestScrollCaptureFromSelectionAsync,
-                CaptureClosed = OnInteractiveCaptureClosed,
-            });
+            CaptureOverlayWindow.ShowInteractive(
+                new CaptureOverlayOptions
+                {
+                    SaveDirectory = settings.SaveDirectory,
+                    KeepHistory = settings.KeepHistory,
+                    HistoryLimit = settings.HistoryLimit,
+                    HistoryService = _historyService,
+                    PinnedImageManager = _pinnedImageManager,
+                    StartOcrAsync = ShowOcrResultAndCompleteCaptureAsync,
+                    RecognizeTextAsync = RecognizeTextAsync,
+                    TranslateTextAsync = TranslateTextAsync,
+                    RecognizeTextAfterSelection = recognizeTextAfterSelection,
+                    StartScrollCaptureAsync = RequestScrollCaptureFromSelectionAsync,
+                    CaptureClosed = OnInteractiveCaptureClosed,
+                },
+                initialScreenSnapshot);
         }
         catch
         {
+            initialScreenSnapshot?.Dispose();
             _isCaptureInProgress = false;
             throw;
         }

@@ -20,6 +20,8 @@ public sealed class AppThemeManager : IDisposable
     private AppTheme _resolvedTheme = AppTheme.Light;
     private bool _disposed;
 
+    public AppTheme ResolvedTheme => _resolvedTheme;
+
     public AppThemeManager()
     {
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
