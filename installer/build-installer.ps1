@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.2.0"
+    [string]$Version = "1.3.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -74,4 +74,28 @@ if (-not (Test-Path -LiteralPath $portablePath)) {
     throw "Portable package was not generated: $portablePath"
 }
 
-Get-Item -LiteralPath $installerPath, $portablePath
+$manifestPath = Join-Path $installerOutputDirectory "Screenshot-Update.json"
+$installerFile = Get-Item -LiteralPath $installerPath
+$portableFile = Get-Item -LiteralPath $portablePath
+$releaseBaseUrl = "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download"
+$manifest = [ordered]@{
+    version = $Version
+    releasePage = "https://github.com/jiuwanzi-hui/Screenshot/releases/latest"
+    installer = [ordered]@{
+        fileName = $installerFile.Name
+        url = "$releaseBaseUrl/$($installerFile.Name)"
+        size = $installerFile.Length
+        sha256 = (Get-FileHash -LiteralPath $installerFile.FullName -Algorithm SHA256).Hash
+    }
+    portable = [ordered]@{
+        fileName = $portableFile.Name
+        url = "$releaseBaseUrl/$($portableFile.Name)"
+        size = $portableFile.Length
+        sha256 = (Get-FileHash -LiteralPath $portableFile.FullName -Algorithm SHA256).Hash
+    }
+}
+$manifest |
+    ConvertTo-Json -Depth 4 |
+    Set-Content -LiteralPath $manifestPath -Encoding UTF8
+
+Get-Item -LiteralPath $installerPath, $portablePath, $manifestPath

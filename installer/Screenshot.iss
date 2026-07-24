@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "1.2.0"
+  #define AppVersion "1.3.0"
 #endif
 
 #define AppName "Screenshot"
@@ -59,6 +59,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "启动 Screenshot"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; Parameters: "--updated {#AppVersion} --cleanup-update-package ""{param:UPDATEPACKAGE|}"""; Flags: nowait skipifnotsilent; Check: IsUpdateMode
 
 [Code]
 procedure InitializeWizard;
@@ -69,6 +70,11 @@ begin
     '此向导将安装 Screenshot。' + #13#10 + #13#10 +
     '你可以在下一步选择安装位置。';
   WizardForm.FinishedHeadingLabel.Caption := 'Screenshot 安装完成';
+end;
+
+function IsUpdateMode: Boolean;
+begin
+  Result := CompareText(ExpandConstant('{param:UPDATE|0}'), '1') = 0;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
