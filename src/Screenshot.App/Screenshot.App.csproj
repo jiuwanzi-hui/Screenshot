@@ -9,7 +9,7 @@
     <AssemblyName>Screenshot</AssemblyName>
     <RootNamespace>Screenshot.App</RootNamespace>
     <ApplicationIcon>Assets\Screenshot.ico</ApplicationIcon>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Authors>Screenshot</Authors>
     <Product>Screenshot</Product>

@@ -6,6 +6,10 @@ public static class WindowSnapService
 {
     private const int DwmExtendedFrameBounds = 9;
     private const int DwmCloaked = 14;
+    private const int ExtendedWindowStyleIndex = -20;
+    private const uint ExtendedStyleTransparent = 0x00000020;
+    private const uint ExtendedStyleLayered = 0x00080000;
+    private const uint LayeredAttributeAlpha = 0x00000002;
 
     public static bool TryGetWindowRegionAt(
         int screenX,
@@ -23,6 +27,7 @@ public static class WindowSnapService
                 !NativeMethods.IsWindowVisible(windowHandle) ||
                 NativeMethods.IsIconic(windowHandle) ||
                 IsCloaked(windowHandle) ||
+                IsTransparentOverlayWindow(windowHandle) ||
                 IsDesktopWindow(windowHandle) ||
                 !TryGetWindowBounds(windowHandle, out var candidate) ||
                 candidate.Width < 40 ||
@@ -80,6 +85,48 @@ public static class WindowSnapService
                cloaked != 0;
     }
 
+    private static bool IsTransparentOverlayWindow(IntPtr windowHandle)
+    {
+        var extendedStyle = unchecked((uint)NativeMethods.GetWindowLong(
+            windowHandle,
+            ExtendedWindowStyleIndex));
+        var hasLayeredAttributes = false;
+        byte alpha = byte.MaxValue;
+        uint layeredFlags = 0;
+
+        if ((extendedStyle & ExtendedStyleLayered) != 0)
+        {
+            hasLayeredAttributes = NativeMethods.GetLayeredWindowAttributes(
+                windowHandle,
+                out _,
+                out alpha,
+                out layeredFlags);
+        }
+
+        return IsTransparentOverlayStyle(
+            extendedStyle,
+            hasLayeredAttributes,
+            alpha,
+            layeredFlags);
+    }
+
+    internal static bool IsTransparentOverlayStyle(
+        uint extendedStyle,
+        bool hasLayeredAttributes,
+        byte alpha,
+        uint layeredFlags)
+    {
+        if ((extendedStyle & ExtendedStyleTransparent) != 0)
+        {
+            return true;
+        }
+
+        return (extendedStyle & ExtendedStyleLayered) != 0 &&
+               hasLayeredAttributes &&
+               (layeredFlags & LayeredAttributeAlpha) != 0 &&
+               alpha == 0;
+    }
+
     private static bool IsDesktopWindow(IntPtr windowHandle)
     {
         var className = new char[128];
@@ -121,6 +168,19 @@ public static class WindowSnapService
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool IsIconic(IntPtr windowHandle);
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongW", SetLastError = true)]
+        public static extern int GetWindowLong(
+            IntPtr windowHandle,
+            int index);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetLayeredWindowAttributes(
+            IntPtr windowHandle,
+            out uint colorKey,
+            out byte alpha,
+            out uint flags);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]

@@ -5,6 +5,26 @@ namespace Screenshot.App.Tests;
 
 public sealed class WindowSnapServiceTests
 {
+    [Theory]
+    [InlineData(0x000800A8u, true, 255, 0x00000002u, true)]
+    [InlineData(0x08080080u, true, 0, 0x00000002u, true)]
+    [InlineData(0x00000100u, false, 255, 0u, false)]
+    public void TransparentSystemOverlaysAreNotSnapCandidates(
+        uint extendedStyle,
+        bool hasLayeredAttributes,
+        byte alpha,
+        uint layeredFlags,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            WindowSnapService.IsTransparentOverlayStyle(
+                extendedStyle,
+                hasLayeredAttributes,
+                alpha,
+                layeredFlags));
+    }
+
     [Fact]
     public void FindsTheTopmostWindowUnderAPhysicalScreenPoint()
     {

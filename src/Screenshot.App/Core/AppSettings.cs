@@ -21,7 +21,7 @@ public sealed record AppSettings
 
     public string SaveDirectory { get; init; } = GetDefaultSaveDirectory();
 
-    public bool ShowTaskbarIcon { get; init; }
+    public bool ShowTaskbarIcon { get; init; } = true;
 
     public bool ShowNotificationIcon { get; init; } = true;
 

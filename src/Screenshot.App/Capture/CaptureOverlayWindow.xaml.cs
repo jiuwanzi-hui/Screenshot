@@ -362,7 +362,7 @@ public partial class CaptureOverlayWindow : Window
 
     private void OnCaptureSurfaceMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (!IsCaptureSurfaceBackground(e.OriginalSource))
+        if (!CanStartNewSelectionFromBackground(e.OriginalSource))
         {
             return;
         }
@@ -2020,6 +2020,20 @@ public partial class CaptureOverlayWindow : Window
     {
         return source is FrameworkElement element &&
                (element.Name == "CaptureSurface" || element is Canvas);
+    }
+
+    private bool CanStartNewSelectionFromBackground(object source)
+    {
+        // Once a region has been completed, clicks outside it must not start a
+        // second selection. UpdateSelectionBounds also repositions the inline
+        // editor, which previously made the captured image follow such clicks
+        // and hid the toolbar when the new zero-sized selection was released.
+        return !_isCompleted &&
+               !_isSelecting &&
+               !_isActionInProgress &&
+               !_isEditorInitializing &&
+               !HasValidSelection() &&
+               IsCaptureSurfaceBackground(source);
     }
 
     private void CompleteSelection(ScreenRegion? result)
