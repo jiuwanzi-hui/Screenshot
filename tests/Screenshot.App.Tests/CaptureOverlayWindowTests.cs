@@ -125,6 +125,56 @@ public sealed class CaptureOverlayWindowTests
     }
 
     [Fact]
+    public void CompletedSelectionRejectsBackgroundClickAsANewSelection()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var pinnedImageManager = new PinnedImageManager();
+            var overlay = CaptureOverlayWindow.ShowInteractive(new CaptureOverlayOptions
+            {
+                SaveDirectory = Path.GetTempPath(),
+                KeepHistory = false,
+                HistoryLimit = 0,
+                HistoryService = new CaptureHistoryService(),
+                PinnedImageManager = pinnedImageManager,
+                StartOcrAsync = image =>
+                {
+                    image.Dispose();
+                    return Task.CompletedTask;
+                },
+            });
+
+            try
+            {
+                overlay.UpdateLayout();
+                var surface = Assert.IsType<Grid>(overlay.FindName("CaptureSurface"));
+                var updateMethod = typeof(CaptureOverlayWindow).GetMethod(
+                    "UpdateSelectionBounds",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var canStartMethod = typeof(CaptureOverlayWindow).GetMethod(
+                    "CanStartNewSelectionFromBackground",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.NotNull(updateMethod);
+                Assert.NotNull(canStartMethod);
+
+                Assert.True(Assert.IsType<bool>(canStartMethod.Invoke(
+                    overlay,
+                    [surface])));
+
+                updateMethod.Invoke(overlay, [new Rect(30, 30, 160, 100)]);
+
+                Assert.False(Assert.IsType<bool>(canStartMethod.Invoke(
+                    overlay,
+                    [surface])));
+            }
+            finally
+            {
+                overlay.Close();
+            }
+        });
+    }
+
+    [Fact]
     public void CopyButtonIsRemovedBecauseCheckmarkAlreadyCopies()
     {
         WpfTestHost.Invoke(() =>

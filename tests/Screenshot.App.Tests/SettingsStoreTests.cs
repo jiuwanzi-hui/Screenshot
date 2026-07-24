@@ -52,6 +52,21 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(AppSettings.CreateDefault().RegionCaptureHotKey, loadResult.Settings.RegionCaptureHotKey);
     }
 
+    [Fact]
+    public void NewAndLegacySettingsDefaultToVisibleTaskbarAndNotificationIcons()
+    {
+        var defaults = AppSettings.CreateDefault();
+        Assert.True(defaults.ShowTaskbarIcon);
+        Assert.True(defaults.ShowNotificationIcon);
+
+        File.WriteAllText(_settingsPath, "{ \"SettingsVersion\": 1 }");
+        var loadResult = new SettingsStore(_settingsPath).Load();
+
+        Assert.Null(loadResult.Warning);
+        Assert.True(loadResult.Settings.ShowTaskbarIcon);
+        Assert.True(loadResult.Settings.ShowNotificationIcon);
+    }
+
     public void Dispose()
     {
         if (File.Exists(_settingsPath))
