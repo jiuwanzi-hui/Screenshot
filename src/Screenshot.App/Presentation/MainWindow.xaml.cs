@@ -205,7 +205,7 @@ public partial class MainWindow : Window, IDisposable
         CheckForUpdatesButton.IsEnabled = false;
         InstallUpdateButton.Visibility = Visibility.Collapsed;
         UpdateProgressBar.Visibility = Visibility.Collapsed;
-        UpdateStatusText.Text = "正在检查 GitHub 最新版本...";
+        UpdateStatusText.Text = "正在检测 Gitee / GitHub 更新源...";
         try
         {
             var result = await _applicationUpdateService.CheckAsync(

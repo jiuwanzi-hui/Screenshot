@@ -1,0 +1,18 @@
+﻿{
+    "version":  "1.3.1",
+    "releasePage":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest",
+    "installer":  {
+                      "fileName":  "Screenshot-Setup-1.3.1-win-x64.exe",
+                      "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.3.1-win-x64.exe",
+                      "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v1.3.1/Screenshot-Setup-1.3.1-win-x64.exe",
+                      "size":  52332239,
+                      "sha256":  "C1E52B8772412A1C28628A7821ABBEC0B424A32328F811B359140DAC96F0DD79"
+                  },
+    "portable":  {
+                     "fileName":  "Screenshot-Portable-1.3.1-win-x64.zip",
+                     "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.3.1-win-x64.zip",
+                     "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v1.3.1/Screenshot-Portable-1.3.1-win-x64.zip",
+                     "size":  72018694,
+                     "sha256":  "478F033086C1CA49B0397D990BDEB6EDC78DE99B2F99C8169D563E11F21FEFB5"
+                 }
+}
