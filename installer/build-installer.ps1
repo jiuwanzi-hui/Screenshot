@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "1.3.0"
+    [string]$Version = "1.3.1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -75,21 +75,26 @@ if (-not (Test-Path -LiteralPath $portablePath)) {
 }
 
 $manifestPath = Join-Path $installerOutputDirectory "Screenshot-Update.json"
+$trackedManifestDirectory = Join-Path $repositoryRoot "updates"
+$trackedManifestPath = Join-Path $trackedManifestDirectory "Screenshot-Update.json"
 $installerFile = Get-Item -LiteralPath $installerPath
 $portableFile = Get-Item -LiteralPath $portablePath
-$releaseBaseUrl = "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download"
+$githubReleaseBaseUrl = "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download"
+$giteeReleaseBaseUrl = "https://gitee.com/wwangyunhui/screenshot/releases/download/v$Version"
 $manifest = [ordered]@{
     version = $Version
     releasePage = "https://github.com/jiuwanzi-hui/Screenshot/releases/latest"
     installer = [ordered]@{
         fileName = $installerFile.Name
-        url = "$releaseBaseUrl/$($installerFile.Name)"
+        githubUrl = "$githubReleaseBaseUrl/$($installerFile.Name)"
+        giteeUrl = "$giteeReleaseBaseUrl/$($installerFile.Name)"
         size = $installerFile.Length
         sha256 = (Get-FileHash -LiteralPath $installerFile.FullName -Algorithm SHA256).Hash
     }
     portable = [ordered]@{
         fileName = $portableFile.Name
-        url = "$releaseBaseUrl/$($portableFile.Name)"
+        githubUrl = "$githubReleaseBaseUrl/$($portableFile.Name)"
+        giteeUrl = "$giteeReleaseBaseUrl/$($portableFile.Name)"
         size = $portableFile.Length
         sha256 = (Get-FileHash -LiteralPath $portableFile.FullName -Algorithm SHA256).Hash
     }
@@ -97,5 +102,7 @@ $manifest = [ordered]@{
 $manifest |
     ConvertTo-Json -Depth 4 |
     Set-Content -LiteralPath $manifestPath -Encoding UTF8
+New-Item -ItemType Directory -Path $trackedManifestDirectory -Force | Out-Null
+Copy-Item -LiteralPath $manifestPath -Destination $trackedManifestPath -Force
 
-Get-Item -LiteralPath $installerPath, $portablePath, $manifestPath
+Get-Item -LiteralPath $installerPath, $portablePath, $manifestPath, $trackedManifestPath

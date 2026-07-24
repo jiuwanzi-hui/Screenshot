@@ -802,7 +802,7 @@
                     <TextBlock Margin="0,7,0,0"
                                FontSize="13"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
-                               Text="从 GitHub 获取并校验最新正式版本" />
+                               Text="自动选择 Gitee / GitHub 并校验最新正式版本" />
 
                     <Border Margin="0,26,0,0"
                             Padding="20"
@@ -837,7 +837,7 @@
                                        Margin="0,18,0,0"
                                        FontSize="13"
                                        Foreground="{DynamicResource AppTextSecondaryBrush}"
-                                       Text="点击“检查更新”获取 GitHub 最新正式版本。"
+                                       Text="点击“检查更新”自动选择可用的 Gitee / GitHub 更新源。"
                                        TextWrapping="Wrap" />
                             <ProgressBar x:Name="UpdateProgressBar"
                                          Height="5"

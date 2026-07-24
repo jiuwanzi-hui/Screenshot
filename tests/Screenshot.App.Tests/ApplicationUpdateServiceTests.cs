@@ -105,6 +105,38 @@ public sealed class ApplicationUpdateServiceTests
     }
 
     [Fact]
+    public async Task DownloadFallsBackFromGiteeToGitHub()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var package = Encoding.UTF8.GetBytes("fallback update package");
+            var handler = new MirrorFallbackResponseHandler(package);
+            using var client = new HttpClient(handler);
+            using var service = new ApplicationUpdateService(
+                client,
+                new Uri("https://github.com/update.json"),
+                directory);
+            var asset = new ApplicationUpdateAsset(
+                "Screenshot-Setup-2.0.0-win-x64.exe",
+                new Uri("https://github.com/update.exe"),
+                new Uri("https://gitee.com/update.exe"),
+                package.Length,
+                Convert.ToHexString(SHA256.HashData(package)),
+                ApplicationUpdateMirror.Gitee);
+
+            var path = await service.DownloadAsync(asset);
+
+            Assert.Equal(package, File.ReadAllBytes(path));
+            Assert.Equal(["gitee.com", "github.com"], handler.RequestedHosts);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void PortableApplyReplacesProgramButPreservesScreenshotData()
     {
         var root = CreateTemporaryDirectory();
@@ -191,13 +223,15 @@ public sealed class ApplicationUpdateServiceTests
           "releasePage": "https://github.com/jiuwanzi-hui/Screenshot/releases/latest",
           "installer": {
             "fileName": "Screenshot-Setup-{{version}}-win-x64.exe",
-            "url": "https://github.com/Screenshot-Setup-{{version}}-win-x64.exe",
+            "githubUrl": "https://github.com/Screenshot-Setup-{{version}}-win-x64.exe",
+            "giteeUrl": "https://gitee.com/Screenshot-Setup-{{version}}-win-x64.exe",
             "size": {{package.Length}},
             "sha256": "{{hash}}"
           },
           "portable": {
             "fileName": "Screenshot-Portable-{{version}}-win-x64.zip",
-            "url": "https://github.com/Screenshot-Portable-{{version}}-win-x64.zip",
+            "githubUrl": "https://github.com/Screenshot-Portable-{{version}}-win-x64.zip",
+            "giteeUrl": "https://gitee.com/Screenshot-Portable-{{version}}-win-x64.zip",
             "size": {{package.Length}},
             "sha256": "{{hash}}"
           }
@@ -271,6 +305,29 @@ public sealed class ApplicationUpdateServiceTests
                 Content = new ByteArrayContent([]),
                 RequestMessage = new HttpRequestMessage(HttpMethod.Get, finalUri),
             });
+        }
+    }
+
+    private sealed class MirrorFallbackResponseHandler(byte[] package) : HttpMessageHandler
+    {
+        public List<string> RequestedHosts { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var host = request.RequestUri!.Host;
+            RequestedHosts.Add(host);
+            return Task.FromResult(host == "gitee.com"
+                ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                {
+                    RequestMessage = request,
+                }
+                : new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(package),
+                    RequestMessage = request,
+                });
         }
     }
 }
