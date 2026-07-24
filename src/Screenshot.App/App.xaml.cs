@@ -7,6 +7,7 @@ using Screenshot.App.Infrastructure;
 using Screenshot.App.Pin;
 using Screenshot.App.Presentation;
 using Screenshot.App.Text;
+using Screenshot.App.Update;
 
 namespace Screenshot.App;
 
@@ -28,6 +29,14 @@ public partial class App : System.Windows.Application, IDisposable
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        if (PortableUpdateRunner.IsUpdateRequest(e.Args))
+        {
+            Shutdown(PortableUpdateRunner.Run(e.Args));
+            return;
+        }
+
+        PortableUpdateRunner.ScheduleCleanup(e.Args);
 
         var startInBackground = e.Args.Any(argument =>
             string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
@@ -85,6 +94,7 @@ public partial class App : System.Windows.Application, IDisposable
         MainWindow = _mainWindow;
         _mainWindow.SettingsSaved += OnSettingsSaved;
         _mainWindow.ExitRequested += OnExitRequested;
+        _mainWindow.UpdateInstallationStarted += OnUpdateInstallationStarted;
         _mainWindow.ConfigureTaskbarVisibility(_currentSettings.ShowTaskbarIcon);
         _captureHistoryService = new CaptureHistoryService();
         _pinnedImageManager = new PinnedImageManager(RecognizePinnedImageAsync);
@@ -111,6 +121,10 @@ public partial class App : System.Windows.Application, IDisposable
         else if (hotKeyWarning is not null)
         {
             _mainWindow.ShowStatus(hotKeyWarning);
+        }
+        else if (TryGetArgumentValue(e.Args, "--updated") is { } updatedVersion)
+        {
+            _mainWindow.ShowStatus($"已更新到 Screenshot {updatedVersion}。");
         }
 
         _trayIconService = new TrayIconService(_themeManager.ResolvedTheme);
@@ -147,6 +161,7 @@ public partial class App : System.Windows.Application, IDisposable
         {
             _mainWindow.SettingsSaved -= OnSettingsSaved;
             _mainWindow.ExitRequested -= OnExitRequested;
+            _mainWindow.UpdateInstallationStarted -= OnUpdateInstallationStarted;
         }
 
         _singleInstanceCoordinator?.Dispose();
@@ -161,6 +176,11 @@ public partial class App : System.Windows.Application, IDisposable
     }
 
     private void OnExitRequested(object? sender, EventArgs e)
+    {
+        _ = Dispatcher.BeginInvoke(ExitApplication);
+    }
+
+    private void OnUpdateInstallationStarted(object? sender, EventArgs e)
     {
         _ = Dispatcher.BeginInvoke(ExitApplication);
     }
@@ -535,5 +555,20 @@ public partial class App : System.Windows.Application, IDisposable
         {
             return exception.Message;
         }
+    }
+
+    private static string? TryGetArgumentValue(
+        IReadOnlyList<string> arguments,
+        string name)
+    {
+        for (var index = 0; index + 1 < arguments.Count; index++)
+        {
+            if (string.Equals(arguments[index], name, StringComparison.OrdinalIgnoreCase))
+            {
+                return arguments[index + 1];
+            }
+        }
+
+        return null;
     }
 }

@@ -8,11 +8,12 @@ using System.Windows.Threading;
 using Screenshot.App.Core;
 using Screenshot.App.Infrastructure;
 using Screenshot.App.Text;
+using Screenshot.App.Update;
 using WinForms = System.Windows.Forms;
 
 namespace Screenshot.App.Presentation;
 
-public partial class MainWindow : Window
+public partial class MainWindow : Window, IDisposable
 {
     private readonly SettingsStore _settingsStore;
     private readonly IStartupRegistrationService _startupRegistrationService;
@@ -22,11 +23,16 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _settingsApplyTimer;
     private readonly HttpClient _modelCatalogHttpClient;
     private readonly bool _ownsModelCatalogHttpClient;
+    private readonly ApplicationUpdateService _applicationUpdateService;
+    private readonly bool _ownsApplicationUpdateService;
+    private readonly CancellationTokenSource _updateCancellationSource = new();
     private AppSettings _savedSettings;
     private IReadOnlyList<HotKeyBinding>? _suspendedHotKeyBindings;
     private bool _exitRequested;
     private bool _isApplyingSettings;
     private bool _translationApiKeyChanged;
+    private ApplicationUpdateInfo? _availableUpdate;
+    private bool _disposed;
 
     public MainWindow(
         AppSettings initialSettings,
@@ -34,7 +40,8 @@ public partial class MainWindow : Window
         IStartupRegistrationService startupRegistrationService,
         GlobalHotKeyManager globalHotKeyManager,
         ITranslationCredentialStore translationCredentialStore,
-        HttpClient? modelCatalogHttpClient = null)
+        HttpClient? modelCatalogHttpClient = null,
+        ApplicationUpdateService? applicationUpdateService = null)
     {
         ArgumentNullException.ThrowIfNull(initialSettings);
         ArgumentNullException.ThrowIfNull(settingsStore);
@@ -52,6 +59,9 @@ public partial class MainWindow : Window
             Timeout = TimeSpan.FromSeconds(30),
         };
         _ownsModelCatalogHttpClient = modelCatalogHttpClient is null;
+        _applicationUpdateService = applicationUpdateService ??
+            new ApplicationUpdateService();
+        _ownsApplicationUpdateService = applicationUpdateService is null;
         _settingsViewModel = new SettingsViewModel(initialSettings);
         _settingsApplyTimer = new DispatcherTimer
         {
@@ -68,6 +78,9 @@ public partial class MainWindow : Window
                 initialSettings.TranslationProvider));
         ShowSettingsSection(sectionIndex: 0);
         ShowOcrLanguageAvailability();
+        CurrentVersionText.Text =
+            $"当前版本 {AppMetadata.DisplayVersion} · " +
+            (AppMetadata.IsInstalled ? "安装版" : "免安装版");
     }
 
     public void ConfigureTaskbarVisibility(bool showInTaskbar)
@@ -78,6 +91,8 @@ public partial class MainWindow : Window
     public event EventHandler<SettingsSavedEventArgs>? SettingsSaved;
 
     public event EventHandler? ExitRequested;
+
+    public event EventHandler? UpdateInstallationStarted;
 
     public bool IsCapturingHotKey { get; private set; }
 
@@ -109,11 +124,29 @@ public partial class MainWindow : Window
         EndHotKeyCapture(restoreRegistrations: true);
         _settingsApplyTimer.Stop();
         _settingsApplyTimer.Tick -= OnSettingsApplyTimerTick;
+        Dispose();
+        base.OnClosed(e);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
         if (_ownsModelCatalogHttpClient)
         {
             _modelCatalogHttpClient.Dispose();
         }
-        base.OnClosed(e);
+        _updateCancellationSource.Cancel();
+        _updateCancellationSource.Dispose();
+        if (_ownsApplicationUpdateService)
+        {
+            _applicationUpdateService.Dispose();
+        }
+        GC.SuppressFinalize(this);
     }
 
     protected override void OnClosing(CancelEventArgs e)
@@ -165,6 +198,98 @@ public partial class MainWindow : Window
             _settingsViewModel.SaveDirectory = dialog.SelectedPath;
             ApplySettings();
         }
+    }
+
+    private async void OnCheckForUpdatesClick(object sender, RoutedEventArgs e)
+    {
+        CheckForUpdatesButton.IsEnabled = false;
+        InstallUpdateButton.Visibility = Visibility.Collapsed;
+        UpdateProgressBar.Visibility = Visibility.Collapsed;
+        UpdateStatusText.Text = "正在检查 GitHub 最新版本...";
+        try
+        {
+            var result = await _applicationUpdateService.CheckAsync(
+                AppMetadata.CurrentVersion,
+                _updateCancellationSource.Token);
+            _availableUpdate = result.AvailableUpdate;
+            UpdateStatusText.Text = result.Message;
+            if (result.AvailableUpdate is not null)
+            {
+                InstallUpdateButton.Content =
+                    $"下载并更新到 {ApplicationUpdateService.NormalizeVersion(result.AvailableUpdate.Version)}";
+                InstallUpdateButton.Visibility = Visibility.Visible;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            UpdateStatusText.Text = "已取消检查更新。";
+        }
+        finally
+        {
+            CheckForUpdatesButton.IsEnabled = true;
+        }
+    }
+
+    private async void OnInstallUpdateClick(object sender, RoutedEventArgs e)
+    {
+        if (_availableUpdate is null)
+        {
+            return;
+        }
+
+        var confirmation = System.Windows.MessageBox.Show(
+            this,
+            "更新下载完成后程序会自动关闭并覆盖更新，然后重新启动。\n\n" +
+            "ScreenshotData 中的设置、历史和截图会保留。是否继续？",
+            "更新 Screenshot",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Information,
+            MessageBoxResult.Yes);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        CheckForUpdatesButton.IsEnabled = false;
+        InstallUpdateButton.IsEnabled = false;
+        UpdateProgressBar.Value = 0;
+        UpdateProgressBar.Visibility = Visibility.Visible;
+        var asset = AppMetadata.IsInstalled
+            ? _availableUpdate.Installer
+            : _availableUpdate.Portable;
+        var progress = new Progress<double>(value =>
+        {
+            UpdateProgressBar.Value = value * 100;
+            UpdateStatusText.Text = $"正在下载更新… {value:P0}";
+        });
+
+        try
+        {
+            var packagePath = await _applicationUpdateService.DownloadAsync(
+                asset,
+                progress,
+                _updateCancellationSource.Token);
+            UpdateStatusText.Text = "校验完成，正在启动覆盖更新...";
+            ApplicationUpdateLauncher.Launch(_availableUpdate, packagePath);
+            UpdateInstallationStarted?.Invoke(this, EventArgs.Empty);
+        }
+        catch (OperationCanceledException)
+        {
+            UpdateStatusText.Text = "已取消下载更新。";
+            RestoreUpdateButtons();
+        }
+        catch (Exception exception)
+        {
+            UpdateStatusText.Text = $"更新失败：{exception.Message}";
+            RestoreUpdateButtons();
+        }
+    }
+
+    private void RestoreUpdateButtons()
+    {
+        CheckForUpdatesButton.IsEnabled = true;
+        InstallUpdateButton.IsEnabled = true;
+        UpdateProgressBar.Visibility = Visibility.Collapsed;
     }
 
     private void OnTranslationApiKeyPasswordChanged(object sender, RoutedEventArgs e)
@@ -585,7 +710,8 @@ public partial class MainWindow : Window
         if (GeneralSettingsPanel is null ||
             HotKeySettingsPanel is null ||
             OcrSettingsPanel is null ||
-            TranslationSettingsPanel is null)
+            TranslationSettingsPanel is null ||
+            UpdateSettingsPanel is null)
         {
             return;
         }
@@ -600,6 +726,9 @@ public partial class MainWindow : Window
             ? Visibility.Visible
             : Visibility.Collapsed;
         TranslationSettingsPanel.Visibility = sectionIndex == 3
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        UpdateSettingsPanel.Visibility = sectionIndex == 4
             ? Visibility.Visible
             : Visibility.Collapsed;
     }

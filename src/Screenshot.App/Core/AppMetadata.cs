@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 
 namespace Screenshot.App.Core;
 
@@ -10,6 +11,7 @@ public static class AppMetadata
     public const string InstalledMarkerFileName = "installed.marker";
     public const string CapturesDirectoryName = "Captures";
     public const string DiagnosticsDirectoryName = "Diagnostics";
+    public const string UpdatesDirectoryName = "Updates";
     public const string StartupRegistrationValueName = "Screenshot.App";
 
     public static bool IsInstalled => File.Exists(Path.Combine(
@@ -38,6 +40,19 @@ public static class AppMetadata
     public static string DiagnosticsDirectoryPath => Path.Combine(
         DataDirectoryPath,
         DiagnosticsDirectoryName);
+
+    public static string UpdatesDirectoryPath => Path.Combine(
+        DataDirectoryPath,
+        UpdatesDirectoryName);
+
+    public static Version CurrentVersion =>
+        Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(0, 0, 0);
+
+    public static string DisplayVersion => string.Join(
+        '.',
+        CurrentVersion.Major,
+        CurrentVersion.Minor,
+        Math.Max(0, CurrentVersion.Build));
 
     internal static string ResolveDataDirectoryPath(string applicationDirectory)
     {

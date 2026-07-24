@@ -132,6 +132,16 @@ public sealed class MainWindowLifecycleTests
             window.ShowFromTray();
             Assert.IsType<HotKeyCaptureBox>(window.FindName("PinHotKeyBox"));
             Assert.Null(window.FindName("ScrollCaptureHotKeyBox"));
+            Assert.IsType<TextBlock>(window.FindName("CurrentVersionText"));
+            Assert.IsType<Button>(window.FindName("CheckForUpdatesButton"));
+            Assert.IsType<Button>(window.FindName("InstallUpdateButton"));
+            var navigation = Assert.IsType<ListBox>(window.FindName("SettingsNavigation"));
+            Assert.Equal(5, navigation.Items.Count);
+            navigation.SelectedIndex = 4;
+            window.UpdateLayout();
+            var updatePanel = Assert.IsType<ScrollViewer>(
+                window.FindName("UpdateSettingsPanel"));
+            Assert.Equal(Visibility.Visible, updatePanel.Visibility);
             window.RequestExit();
         });
     }
