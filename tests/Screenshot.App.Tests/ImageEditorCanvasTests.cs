@@ -14,6 +14,47 @@ namespace Screenshot.App.Tests;
 public sealed class ImageEditorCanvasTests
 {
     [Fact]
+    public void ReframeKeepsAnnotationsAndOffsetsThemForTheNewCaptureOrigin()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var firstBitmap = new Bitmap(100, 80, PixelFormat.Format32bppPArgb);
+            using var secondBitmap = new Bitmap(140, 110, PixelFormat.Format32bppPArgb);
+            using var firstImage = new CapturedImage((Bitmap)firstBitmap.Clone());
+            using var secondImage = new CapturedImage((Bitmap)secondBitmap.Clone());
+            var editor = new ImageEditorCanvas();
+            editor.Initialize(firstImage, displayWidth: 100, displayHeight: 80);
+            var documentField = typeof(ImageEditorCanvas).GetField(
+                "_document",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(documentField);
+            var document = Assert.IsType<EditorDocument>(documentField.GetValue(editor));
+            document.Add(new RectangleAnnotation(
+                new System.Windows.Rect(20, 15, 30, 25),
+                System.Windows.Media.Colors.Red,
+                4));
+            var before = Assert.IsType<System.Windows.Rect>(
+                editor.GetAnnotationBounds());
+
+            editor.Reframe(
+                secondImage,
+                displayWidth: 140,
+                displayHeight: 110,
+                new System.Windows.Vector(12, 9));
+
+            var after = Assert.IsType<System.Windows.Rect>(
+                editor.GetAnnotationBounds());
+            Assert.Equal(before.X + 12, after.X);
+            Assert.Equal(before.Y + 9, after.Y);
+            Assert.Equal(140, editor.RenderEditedImage().PixelWidth);
+            Assert.Equal(110, editor.RenderEditedImage().PixelHeight);
+            Assert.True(editor.CanUndo);
+            editor.Undo();
+            Assert.Null(editor.GetAnnotationBounds());
+        });
+    }
+
+    [Fact]
     public void RendersTheCapturedImageAtItsOriginalPixelSize()
     {
         WpfTestHost.Invoke(() =>
@@ -301,13 +342,67 @@ public sealed class ImageEditorCanvasTests
                 translatedText.Foreground);
             Assert.True(background.Color.R < 80);
             Assert.True(foreground.Color.R > 220);
-            Assert.Equal(16, translatedText.FontSize);
+            Assert.InRange(
+                translatedText.FontSize,
+                TranslationTextLayout.MinimumFontSize,
+                12);
             Assert.Equal(System.Windows.TextWrapping.Wrap, translatedText.TextWrapping);
+            Assert.Equal(System.Windows.TextTrimming.CharacterEllipsis, translatedText.TextTrimming);
+            Assert.True(overlays[0].ClipToBounds);
+            Assert.Equal(16, overlays[0].Height);
 
             editor.Undo();
 
             Assert.False(editor.HasTranslationOverlay);
             Assert.Empty(editor.Children.OfType<System.Windows.Controls.Border>());
+        });
+    }
+
+    [Fact]
+    public void LongTranslationShrinksAndStaysInsideItsOwnRegion()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var bitmap = new Bitmap(260, 120, PixelFormat.Format32bppPArgb);
+            using (var graphics = Graphics.FromImage(bitmap))
+            {
+                graphics.Clear(Color.FromArgb(255, 20, 24, 28));
+            }
+
+            using var image = new CapturedImage((Bitmap)bitmap.Clone());
+            var editor = new ImageEditorCanvas();
+            editor.Initialize(image, displayWidth: 260, displayHeight: 120);
+            editor.AddTranslationOverlay(
+            [
+                new TranslatedTextAnnotationRegion(
+                    new System.Windows.Rect(8, 8, 150, 36),
+                    "This translated sentence is much longer than its source text.",
+                    28),
+                new TranslatedTextAnnotationRegion(
+                    new System.Windows.Rect(8, 48, 150, 30),
+                    "The next translated line remains separate.",
+                    24),
+            ]);
+
+            var overlays = editor.Children
+                .OfType<System.Windows.Controls.Border>()
+                .ToArray();
+            Assert.Equal(2, overlays.Length);
+            var firstText = Assert.IsType<System.Windows.Controls.TextBlock>(
+                overlays[0].Child);
+
+            Assert.InRange(
+                firstText.FontSize,
+                TranslationTextLayout.MinimumFontSize,
+                14);
+            Assert.Equal(36, overlays[0].Height);
+            Assert.Equal(30, overlays[1].Height);
+            Assert.True(overlays[0].ClipToBounds);
+            Assert.True(firstText.ClipToBounds);
+            Assert.True(
+                System.Windows.Controls.Canvas.GetTop(overlays[0]) +
+                overlays[0].Height <=
+                System.Windows.Controls.Canvas.GetTop(overlays[1]));
         });
     }
 }

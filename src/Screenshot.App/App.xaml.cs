@@ -113,7 +113,7 @@ public partial class App : System.Windows.Application, IDisposable
             _mainWindow.ShowStatus(hotKeyWarning);
         }
 
-        _trayIconService = new TrayIconService();
+        _trayIconService = new TrayIconService(_themeManager.ResolvedTheme);
         _trayIconService.OpenSettingsRequested += OnOpenSettingsRequested;
         _trayIconService.RegionCaptureRequested += OnRegionCaptureRequested;
         _trayIconService.ScrollCaptureRequested += OnScrollCaptureRequested;
@@ -184,6 +184,10 @@ public partial class App : System.Windows.Application, IDisposable
     {
         _currentSettings = e.Settings;
         _themeManager?.Apply(e.Settings.Theme);
+        if (_themeManager is not null)
+        {
+            _trayIconService?.ApplyTheme(_themeManager.ResolvedTheme);
+        }
         _trayIconService?.SetVisible(e.Settings.ShowNotificationIcon);
     }
 
@@ -196,19 +200,19 @@ public partial class App : System.Windows.Application, IDisposable
 
         if (e.Action == HotKeyAction.RegionCapture)
         {
-            _ = Dispatcher.BeginInvoke(RequestRegionCapture);
+            RequestRegionCapture(e.DetachPreCapturedScreen());
         }
         else if (e.Action == HotKeyAction.RecognizeText)
         {
-            _ = Dispatcher.BeginInvoke(RequestOcrCapture);
+            RequestOcrCapture(e.DetachPreCapturedScreen());
         }
         else if (e.Action == HotKeyAction.PinImage)
         {
-            _ = Dispatcher.BeginInvoke(RequestPinCapture);
+            RequestPinCapture();
         }
         else if (e.Action == HotKeyAction.ScrollCapture)
         {
-            _ = Dispatcher.BeginInvoke(RequestScrollCapture);
+            RequestScrollCapture();
         }
         else if (e.Action == HotKeyAction.OpenSettings)
         {
@@ -228,16 +232,31 @@ public partial class App : System.Windows.Application, IDisposable
             return;
         }
 
-        if (_captureHistoryWindow is null)
+        try
         {
-            _captureHistoryWindow = new CaptureHistoryWindow(_captureHistoryService);
-            _captureHistoryWindow.Closed += OnCaptureHistoryWindowClosed;
-            _captureHistoryWindow.Show();
-            return;
-        }
+            if (_captureHistoryWindow is null)
+            {
+                _captureHistoryWindow = new CaptureHistoryWindow(
+                    _captureHistoryService,
+                    _currentSettings.SaveDirectory);
+                _captureHistoryWindow.Closed += OnCaptureHistoryWindowClosed;
+                _captureHistoryWindow.Show();
+                return;
+            }
 
-        _captureHistoryWindow.Show();
-        _captureHistoryWindow.Activate();
+            _captureHistoryWindow.Show();
+            _captureHistoryWindow.Activate();
+        }
+        catch (Exception exception)
+        {
+            if (_captureHistoryWindow is not null)
+            {
+                _captureHistoryWindow.Closed -= OnCaptureHistoryWindowClosed;
+                _captureHistoryWindow = null;
+            }
+
+            _mainWindow?.ShowStatus($"无法打开截图历史：{exception.Message}");
+        }
     }
 
     private void OnCaptureHistoryWindowClosed(object? sender, EventArgs e)
@@ -249,14 +268,14 @@ public partial class App : System.Windows.Application, IDisposable
         }
     }
 
-    private void RequestRegionCapture()
+    private void RequestRegionCapture(CapturedImage? initialScreenSnapshot = null)
     {
-        _ = RequestRegionCaptureAsync();
+        _ = RequestRegionCaptureAsync(initialScreenSnapshot);
     }
 
-    private void RequestOcrCapture()
+    private void RequestOcrCapture(CapturedImage? initialScreenSnapshot = null)
     {
-        _ = RequestOcrCaptureAsync();
+        _ = RequestOcrCaptureAsync(initialScreenSnapshot);
     }
 
     private void RequestPinCapture()
@@ -269,13 +288,19 @@ public partial class App : System.Windows.Application, IDisposable
         _ = RequestScrollCaptureAsync();
     }
 
-    private async Task RequestRegionCaptureAsync()
+    private async Task RequestRegionCaptureAsync(
+        CapturedImage? initialScreenSnapshot = null)
     {
         try
         {
             if (_regionCaptureCoordinator is not null)
             {
-                await _regionCaptureCoordinator.RequestCaptureAsync();
+                await _regionCaptureCoordinator.RequestCaptureAsync(
+                    initialScreenSnapshot);
+            }
+            else
+            {
+                initialScreenSnapshot?.Dispose();
             }
         }
         catch (Exception)
@@ -284,13 +309,19 @@ public partial class App : System.Windows.Application, IDisposable
         }
     }
 
-    private async Task RequestOcrCaptureAsync()
+    private async Task RequestOcrCaptureAsync(
+        CapturedImage? initialScreenSnapshot = null)
     {
         try
         {
             if (_regionCaptureCoordinator is not null)
             {
-                await _regionCaptureCoordinator.RequestOcrCaptureAsync();
+                await _regionCaptureCoordinator.RequestOcrCaptureAsync(
+                    initialScreenSnapshot);
+            }
+            else
+            {
+                initialScreenSnapshot?.Dispose();
             }
         }
         catch (Exception)

@@ -172,7 +172,7 @@
         </Style>
     </Window.Resources>
     <Grid x:Name="CaptureSurface"
-          Background="#48000000"
+          Background="Transparent"
           Cursor="Cross"
           Focusable="True"
            KeyDown="OnCaptureSurfaceKeyDown"
@@ -182,27 +182,38 @@
            MouseLeftButtonDown="OnCaptureSurfaceMouseLeftButtonDown"
           MouseLeftButtonUp="OnCaptureSurfaceMouseLeftButtonUp"
           MouseMove="OnCaptureSurfaceMouseMove">
+        <Image x:Name="FrozenScreenImage"
+               IsHitTestVisible="False"
+               SnapsToDevicePixels="True"
+               Stretch="Fill" />
+        <Border x:Name="CaptureShade"
+                Background="#48000000"
+                IsHitTestVisible="False" />
         <Canvas>
             <Rectangle x:Name="TopMask"
                        Fill="#70000000"
                        IsHitTestVisible="False"
+                       Panel.ZIndex="60"
                        Visibility="Collapsed" />
             <Rectangle x:Name="LeftMask"
                        Fill="#70000000"
                        IsHitTestVisible="False"
+                       Panel.ZIndex="60"
                        Visibility="Collapsed" />
             <Rectangle x:Name="RightMask"
                        Fill="#70000000"
                        IsHitTestVisible="False"
+                       Panel.ZIndex="60"
                        Visibility="Collapsed" />
             <Rectangle x:Name="BottomMask"
                        Fill="#70000000"
                        IsHitTestVisible="False"
+                       Panel.ZIndex="60"
                        Visibility="Collapsed" />
             <Rectangle x:Name="ScrollCaptureOutline"
                        Fill="Transparent"
                        IsHitTestVisible="False"
-                       Panel.ZIndex="50"
+                       Panel.ZIndex="80"
                        Stroke="#00A99D"
                        StrokeThickness="4"
                        Visibility="Collapsed" />
@@ -225,6 +236,7 @@
                        Cursor="SizeAll"
                        Fill="#18007F73"
                        ForceCursor="True"
+                       Panel.ZIndex="70"
                        Stroke="#00A99D"
                        StrokeThickness="2"
                        Visibility="Collapsed"
@@ -233,6 +245,7 @@
                        MouseLeftButtonUp="OnSelectionRectangleMouseLeftButtonUp" />
 
             <editor:ImageEditorCanvas x:Name="InlineEditorCanvas"
+                                      Panel.ZIndex="50"
                                       Visibility="Collapsed" />
 
             <Canvas x:Name="OcrTextOverlay"
@@ -264,6 +277,7 @@
                    Width="12"
                    Height="12"
                    Cursor="SizeNWSE"
+                   Panel.ZIndex="90"
                    DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnTopLeftResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"
@@ -272,6 +286,7 @@
                    Width="12"
                    Height="12"
                    Cursor="SizeNESW"
+                   Panel.ZIndex="90"
                    DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnTopRightResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"
@@ -280,6 +295,7 @@
                    Width="18"
                    Height="8"
                    Cursor="SizeNS"
+                   Panel.ZIndex="90"
                    DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnTopResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"
@@ -288,6 +304,7 @@
                    Width="8"
                    Height="18"
                    Cursor="SizeWE"
+                   Panel.ZIndex="90"
                    DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnLeftResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"
@@ -296,6 +313,7 @@
                    Width="8"
                    Height="18"
                    Cursor="SizeWE"
+                   Panel.ZIndex="90"
                    DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnRightResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"
@@ -304,6 +322,7 @@
                    Width="18"
                    Height="8"
                    Cursor="SizeNS"
+                   Panel.ZIndex="90"
                    DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnBottomResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"
@@ -312,6 +331,7 @@
                    Width="12"
                    Height="12"
                    Cursor="SizeNESW"
+                   Panel.ZIndex="90"
                    DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnBottomLeftResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"
@@ -320,6 +340,7 @@
                    Width="12"
                    Height="12"
                    Cursor="SizeNWSE"
+                   Panel.ZIndex="90"
                    DragCompleted="OnSelectionResizeThumbDragCompleted"
                    DragDelta="OnBottomRightResizeThumbDragDelta"
                    Style="{StaticResource SelectionResizeThumb}"

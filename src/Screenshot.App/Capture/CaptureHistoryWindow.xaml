@@ -11,10 +11,44 @@
         MinHeight="360"
         FontFamily="Microsoft YaHei UI"
         WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <Style x:Key="HistoryActionButton" TargetType="Button">
+            <Setter Property="MinWidth" Value="62" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Margin" Value="0,0,0,8" />
+            <Setter Property="Padding" Value="10,3" />
+            <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AppAccentMutedBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
     <Grid Background="{DynamicResource AppWindowBackgroundBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="68" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="36" />
         </Grid.RowDefinitions>
 
         <StackPanel Margin="22,16,22,0">
@@ -25,10 +59,11 @@
             <TextBlock Margin="0,5,0,0"
                        FontSize="13"
                        Foreground="{DynamicResource AppTextSecondaryBrush}"
-                       Text="仅保留本次运行的缩略图" />
+                       Text="本次运行的完整截图，可查看、复制或保存" />
         </StackPanel>
 
-        <ListBox Grid.Row="1"
+        <ListBox x:Name="HistoryListBox"
+                 Grid.Row="1"
                  Margin="16,6,16,16"
                  Background="Transparent"
                  BorderThickness="0"
@@ -43,9 +78,10 @@
                             BorderThickness="1"
                             CornerRadius="10">
                         <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="128" />
-                                <ColumnDefinition Width="*" />
+                             <Grid.ColumnDefinitions>
+                                 <ColumnDefinition Width="128" />
+                                 <ColumnDefinition Width="*" />
+                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
 
                             <Border Height="86"
@@ -64,15 +100,35 @@
                                            Text="{Binding CapturedAt, StringFormat={}{0:yyyy-MM-dd HH:mm:ss}}" />
                                 <TextBlock Margin="0,8,0,0"
                                            Foreground="{DynamicResource AppTextSecondaryBrush}">
-                                    <Run Text="{Binding PixelWidth}" />
+                                    <Run Text="{Binding PixelWidth, Mode=OneWay}" />
                                     <Run Text=" x " />
-                                    <Run Text="{Binding PixelHeight}" />
+                                    <Run Text="{Binding PixelHeight, Mode=OneWay}" />
                                 </TextBlock>
+                             </StackPanel>
+
+                            <StackPanel Grid.Column="2"
+                                        Margin="12,2,0,0">
+                                <Button Click="OnViewHistoryItemClick"
+                                        Content="查看"
+                                        Style="{StaticResource HistoryActionButton}"
+                                        Tag="{Binding}" />
+                                <Button Click="OnCopyHistoryItemClick"
+                                        Content="复制"
+                                        Style="{StaticResource HistoryActionButton}"
+                                        Tag="{Binding}" />
                             </StackPanel>
-                        </Grid>
+                         </Grid>
                     </Border>
                 </DataTemplate>
             </ListBox.ItemTemplate>
         </ListBox>
+
+        <TextBlock x:Name="HistoryStatusText"
+                   Grid.Row="2"
+                   Margin="20,0"
+                   VerticalAlignment="Center"
+                   Foreground="{DynamicResource AppTextSecondaryBrush}"
+                   Text="点击查看可打开完整图片。"
+                   TextTrimming="CharacterEllipsis" />
     </Grid>
 </Window>

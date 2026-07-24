@@ -85,6 +85,51 @@ public sealed class ImageEditorCanvas : Canvas
         RaiseHistoryChanged();
     }
 
+    public Rect? GetAnnotationBounds()
+    {
+        CommitPendingText();
+        Rect? combinedBounds = null;
+
+        foreach (var annotation in _document.Annotations)
+        {
+            var bounds = GetAnnotationBounds(annotation);
+            combinedBounds = combinedBounds.HasValue
+                ? Rect.Union(combinedBounds.Value, bounds)
+                : bounds;
+        }
+
+        return combinedBounds;
+    }
+
+    public void Reframe(
+        CapturedImage capturedImage,
+        double displayWidth,
+        double displayHeight,
+        Vector annotationOffset)
+    {
+        ArgumentNullException.ThrowIfNull(capturedImage);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(displayWidth);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(displayHeight);
+
+        CommitPendingText();
+        if (annotationOffset.X != 0 || annotationOffset.Y != 0)
+        {
+            _document.TransformAnnotations(annotation =>
+                TranslateAnnotation(annotation, annotationOffset));
+        }
+
+        _capturedImage = capturedImage;
+        Width = capturedImage.Preview.PixelWidth;
+        Height = capturedImage.Preview.PixelHeight;
+        _baseDisplayWidth = displayWidth;
+        _baseDisplayHeight = displayHeight;
+        _zoom = 1;
+        RenderTransformOrigin = new WpfPoint(0, 0);
+        ApplyDisplayTransform();
+        RebuildCanvas();
+        RaiseHistoryChanged();
+    }
+
     public void SetZoom(double zoom)
     {
         if (_capturedImage is null)
@@ -610,6 +655,117 @@ public sealed class ImageEditorCanvas : Canvas
         }
     }
 
+    private static Rect GetAnnotationBounds(EditorAnnotation annotation)
+    {
+        return annotation switch
+        {
+            RectangleAnnotation rectangle => Inflate(
+                rectangle.Bounds,
+                (rectangle.StrokeWidth / 2) + 1),
+            ArrowAnnotation arrow => BoundsFromPoints(
+                [arrow.Start, arrow.End],
+                Math.Max(10, arrow.StrokeWidth * 4) + arrow.StrokeWidth),
+            BrushAnnotation brush => BoundsFromPoints(
+                brush.Points,
+                (brush.StrokeWidth / 2) + 1),
+            MosaicAnnotation mosaic => BoundsFromPoints(
+                mosaic.Points,
+                (mosaic.StrokeWidth / 2) + 2),
+            TextAnnotation text => GetTextBounds(text),
+            EmojiAnnotation emoji => new Rect(
+                emoji.Position.X - (emoji.FontSize / 2),
+                emoji.Position.Y - (emoji.FontSize / 2),
+                emoji.FontSize,
+                emoji.FontSize),
+            TranslationOverlayAnnotation translation => translation.Regions
+                .Select(region => region.Bounds)
+                .Aggregate(Rect.Empty, Rect.Union),
+            _ => Rect.Empty,
+        };
+    }
+
+    private static Rect GetTextBounds(TextAnnotation annotation)
+    {
+        var lines = annotation.Text.Replace("\r", string.Empty).Split('\n');
+        var longestLine = Math.Max(1, lines.Max(line => line.Length));
+        return new Rect(
+            annotation.Position,
+            new WpfSize(
+                Math.Max(annotation.FontSize, longestLine * annotation.FontSize),
+                Math.Max(annotation.FontSize, lines.Length * annotation.FontSize * 1.35)));
+    }
+
+    private static Rect BoundsFromPoints(
+        IReadOnlyList<WpfPoint> points,
+        double padding)
+    {
+        if (points.Count == 0)
+        {
+            return Rect.Empty;
+        }
+
+        var bounds = new Rect(points[0], points[0]);
+        foreach (var point in points.Skip(1))
+        {
+            bounds.Union(point);
+        }
+
+        return Inflate(bounds, padding);
+    }
+
+    private static Rect Inflate(Rect bounds, double padding)
+    {
+        if (bounds.IsEmpty)
+        {
+            return bounds;
+        }
+
+        bounds.Inflate(padding, padding);
+        return bounds;
+    }
+
+    private static EditorAnnotation TranslateAnnotation(
+        EditorAnnotation annotation,
+        Vector offset)
+    {
+        return annotation switch
+        {
+            RectangleAnnotation rectangle => rectangle with
+            {
+                Bounds = new Rect(rectangle.Bounds.TopLeft + offset, rectangle.Bounds.Size),
+            },
+            ArrowAnnotation arrow => arrow with
+            {
+                Start = arrow.Start + offset,
+                End = arrow.End + offset,
+            },
+            BrushAnnotation brush => brush with
+            {
+                Points = brush.Points.Select(point => point + offset).ToArray(),
+            },
+            TextAnnotation text => text with
+            {
+                Position = text.Position + offset,
+            },
+            EmojiAnnotation emoji => emoji with
+            {
+                Position = emoji.Position + offset,
+            },
+            TranslationOverlayAnnotation translation => translation with
+            {
+                Regions = translation.Regions.Select(region => region with
+                {
+                    Bounds = new Rect(region.Bounds.TopLeft + offset, region.Bounds.Size),
+                }).ToArray(),
+            },
+            MosaicAnnotation mosaic => mosaic with
+            {
+                Points = mosaic.Points.Select(point => point + offset).ToArray(),
+            },
+            _ => annotation,
+        };
+    }
+
     private void ApplyDisplayTransform()
     {
         if (Width <= 0 || Height <= 0)
@@ -754,30 +910,37 @@ public sealed class ImageEditorCanvas : Canvas
         {
             var palette = GetTranslationPalette(region.Bounds);
             var contentWidth = Math.Max(8, region.Bounds.Width - 6);
+            var contentHeight = Math.Max(8, region.Bounds.Height - 2);
+            var fittedFontSize = TranslationTextLayout.FitFontSize(
+                region.Text,
+                contentWidth,
+                contentHeight,
+                region.FontSize);
             var text = new TextBlock
             {
                 Text = region.Text,
                 FontFamily = new System.Windows.Media.FontFamily(
                     "Microsoft YaHei UI"),
-                FontSize = Math.Max(10, region.FontSize),
+                FontSize = fittedFontSize,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = new SolidColorBrush(palette.Foreground),
                 Width = contentWidth,
+                Height = contentHeight,
                 TextWrapping = TextWrapping.Wrap,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                LineHeight = fittedFontSize * 1.12,
+                LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+                ClipToBounds = true,
                 IsHitTestVisible = false,
             };
-            text.Measure(new WpfSize(contentWidth, double.PositiveInfinity));
-            var desiredHeight = Math.Max(
-                region.Bounds.Height,
-                text.DesiredSize.Height + 4);
-            var availableHeight = Math.Max(12, Height - region.Bounds.Y);
             var border = new Border
             {
                 Width = Math.Max(12, region.Bounds.Width),
-                Height = Math.Min(desiredHeight, availableHeight),
+                Height = Math.Max(12, region.Bounds.Height),
                 Padding = new Thickness(3, 1, 3, 1),
                 Background = new SolidColorBrush(palette.Background),
                 CornerRadius = new CornerRadius(2),
+                ClipToBounds = true,
                 IsHitTestVisible = false,
                 Child = text,
             };

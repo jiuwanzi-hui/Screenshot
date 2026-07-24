@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using System.Windows;
 
 namespace Screenshot.App.Capture;
@@ -38,6 +37,16 @@ public partial class CapturePreviewWindow : Window
         return _capturedImage.Clone();
     }
 
+    public void ConfigureForHistoryView()
+    {
+        Title = "截图历史查看";
+        ReselectButton.Visibility = Visibility.Collapsed;
+        EditButton.Visibility = Visibility.Collapsed;
+        PinButton.Visibility = Visibility.Collapsed;
+        OcrButton.Visibility = Visibility.Collapsed;
+        StatusText.Text = "可复制或保存这张完整截图。";
+    }
+
     public void SetStatus(string message)
     {
         StatusText.Text = message;
@@ -67,29 +76,29 @@ public partial class CapturePreviewWindow : Window
         base.OnClosed(e);
     }
 
-    private void OnCopyClick(object sender, RoutedEventArgs e)
+    private async void OnCopyClick(object sender, RoutedEventArgs e)
     {
         try
         {
-            System.Windows.Clipboard.SetImage(_capturedImage.Preview);
+            await ClipboardImageService.SetImageAsync(_capturedImage.Preview);
             _historyItem?.MarkCopied();
             StatusText.Text = "已复制到剪贴板。";
         }
-        catch (COMException)
+        catch
         {
             StatusText.Text = "剪贴板正被其他程序使用，请重试。";
         }
     }
 
-    private void OnConfirmClick(object sender, RoutedEventArgs e)
+    private async void OnConfirmClick(object sender, RoutedEventArgs e)
     {
         try
         {
-            System.Windows.Clipboard.SetImage(_capturedImage.Preview);
+            await ClipboardImageService.SetImageAsync(_capturedImage.Preview);
             _historyItem?.MarkCopied();
             Close();
         }
-        catch (COMException)
+        catch
         {
             StatusText.Text = "剪贴板正被其他程序使用，请重试。";
         }

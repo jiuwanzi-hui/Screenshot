@@ -1,5 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Windows.Interop;
+using System.Windows.Threading;
+using Screenshot.App.Capture;
 using Screenshot.App.Core;
 
 namespace Screenshot.App.Infrastructure;
@@ -11,12 +13,30 @@ public sealed record HotKeyRegistrationResult(bool IsSuccess, string? ErrorMessa
 
 public sealed class HotKeyPressedEventArgs : EventArgs
 {
-    public HotKeyPressedEventArgs(HotKeyAction action)
+    private CapturedImage? _preCapturedScreen;
+
+    public HotKeyPressedEventArgs(
+        HotKeyAction action,
+        CapturedImage? preCapturedScreen = null)
     {
         Action = action;
+        _preCapturedScreen = preCapturedScreen;
     }
 
     public HotKeyAction Action { get; }
+
+    public CapturedImage? DetachPreCapturedScreen()
+    {
+        var snapshot = _preCapturedScreen;
+        _preCapturedScreen = null;
+        return snapshot;
+    }
+
+    internal void DisposeUnusedPreCapturedScreen()
+    {
+        _preCapturedScreen?.Dispose();
+        _preCapturedScreen = null;
+    }
 }
 
 public sealed class GlobalHotKeyManager : IDisposable
@@ -24,9 +44,28 @@ public sealed class GlobalHotKeyManager : IDisposable
     private const int HotKeyAlreadyRegisteredError = 1409;
     private const int WindowMessageHotKey = 0x0312;
     private const int MessageOnlyWindow = -3;
+    private const int LowLevelKeyboardHook = 13;
+    private const int WindowMessageKeyDown = 0x0100;
+    private const int WindowMessageSystemKeyDown = 0x0104;
+    private const uint VirtualKeyShift = 0x10;
+    private const uint VirtualKeyControl = 0x11;
+    private const uint VirtualKeyAlt = 0x12;
+    private const uint VirtualKeyLeftShift = 0xA0;
+    private const uint VirtualKeyRightShift = 0xA1;
+    private const uint VirtualKeyLeftControl = 0xA2;
+    private const uint VirtualKeyRightControl = 0xA3;
+    private const uint VirtualKeyLeftAlt = 0xA4;
+    private const uint VirtualKeyRightAlt = 0xA5;
+    private static readonly TimeSpan PreCaptureLifetime = TimeSpan.FromSeconds(2);
 
     private readonly HwndSource _messageSource;
+    private readonly NativeMethods.LowLevelKeyboardProcedure _keyboardProcedure;
+    private readonly DispatcherTimer _preCaptureExpiryTimer;
     private readonly Dictionary<int, HotKeyBinding> _registeredBindings = [];
+    private readonly HashSet<HotKeyAction> _preCapturedActions = [];
+    private IntPtr _keyboardHook;
+    private CapturedImage? _preCapturedScreen;
+    private DateTimeOffset _preCapturedAt;
     private bool _disposed;
 
     public GlobalHotKeyManager()
@@ -39,6 +78,17 @@ public sealed class GlobalHotKeyManager : IDisposable
 
         _messageSource = new HwndSource(parameters);
         _messageSource.AddHook(WindowProcedure);
+        _preCaptureExpiryTimer = new DispatcherTimer
+        {
+            Interval = PreCaptureLifetime,
+        };
+        _preCaptureExpiryTimer.Tick += OnPreCaptureExpired;
+        _keyboardProcedure = OnLowLevelKeyboardMessage;
+        _keyboardHook = NativeMethods.SetWindowsHookEx(
+            LowLevelKeyboardHook,
+            _keyboardProcedure,
+            NativeMethods.GetModuleHandle(moduleName: null),
+            threadId: 0);
     }
 
     public event EventHandler<HotKeyPressedEventArgs>? HotKeyPressed;
@@ -112,6 +162,15 @@ public sealed class GlobalHotKeyManager : IDisposable
 
         _disposed = true;
         UnregisterAll();
+        if (_keyboardHook != IntPtr.Zero)
+        {
+            _ = NativeMethods.UnhookWindowsHookEx(_keyboardHook);
+            _keyboardHook = IntPtr.Zero;
+        }
+
+        _preCaptureExpiryTimer.Stop();
+        _preCaptureExpiryTimer.Tick -= OnPreCaptureExpired;
+        ClearPreCapturedScreen();
         _messageSource.RemoveHook(WindowProcedure);
         _messageSource.Dispose();
     }
@@ -182,6 +241,7 @@ public sealed class GlobalHotKeyManager : IDisposable
         }
 
         _registeredBindings.Clear();
+        ClearPreCapturedScreen();
     }
 
     private IntPtr WindowProcedure(
@@ -194,11 +254,168 @@ public sealed class GlobalHotKeyManager : IDisposable
         if (message == WindowMessageHotKey &&
             _registeredBindings.TryGetValue(wParam.ToInt32(), out var binding))
         {
-            HotKeyPressed?.Invoke(this, new HotKeyPressedEventArgs(binding.Action));
+            var eventArgs = new HotKeyPressedEventArgs(
+                binding.Action,
+                TakePreCapturedScreen(binding.Action));
+            try
+            {
+                HotKeyPressed?.Invoke(this, eventArgs);
+            }
+            finally
+            {
+                eventArgs.DisposeUnusedPreCapturedScreen();
+            }
+
             handled = true;
         }
 
         return IntPtr.Zero;
+    }
+
+    private IntPtr OnLowLevelKeyboardMessage(
+        int code,
+        IntPtr wParam,
+        IntPtr lParam)
+    {
+        if (code >= 0 &&
+            (wParam.ToInt32() == WindowMessageKeyDown ||
+             wParam.ToInt32() == WindowMessageSystemKeyDown))
+        {
+            var keyboardData = Marshal.PtrToStructure<NativeMethods.LowLevelKeyboardData>(
+                lParam);
+            TryPreCaptureTransientUi(keyboardData.VirtualKey);
+        }
+
+        return NativeMethods.CallNextHookEx(_keyboardHook, code, wParam, lParam);
+    }
+
+    private void TryPreCaptureTransientUi(uint virtualKey)
+    {
+        var modifiers = GetCurrentModifiersIncluding(virtualKey);
+        var candidates = GetPreCaptureActions(
+            _registeredBindings.Values,
+            virtualKey,
+            modifiers);
+        if (candidates.Count == 0)
+        {
+            return;
+        }
+
+        if (_preCapturedScreen is not null &&
+            DateTimeOffset.UtcNow - _preCapturedAt <= PreCaptureLifetime &&
+            candidates.All(_preCapturedActions.Contains))
+        {
+            return;
+        }
+
+        ClearPreCapturedScreen();
+        try
+        {
+            _preCapturedScreen = ScreenCaptureService.Capture(VirtualScreen.GetBounds());
+            _preCapturedAt = DateTimeOffset.UtcNow;
+            _preCaptureExpiryTimer.Stop();
+            _preCaptureExpiryTimer.Start();
+            foreach (var action in candidates)
+            {
+                _preCapturedActions.Add(action);
+            }
+        }
+        catch
+        {
+            ClearPreCapturedScreen();
+        }
+    }
+
+    internal static IReadOnlyList<HotKeyAction> GetPreCaptureActions(
+        IEnumerable<HotKeyBinding> bindings,
+        uint virtualKey,
+        HotKeyModifiers modifiers)
+    {
+        var isModifier = IsModifierKey(virtualKey);
+        var isAltKey = virtualKey is
+            VirtualKeyAlt or VirtualKeyLeftAlt or VirtualKeyRightAlt;
+        return bindings
+            .Where(binding => IsTransientUiCaptureAction(binding.Action))
+            .Where(binding => isAltKey
+                ? binding.Gesture.Modifiers.HasFlag(HotKeyModifiers.Alt)
+                : binding.Gesture.Modifiers == modifiers)
+            .Where(binding => isModifier || binding.Gesture.VirtualKey == virtualKey)
+            .Select(binding => binding.Action)
+            .Distinct()
+            .ToArray();
+    }
+
+    private CapturedImage? TakePreCapturedScreen(HotKeyAction action)
+    {
+        if (_preCapturedScreen is null ||
+            !_preCapturedActions.Contains(action) ||
+            DateTimeOffset.UtcNow - _preCapturedAt > PreCaptureLifetime)
+        {
+            ClearPreCapturedScreen();
+            return null;
+        }
+
+        var snapshot = _preCapturedScreen;
+        _preCapturedScreen = null;
+        _preCapturedActions.Clear();
+        _preCaptureExpiryTimer.Stop();
+        return snapshot;
+    }
+
+    private void ClearPreCapturedScreen()
+    {
+        _preCapturedScreen?.Dispose();
+        _preCapturedScreen = null;
+        _preCapturedActions.Clear();
+        _preCapturedAt = default;
+        _preCaptureExpiryTimer.Stop();
+    }
+
+    private void OnPreCaptureExpired(object? sender, EventArgs e)
+    {
+        ClearPreCapturedScreen();
+    }
+
+    internal static bool IsTransientUiCaptureAction(HotKeyAction action)
+    {
+        return action is HotKeyAction.RegionCapture or HotKeyAction.RecognizeText;
+    }
+
+    private static HotKeyModifiers GetCurrentModifiersIncluding(uint virtualKey)
+    {
+        var modifiers = HotKeyModifiers.None;
+        if (IsKeyDown(VirtualKeyControl) ||
+            virtualKey is VirtualKeyControl or VirtualKeyLeftControl or VirtualKeyRightControl)
+        {
+            modifiers |= HotKeyModifiers.Control;
+        }
+
+        if (IsKeyDown(VirtualKeyAlt) ||
+            virtualKey is VirtualKeyAlt or VirtualKeyLeftAlt or VirtualKeyRightAlt)
+        {
+            modifiers |= HotKeyModifiers.Alt;
+        }
+
+        if (IsKeyDown(VirtualKeyShift) ||
+            virtualKey is VirtualKeyShift or VirtualKeyLeftShift or VirtualKeyRightShift)
+        {
+            modifiers |= HotKeyModifiers.Shift;
+        }
+
+        return modifiers;
+    }
+
+    private static bool IsModifierKey(uint virtualKey)
+    {
+        return virtualKey is
+            VirtualKeyShift or VirtualKeyLeftShift or VirtualKeyRightShift or
+            VirtualKeyControl or VirtualKeyLeftControl or VirtualKeyRightControl or
+            VirtualKeyAlt or VirtualKeyLeftAlt or VirtualKeyRightAlt;
+    }
+
+    private static bool IsKeyDown(uint virtualKey)
+    {
+        return (NativeMethods.GetAsyncKeyState((int)virtualKey) & 0x8000) != 0;
     }
 
     private static string CreateRegistrationError(HotKeyBinding binding, int errorCode)
@@ -213,6 +430,21 @@ public sealed class GlobalHotKeyManager : IDisposable
 
     private static class NativeMethods
     {
+        public delegate IntPtr LowLevelKeyboardProcedure(
+            int code,
+            IntPtr wParam,
+            IntPtr lParam);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct LowLevelKeyboardData
+        {
+            public uint VirtualKey;
+            public uint ScanCode;
+            public uint Flags;
+            public uint Time;
+            public IntPtr ExtraInfo;
+        }
+
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool RegisterHotKey(
@@ -224,5 +456,29 @@ public sealed class GlobalHotKeyManager : IDisposable
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool UnregisterHotKey(IntPtr windowHandle, int identifier);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr SetWindowsHookEx(
+            int hookIdentifier,
+            LowLevelKeyboardProcedure procedure,
+            IntPtr moduleHandle,
+            uint threadId);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool UnhookWindowsHookEx(IntPtr hookHandle);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr CallNextHookEx(
+            IntPtr hookHandle,
+            int code,
+            IntPtr wParam,
+            IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        public static extern short GetAsyncKeyState(int virtualKey);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        public static extern IntPtr GetModuleHandle(string? moduleName);
     }
 }
