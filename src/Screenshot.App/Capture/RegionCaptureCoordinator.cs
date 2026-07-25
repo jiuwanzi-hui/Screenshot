@@ -191,6 +191,7 @@ public sealed class RegionCaptureCoordinator
                     TaskCreationOptions.RunContinuationsAsynchronously);
                 var progressWindow = new ScrollCaptureProgressWindow();
                 var editRequested = false;
+                var cancellationRequested = 0;
 
                 void CompleteCapture(object? sender, EventArgs eventArgs)
                 {
@@ -199,11 +200,25 @@ public sealed class RegionCaptureCoordinator
 
                 void CancelCapture(object? sender, EventArgs eventArgs)
                 {
-                    cancellationSource.Cancel();
+                    CancelSession();
                 }
 
                 void CancelFromSelection()
                 {
+                    CancelSession();
+                }
+
+                void CancelSession()
+                {
+                    if (Interlocked.Exchange(ref cancellationRequested, 1) != 0)
+                    {
+                        return;
+                    }
+
+                    // Remove both visual surfaces immediately. Background frame
+                    // processing observes the token and unwinds independently.
+                    progressWindow.CloseFromCoordinator();
+                    scrollSelection.Dispose();
                     cancellationSource.Cancel();
                 }
 
@@ -217,6 +232,7 @@ public sealed class RegionCaptureCoordinator
                 progressWindow.EditRequested += EditCapture;
                 progressWindow.CancelRequested += CancelCapture;
                 scrollSelection.CancelRequested += CancelFromSelection;
+                progressWindow.Owner = scrollSelection.OverlayWindow;
                 progressWindow.Show();
                 var initialImage = scrollSelection.CaptureSnapshot();
                 var initialRegion = scrollSelection.CaptureRegion;
@@ -312,14 +328,35 @@ public sealed class RegionCaptureCoordinator
                         await scrollSelection.LockForScrollingAsync(
                             cancellationSource.Token);
                         wheelMonitor.BlockNonWheelInput();
-                        // Let the click-through hole settle so WindowFromPoint /
-                        // live pixel reads hit the real content under the selection.
-                        await Task.Delay(40, cancellationSource.Token);
+                        ScrollCaptureTarget? target = null;
+                        progressWindow.Owner = null;
+                        await scrollSelection.SetVisibleAsync(
+                            isVisible: false,
+                            cancellationSource.Token);
+                        try
+                        {
+                            // WindowFromPoint cannot see through a layered WPF
+                            // window owned by another process. Hide the overlay
+                            // for one render turn while resolving the real target.
+                            await Task.Delay(30, cancellationSource.Token);
+                            _ = ForegroundWindowCaptureService
+                                .TryCreateScrollCaptureTargetFromSelection(
+                                    scrollSelection.CaptureRegion,
+                                    out target);
+                        }
+                        finally
+                        {
+                            await scrollSelection.SetVisibleAsync(
+                                isVisible: true,
+                                CancellationToken.None);
+                            if (!cancellationSource.IsCancellationRequested)
+                            {
+                                progressWindow.Owner = scrollSelection.OverlayWindow;
+                                progressWindow.BringToFront();
+                            }
+                        }
 
-                        if (!ForegroundWindowCaptureService.TryCreateScrollCaptureTargetFromSelection(
-                                scrollSelection.CaptureRegion,
-                                out var target) ||
-                            target is null)
+                        if (target is null)
                         {
                             _statusReporter("无法识别选区下的可滚动窗口。");
                             return;

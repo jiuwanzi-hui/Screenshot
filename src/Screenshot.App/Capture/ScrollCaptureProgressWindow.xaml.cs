@@ -23,7 +23,9 @@ public partial class ScrollCaptureProgressWindow : Window
         DoNotActivate;
     private const uint MonitorDefaultToNearest = 0x00000002;
     private bool _allowClose;
+    private bool _isClosed;
     private bool _isRequestRaised;
+    private bool _cancelAfterRightButtonUp;
     private ScrollCapturePreviewState? _pendingPreviewState;
     private int _previewUpdateScheduled;
 
@@ -164,8 +166,19 @@ public partial class ScrollCaptureProgressWindow : Window
 
     public void CloseFromCoordinator()
     {
+        if (_isClosed)
+        {
+            return;
+        }
+
         _allowClose = true;
         Close();
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _isClosed = true;
+        base.OnClosed(e);
     }
 
     protected override void OnClosing(CancelEventArgs e)
@@ -217,12 +230,27 @@ public partial class ScrollCaptureProgressWindow : Window
         object sender,
         System.Windows.Input.MouseButtonEventArgs e)
     {
+        _cancelAfterRightButtonUp = true;
+        CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnPreviewMouseRightButtonUp(
+        object sender,
+        System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (!_cancelAfterRightButtonUp)
+        {
+            return;
+        }
+
+        _cancelAfterRightButtonUp = false;
+        ReleaseMouseCapture();
+        e.Handled = true;
         if (BeginRequest("正在取消"))
         {
             CancelRequested?.Invoke(this, EventArgs.Empty);
         }
-
-        e.Handled = true;
     }
 
     private bool BeginRequest(string status)

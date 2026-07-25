@@ -181,12 +181,7 @@
                     CornerRadius="7,7,0,0"
                     Cursor="SizeAll"
                     MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
-                <DockPanel LastChildFill="False">
-                    <TextBlock Margin="9,0,0,0"
-                               VerticalAlignment="Center"
-                               FontSize="12"
-                               Foreground="#E0F4F1"
-                               Text="钉图" />
+                <DockPanel LastChildFill="True">
                     <StackPanel DockPanel.Dock="Right"
                                 Margin="0,0,4,0"
                                 VerticalAlignment="Center"
@@ -195,11 +190,11 @@
                                 Content="复制"
                                 Style="{StaticResource PinnedCommandButton}"
                                 ToolTip="复制图片" />
-                        <Button x:Name="OcrButton"
-                                Click="OnOcrClick"
-                                Content="识别"
+                        <Button x:Name="TranslateButton"
+                                Click="OnTranslateClick"
+                                Content="翻译"
                                 Style="{StaticResource PinnedCommandButton}"
-                                ToolTip="识别并选择图片文字" />
+                                ToolTip="翻译图片文字并覆盖显示" />
                         <Slider Style="{StaticResource PinnedOpacitySlider}"
                                 Minimum="0.2"
                                 Maximum="1"
@@ -216,17 +211,31 @@
                                        Text="&#xE711;" />
                         </Button>
                     </StackPanel>
+                    <TextBlock x:Name="HeaderStatusText"
+                               Margin="9,0,8,0"
+                               VerticalAlignment="Center"
+                               FontSize="12"
+                               Foreground="#E0F4F1"
+                               TextTrimming="CharacterEllipsis"
+                               Text="钉图" />
                 </DockPanel>
             </Border>
 
-            <Border Grid.Row="1"
+            <Border x:Name="ImageSurface"
+                    Grid.Row="1"
                     Background="#F00F171A"
                     CornerRadius="0,0,7,7"
                     Cursor="SizeAll"
                     ClipToBounds="True"
                     MouseLeftButtonDown="OnImageMouseLeftButtonDown">
-                <Image Source="{Binding Preview}"
-                       Stretch="Uniform" />
+                <Grid x:Name="ImageViewport"
+                      SizeChanged="OnImageViewportSizeChanged">
+                    <Image x:Name="PinnedImage"
+                           Source="{Binding Preview}"
+                           Stretch="Uniform" />
+                    <Canvas x:Name="TextOverlay"
+                            Background="Transparent" />
+                </Grid>
             </Border>
 
             <Thumb Grid.Row="1"

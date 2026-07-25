@@ -65,7 +65,8 @@
                    Grid.ColumnSpan="2"
                    Margin="20,0,20,10"
                    LastChildFill="False">
-            <Button DockPanel.Dock="Right"
+            <Button x:Name="TranslateButton"
+                    DockPanel.Dock="Right"
                     MinWidth="76"
                     Height="34"
                     Margin="0,0,8,0"

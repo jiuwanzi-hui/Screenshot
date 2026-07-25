@@ -434,7 +434,8 @@
                                 Margin="0,0,4,0"
                                 Click="OnTranslateClick"
                                 ToolTip="识别并翻译，覆盖到截图">
-                            <TextBlock FontSize="14"
+                            <TextBlock x:Name="TranslateButtonText"
+                                       FontSize="14"
                                        FontWeight="SemiBold"
                                        Text="译" />
                         </Button>

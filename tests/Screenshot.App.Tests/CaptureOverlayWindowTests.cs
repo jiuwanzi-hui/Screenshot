@@ -692,6 +692,7 @@ public sealed class CaptureOverlayWindowTests
         Task? enterEditorTask = null;
         var translationRequested = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        var translationRequestCount = 0;
 
         try
         {
@@ -720,6 +721,7 @@ public sealed class CaptureOverlayWindowTests
                         }),
                     TranslateTextAsync = _ =>
                     {
+                        translationRequestCount++;
                         translationRequested.TrySetResult();
                         return Task.FromResult(new TranslationSegmentsResult(
                             true,
@@ -771,8 +773,30 @@ public sealed class CaptureOverlayWindowTests
                 Assert.Equal("你好", translatedTextBox.Text);
                 Assert.True(translatedTextBox.IsReadOnly);
 
+                var button = Assert.IsType<Button>(
+                    overlay?.FindName("TranslateButton"));
+                button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert.False(editor.IsTranslationOverlayVisible);
+                Assert.Equal(
+                    "hello",
+                    Assert.Single(selectableTranslation.Children
+                        .OfType<TextBox>()).Text);
+
+                button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert.True(editor.IsTranslationOverlayVisible);
+                Assert.Equal(
+                    "你好",
+                    Assert.Single(selectableTranslation.Children
+                        .OfType<TextBox>()).Text);
+                Assert.Equal(1, translationRequestCount);
+
                 editor.Undo();
                 Assert.False(editor.HasTranslationOverlay);
+
+                button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Assert.True(editor.HasTranslationOverlay);
+                Assert.True(editor.IsTranslationOverlayVisible);
+                Assert.Equal(1, translationRequestCount);
             });
         }
         finally
@@ -1124,19 +1148,15 @@ public sealed class CaptureOverlayWindowTests
             await selection.SetVisibleAsync(isVisible: false);
             WpfTestHost.Invoke(() =>
             {
-                var selectionRectangle = Assert.IsType<System.Windows.Shapes.Rectangle>(
-                    overlay!.FindName("SelectionRectangle"));
-                var outline = Assert.IsType<System.Windows.Shapes.Rectangle>(
-                    overlay.FindName("ScrollCaptureOutline"));
-                Assert.Equal(Visibility.Collapsed, selectionRectangle.Visibility);
-                Assert.Equal(Visibility.Visible, outline.Visibility);
+                Assert.False(overlay!.IsVisible);
             });
 
             await selection.SetVisibleAsync(isVisible: true);
             WpfTestHost.Invoke(() =>
             {
+                Assert.True(overlay!.IsVisible);
                 var selectionRectangle = Assert.IsType<System.Windows.Shapes.Rectangle>(
-                    overlay!.FindName("SelectionRectangle"));
+                    overlay.FindName("SelectionRectangle"));
                 var outline = Assert.IsType<System.Windows.Shapes.Rectangle>(
                     overlay.FindName("ScrollCaptureOutline"));
                 Assert.Equal(Visibility.Collapsed, selectionRectangle.Visibility);
@@ -1155,7 +1175,7 @@ public sealed class CaptureOverlayWindowTests
     }
 
     [Fact]
-    public async Task RightClickCancelsPublishedScrollSelectionAfterClearingIt()
+    public async Task RightClickCancelsPublishedScrollSelectionOnButtonUp()
     {
         CaptureOverlayWindow? overlay = null;
         ScrollCaptureSelection? selection = null;
@@ -1189,22 +1209,44 @@ public sealed class CaptureOverlayWindowTests
             Assert.NotNull(selection);
             selection.CancelRequested += () => cancelled.TrySetResult();
 
-            var returnMethod = typeof(CaptureOverlayWindow).GetMethod(
-                "ReturnToPreviousCaptureState",
+            var downMethod = typeof(CaptureOverlayWindow).GetMethod(
+                "OnCaptureSurfacePreviewMouseRightButtonDown",
                 BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(returnMethod);
+            var upMethod = typeof(CaptureOverlayWindow).GetMethod(
+                "OnCaptureSurfacePreviewMouseRightButtonUp",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(downMethod);
+            Assert.NotNull(upMethod);
 
-            WpfTestHost.Invoke(() => returnMethod.Invoke(overlay, null));
             WpfTestHost.Invoke(() =>
             {
-                var rectangle = Assert.IsType<System.Windows.Shapes.Rectangle>(
-                    overlay!.FindName("SelectionRectangle"));
-                Assert.Equal(Visibility.Collapsed, rectangle.Visibility);
-                Assert.Equal(0, rectangle.Width);
-                Assert.Equal(0, rectangle.Height);
-            });
+                var surface = Assert.IsType<Grid>(overlay!.FindName("CaptureSurface"));
+                var down = new MouseButtonEventArgs(
+                    Mouse.PrimaryDevice,
+                    Environment.TickCount,
+                    MouseButton.Right)
+                {
+                    RoutedEvent = UIElement.PreviewMouseRightButtonDownEvent,
+                };
+                downMethod.Invoke(overlay, [surface, down]);
+                Assert.True(down.Handled);
+                Assert.False(cancelled.Task.IsCompleted);
 
-            WpfTestHost.Invoke(() => returnMethod.Invoke(overlay, null));
+                var rectangle = Assert.IsType<System.Windows.Shapes.Rectangle>(
+                    overlay.FindName("SelectionRectangle"));
+                Assert.Equal(Visibility.Visible, rectangle.Visibility);
+                Assert.True(rectangle.Width > 0);
+
+                var up = new MouseButtonEventArgs(
+                    Mouse.PrimaryDevice,
+                    Environment.TickCount,
+                    MouseButton.Right)
+                {
+                    RoutedEvent = UIElement.PreviewMouseRightButtonUpEvent,
+                };
+                upMethod.Invoke(overlay, [surface, up]);
+                Assert.True(up.Handled);
+            });
             await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
         }
         finally

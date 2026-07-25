@@ -36,6 +36,7 @@ public sealed class ImageEditorCanvas : Canvas
     private double _baseDisplayWidth;
     private double _baseDisplayHeight;
     private double _zoom = 1;
+    private bool _isTranslationOverlayVisible = true;
 
     public ImageEditorCanvas()
     {
@@ -56,6 +57,9 @@ public sealed class ImageEditorCanvas : Canvas
     public bool HasTranslationOverlay =>
         _document.Annotations.Any(annotation =>
             annotation is TranslationOverlayAnnotation);
+
+    public bool IsTranslationOverlayVisible =>
+        HasTranslationOverlay && _isTranslationOverlayVisible;
 
     public double Zoom => _zoom;
 
@@ -79,6 +83,7 @@ public sealed class ImageEditorCanvas : Canvas
         _baseDisplayWidth = displayWidth;
         _baseDisplayHeight = displayHeight;
         _zoom = 1;
+        _isTranslationOverlayVisible = true;
         RenderTransformOrigin = new WpfPoint(0, 0);
         ApplyDisplayTransform();
         RebuildCanvas();
@@ -92,6 +97,12 @@ public sealed class ImageEditorCanvas : Canvas
 
         foreach (var annotation in _document.Annotations)
         {
+            if (annotation is TranslationOverlayAnnotation &&
+                !_isTranslationOverlayVisible)
+            {
+                continue;
+            }
+
             var bounds = GetAnnotationBounds(annotation);
             combinedBounds = combinedBounds.HasValue
                 ? Rect.Union(combinedBounds.Value, bounds)
@@ -178,9 +189,23 @@ public sealed class ImageEditorCanvas : Canvas
         }
 
         CommitPendingText();
+        _isTranslationOverlayVisible = true;
         _document.Add(new TranslationOverlayAnnotation(validRegions));
         RebuildCanvas();
         RaiseHistoryChanged();
+    }
+
+    public void SetTranslationOverlayVisible(bool isVisible)
+    {
+        if (!HasTranslationOverlay ||
+            _isTranslationOverlayVisible == isVisible)
+        {
+            return;
+        }
+
+        CommitPendingText();
+        _isTranslationOverlayVisible = isVisible;
+        RebuildCanvas();
     }
 
     public void Undo()
@@ -269,6 +294,7 @@ public sealed class ImageEditorCanvas : Canvas
         _baseDisplayWidth = 0;
         _baseDisplayHeight = 0;
         _zoom = 1;
+        _isTranslationOverlayVisible = true;
         Children.Clear();
         Width = double.NaN;
         Height = double.NaN;
@@ -651,6 +677,12 @@ public sealed class ImageEditorCanvas : Canvas
 
         foreach (var annotation in _document.Annotations)
         {
+            if (annotation is TranslationOverlayAnnotation &&
+                !_isTranslationOverlayVisible)
+            {
+                continue;
+            }
+
             AddAnnotationVisual(annotation);
         }
     }

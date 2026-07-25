@@ -1,18 +1,18 @@
 ﻿{
-    "version":  "1.3.1",
+    "version":  "1.3.2",
     "releasePage":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest",
     "installer":  {
-                      "fileName":  "Screenshot-Setup-1.3.1-win-x64.exe",
-                      "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.3.1-win-x64.exe",
-                      "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v1.3.1/Screenshot-Setup-1.3.1-win-x64.exe",
-                      "size":  52332239,
-                      "sha256":  "C1E52B8772412A1C28628A7821ABBEC0B424A32328F811B359140DAC96F0DD79"
+                      "fileName":  "Screenshot-Setup-1.3.2-win-x64.exe",
+                      "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.3.2-win-x64.exe",
+                      "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v1.3.2/Screenshot-Setup-1.3.2-win-x64.exe",
+                      "size":  52297656,
+                      "sha256":  "3596F123B9E32EA91E5067BCD87BB44FEB720578FCF067AF865BCAA773FBAA36"
                   },
     "portable":  {
-                     "fileName":  "Screenshot-Portable-1.3.1-win-x64.zip",
-                     "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.3.1-win-x64.zip",
-                     "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v1.3.1/Screenshot-Portable-1.3.1-win-x64.zip",
-                     "size":  72018694,
-                     "sha256":  "478F033086C1CA49B0397D990BDEB6EDC78DE99B2F99C8169D563E11F21FEFB5"
+                     "fileName":  "Screenshot-Portable-1.3.2-win-x64.zip",
+                     "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.3.2-win-x64.zip",
+                     "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v1.3.2/Screenshot-Portable-1.3.2-win-x64.zip",
+                     "size":  72019420,
+                     "sha256":  "D1B7439086A183EBB2FD5B3535BEEBDEB83B58F1CD6ACA8D07802F4CBF80EF24"
                  }
 }

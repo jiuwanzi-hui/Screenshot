@@ -6,6 +6,60 @@ namespace Screenshot.App.Tests;
 public sealed class ScrollCaptureProgressWindowTests
 {
     [Fact]
+    public void RightClickCancelsOnlyAfterTheButtonIsReleased()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var window = new ScrollCaptureProgressWindow();
+            var cancelCount = 0;
+            window.CancelRequested += (_, _) => cancelCount++;
+            window.Show();
+
+            try
+            {
+                var downMethod = typeof(ScrollCaptureProgressWindow).GetMethod(
+                    "OnPreviewMouseRightButtonDown",
+                    BindingFlags.Instance |
+                    BindingFlags.NonPublic |
+                    BindingFlags.DeclaredOnly);
+                var upMethod = typeof(ScrollCaptureProgressWindow).GetMethod(
+                    "OnPreviewMouseRightButtonUp",
+                    BindingFlags.Instance |
+                    BindingFlags.NonPublic |
+                    BindingFlags.DeclaredOnly);
+                Assert.NotNull(downMethod);
+                Assert.NotNull(upMethod);
+
+                var down = new System.Windows.Input.MouseButtonEventArgs(
+                    System.Windows.Input.Mouse.PrimaryDevice,
+                    Environment.TickCount,
+                    System.Windows.Input.MouseButton.Right)
+                {
+                    RoutedEvent = System.Windows.UIElement.PreviewMouseRightButtonDownEvent,
+                };
+                downMethod.Invoke(window, [window, down]);
+                Assert.True(down.Handled);
+                Assert.Equal(0, cancelCount);
+
+                var up = new System.Windows.Input.MouseButtonEventArgs(
+                    System.Windows.Input.Mouse.PrimaryDevice,
+                    Environment.TickCount,
+                    System.Windows.Input.MouseButton.Right)
+                {
+                    RoutedEvent = System.Windows.UIElement.PreviewMouseRightButtonUpEvent,
+                };
+                upMethod.Invoke(window, [window, up]);
+                Assert.True(up.Handled);
+                Assert.Equal(1, cancelCount);
+            }
+            finally
+            {
+                window.CloseFromCoordinator();
+            }
+        });
+    }
+
+    [Fact]
     public void BringingPreviewToFrontDoesNotMoveItToTheOrigin()
     {
         var flagsField = typeof(ScrollCaptureProgressWindow).GetField(
