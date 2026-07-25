@@ -8,6 +8,7 @@ public sealed class ScrollCaptureSelection : IDisposable
 {
     private readonly CaptureOverlayWindow _overlay;
     private ScreenRegion _captureRegion;
+    private int _disposed;
 
     internal ScrollCaptureSelection(
         CaptureOverlayWindow overlay,
@@ -22,6 +23,8 @@ public sealed class ScrollCaptureSelection : IDisposable
     public event Action? CancelRequested;
 
     public ScreenRegion CaptureRegion => _captureRegion;
+
+    internal System.Windows.Window OverlayWindow => _overlay;
 
     internal void UpdateCaptureRegion(ScreenRegion captureRegion)
     {
@@ -58,9 +61,8 @@ public sealed class ScrollCaptureSelection : IDisposable
     }
 
     /// <summary>
-    /// Temporarily hides or restores the visible selection border. The capture
-    /// service uses this before reading pixels so the border is never included in
-    /// the stitched image.
+    /// Temporarily hides or restores the full overlay so native hit testing can
+    /// resolve the real window under the selected region.
     /// </summary>
     public Task SetVisibleAsync(
         bool isVisible,
@@ -73,6 +75,11 @@ public sealed class ScrollCaptureSelection : IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
         _overlay.CloseScrollCaptureSelection();
     }
 }

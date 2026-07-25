@@ -14,6 +14,8 @@ public partial class OcrResultWindow : Window
     private readonly bool _ocrSucceeded;
     private bool _isTranslating;
     private bool _hasAutoTranslated;
+    private string? _cachedTranslationSource;
+    private string? _cachedTranslationText;
 
     public OcrResultWindow(
         OcrRecognitionResult result,
@@ -141,7 +143,20 @@ public partial class OcrResultWindow : Window
             return;
         }
 
+        var sourceText = ResultTextBox.Text;
+        if (!string.IsNullOrWhiteSpace(_cachedTranslationText) &&
+            string.Equals(
+                _cachedTranslationSource,
+                sourceText,
+                StringComparison.Ordinal))
+        {
+            TranslationTextBox.Text = _cachedTranslationText;
+            StatusText.Text = "已显示缓存译文，无需重新请求。";
+            return;
+        }
+
         _isTranslating = true;
+        TranslateButton.IsEnabled = false;
         StatusText.Text = "正在翻译...";
 
         try
@@ -152,14 +167,18 @@ public partial class OcrResultWindow : Window
                 _credentialStore,
                 _httpClient);
             var result = await provider.TranslateAsync(
-                ResultTextBox.Text,
+                sourceText,
                 "auto",
                 settings.TranslationTargetLanguage);
 
             if (result.IsSuccess)
             {
+                _cachedTranslationSource = sourceText;
+                _cachedTranslationText = result.Text;
                 TranslationTextBox.Text = result.Text;
                 StatusText.Text = "翻译完成。";
+                TranslateButton.Content = "显示译文";
+                TranslateButton.ToolTip = "直接显示本次识别结果的缓存译文";
             }
             else
             {
@@ -169,6 +188,7 @@ public partial class OcrResultWindow : Window
         finally
         {
             _isTranslating = false;
+            TranslateButton.IsEnabled = true;
         }
     }
 }

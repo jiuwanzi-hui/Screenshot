@@ -97,7 +97,9 @@ public partial class App : System.Windows.Application, IDisposable
         _mainWindow.UpdateInstallationStarted += OnUpdateInstallationStarted;
         _mainWindow.ConfigureTaskbarVisibility(_currentSettings.ShowTaskbarIcon);
         _captureHistoryService = new CaptureHistoryService();
-        _pinnedImageManager = new PinnedImageManager(RecognizePinnedImageAsync);
+        _pinnedImageManager = new PinnedImageManager(
+            RecognizePinnedImageAsync,
+            TranslatePinnedImageAsync);
         _regionCaptureCoordinator = new RegionCaptureCoordinator(
             () => _currentSettings,
             _captureHistoryService,
@@ -365,32 +367,47 @@ public partial class App : System.Windows.Application, IDisposable
         }
     }
 
-    private async Task RecognizePinnedImageAsync(CapturedImage image)
+    private async Task<OcrRecognitionResult> RecognizePinnedImageAsync(
+        CapturedImage image)
     {
-        if (_translationHttpClient is null)
-        {
-            return;
-        }
-
         try
         {
-            var result = await OcrService.RecognizeAsync(
+            return await OcrService.RecognizeAsync(
                 image,
                 _currentSettings.OcrLanguageTag);
-            var window = new OcrResultWindow(
-                result,
-                () => _currentSettings,
-                new DpapiTranslationCredentialStore(),
-                _translationHttpClient)
-            {
-                Topmost = true,
-            };
-            window.Show();
-            window.Activate();
         }
         catch (Exception)
         {
             _mainWindow?.ShowStatus("钉图文字识别失败，请检查语言设置。");
+            return OcrRecognitionResult.Failure(
+                "钉图文字识别失败，请检查语言设置。");
+        }
+    }
+
+    private async Task<TranslationSegmentsResult> TranslatePinnedImageAsync(
+        OcrRecognitionResult recognition)
+    {
+        if (_translationHttpClient is null)
+        {
+            return TranslationSegmentsResult.Failure("翻译服务尚未初始化。");
+        }
+
+        try
+        {
+            var provider = TranslationProviderFactory.Create(
+                _currentSettings,
+                new DpapiTranslationCredentialStore(),
+                _translationHttpClient);
+            return await provider.TranslateSegmentsAsync(
+                recognition.Regions.Select(region => region.Text).ToArray(),
+                "auto",
+                _currentSettings.TranslationTargetLanguage);
+        }
+        catch (Exception)
+        {
+            _mainWindow?.ShowStatus("钉图翻译失败，请检查翻译设置。");
+            return TranslationSegmentsResult.Failure(
+                "钉图翻译失败，请检查翻译设置。");
         }
     }
 

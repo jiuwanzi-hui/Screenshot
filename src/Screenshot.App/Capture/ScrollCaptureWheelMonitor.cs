@@ -8,15 +8,8 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
 {
     private const int LowLevelMouseHook = 14;
     private const int MouseWheelMessage = 0x020A;
-    private const int LeftButtonDownMessage = 0x0201;
-    private const int LeftButtonUpMessage = 0x0202;
     private const int RightButtonDownMessage = 0x0204;
     private const int RightButtonUpMessage = 0x0205;
-    private const int MiddleButtonDownMessage = 0x0207;
-    private const int MiddleButtonUpMessage = 0x0208;
-    private const int HorizontalWheelMessage = 0x020E;
-    private const int XButtonDownMessage = 0x020B;
-    private const int XButtonUpMessage = 0x020C;
 
     private readonly object _captureRegionSync = new();
     private ScreenRegion _captureRegion;
@@ -33,6 +26,7 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
     private IntPtr _hookHandle;
     private bool _disposed;
     private volatile bool _blockNonWheelInput;
+    private bool _rightButtonCancellationPending;
 
     public ScrollCaptureWheelMonitor(
         ScreenRegion captureRegion,
@@ -151,26 +145,28 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
         {
             var hookData = Marshal.PtrToStructure<LowLevelMouseHookData>(
                 hookDataPointer);
+            var pointerMessage = message.ToInt32();
 
-            ScreenRegion captureRegion;
-            lock (_captureRegionSync)
+            // Keep the hook alive through the complete right-click gesture.
+            // Canceling on button-down disposed the hook before button-up and
+            // allowed the final event to leak into the application underneath.
+            if (pointerMessage == RightButtonUpMessage &&
+                _rightButtonCancellationPending)
             {
-                captureRegion = _captureRegion;
+                _rightButtonCancellationPending = false;
+                try
+                {
+                    _cancelRequested?.Invoke();
+                }
+                catch
+                {
+                }
+
+                return new IntPtr(1);
             }
 
-            // The full-screen overlay already prevents interaction outside the
-            // selection. Keep the low-level hook limited to the click-through
-            // selection itself so a bad preview-window hit test can never lock
-            // mouse input across the whole desktop.
-            if (!captureRegion.Contains(hookData.Point.X, hookData.Point.Y))
-            {
-                return NativeMethods.CallNextHookEx(
-                    _hookHandle,
-                    hookCode,
-                    message,
-                    hookDataPointer);
-            }
-
+            // Let the preview handle its own right click. Everywhere else the
+            // complete gesture is reserved for canceling the capture.
             if (_allowBlockedInputAt?.Invoke(
                     hookData.Point.X,
                     hookData.Point.Y) == true)
@@ -182,18 +178,9 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
                     hookDataPointer);
             }
 
-            if (message.ToInt32() == RightButtonDownMessage)
+            if (pointerMessage == RightButtonDownMessage)
             {
-                try
-                {
-                    _cancelRequested?.Invoke();
-                }
-                catch
-                {
-                }
-
-                // The cancellation callback owns the right-click. Do not let
-                // it reach the target application underneath the overlay.
+                _rightButtonCancellationPending = true;
                 return new IntPtr(1);
             }
 
@@ -210,15 +197,10 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
 
     private static bool IsBlockedPointerMessage(int message)
     {
-        return message is LeftButtonDownMessage or
-            LeftButtonUpMessage or
-            RightButtonDownMessage or
-            RightButtonUpMessage or
-            MiddleButtonDownMessage or
-            MiddleButtonUpMessage or
-            XButtonDownMessage or
-            XButtonUpMessage or
-            HorizontalWheelMessage;
+        // Right click is reserved for canceling the capture. All other pointer
+        // input must continue normally; globally swallowing the left button
+        // broke unrelated tools such as WeChat's screenshot selector.
+        return message is RightButtonDownMessage or RightButtonUpMessage;
     }
 
     private delegate IntPtr HookProcedure(

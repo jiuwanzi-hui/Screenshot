@@ -351,6 +351,17 @@ public sealed class ImageEditorCanvasTests
             Assert.True(overlays[0].ClipToBounds);
             Assert.Equal(16, overlays[0].Height);
 
+            editor.SetTranslationOverlayVisible(isVisible: false);
+            Assert.True(editor.HasTranslationOverlay);
+            Assert.False(editor.IsTranslationOverlayVisible);
+            Assert.Empty(editor.Children.OfType<System.Windows.Controls.Border>());
+
+            editor.SetTranslationOverlayVisible(isVisible: true);
+            Assert.True(editor.IsTranslationOverlayVisible);
+            Assert.Equal(
+                2,
+                editor.Children.OfType<System.Windows.Controls.Border>().Count());
+
             editor.Undo();
 
             Assert.False(editor.HasTranslationOverlay);

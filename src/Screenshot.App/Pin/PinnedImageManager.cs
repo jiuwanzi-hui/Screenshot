@@ -1,16 +1,24 @@
 using Screenshot.App.Capture;
+using Screenshot.App.Text;
 
 namespace Screenshot.App.Pin;
 
 public sealed class PinnedImageManager : IDisposable
 {
     private readonly HashSet<PinnedImageWindow> _windows = [];
-    private readonly Func<CapturedImage, Task>? _recognizeTextAsync;
+    private readonly Func<CapturedImage, Task<OcrRecognitionResult>>?
+        _recognizeTextAsync;
+    private readonly Func<OcrRecognitionResult, Task<TranslationSegmentsResult>>?
+        _translateTextAsync;
     private bool _disposed;
 
-    public PinnedImageManager(Func<CapturedImage, Task>? recognizeTextAsync = null)
+    public PinnedImageManager(
+        Func<CapturedImage, Task<OcrRecognitionResult>>? recognizeTextAsync = null,
+        Func<OcrRecognitionResult, Task<TranslationSegmentsResult>>?
+            translateTextAsync = null)
     {
         _recognizeTextAsync = recognizeTextAsync;
+        _translateTextAsync = translateTextAsync;
     }
 
     public int Count => _windows.Count;
@@ -24,7 +32,10 @@ public sealed class PinnedImageManager : IDisposable
 
         try
         {
-            window = new PinnedImageWindow(capturedImage, _recognizeTextAsync);
+            window = new PinnedImageWindow(
+                capturedImage,
+                _recognizeTextAsync,
+                _translateTextAsync);
             window.Closed += OnPinnedImageWindowClosed;
             _windows.Add(window);
             window.Show();

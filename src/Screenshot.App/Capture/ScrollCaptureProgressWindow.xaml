@@ -15,7 +15,8 @@
         Topmost="True"
         WindowStartupLocation="Manual"
         WindowStyle="None"
-        PreviewMouseRightButtonDown="OnPreviewMouseRightButtonDown">
+        PreviewMouseRightButtonDown="OnPreviewMouseRightButtonDown"
+        PreviewMouseRightButtonUp="OnPreviewMouseRightButtonUp">
     <Border Background="#E6142830"
             BorderBrush="#7A5BBDB5"
             BorderThickness="1"

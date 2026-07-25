@@ -59,6 +59,7 @@ public partial class CaptureOverlayWindow : Window
     private const uint DoNotChangeZOrder = 0x0004;
     private const uint FrameChanged = 0x0020;
     private const long ExtendedStyleNoActivate = 0x08000000L;
+    private const int RegionCombineDifference = 4;
     private const double MinimumSelectionEdge = 2;
     private const double ResizeThumbHalfSize = 6;
 
@@ -86,15 +87,19 @@ public partial class CaptureOverlayWindow : Window
     private bool _isOcrInitializing;
     private bool _isTranslationInitializing;
     private bool _completeAfterRightButtonUp;
+    private bool _cancelScrollCaptureAfterRightButtonUp;
     private bool _isWindowSnapClickPending;
     private Rect? _windowSnapBounds;
     private IntPtr _windowHandle;
     private bool _isCompleted;
     private OcrRecognitionResult? _inlineOcrResult;
     private IReadOnlyList<OcrTextRegion>? _inlineTranslatedTextRegions;
+    private IReadOnlyList<TranslatedTextAnnotationRegion>?
+        _inlineTranslatedAnnotationRegions;
     private bool _isShowingTranslatedText;
     private bool _isScrollCaptureSelectionPublished;
     private bool _isScrollCaptureSelectionLocked;
+    private bool _isScrollCaptureTemporarilyHidden;
     private WeakReference<ScrollCaptureSelection>?
         _publishedScrollCaptureSelection;
     private HwndSource? _windowSource;
@@ -242,7 +247,15 @@ public partial class CaptureOverlayWindow : Window
     {
         if (e.Key == Key.Escape)
         {
-            CompleteSelection(result: null);
+            if (_isScrollCaptureSelection && _isScrollCaptureSelectionPublished)
+            {
+                RequestScrollCaptureCancellation();
+            }
+            else
+            {
+                CompleteSelection(result: null);
+            }
+
             e.Handled = true;
         }
         else if (e.Key == Key.Enter && HasValidSelection())
@@ -277,6 +290,14 @@ public partial class CaptureOverlayWindow : Window
         object sender,
         MouseButtonEventArgs e)
     {
+        if (_isScrollCaptureSelection && _isScrollCaptureSelectionPublished)
+        {
+            _cancelScrollCaptureAfterRightButtonUp = true;
+            CaptureSurface.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
+
         if (OcrTextOverlay.Visibility == Visibility.Visible)
         {
             OcrTextOverlay.Visibility = Visibility.Collapsed;
@@ -294,6 +315,19 @@ public partial class CaptureOverlayWindow : Window
         object sender,
         MouseButtonEventArgs e)
     {
+        if (_cancelScrollCaptureAfterRightButtonUp)
+        {
+            _cancelScrollCaptureAfterRightButtonUp = false;
+            e.Handled = true;
+            if (CaptureSurface.IsMouseCaptured)
+            {
+                CaptureSurface.ReleaseMouseCapture();
+            }
+
+            RequestScrollCaptureCancellation();
+            return;
+        }
+
         if (!_completeAfterRightButtonUp)
         {
             return;
@@ -329,15 +363,7 @@ public partial class CaptureOverlayWindow : Window
             return;
         }
 
-        if (_isScrollCaptureSelection && _isScrollCaptureSelectionLocked)
-        {
-            RequestScrollCaptureCancellation();
-            return;
-        }
-
-        if (_isScrollCaptureSelection &&
-            _isScrollCaptureSelectionPublished &&
-            !HasValidSelection())
+        if (_isScrollCaptureSelection && _isScrollCaptureSelectionPublished)
         {
             RequestScrollCaptureCancellation();
             return;
@@ -1047,20 +1073,19 @@ public partial class CaptureOverlayWindow : Window
             return;
         }
 
-        if (InlineEditorCanvas.HasTranslationOverlay)
+        if (_inlineTranslatedTextRegions is { Count: > 0 } &&
+            _inlineTranslatedAnnotationRegions is { Count: > 0 })
         {
-            if (_inlineTranslatedTextRegions is { Count: > 0 })
+            if (!InlineEditorCanvas.HasTranslationOverlay)
             {
-                ShowSelectableTextOverlay(
-                    _inlineTranslatedTextRegions,
-                    isTranslation: true);
-            }
-            else
-            {
-                CaptureStatusText.Text = "译文已经覆盖到截图；可点击撤销移除后重新翻译。";
-                CaptureStatusText.Visibility = Visibility.Visible;
+                InlineEditorCanvas.AddTranslationOverlay(
+                    _inlineTranslatedAnnotationRegions);
+                SetInlineTranslationVisibility(isVisible: true);
+                return;
             }
 
+            SetInlineTranslationVisibility(
+                !InlineEditorCanvas.IsTranslationOverlayVisible);
             return;
         }
 
@@ -1117,7 +1142,7 @@ public partial class CaptureOverlayWindow : Window
                 return;
             }
 
-            var translatedRegions = recognition.Regions
+            _inlineTranslatedAnnotationRegions = recognition.Regions
                 .Select((region, index) => new TranslatedTextAnnotationRegion(
                      new Rect(
                          Math.Max(0, region.X),
@@ -1127,7 +1152,6 @@ public partial class CaptureOverlayWindow : Window
                      translation.Segments[index],
                      Math.Max(10, region.Height * 0.78)))
                 .ToArray();
-            InlineEditorCanvas.AddTranslationOverlay(translatedRegions);
             _inlineTranslatedTextRegions = recognition.Regions
                 .Select((region, index) => new OcrTextRegion(
                     translation.Segments[index],
@@ -1136,9 +1160,9 @@ public partial class CaptureOverlayWindow : Window
                     region.Width,
                     Math.Max(22, region.Height + 10)))
                 .ToArray();
-            ShowSelectableTextOverlay(
-                _inlineTranslatedTextRegions,
-                isTranslation: true);
+            InlineEditorCanvas.AddTranslationOverlay(
+                _inlineTranslatedAnnotationRegions);
+            SetInlineTranslationVisibility(isVisible: true);
             CaptureStatusText.Text +=
                 $" 在线翻译耗时 {translationTimer.Elapsed.TotalSeconds:F1} 秒。";
         }
@@ -1155,6 +1179,40 @@ public partial class CaptureOverlayWindow : Window
                 CaptureToolbar.IsEnabled = true;
             }
         }
+    }
+
+    private void SetInlineTranslationVisibility(bool isVisible)
+    {
+        if (_inlineTranslatedTextRegions is not { Count: > 0 } translatedRegions)
+        {
+            return;
+        }
+
+        InlineEditorCanvas.SetTranslationOverlayVisible(isVisible);
+        if (isVisible)
+        {
+            ShowSelectableTextOverlay(translatedRegions, isTranslation: true);
+            TranslateButtonText.Text = "原";
+            TranslateButton.ToolTip = "显示原文";
+            return;
+        }
+
+        if (_inlineOcrResult is { IsSuccess: true, Regions.Count: > 0 } recognition)
+        {
+            ShowSelectableTextOverlay(recognition.Regions, isTranslation: false);
+        }
+        else
+        {
+            OcrTextOverlay.Children.Clear();
+            OcrTextOverlay.Visibility = Visibility.Collapsed;
+        }
+
+        _isShowingTranslatedText = false;
+        TranslateButtonText.Text = "译";
+        TranslateButton.ToolTip = "显示已缓存的译文";
+        CaptureStatusText.Text =
+            "当前显示原图；可直接选择原文，再次点击译文按钮会立即显示缓存译文。";
+        CaptureStatusText.Visibility = Visibility.Visible;
     }
 
     private void ShowInlineOcrText(OcrRecognitionResult result)
@@ -1260,7 +1318,10 @@ public partial class CaptureOverlayWindow : Window
     {
         _inlineOcrResult = null;
         _inlineTranslatedTextRegions = null;
+        _inlineTranslatedAnnotationRegions = null;
         _isShowingTranslatedText = false;
+        TranslateButtonText.Text = "译";
+        TranslateButton.ToolTip = "识别并翻译，覆盖到截图";
         OcrTextOverlay.Children.Clear();
         OcrTextOverlay.Visibility = Visibility.Collapsed;
     }
@@ -1473,15 +1534,17 @@ public partial class CaptureOverlayWindow : Window
         InlineUndoButton.IsEnabled = InlineEditorCanvas.CanUndo;
         InlineRedoButton.IsEnabled = InlineEditorCanvas.CanRedo;
         if (!InlineEditorCanvas.HasTranslationOverlay &&
-            _inlineTranslatedTextRegions is not null)
+            _inlineTranslatedTextRegions is not null &&
+            _isShowingTranslatedText)
         {
-            _inlineTranslatedTextRegions = null;
-            if (_isShowingTranslatedText)
+            if (_inlineOcrResult is { IsSuccess: true, Regions.Count: > 0 } recognition)
             {
-                OcrTextOverlay.Children.Clear();
-                OcrTextOverlay.Visibility = Visibility.Collapsed;
-                _isShowingTranslatedText = false;
+                ShowSelectableTextOverlay(recognition.Regions, isTranslation: false);
             }
+
+            _isShowingTranslatedText = false;
+            TranslateButtonText.Text = "译";
+            TranslateButton.ToolTip = "显示已缓存的译文";
         }
     }
 
@@ -1766,6 +1829,31 @@ public partial class CaptureOverlayWindow : Window
                     return;
                 }
 
+                if (!isVisible)
+                {
+                    if (IsVisible)
+                    {
+                        _isScrollCaptureTemporarilyHidden = true;
+                        Hide();
+                    }
+
+                    return;
+                }
+
+                if (_isScrollCaptureTemporarilyHidden)
+                {
+                    _isScrollCaptureTemporarilyHidden = false;
+                    Show();
+                    _ = NativeMethods.SetWindowPos(
+                        _windowHandle,
+                        new IntPtr(TopmostWindow),
+                        _virtualScreenBounds.X,
+                        _virtualScreenBounds.Y,
+                        _virtualScreenBounds.Width,
+                        _virtualScreenBounds.Height,
+                        DoNotActivate | DoNotChangeOwnerZOrder);
+                }
+
             },
             DispatcherPriority.Render,
             cancellationToken).Task;
@@ -1969,6 +2057,12 @@ public partial class CaptureOverlayWindow : Window
             windowHandle,
             ExtendedWindowStyleIndex,
             new IntPtr(extendedStyle | ExtendedStyleNoActivate));
+
+        // A transparent layered WPF window can still win native mouse hit
+        // testing. Remove the selected viewport from the HWND region itself so
+        // wheel and button input is routed directly to the application below.
+        // The four shaded areas and the outline remain part of the window.
+        ApplyScrollCaptureInputHole(windowHandle);
         _ = NativeMethods.SetWindowPos(
             windowHandle,
             IntPtr.Zero,
@@ -1980,7 +2074,64 @@ public partial class CaptureOverlayWindow : Window
             DoNotMove |
             DoNotChangeZOrder |
             DoNotActivate |
-            FrameChanged);
+                FrameChanged);
+    }
+
+    private void ApplyScrollCaptureInputHole(IntPtr windowHandle)
+    {
+        if (_publishedScrollCaptureSelection?.TryGetTarget(
+                out var selection) != true ||
+            selection is null)
+        {
+            return;
+        }
+
+        var captureRegion = selection.CaptureRegion;
+        var holeLeft = captureRegion.X - _virtualScreenBounds.X;
+        var holeTop = captureRegion.Y - _virtualScreenBounds.Y;
+        var windowRegion = NativeMethods.CreateRectRgn(
+            0,
+            0,
+            _virtualScreenBounds.Width,
+            _virtualScreenBounds.Height);
+        var holeRegion = NativeMethods.CreateRectRgn(
+            holeLeft,
+            holeTop,
+            holeLeft + captureRegion.Width,
+            holeTop + captureRegion.Height);
+
+        try
+        {
+            if (windowRegion == IntPtr.Zero ||
+                holeRegion == IntPtr.Zero ||
+                NativeMethods.CombineRgn(
+                    windowRegion,
+                    windowRegion,
+                    holeRegion,
+                    RegionCombineDifference) == 0 ||
+                NativeMethods.SetWindowRgn(
+                    windowHandle,
+                    windowRegion,
+                    redraw: true) == 0)
+            {
+                return;
+            }
+
+            // SetWindowRgn transfers ownership of a successful region to the OS.
+            windowRegion = IntPtr.Zero;
+        }
+        finally
+        {
+            if (windowRegion != IntPtr.Zero)
+            {
+                _ = NativeMethods.DeleteObject(windowRegion);
+            }
+
+            if (holeRegion != IntPtr.Zero)
+            {
+                _ = NativeMethods.DeleteObject(holeRegion);
+            }
+        }
     }
 
     private IntPtr OnScrollCaptureWindowMessage(
@@ -2166,6 +2317,30 @@ public partial class CaptureOverlayWindow : Window
             int width,
             int height,
             uint flags);
+
+        [DllImport("gdi32.dll", SetLastError = true)]
+        public static extern IntPtr CreateRectRgn(
+            int left,
+            int top,
+            int right,
+            int bottom);
+
+        [DllImport("gdi32.dll", SetLastError = true)]
+        public static extern int CombineRgn(
+            IntPtr destinationRegion,
+            IntPtr sourceRegion1,
+            IntPtr sourceRegion2,
+            int combineMode);
+
+        [DllImport("gdi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool DeleteObject(IntPtr objectHandle);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern int SetWindowRgn(
+            IntPtr windowHandle,
+            IntPtr regionHandle,
+            [MarshalAs(UnmanagedType.Bool)] bool redraw);
 
 
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
