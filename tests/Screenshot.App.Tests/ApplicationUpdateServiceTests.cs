@@ -34,6 +34,33 @@ public sealed class ApplicationUpdateServiceTests
     }
 
     [Fact]
+    public async Task AcceptsSnapCutNamedAssetsAfterTheRename()
+    {
+        var package = Encoding.UTF8.GetBytes("package");
+        var manifest = CreateManifest("2.1.0", package)
+            .Replace("Screenshot-Setup-", "SnapCut-Setup-")
+            .Replace("Screenshot-Portable-", "SnapCut-Portable-");
+        using var client = new HttpClient(new StaticResponseHandler(
+            Encoding.UTF8.GetBytes(manifest),
+            "application/json"));
+        using var service = new ApplicationUpdateService(
+            client,
+            new Uri("https://github.com/update.json"),
+            CreateTemporaryPath());
+
+        var result = await service.CheckAsync(new Version(2, 0, 0, 0));
+
+        Assert.True(result.IsSuccess);
+        Assert.NotNull(result.AvailableUpdate);
+        Assert.Equal(
+            "SnapCut-Setup-2.1.0-win-x64.exe",
+            result.AvailableUpdate.Installer.FileName);
+        Assert.Equal(
+            "SnapCut-Portable-2.1.0-win-x64.zip",
+            result.AvailableUpdate.Portable.FileName);
+    }
+
+    [Fact]
     public async Task ReportsCurrentVersionAsUpToDate()
     {
         var package = Encoding.UTF8.GetBytes("package");
