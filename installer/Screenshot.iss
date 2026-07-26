@@ -2,8 +2,8 @@
   #define AppVersion "1.3.2"
 #endif
 
-#define AppName "Screenshot"
-#define AppExeName "Screenshot.exe"
+#define AppName "SnapCut"
+#define AppExeName "SnapCut.exe"
 #define AppId "{{1CFE5EF2-3645-4BA7-B96F-4DBDA9C3D2B5}"
 
 [Setup]
@@ -17,7 +17,7 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
 OutputDir=dist
-OutputBaseFilename=Screenshot-Setup-{#AppVersion}-win-x64
+OutputBaseFilename=SnapCut-Setup-{#AppVersion}-win-x64
 SetupIconFile=..\src\Screenshot.App\Assets\Screenshot.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 Compression=lzma2/ultra64
@@ -50,6 +50,14 @@ Name: "desktopicon"; Description: "在桌面创建快捷方式"; GroupDescriptio
 Source: "..\artifacts\publish\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "installed.marker"; DestDir: "{app}"; Flags: ignoreversion
 
+[InstallDelete]
+; 从旧版本 (Screenshot.exe) 升级时清理旧名产物，避免新旧两份程序并存。
+Type: files; Name: "{app}\Screenshot.exe"
+Type: files; Name: "{app}\Screenshot.dll"
+Type: files; Name: "{app}\Screenshot.pdb"
+Type: files; Name: "{app}\Screenshot.deps.json"
+Type: files; Name: "{app}\Screenshot.runtimeconfig.json"
+
 [Dirs]
 Name: "{app}\ScreenshotData"; Permissions: users-modify
 
@@ -58,18 +66,18 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#AppExeName}"; Description: "启动 Screenshot"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; Description: "启动 SnapCut"; Flags: nowait postinstall skipifsilent
 Filename: "{app}\{#AppExeName}"; Parameters: "--updated {#AppVersion} --cleanup-update-package ""{param:UPDATEPACKAGE|}"""; Flags: nowait skipifnotsilent; Check: IsUpdateMode
 
 [Code]
 procedure InitializeWizard;
 begin
-  WizardForm.Caption := '安装 Screenshot';
-  WizardForm.WelcomeLabel1.Caption := '安装 Screenshot';
+  WizardForm.Caption := '安装 SnapCut';
+  WizardForm.WelcomeLabel1.Caption := '安装 SnapCut';
   WizardForm.WelcomeLabel2.Caption :=
-    '此向导将安装 Screenshot。' + #13#10 + #13#10 +
+    '此向导将安装 SnapCut。' + #13#10 + #13#10 +
     '你可以在下一步选择安装位置。';
-  WizardForm.FinishedHeadingLabel.Caption := 'Screenshot 安装完成';
+  WizardForm.FinishedHeadingLabel.Caption := 'SnapCut 安装完成';
 end;
 
 function IsUpdateMode: Boolean;

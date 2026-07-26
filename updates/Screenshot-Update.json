@@ -1,18 +1,18 @@
-﻿{
-    "version":  "1.3.2",
+{
+    "version":  "2.0.0",
     "releasePage":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest",
     "installer":  {
-                      "fileName":  "Screenshot-Setup-1.3.2-win-x64.exe",
-                      "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.3.2-win-x64.exe",
-                      "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v1.3.2/Screenshot-Setup-1.3.2-win-x64.exe",
-                      "size":  52297656,
-                      "sha256":  "3596F123B9E32EA91E5067BCD87BB44FEB720578FCF067AF865BCAA773FBAA36"
+                      "fileName":  "SnapCut-Setup-2.0.0-win-x64.exe",
+                      "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.0.0-win-x64.exe",
+                      "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v2.0.0/SnapCut-Setup-2.0.0-win-x64.exe",
+                      "size":  52360558,
+                      "sha256":  "540B7E94CA5E2DC08EF0A8BF268E4F1C00E6A96AF7927D3C8D7EAC33BA1B7C38"
                   },
     "portable":  {
-                     "fileName":  "Screenshot-Portable-1.3.2-win-x64.zip",
-                     "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.3.2-win-x64.zip",
-                     "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v1.3.2/Screenshot-Portable-1.3.2-win-x64.zip",
-                     "size":  72019420,
-                     "sha256":  "D1B7439086A183EBB2FD5B3535BEEBDEB83B58F1CD6ACA8D07802F4CBF80EF24"
+                     "fileName":  "SnapCut-Portable-2.0.0-win-x64.zip",
+                     "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.0.0-win-x64.zip",
+                     "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v2.0.0/SnapCut-Portable-2.0.0-win-x64.zip",
+                     "size":  72074115,
+                     "sha256":  "F12E20193BB6886DE274158D30A10AF71FA63A3CF007BC2049F8E82B4FA76393"
                  }
 }

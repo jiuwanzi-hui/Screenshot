@@ -8,20 +8,23 @@ public sealed class EmojiStickerImage : System.Windows.Controls.Image
 {
     public static readonly DependencyProperty StickerProperty = DependencyProperty.Register(
         nameof(Sticker),
-        typeof(EmojiSticker),
+        typeof(string),
         typeof(EmojiStickerImage),
-        new PropertyMetadata(EmojiSticker.Smile, OnStickerChanged));
+        new PropertyMetadata(EmojiStickerCatalog.Default, OnStickerChanged));
 
     public EmojiStickerImage()
     {
         Stretch = Stretch.Uniform;
         IsHitTestVisible = false;
-        Source = EmojiStickerRenderer.GetImage(Sticker);
+        UseLayoutRounding = true;
+        RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.HighQuality);
+        SizeChanged += (_, _) => RefreshSource();
+        RefreshSource();
     }
 
-    public EmojiSticker Sticker
+    public string Sticker
     {
-        get => (EmojiSticker)GetValue(StickerProperty);
+        get => (string)GetValue(StickerProperty);
         set => SetValue(StickerProperty, value);
     }
 
@@ -30,9 +33,31 @@ public sealed class EmojiStickerImage : System.Windows.Controls.Image
         DependencyPropertyChangedEventArgs eventArgs)
     {
         if (dependencyObject is EmojiStickerImage image &&
-            eventArgs.NewValue is EmojiSticker sticker)
+            eventArgs.NewValue is string sticker &&
+            !string.IsNullOrWhiteSpace(sticker))
         {
-            image.Source = EmojiStickerRenderer.GetImage(sticker);
+            image.RefreshSource();
         }
+    }
+
+    /// <summary>
+    /// Requests a rasterization matched to the displayed size (with headroom
+    /// for display scaling) so small palette tiles stay as crisp as large
+    /// placed stickers.
+    /// </summary>
+    private void RefreshSource()
+    {
+        var referenceSize = double.IsNaN(Width) || Width <= 0
+            ? Math.Max(ActualWidth, ActualHeight)
+            : Width;
+
+        if (referenceSize <= 0)
+        {
+            referenceSize = 24;
+        }
+
+        Source = EmojiStickerRenderer.GetImage(
+            Sticker,
+            (int)Math.Ceiling(referenceSize * 2));
     }
 }

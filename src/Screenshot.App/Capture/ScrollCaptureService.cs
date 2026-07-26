@@ -17,10 +17,30 @@ public static class ScrollCaptureService
     // possible sample when the viewport has already stopped.
     private const int CompletionSettleMilliseconds = 120;
     private const int PreviewMaximumWidth = 260;
-    private const int PreviewMaximumHeight = 520;
-    private const int ActiveFrameQueueMaximumCapacity = 8;
-    private const long ActiveFrameQueueMemoryBudgetBytes = 64L * 1024 * 1024;
-    private const int CompletionTailFrameCount = 3;
+    // Tall enough that the whole-image preview keeps real detail while the
+    // preview window grows, bounded so each update stays a small bitmap.
+    private const int PreviewMaximumHeight = 1600;
+    // Sampling is far cheaper than matching, so a fling produces samples
+    // faster than the matcher can stitch them and a backlog builds up. The
+    // backlog must be deep enough to hold an entire fling: consecutive samples
+    // always overlap each other, but once decimation is forced to merge
+    // neighbors the chain gap doubles, and a gap beyond one viewport can never
+    // be matched again. A fling lasts one to two seconds and sampling is paced
+    // to the compositor, so roughly forty retained samples bridge the burst
+    // and let the chain drain losslessly once the motion stops.
+    private const int ActiveFrameQueueMaximumCapacity = 48;
+    private const long ActiveFrameQueueMemoryBudgetBytes = 96L * 1024 * 1024;
+    // The hand-off channel and the matcher backlog can both be full at once.
+    private const int ActiveFrameBufferCount = 2;
+    // Finishing has to feel quick, but a deep backlog after a final fling is
+    // real content the user scrolled past: at a few tens of milliseconds per
+    // chain step, this budget drains a full backlog rather than discarding it.
+    private const int CompletionDrainBudgetMilliseconds = 1200;
+    // Longest stretch backpressure may go without taking a sample. Bounds the
+    // scroll distance between retained samples when smooth-scroll inertia
+    // moves the screen without wheel input the travel estimate could see.
+    private static readonly TimeSpan MaximumSampleSkipWindow =
+        TimeSpan.FromMilliseconds(120);
 
     public static async Task<ScrollCaptureResult> CaptureOnWheelAsync(
         ScrollCaptureTarget target,
@@ -96,9 +116,12 @@ public static class ScrollCaptureService
             var nextSample = Task.Delay(
                 options.FrameDelayMilliseconds,
                 cancellationToken);
+            var activeFrameCapacity = GetActiveFrameQueueCapacity(
+                target.CaptureRegion);
+            var backpressureThreshold = Math.Max(4, activeFrameCapacity / 4);
+            var lastSampleTimestamp = 0L;
             activeFrameQueue = Channel.CreateBounded<QueuedScrollFrame>(
-                new BoundedChannelOptions(GetActiveFrameQueueCapacity(
-                    target.CaptureRegion))
+                new BoundedChannelOptions(activeFrameCapacity)
                 {
                     SingleReader = true,
                     SingleWriter = true,
@@ -118,6 +141,7 @@ public static class ScrollCaptureService
                 motionTracker,
                 frameQueueState,
                 diagnostics,
+                activeFrameCapacity,
                 cancellationToken);
 
             while (true)
@@ -151,7 +175,6 @@ public static class ScrollCaptureService
                         }
                     }
 
-                    frameQueueState.BeginCompletion();
                     activeFrameQueue.Writer.TryComplete();
                     await activeFrameProcessor;
                     activeFrameProcessor = null;
@@ -272,6 +295,34 @@ public static class ScrollCaptureService
                     continue;
                 }
 
+                // Backpressure: when the stitcher falls behind, sampling any
+                // faster only forces backlog decimation, and decimated gaps
+                // are what break the chain. Skipping the tick makes retained
+                // samples arrive at the stitching rate instead. The skip is
+                // bounded by travel, not just count: once the wheel says the
+                // viewport moved a quarter frame — or enough time has passed
+                // that smooth-scroll inertia could have — the sample must be
+                // taken anyway, because a gap beyond one viewport can never be
+                // matched no matter how deep the buffers are.
+                var estimatedPendingRows = motionTracker.GetExpectedRowsForDelta(
+                    target.CaptureRegion.Height,
+                    options,
+                    motionTracker.PendingDelta) ?? 0;
+                var mustSample =
+                    estimatedPendingRows >= target.CaptureRegion.Height / 4 ||
+                    lastSampleTimestamp == 0L ||
+                    Stopwatch.GetElapsedTime(lastSampleTimestamp) >=
+                        MaximumSampleSkipWindow;
+                if (!mustSample &&
+                    frameQueueState.PendingStitchCount >= backpressureThreshold)
+                {
+                    diagnostics.Record(
+                        "frame-sample-skipped-backpressure",
+                        ("pending", frameQueueState.PendingStitchCount));
+                    continue;
+                }
+
+                lastSampleTimestamp = Stopwatch.GetTimestamp();
                 await CaptureAndQueueFrameAsync(
                     target,
                     activeFrameQueue.Writer,
@@ -664,13 +715,15 @@ public static class ScrollCaptureService
         }
     }
 
-    private const int PreviewMinIntervalMilliseconds = 16;
+    // The preview now renders the whole stitched image per update, so pacing
+    // it like a video feed would burn memory bandwidth for no visible gain.
+    private const int PreviewMinIntervalMilliseconds = 120;
 
     private static int GetActiveFrameQueueCapacity(ScreenRegion region)
     {
         var frameBytes = Math.Max(
             1L,
-            (long)region.Width * region.Height * 4L);
+            (long)region.Width * region.Height * 4L * ActiveFrameBufferCount);
         return Math.Clamp(
             (int)(ActiveFrameQueueMemoryBudgetBytes / frameBytes),
             2,
@@ -760,42 +813,268 @@ public static class ScrollCaptureService
         ScrollWheelMotionTracker motionTracker,
         ActiveFrameQueueState queueState,
         ScrollCaptureDiagnostics diagnostics,
+        int backlogCapacity,
         CancellationToken cancellationToken)
     {
-        await foreach (var queuedFrame in reader.ReadAllAsync(cancellationToken))
+        var backlog = new List<QueuedScrollFrame>(backlogCapacity + 1);
+        var chainState = new BacklogChainState();
+        var drainDeadlineTimestamp = 0L;
+
+        try
         {
-            queueState.OnDequeued();
-            using (queuedFrame)
+            while (true)
             {
-                if (queueState.ShouldSkipOnCompletion(
-                        queuedFrame.Sequence,
-                        CompletionTailFrameCount))
+                // Top up between every chain step, not once per drained
+                // backlog: one match spans several sampling intervals, and a
+                // hand-off channel that stays full while a long backlog is
+                // processed rejects precisely the fresh samples the chain
+                // needs to stay connected to the viewport.
+                while (reader.TryRead(out var queuedFrame))
                 {
+                    queueState.OnDequeued();
+                    AddToBacklog(
+                        backlog,
+                        queuedFrame,
+                        backlogCapacity,
+                        chainState,
+                        motionTracker,
+                        options,
+                        queueState);
+                }
+
+                if (drainDeadlineTimestamp == 0L && reader.Completion.IsCompleted)
+                {
+                    // The sampler is done. Everything still pending is real
+                    // content the user scrolled past, so stitch it — bounded,
+                    // because finishing has to feel immediate.
+                    drainDeadlineTimestamp = Stopwatch.GetTimestamp() +
+                        (long)(Stopwatch.Frequency *
+                            (CompletionDrainBudgetMilliseconds / 1000d));
+                }
+
+                if (backlog.Count == 0)
+                {
+                    if (!await reader.WaitToReadAsync(cancellationToken))
+                    {
+                        return;
+                    }
+
                     continue;
                 }
 
-                if (composer.FrameCount >= options.MaximumFrames)
-                {
-                    continue;
-                }
-
-                await ProcessCapturedFrameForDirectionAsync(
-                    queuedFrame.Frame,
+                await ProcessNextBacklogFrameAsync(
+                    backlog,
+                    chainState,
                     composer,
                     options,
-                    queuedFrame.Motion,
                     previewChanged,
-                    forcePreview: false,
-                    previewTimestampSlot: previewTimestampSlot,
-                    preparedCache: preparedCache,
-                    motionTracker: motionTracker,
-                    prepareResult: queuedFrame.PrepareResult,
-                    diagnostics: diagnostics,
-                    queuedSequence: queuedFrame.Sequence,
-                    capturedTimestamp: queuedFrame.CapturedTimestamp,
-                    cancellationToken: cancellationToken);
+                    previewTimestampSlot,
+                    preparedCache,
+                    motionTracker,
+                    queueState,
+                    diagnostics,
+                    drainDeadlineTimestamp,
+                    cancellationToken);
             }
         }
+        finally
+        {
+            DisposeBacklog(backlog, backlog.Count, queueState);
+
+            // Cancellation can leave captures in the hand-off channel; release
+            // their bitmaps instead of waiting for a finalizer.
+            while (reader.TryRead(out var pendingFrame))
+            {
+                queueState.OnDequeued();
+                queueState.OnFrameRetired();
+                pendingFrame.Dispose();
+            }
+        }
+    }
+
+    private static void AddToBacklog(
+        List<QueuedScrollFrame> backlog,
+        QueuedScrollFrame queuedFrame,
+        int capacity,
+        BacklogChainState chainState,
+        ScrollWheelMotionTracker motionTracker,
+        ScrollCaptureOptions options,
+        ActiveFrameQueueState queueState)
+    {
+        if (chainState.CarriedMotion is { } carriedMotion)
+        {
+            // A previous sample was dropped without being located; its wheel
+            // motion rides on this one so the accumulated estimate still
+            // describes the displacement from the stitched anchor.
+            queuedFrame.Motion = motionTracker.MergeMotion(
+                carriedMotion,
+                queuedFrame.Motion,
+                queuedFrame.Frame.Height,
+                options);
+            chainState.CarriedMotion = null;
+        }
+
+        backlog.Add(queuedFrame);
+
+        while (backlog.Count > capacity && backlog.Count >= 3)
+        {
+            var index = ScrollFrameSelection.SelectDecimationIndex(backlog.Count);
+            var dropped = backlog[index];
+            var successor = backlog[index + 1];
+            // Fold the dropped sample's wheel motion into its successor so the
+            // accumulated estimate still describes the true displacement.
+            successor.Motion = motionTracker.MergeMotion(
+                dropped.Motion,
+                successor.Motion,
+                dropped.Frame.Height,
+                options);
+            backlog.RemoveAt(index);
+            queueState.OnDropped(dropped);
+            queueState.OnFrameRetired();
+            dropped.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Stitches the oldest pending viewport. The backlog is processed strictly
+    /// in capture order: consecutive samples are only a few frame intervals
+    /// apart, so each one still overlaps its predecessor even during the
+    /// fastest fling — walking that chain keeps the anchor glued to the
+    /// viewport through accelerations, smooth-scroll inertia and direction
+    /// reversals alike.
+    /// </summary>
+    /// <remarks>
+    /// Skipping ahead to the newest sample was tried and fails structurally: a
+    /// skipped-to sample must overlap the much older stitched content, and the
+    /// faster the scroll the smaller that overlap is, so one missed frame
+    /// snowballed into a permanently lost anchor. Wheel deltas cannot patch
+    /// that up either — smooth scrolling keeps the screen moving long after
+    /// the last wheel tick, so pending samples routinely carry no wheel
+    /// evidence at all.
+    /// </remarks>
+    private static async Task ProcessNextBacklogFrameAsync(
+        List<QueuedScrollFrame> backlog,
+        BacklogChainState chainState,
+        ScrollCaptureComposer composer,
+        ScrollCaptureOptions options,
+        Action<ScrollCapturePreviewState>? previewChanged,
+        long[] previewTimestampSlot,
+        PreparedCaptureCache preparedCache,
+        ScrollWheelMotionTracker motionTracker,
+        ActiveFrameQueueState queueState,
+        ScrollCaptureDiagnostics diagnostics,
+        long drainDeadlineTimestamp,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (composer.FrameCount >= options.MaximumFrames)
+        {
+            DisposeBacklog(backlog, backlog.Count, queueState);
+            return;
+        }
+
+        if (drainDeadlineTimestamp != 0L &&
+            Stopwatch.GetTimestamp() >= drainDeadlineTimestamp &&
+            backlog.Count > 1)
+        {
+            // Out of budget: keep only the freshest viewport so the final
+            // image still ends where the user stopped scrolling.
+            CarryBacklogMotion(
+                backlog,
+                backlog.Count - 1,
+                motionTracker,
+                options);
+            DisposeBacklog(backlog, backlog.Count - 1, queueState);
+        }
+
+        var queuedFrame = backlog[0];
+        var wasAdded = await ProcessCapturedFrameForDirectionAsync(
+            queuedFrame.Frame,
+            composer,
+            options,
+            queuedFrame.Motion,
+            previewChanged,
+            forcePreview: false,
+            previewTimestampSlot: previewTimestampSlot,
+            preparedCache: preparedCache,
+            motionTracker: motionTracker,
+            prepareResult: queuedFrame.PrepareResult,
+            diagnostics: diagnostics,
+            queuedSequence: queuedFrame.Sequence,
+            capturedTimestamp: queuedFrame.CapturedTimestamp,
+            cancellationToken: cancellationToken);
+
+        // Movement rows are set whenever the viewport was located, even
+        // when it only walked through content that is already stitched.
+        if (!wasAdded && composer.LastFrameMovementRows is null)
+        {
+            diagnostics.Record(
+                "frame-chain-miss",
+                ("sequence", queuedFrame.Sequence),
+                ("pending", backlog.Count),
+                ("outputHeight", composer.OutputHeight));
+
+            if (backlog.Count > 1)
+            {
+                // Transient artifact or a decimated-away gap: fold this
+                // sample's wheel motion into the next one and let that one
+                // try the same anchor.
+                CarryBacklogMotion(backlog, 1, motionTracker, options);
+            }
+            else
+            {
+                // Retrying the same pixels against the same anchor cannot
+                // turn out differently, so only the motion survives until
+                // the next capture arrives.
+                chainState.CarriedMotion = queuedFrame.Motion;
+            }
+        }
+
+        DisposeBacklog(backlog, 1, queueState);
+    }
+
+    private static void CarryBacklogMotion(
+        List<QueuedScrollFrame> backlog,
+        int count,
+        ScrollWheelMotionTracker motionTracker,
+        ScrollCaptureOptions options)
+    {
+        if (count <= 0 || count >= backlog.Count)
+        {
+            return;
+        }
+
+        var survivor = backlog[count];
+        var frameHeight = survivor.Frame.Height;
+        var motion = backlog[0].Motion;
+
+        for (var index = 1; index <= count; index++)
+        {
+            motion = motionTracker.MergeMotion(
+                motion,
+                backlog[index].Motion,
+                frameHeight,
+                options);
+        }
+
+        survivor.Motion = motion;
+    }
+
+    private static void DisposeBacklog(
+        List<QueuedScrollFrame> backlog,
+        int count,
+        ActiveFrameQueueState queueState)
+    {
+        var removed = Math.Clamp(count, 0, backlog.Count);
+
+        for (var index = 0; index < removed; index++)
+        {
+            backlog[index].Dispose();
+            queueState.OnFrameRetired();
+        }
+
+        backlog.RemoveRange(0, removed);
     }
 
     private static async Task<bool> ProcessCapturedFrameForDirectionAsync(
@@ -840,6 +1119,9 @@ public static class ScrollCaptureService
             ("confidence", overlapMatch?.Confidence),
             ("horizontalOffset", overlapMatch?.HorizontalOffset),
             ("movementRows", composer.LastFrameMovementRows),
+            ("reject", composer.LastRejectReason),
+            ("boundaryDrift", composer.LastBoundaryDriftRows),
+            ("boundaryConfidence", composer.LastBoundaryConfidence),
             ("frameCount", composer.FrameCount),
             ("outputHeight", composer.OutputHeight));
 
@@ -939,13 +1221,48 @@ public static class ScrollCaptureService
             cancellationToken);
     }
 
-    private sealed record QueuedScrollFrame(
-        Bitmap Frame,
-        ScrollWheelMotionSample Motion,
-        long Sequence,
-        long CapturedTimestamp,
-        bool PrepareResult) : IDisposable
+    /// <summary>
+    /// Chain-stitching state that outlives individual backlog rounds: the
+    /// wheel motion of samples that were dropped without being located, which
+    /// must ride on the next capture so the accumulated estimate keeps
+    /// describing the displacement from the stitched anchor.
+    /// </summary>
+    private sealed class BacklogChainState
     {
+        public ScrollWheelMotionSample? CarriedMotion { get; set; }
+    }
+
+    /// <summary>
+    /// One captured viewport waiting to be stitched. <see cref="Motion"/> is
+    /// mutable because merging two samples into one is how the pipeline keeps
+    /// the wheel estimate correct after it skips or decimates a sample.
+    /// </summary>
+    private sealed class QueuedScrollFrame : IDisposable
+    {
+        public QueuedScrollFrame(
+            Bitmap frame,
+            ScrollWheelMotionSample motion,
+            long sequence,
+            long capturedTimestamp,
+            bool prepareResult)
+        {
+            Frame = frame;
+            Motion = motion;
+            Sequence = sequence;
+            CapturedTimestamp = capturedTimestamp;
+            PrepareResult = prepareResult;
+        }
+
+        public Bitmap Frame { get; }
+
+        public ScrollWheelMotionSample Motion { get; set; }
+
+        public long Sequence { get; }
+
+        public long CapturedTimestamp { get; }
+
+        public bool PrepareResult { get; }
+
         public void Dispose() => Frame.Dispose();
     }
 
@@ -954,7 +1271,7 @@ public static class ScrollCaptureService
         private readonly ScrollCaptureDiagnostics _diagnostics;
         private long _latestSequence;
         private int _queueCount;
-        private int _isCompleting;
+        private int _pendingStitchCount;
 
         public ActiveFrameQueueState(ScrollCaptureDiagnostics diagnostics)
         {
@@ -965,16 +1282,22 @@ public static class ScrollCaptureService
 
         public int QueueCount => Math.Max(0, Volatile.Read(ref _queueCount));
 
+        /// <summary>
+        /// Captured viewports that have not been stitched or retired yet,
+        /// across both the hand-off channel and the matcher backlog. This is
+        /// the sampler's backpressure signal.
+        /// </summary>
+        public int PendingStitchCount =>
+            Math.Max(0, Volatile.Read(ref _pendingStitchCount));
+
         public long ReserveSequence() => Interlocked.Increment(
             ref _latestSequence);
 
-        public void BeginCompletion() => Volatile.Write(
-            ref _isCompleting,
-            1);
-
         public void OnEnqueued(QueuedScrollFrame frame)
         {
+            _ = frame;
             Interlocked.Increment(ref _queueCount);
+            Interlocked.Increment(ref _pendingStitchCount);
         }
 
         public void OnDequeued()
@@ -982,26 +1305,19 @@ public static class ScrollCaptureService
             Interlocked.Decrement(ref _queueCount);
         }
 
+        public void OnFrameRetired()
+        {
+            Interlocked.Decrement(ref _pendingStitchCount);
+        }
+
         public void OnDropped(QueuedScrollFrame frame)
         {
-            Interlocked.Decrement(ref _queueCount);
             _diagnostics.Record(
-                "frame-dropped",
+                "frame-decimated",
                 ("sequence", frame.Sequence),
                 ("direction", frame.Motion.Direction.ToString()),
                 ("queueAgeMs", Stopwatch.GetElapsedTime(
                     frame.CapturedTimestamp).TotalMilliseconds));
-        }
-
-        public bool ShouldSkipOnCompletion(long sequence, int tailFrameCount)
-        {
-            if (Volatile.Read(ref _isCompleting) == 0)
-            {
-                return false;
-            }
-
-            var latest = Volatile.Read(ref _latestSequence);
-            return sequence < latest - Math.Max(0, tailFrameCount - 1);
         }
     }
 

@@ -73,6 +73,67 @@ public sealed class ScrollWheelMotionTracker
         }
     }
 
+    /// <summary>
+    /// Converts an explicit wheel delta into an expected row displacement using
+    /// the calibration learned so far. The sampler needs this when several
+    /// captured viewports have to be summarized as a single motion, which
+    /// happens whenever fast scrolling forces intermediate samples to be
+    /// skipped or merged.
+    /// </summary>
+    public int? GetExpectedRowsForDelta(
+        int frameHeight,
+        ScrollCaptureOptions options,
+        int delta)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        lock (_syncRoot)
+        {
+            return GetExpectedRowsCore(frameHeight, options, delta);
+        }
+    }
+
+    /// <summary>
+    /// Combines two consecutive captured motions into the motion that spans
+    /// both. Dropping or skipping a sample without merging its wheel delta made
+    /// the next expected displacement far too small, which is what turned one
+    /// unmatched fast-scroll frame into a run of unmatched frames.
+    /// </summary>
+    public ScrollWheelMotionSample MergeMotion(
+        ScrollWheelMotionSample earlier,
+        ScrollWheelMotionSample later,
+        int frameHeight,
+        ScrollCaptureOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (earlier.Delta == 0)
+        {
+            return later;
+        }
+
+        if (later.Delta == 0)
+        {
+            return new ScrollWheelMotionSample(
+                earlier.Direction,
+                earlier.ExpectedRows,
+                earlier.Delta);
+        }
+
+        if (Math.Sign(earlier.Delta) != Math.Sign(later.Delta))
+        {
+            // A reversal is a new motion run. Keeping the older delta would
+            // cancel it out and hide the direction change.
+            return later;
+        }
+
+        var mergedDelta = earlier.Delta + later.Delta;
+        return new ScrollWheelMotionSample(
+            later.Direction,
+            GetExpectedRowsForDelta(frameHeight, options, mergedDelta),
+            mergedDelta);
+    }
+
     public ScrollWheelMotionSample TakePendingMotion(
         int frameHeight,
         ScrollCaptureOptions options,

@@ -245,21 +245,52 @@ public sealed class ImageEditorCanvasTests
                 documentField.GetValue(editor));
             document.Add(new EmojiAnnotation(
                 new WpfPoint(30, 24),
-                EmojiSticker.Smile,
+                EmojiStickerCatalog.Default,
                 28));
             rebuildMethod.Invoke(editor, null);
 
+            // Placed stickers rasterize at twice their font size for crispness.
+            var placedImage = EmojiStickerRenderer.GetImage(
+                EmojiStickerCatalog.Default,
+                56);
             Assert.Contains(
                 editor.Children.OfType<System.Windows.Controls.Image>(),
-                sticker => sticker.Source == EmojiStickerRenderer.GetImage(
-                    EmojiSticker.Smile));
+                sticker => sticker.Source == placedImage);
             Assert.True(editor.CanUndo);
             editor.Undo();
             Assert.DoesNotContain(
                 editor.Children.OfType<System.Windows.Controls.Image>(),
-                sticker => sticker.Source == EmojiStickerRenderer.GetImage(
-                    EmojiSticker.Smile));
+                sticker => sticker.Source == placedImage);
         });
+    }
+
+    [Fact]
+    public void TaperedArrowSurvivesEveryDragLength()
+    {
+        // Regression: while an arrow drag is still short, the length-derived
+        // head maximum sits below the preferred head minimum. The original
+        // Math.Clamp call threw on that inverted range and took the whole
+        // application down on the first mouse move.
+        var method = typeof(ImageEditorCanvas).GetMethod(
+            "CreateTaperedArrowPoints",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        foreach (var strokeWidth in new[] { 1.0, 3.0, 8.0, 24.0 })
+        {
+            for (var length = 0; length <= 120; length++)
+            {
+                var points = Assert.IsType<System.Windows.Media.PointCollection>(
+                    method.Invoke(
+                        null,
+                        [
+                            new WpfPoint(50, 50),
+                            new WpfPoint(50 + length, 50),
+                            strokeWidth,
+                        ]));
+                Assert.True(points.Count >= 2);
+            }
+        }
     }
 
     [Fact]
@@ -267,7 +298,7 @@ public sealed class ImageEditorCanvasTests
     {
         WpfTestHost.Invoke(() =>
         {
-            foreach (var sticker in Enum.GetValues<EmojiSticker>())
+            foreach (var sticker in EmojiStickerCatalog.All)
             {
                 var image = Assert.IsAssignableFrom<WpfBitmapSource>(
                     EmojiStickerRenderer.GetImage(sticker));

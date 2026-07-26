@@ -191,6 +191,30 @@ public static class PortableUpdateRunner
                 Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
                 File.Copy(sourcePath, destinationPath, overwrite: true);
             }
+
+            // The application used to ship as Screenshot.exe. When updating a
+            // directory that still holds the old-name binaries, remove them so
+            // the folder does not keep a runnable stale copy.
+            foreach (var legacyFileName in new[]
+                     {
+                         "Screenshot.exe",
+                         "Screenshot.dll",
+                         "Screenshot.pdb",
+                         "Screenshot.deps.json",
+                         "Screenshot.runtimeconfig.json",
+                     })
+            {
+                try
+                {
+                    File.Delete(Path.Combine(targetDirectory, legacyFileName));
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
         }
         finally
         {
@@ -216,7 +240,7 @@ public static class PortableUpdateRunner
         if (!packagePath.StartsWith(updatesDirectory, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(
                 restartPath,
-                Path.Combine(targetDirectory, "Screenshot.exe"),
+                Path.Combine(targetDirectory, "SnapCut.exe"),
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException("更新路径未通过安全检查。");

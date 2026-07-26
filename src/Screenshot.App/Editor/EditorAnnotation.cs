@@ -30,7 +30,7 @@ public sealed record TextAnnotation(
 
 public sealed record EmojiAnnotation(
     WpfPoint Position,
-    EmojiSticker Sticker,
+    string Sticker,
     double FontSize) : EditorAnnotation;
 
 public sealed record TranslatedTextAnnotationRegion(

@@ -4,8 +4,8 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
-        Icon="/Screenshot;component/Assets/Screenshot.ico"
-        Title="Screenshot"
+        Icon="/SnapCut;component/Assets/Screenshot.ico"
+        Title="SnapCut"
         Width="760"
         Height="560"
         MinWidth="500"
@@ -61,7 +61,7 @@
                        VerticalAlignment="Center"
                        FontWeight="SemiBold"
                        Foreground="{DynamicResource AppControlForegroundBrush}"
-                       Text="Screenshot" />
+                       Text="SnapCut" />
             <StackPanel DockPanel.Dock="Right"
                         Margin="0,0,8,0"
                         VerticalAlignment="Center"

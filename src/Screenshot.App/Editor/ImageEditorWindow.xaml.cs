@@ -34,6 +34,7 @@ public partial class ImageEditorWindow : Window
         _saveDirectory = saveDirectory;
 
         InitializeComponent();
+        PopulateEmojiPalette();
         EditorCanvas.HistoryChanged += OnEditorHistoryChanged;
 
         EditorCanvas.Visibility = Visibility.Hidden;
@@ -48,6 +49,7 @@ public partial class ImageEditorWindow : Window
         EditorCanvas.HistoryChanged -= OnEditorHistoryChanged;
         _capturedImage.Dispose();
         base.OnClosed(e);
+        Core.MemoryFootprint.TrimAfterHeavyOperation();
     }
 
     private void OnEditorLoaded(object sender, RoutedEventArgs e)
@@ -78,6 +80,11 @@ public partial class ImageEditorWindow : Window
         StatusText.Text = "可以开始编辑。";
         UpdateEditorViewportSize();
         UpdateUndoRedoAvailability();
+        // Loading a tall capture materializes transient decode and conversion
+        // copies; return them so an open editor only holds its live surfaces.
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.ApplicationIdle,
+            Core.MemoryFootprint.TrimAfterHeavyOperation);
     }
 
     private void OnEditorHistoryChanged(object? sender, EventArgs e)
@@ -92,11 +99,56 @@ public partial class ImageEditorWindow : Window
         {
             _selectedTool = tool;
             UpdateStrokeWidthText();
+
+            if (EmojiPaletteScroll is not null && StrokeOptionsPanel is not null)
+            {
+                var isEmoji = tool == EditorTool.Emoji;
+                EmojiPaletteScroll.Visibility = isEmoji
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+                StrokeOptionsPanel.Visibility = isEmoji
+                    ? Visibility.Collapsed
+                    : Visibility.Visible;
+            }
+
             if (_isInitialized)
             {
                 EditorCanvas.SelectTool(tool);
             }
         }
+    }
+
+    private void PopulateEmojiPalette()
+    {
+        foreach (var emoji in EmojiStickerCatalog.All)
+        {
+            var button = new WpfButton
+            {
+                Tag = emoji,
+                ToolTip = emoji,
+                Style = (Style)FindResource("GlassButton"),
+                Content = new EmojiStickerImage
+                {
+                    Width = 23,
+                    Height = 23,
+                    Sticker = emoji,
+                },
+            };
+            button.Click += OnEmojiClick;
+            EmojiPalettePanel.Children.Add(button);
+        }
+    }
+
+    private void OnEmojiClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not WpfButton { Tag: string sticker } ||
+            string.IsNullOrWhiteSpace(sticker))
+        {
+            return;
+        }
+
+        EditorCanvas.SelectEmoji(sticker);
+        EmojiToolButton.IsChecked = true;
     }
 
     private void OnColorClick(object sender, RoutedEventArgs e)

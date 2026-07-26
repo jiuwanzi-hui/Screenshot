@@ -193,6 +193,15 @@ public static class ForegroundWindowCaptureService
 
         try
         {
+            // A BitBlt that races the compositor can span a refresh and return
+            // a frame whose upper and lower halves sit at different scroll
+            // positions. Such a torn frame matches nothing: the band-agreement
+            // rule rejects every candidate, and during a fast scroll a run of
+            // torn frames is what lets the viewport escape the matchable
+            // range. Waiting for the composition pass aligns the copy with a
+            // stable desktop image; it also naturally paces sampling to the
+            // refresh rate, which is as fast as new content can appear anyway.
+            _ = NativeMethods.DwmFlush();
             using var graphics = Graphics.FromImage(bitmap);
             graphics.CopyFromScreen(region.X, region.Y, 0, 0, bitmap.Size);
             return bitmap;
@@ -527,6 +536,9 @@ public static class ForegroundWindowCaptureService
 
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
+
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmFlush();
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

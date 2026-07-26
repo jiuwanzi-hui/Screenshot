@@ -28,6 +28,9 @@ public partial class ScrollCaptureProgressWindow : Window
     private bool _cancelAfterRightButtonUp;
     private ScrollCapturePreviewState? _pendingPreviewState;
     private int _previewUpdateScheduled;
+    private double _maximumHeightDip;
+    private double _workAreaTopDip;
+    private double _workAreaBottomDip;
 
     public ScrollCaptureProgressWindow()
     {
@@ -45,17 +48,21 @@ public partial class ScrollCaptureProgressWindow : Window
         var monitorBounds = GetMonitorWorkArea(captureRegion);
         var maximumHeight = Math.Max(
             280,
-            Math.Min(640, monitorBounds.Height - (PositionGap * 2)));
+            monitorBounds.Height - (PositionGap * 2));
         var physicalHeight = Math.Clamp(
             captureRegion.Height,
             280,
-            maximumHeight);
+            Math.Min(640, maximumHeight));
         var physicalWidth = GetPreviewPhysicalWidth(
             captureRegion,
             monitorBounds);
         var dpi = VisualTreeHelper.GetDpi(this);
         Width = physicalWidth / dpi.DpiScaleX;
         Height = physicalHeight / dpi.DpiScaleY;
+        _maximumHeightDip = maximumHeight / dpi.DpiScaleY;
+        _workAreaTopDip = monitorBounds.Y / dpi.DpiScaleY;
+        _workAreaBottomDip =
+            (monitorBounds.Y + monitorBounds.Height) / dpi.DpiScaleY;
         UpdateLayout();
     }
 
@@ -67,6 +74,45 @@ public partial class ScrollCaptureProgressWindow : Window
             $"{previewState.FrameCount} 帧 · 上 {previewState.AddedAboveFrameCount} · " +
             $"下 {previewState.AddedBelowFrameCount} · " +
             $"{previewState.PixelWidth}×{previewState.PixelHeight}";
+        GrowToFitPreview(previewState);
+    }
+
+    /// <summary>
+    /// Grows the window toward the work-area height as the stitched image
+    /// gets taller, so the whole-image preview keeps as much width as the
+    /// screen allows instead of shrinking inside a selection-sized pane.
+    /// Grow-only: shrinking mid-capture would make the window jitter.
+    /// </summary>
+    private void GrowToFitPreview(ScrollCapturePreviewState previewState)
+    {
+        if (previewState.PixelWidth <= 0 ||
+            previewState.PixelHeight <= 0 ||
+            _maximumHeightDip <= 0)
+        {
+            return;
+        }
+
+        // Header row (58) + action row (54) + image margins and border.
+        const double ChromeHeight = 58 + 54 + 16;
+        var imagePaneWidth = Math.Max(80, ActualWidth - 36);
+        var aspect = previewState.PixelHeight / (double)previewState.PixelWidth;
+        var desiredHeight = Math.Clamp(
+            (imagePaneWidth * aspect) + ChromeHeight,
+            ActualHeight,
+            _maximumHeightDip);
+
+        if (desiredHeight <= ActualHeight + 4)
+        {
+            return;
+        }
+
+        Height = desiredHeight;
+
+        if (_workAreaBottomDip > _workAreaTopDip)
+        {
+            var maximumTop = _workAreaBottomDip - desiredHeight;
+            Top = Math.Max(_workAreaTopDip, Math.Min(Top, maximumTop));
+        }
     }
 
     public void QueuePreview(ScrollCapturePreviewState previewState)

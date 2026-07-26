@@ -165,6 +165,10 @@ public partial class MainWindow : Window, IDisposable
         {
             e.Cancel = true;
             Hide();
+            // Entering tray residency is the moment the footprint matters.
+            _ = Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                Core.MemoryFootprint.TrimAfterHeavyOperation);
         }
         else if (ApplicationClosePolicy.ShouldExitApplication(
                      _exitRequested,

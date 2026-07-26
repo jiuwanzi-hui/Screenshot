@@ -8,13 +8,22 @@ public sealed record ImageOverlapMatch(int OverlapRows, double Confidence, int H
 
 public static class ImageOverlapMatcher
 {
+    /// <param name="preferredNeighborhoodOnly">
+    /// Restricts the search to the temporal fast path around
+    /// <paramref name="preferredNewRows"/> and returns null instead of falling
+    /// back to the global search. Callers that only need to confirm or refute
+    /// a displacement they already predict — the opposite-direction probe and
+    /// the consistency verifications — use this to avoid paying the full
+    /// global cost for an answer the neighborhood already decides.
+    /// </param>
     public static ImageOverlapMatch? FindVerticalOverlap(
         Bitmap previousFrame,
         Bitmap currentFrame,
         int minimumOverlapRows,
         double minimumConfidence,
         int minimumNewRows = 0,
-        int? preferredNewRows = null)
+        int? preferredNewRows = null,
+        bool preferredNeighborhoodOnly = false)
     {
         ArgumentNullException.ThrowIfNull(previousFrame);
         ArgumentNullException.ThrowIfNull(currentFrame);
@@ -49,6 +58,11 @@ public static class ImageOverlapMatcher
             preferredNewRows = null;
         }
 
+        if (preferredNeighborhoodOnly && preferredNewRows is null)
+        {
+            return null;
+        }
+
         var previousPixels = PixelBuffer.Create(previousFrame);
         var currentPixels = PixelBuffer.Create(currentFrame);
         // Keep line numbers and chat avatars on the left; ignore only the
@@ -69,6 +83,19 @@ public static class ImageOverlapMatcher
             previousFrame.Height >= 120 ? previousFrame.Height / 5 : 0,
         }.Distinct().ToArray();
 
+        // Row profiles rank every displacement cheaply and both the temporal and
+        // the global stage need them. Building them once keeps a missed fast
+        // path from paying for the same scan twice, which matters because a
+        // fast scroll misses the fast path on almost every frame.
+        var previousProfiles = BuildRowProfiles(
+            previousPixels,
+            ignoredLeft,
+            comparisonRight);
+        var currentProfiles = BuildRowProfiles(
+            currentPixels,
+            ignoredLeft,
+            comparisonRight);
+
         // Stage 0: WeChat-style temporal strip search. Continuous scrolling keeps
         // nearly the same displacement frame-to-frame; resolve that neighborhood
         // first so the interactive path stays inside a single frame budget.
@@ -77,6 +104,8 @@ public static class ImageOverlapMatcher
             var fastMatch = TryTemporalFastPath(
                 previousPixels,
                 currentPixels,
+                previousProfiles,
+                currentProfiles,
                 preferredSeed,
                 ignoredLeft,
                 comparisonRight,
@@ -102,6 +131,8 @@ public static class ImageOverlapMatcher
                 var fallbackMatch = TryTemporalFastPath(
                     previousPixels,
                     currentPixels,
+                    previousProfiles,
+                    currentProfiles,
                     fallbackSeed,
                     ignoredLeft,
                     comparisonRight,
@@ -122,6 +153,11 @@ public static class ImageOverlapMatcher
                 }
             }
 
+            if (preferredNeighborhoodOnly)
+            {
+                return fastMatch;
+            }
+
             // A moderate local peak is useful as a ranking hint, but repeated
             // code can produce one near the previous displacement when the
             // user abruptly changes scroll speed. Only a strong temporal peak
@@ -135,14 +171,6 @@ public static class ImageOverlapMatcher
         // Stage 1: row-profile correlation ranks every displacement quickly.
         // This is closer to commercial long-screenshot strip matching and avoids
         // missing the true peak when sparse coarse sampling hits a flat region.
-        var previousProfiles = BuildRowProfiles(
-            previousPixels,
-            ignoredLeft,
-            comparisonRight);
-        var currentProfiles = BuildRowProfiles(
-            currentPixels,
-            ignoredLeft,
-            comparisonRight);
         var profileCandidates = new List<OverlapCandidate>(
             maximumNewRows - minimumNewRows + 1);
 
@@ -163,6 +191,27 @@ public static class ImageOverlapMatcher
         }
 
         if (profileCandidates.Count == 0)
+        {
+            return null;
+        }
+
+        // A frame that agrees with the previous one nowhere — a torn capture
+        // whose halves sit at different scroll positions, a popup, a mid-paint
+        // smear — still paid for every dense probe below, and during a fast
+        // scroll such frames arrive in runs. When even the best row-profile
+        // alignment sits far below the acceptance confidence, no dense probe
+        // can rescue it; failing fast here lets the next clean sample get its
+        // attempt several times sooner, which is what keeps the anchor within
+        // matchable range of the viewport.
+        var bestProfileScore = 0d;
+        foreach (var profileCandidate in profileCandidates)
+        {
+            bestProfileScore = Math.Max(
+                bestProfileScore,
+                profileCandidate.Confidence);
+        }
+
+        if (bestProfileScore < minimumConfidence - ProfileFailFastMargin)
         {
             return null;
         }
@@ -265,7 +314,16 @@ public static class ImageOverlapMatcher
     private const int MaximumDenseCandidates = 12;
     private const int MinimumTemporalNeighborhoodRadius = 12;
     private const int MaximumTemporalNeighborhoodRadius = 96;
+    // Widest neighborhood the temporal fast path will rank. It only bounds the
+    // cheap row-profile scan, so a large window costs very little, while a
+    // narrow one forced every accelerating frame into the full global search.
+    private const int MaximumTemporalScanRadius = 720;
     private const int LocalRefineRadius = 2;
+    // How far below the acceptance confidence the best row-profile score may
+    // sit before the global stage gives up without dense probing. Real matches
+    // keep profile scores close to their dense confidence; only frames with no
+    // consistent alignment anywhere fall this far.
+    private const double ProfileFailFastMargin = 0.06;
     // Expand dense probes around only the strongest profile peaks. Expanding
     // every top-N peak by ±radius explodes cost on large frames (interactive
     // budget tests target <1s); a few seeds still recover peaks that rank a
@@ -282,6 +340,8 @@ public static class ImageOverlapMatcher
     private static ImageOverlapMatch? TryTemporalFastPath(
         PixelBuffer previousPixels,
         PixelBuffer currentPixels,
+        RowProfile[] previousProfiles,
+        RowProfile[] currentProfiles,
         int preferredNewRows,
         int comparisonLeft,
         int comparisonRight,
@@ -293,7 +353,7 @@ public static class ImageOverlapMatcher
         double minimumConfidence,
         int frameHeight)
     {
-        var radius = GetTemporalNeighborhoodRadius(preferredNewRows);
+        var radius = GetTemporalScanRadius(preferredNewRows);
         var from = Math.Max(minimumNewRows, preferredNewRows - radius);
         var to = Math.Min(maximumNewRows, preferredNewRows + radius);
         if (to < from)
@@ -377,14 +437,6 @@ public static class ImageOverlapMatcher
         // pixel scoring every possible displacement made one match slower than a
         // display refresh, which caused the sampler to skip the intermediate
         // viewports that make fast scrolling stitchable.
-        var previousProfiles = BuildRowProfiles(
-            previousPixels,
-            comparisonLeft,
-            comparisonRight);
-        var currentProfiles = BuildRowProfiles(
-            currentPixels,
-            comparisonLeft,
-            comparisonRight);
         var temporalProfiles = new List<OverlapCandidate>(to - from + 1);
         for (var newRows = from; newRows <= to; newRows++)
         {
@@ -925,6 +977,39 @@ public static class ImageOverlapMatcher
             radius,
             MinimumTemporalNeighborhoodRadius,
             MaximumTemporalNeighborhoodRadius);
+    }
+
+    /// <summary>
+    /// Neighborhood the temporal fast path ranks around the previous
+    /// displacement. It is deliberately much wider than
+    /// <see cref="GetTemporalNeighborhoodRadius"/>, which still governs how
+    /// strongly a nearby candidate is preferred.
+    /// </summary>
+    /// <remarks>
+    /// A fling accelerates from a few pixels per frame to several hundred, so
+    /// two consecutive samples routinely differ by far more than the ±96 row
+    /// preference window. Ranking only that window meant every frame of a fast
+    /// scroll missed the fast path and paid for the full global search, which
+    /// is several times slower — so the sampler fell further behind on each
+    /// frame until the remaining displacement exceeded one viewport and the
+    /// stitch stopped growing. Widening only the scan keeps those frames on the
+    /// cheap path without loosening any acceptance rule.
+    /// <para>
+    /// Twice the previous displacement covers real steps up to three times the
+    /// estimate, which spans the whole acceleration phase of a fling. Measured
+    /// on a 1200x900 viewport, that takes a 420-row step with a 150-row prior
+    /// from 401 scored alignments down to 80, and a 700-row step with a 260-row
+    /// prior from 464 down to 80 — the same cost as an ordinary steady scroll —
+    /// while resolving the identical displacement.
+    /// </para>
+    /// </remarks>
+    private static int GetTemporalScanRadius(int preferredNewRows)
+    {
+        var preferred = Math.Max(0, preferredNewRows);
+        return Math.Clamp(
+            Math.Max(MinimumTemporalNeighborhoodRadius, preferred * 2),
+            MinimumTemporalNeighborhoodRadius,
+            MaximumTemporalScanRadius);
     }
 
     private static OverlapCandidate RefineAroundCandidate(

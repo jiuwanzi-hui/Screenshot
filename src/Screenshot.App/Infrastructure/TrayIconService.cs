@@ -52,7 +52,7 @@ public sealed class TrayIconService : IDisposable
         {
             ContextMenuStrip = _contextMenu,
             Icon = LoadApplicationIcon(),
-            Text = AppMetadata.ApplicationName,
+            Text = AppMetadata.DisplayName,
             Visible = false,
         };
         _notifyIcon.DoubleClick += OnTrayIconDoubleClick;

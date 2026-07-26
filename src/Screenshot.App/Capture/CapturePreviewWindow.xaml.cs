@@ -74,6 +74,7 @@ public partial class CapturePreviewWindow : Window
     {
         _capturedImage.Dispose();
         base.OnClosed(e);
+        Core.MemoryFootprint.TrimAfterHeavyOperation();
     }
 
     private async void OnCopyClick(object sender, RoutedEventArgs e)

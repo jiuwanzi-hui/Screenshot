@@ -10,7 +10,7 @@
         Focusable="True"
         FontFamily="Microsoft YaHei UI"
         ShowInTaskbar="False"
-        Title="Screenshot Capture"
+        Title="SnapCut Capture"
         Topmost="True"
         WindowStyle="None">
     <Window.Resources>
@@ -377,7 +377,7 @@
                                      Style="{StaticResource InlineToolButton}"
                                      Tag="Emoji"
                                      ToolTip="表情">
-                            <editor:EmojiStickerImage Width="21" Height="21" Sticker="Smile" />
+                            <editor:EmojiStickerImage Width="21" Height="21" Sticker="😊" />
                         </RadioButton>
                         <RadioButton GroupName="InlineEditorTool"
                                      Checked="OnInlineEditorToolSelected"
@@ -519,46 +519,16 @@
                                 Margin="0,6,0,0"
                                 Orientation="Horizontal"
                                 Visibility="Collapsed">
-                        <StackPanel x:Name="InlineEmojiPalette"
-                                    Orientation="Horizontal"
-                                    Visibility="Collapsed">
-                            <Button Tag="Smile" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="笑脸">
-                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Smile" />
-                            </Button>
-                            <Button Tag="Laugh" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="笑哭">
-                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Laugh" />
-                            </Button>
-                            <Button Tag="Wink" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="眨眼">
-                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Wink" />
-                            </Button>
-                            <Button Tag="Love" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="喜欢">
-                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Love" />
-                            </Button>
-                            <Button Tag="Cool" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="墨镜">
-                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Cool" />
-                            </Button>
-                            <Button Tag="Cry" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="哭泣">
-                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Cry" />
-                            </Button>
-                            <Button Tag="Angry" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="生气">
-                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Angry" />
-                            </Button>
-                            <Button Tag="Surprised" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="惊讶">
-                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Surprised" />
-                            </Button>
-                            <Button Tag="ThumbsUp" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="赞">
-                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="ThumbsUp" />
-                            </Button>
-                            <Button Tag="Heart" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="爱心">
-                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Heart" />
-                            </Button>
-                            <Button Tag="Party" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="庆祝">
-                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Party" />
-                            </Button>
-                            <Button Tag="Star" Click="OnInlineEmojiClick" Style="{StaticResource InlineEmojiButton}" ToolTip="星星">
-                                <editor:EmojiStickerImage Width="23" Height="23" Sticker="Star" />
-                            </Button>
-                        </StackPanel>
+                        <ScrollViewer x:Name="InlineEmojiPalette"
+                                      MaxHeight="94"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      VerticalScrollBarVisibility="Auto"
+                                      Visibility="Collapsed">
+                            <!-- Populated from EmojiStickerCatalog in code-behind:
+                                 real system color emoji, far livelier than the
+                                 previous twelve hand-drawn faces. -->
+                            <WrapPanel x:Name="InlineEmojiPanel" MaxWidth="392" />
+                        </ScrollViewer>
 
                         <StackPanel x:Name="InlineStrokeOptions" Orientation="Horizontal">
                         <Button x:Name="InlineRedColorButton"

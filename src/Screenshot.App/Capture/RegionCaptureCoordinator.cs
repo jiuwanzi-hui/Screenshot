@@ -129,6 +129,9 @@ public sealed class RegionCaptureCoordinator
     private void OnInteractiveCaptureClosed()
     {
         _isCaptureInProgress = false;
+        // The overlay held a frozen full-desktop snapshot plus the capture
+        // bitmaps; return that memory now so the tray idle stays small.
+        Core.MemoryFootprint.TrimAfterHeavyOperation();
     }
 
     public Task RequestScrollCaptureAsync()
@@ -454,6 +457,7 @@ public sealed class RegionCaptureCoordinator
         finally
         {
             _isCaptureInProgress = false;
+            Core.MemoryFootprint.TrimAfterHeavyOperation();
         }
     }
 
@@ -495,6 +499,7 @@ public sealed class RegionCaptureCoordinator
         finally
         {
             _isCaptureInProgress = false;
+            Core.MemoryFootprint.TrimAfterHeavyOperation();
         }
     }
 

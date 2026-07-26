@@ -63,7 +63,7 @@ public static class ApplicationUpdateLauncher
         Directory.CreateDirectory(AppMetadata.UpdatesDirectoryPath);
         var runnerPath = Path.Combine(
             AppMetadata.UpdatesDirectoryPath,
-            $"Screenshot.UpdateRunner-{Guid.NewGuid():N}.exe");
+            $"SnapCut.UpdateRunner-{Guid.NewGuid():N}.exe");
         try
         {
             using (var archive = ZipFile.OpenRead(packagePath))
@@ -71,11 +71,11 @@ public static class ApplicationUpdateLauncher
                 var executable = archive.Entries.SingleOrDefault(entry =>
                     string.Equals(
                         entry.FullName.Replace('\\', '/'),
-                        "Screenshot.exe",
+                        "SnapCut.exe",
                         StringComparison.OrdinalIgnoreCase));
                 if (executable is null || executable.Length <= 0)
                 {
-                    throw new InvalidDataException("免安装更新包中缺少 Screenshot.exe。");
+                    throw new InvalidDataException("免安装更新包中缺少 SnapCut.exe。");
                 }
 
                 executable.ExtractToFile(runnerPath, overwrite: true);

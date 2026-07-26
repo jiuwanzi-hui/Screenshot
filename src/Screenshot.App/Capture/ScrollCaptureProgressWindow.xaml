@@ -52,6 +52,10 @@
                     Background="#B51B3037"
                     BorderBrush="#4F738789"
                     BorderThickness="1">
+                <!-- The preview is a global map of the whole stitched image.
+                     The window grows toward the work-area height as the image
+                     grows, so the Uniform fit stays as wide and readable as
+                     the screen allows. -->
                 <Image x:Name="PreviewImage"
                        Margin="6"
                        HorizontalAlignment="Center"

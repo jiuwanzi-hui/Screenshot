@@ -50,9 +50,13 @@ public sealed class CaptureOverlayWindowTests
                 var snapOutline = Assert.IsType<System.Windows.Shapes.Rectangle>(
                     overlay.FindName("WindowSnapRectangle"));
                 Assert.False(snapOutline.IsHitTestVisible);
-                var emojiPalette = Assert.IsType<StackPanel>(
+                _ = Assert.IsType<ScrollViewer>(
                     overlay.FindName("InlineEmojiPalette"));
-                Assert.Equal(12, emojiPalette.Children.Count);
+                var emojiPanel = Assert.IsType<WrapPanel>(
+                    overlay.FindName("InlineEmojiPanel"));
+                Assert.Equal(
+                    EmojiStickerCatalog.All.Count,
+                    emojiPanel.Children.Count);
 
                 var undoButton = Assert.IsType<Button>(
                     overlay.FindName("InlineUndoButton"));
