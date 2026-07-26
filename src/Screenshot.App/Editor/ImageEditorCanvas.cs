@@ -25,7 +25,7 @@ public sealed class ImageEditorCanvas : Canvas
     private EditorDocument _document = new();
     private EditorTool _selectedTool = EditorTool.Rectangle;
     private WpfColor _selectedColor = WpfColor.FromRgb(214, 69, 69);
-    private EmojiSticker _selectedEmoji = EmojiSticker.Smile;
+    private string _selectedEmoji = EmojiStickerCatalog.Default;
     private double _strokeWidth = 3;
     private WpfPoint _drawingStartPoint;
     private List<WpfPoint>? _brushPoints;
@@ -163,8 +163,9 @@ public sealed class ImageEditorCanvas : Canvas
         _selectedColor = color;
     }
 
-    public void SelectEmoji(EmojiSticker emoji)
+    public void SelectEmoji(string emoji)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(emoji);
         _selectedEmoji = emoji;
     }
 
@@ -398,7 +399,7 @@ public sealed class ImageEditorCanvas : Canvas
                 UpdateRectanglePreview((WpfRectangle)_drawingPreview, point);
                 break;
             case EditorTool.Arrow:
-                UpdateArrowPreview((Line)_drawingPreview, point);
+                UpdateArrowPreview((Polygon)_drawingPreview, point);
                 break;
             case EditorTool.Brush:
             case EditorTool.Mosaic:
@@ -440,16 +441,10 @@ public sealed class ImageEditorCanvas : Canvas
                 StrokeThickness = _strokeWidth,
                 Fill = WpfBrushes.Transparent,
             },
-            EditorTool.Arrow => new Line
+            EditorTool.Arrow => new Polygon
             {
-                X1 = point.X,
-                Y1 = point.Y,
-                X2 = point.X,
-                Y2 = point.Y,
-                Stroke = new SolidColorBrush(_selectedColor),
-                StrokeThickness = _strokeWidth,
-                StrokeStartLineCap = PenLineCap.Round,
-                StrokeEndLineCap = PenLineCap.Round,
+                Fill = new SolidColorBrush(_selectedColor),
+                Points = CreateTaperedArrowPoints(point, point, _strokeWidth),
             },
             EditorTool.Brush => CreateBrushPreview(point),
             EditorTool.Mosaic => CreateMosaicBrushPreview(point),
@@ -503,10 +498,12 @@ public sealed class ImageEditorCanvas : Canvas
         rectangle.Height = bounds.Height;
     }
 
-    private static void UpdateArrowPreview(Line line, WpfPoint currentPoint)
+    private void UpdateArrowPreview(Polygon polygon, WpfPoint currentPoint)
     {
-        line.X2 = currentPoint.X;
-        line.Y2 = currentPoint.Y;
+        polygon.Points = CreateTaperedArrowPoints(
+            _drawingStartPoint,
+            currentPoint,
+            _strokeWidth);
     }
 
     private void UpdateBrushPreview(Polyline line, WpfPoint currentPoint)
@@ -856,40 +853,65 @@ public sealed class ImageEditorCanvas : Canvas
 
     private void AddArrowVisual(ArrowAnnotation annotation)
     {
-        Children.Add(new Line
+        Children.Add(new Polygon
         {
-            X1 = annotation.Start.X,
-            Y1 = annotation.Start.Y,
-            X2 = annotation.End.X,
-            Y2 = annotation.End.Y,
-            Stroke = new SolidColorBrush(annotation.StrokeColor),
-            StrokeThickness = annotation.StrokeWidth,
-            StrokeStartLineCap = PenLineCap.Round,
-            StrokeEndLineCap = PenLineCap.Round,
+            Fill = new SolidColorBrush(annotation.StrokeColor),
+            Points = CreateTaperedArrowPoints(
+                annotation.Start,
+                annotation.End,
+                annotation.StrokeWidth),
             IsHitTestVisible = false,
         });
+    }
 
-        var direction = annotation.End - annotation.Start;
+    /// <summary>
+    /// WeChat-style tapered arrow: one filled polygon that swells from a thin
+    /// tail into a wide head base and ends in a solid triangular tip. A single
+    /// shape cannot poke past its own tip, unlike the previous round-capped
+    /// shaft drawn underneath a separate head triangle.
+    /// </summary>
+    private static PointCollection CreateTaperedArrowPoints(
+        WpfPoint start,
+        WpfPoint end,
+        double strokeWidth)
+    {
+        var direction = end - start;
+        var length = direction.Length;
 
-        if (direction.Length < 1)
+        if (length < 1)
         {
-            return;
+            return [start, end];
         }
 
         direction.Normalize();
         var perpendicular = new Vector(-direction.Y, direction.X);
-        var headLength = Math.Max(10, annotation.StrokeWidth * 4);
-        var headWidth = headLength * 0.55;
-        var left = annotation.End - (direction * headLength) +
-                   (perpendicular * headWidth);
-        var right = annotation.End - (direction * headLength) -
-                    (perpendicular * headWidth);
-        Children.Add(new Polygon
-        {
-            Fill = new SolidColorBrush(annotation.StrokeColor),
-            Points = [annotation.End, left, right],
-            IsHitTestVisible = false,
-        });
+        // The head grows with the arrow itself, the way chat-app arrows do: a
+        // long arrow gets a long, wide head, while the stroke width mostly
+        // controls how much the shaft swells. Composed from Min/Max instead of
+        // Math.Clamp: while the user is still dragging a tiny arrow the
+        // length-derived maximum drops below the preferred minimum, and Clamp
+        // throws on an inverted range — which crashed the whole app on the
+        // first mouse move of an arrow drag.
+        var headLength = Math.Min(
+            Math.Max((length * 0.11) + (strokeWidth * 1.6), 9),
+            Math.Min(44, length * 0.45));
+        var headHalfWidth = headLength * 0.36;
+        var baseHalfWidth = Math.Max(
+            1.4,
+            Math.Max(strokeWidth * 0.9, headHalfWidth * 0.22));
+        var tailHalfWidth = Math.Max(0.6, strokeWidth * 0.22);
+        var basePoint = end - (direction * headLength);
+
+        return
+        [
+            start + (perpendicular * tailHalfWidth),
+            basePoint + (perpendicular * baseHalfWidth),
+            basePoint + (perpendicular * headHalfWidth),
+            end,
+            basePoint - (perpendicular * headHalfWidth),
+            basePoint - (perpendicular * baseHalfWidth),
+            start - (perpendicular * tailHalfWidth),
+        ];
     }
 
     private void AddBrushVisual(BrushAnnotation annotation)
@@ -924,12 +946,17 @@ public sealed class ImageEditorCanvas : Canvas
     {
         var image = new WpfImage
         {
-            Source = EmojiStickerRenderer.GetImage(annotation.Sticker),
+            // Rasterized at twice the placed size so display scaling and the
+            // final full-resolution composition both stay crisp.
+            Source = EmojiStickerRenderer.GetImage(
+                annotation.Sticker,
+                (int)Math.Ceiling(annotation.FontSize * 2)),
             Width = annotation.FontSize,
             Height = annotation.FontSize,
             Stretch = Stretch.Uniform,
             IsHitTestVisible = false,
         };
+        RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
         SetLeft(image, annotation.Position.X - (annotation.FontSize / 2));
         SetTop(image, annotation.Position.Y - (annotation.FontSize / 2));
         Children.Add(image);

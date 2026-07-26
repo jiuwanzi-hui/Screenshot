@@ -1,57 +1,66 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using Color = System.Windows.Media.Color;
-using ColorConverter = System.Windows.Media.ColorConverter;
-using Pen = System.Windows.Media.Pen;
-using Point = System.Windows.Point;
 
 namespace Screenshot.App.Editor;
 
+/// <summary>
+/// Renders emoji sticker bitmaps from the system color emoji font. The glyphs
+/// are the same full-color emoji the user knows from chat apps — far livelier
+/// than anything hand-drawn — and rendering them locally means no bundled
+/// image assets and no licensing concerns.
+/// </summary>
+/// <remarks>
+/// WPF's text stack rasterizes only the monochrome outlines and ignores the
+/// font's color layers, so this renderer reads the COLR/CPAL tables of
+/// Segoe UI Emoji itself: each emoji is a stack of ordinary outline glyphs,
+/// every layer filled with one palette color. Drawing those layers in order
+/// through <see cref="GlyphTypeface.GetGlyphOutline"/> reproduces the exact
+/// full-color emoji the rest of Windows shows.
+/// </remarks>
 public static class EmojiStickerRenderer
 {
-    private const int ImageSize = 64;
-    private static readonly ConcurrentDictionary<EmojiSticker, ImageSource> Cache = new();
-    private static readonly SolidColorBrush FaceBrush = Brush("#FFD54F");
-    private static readonly SolidColorBrush FaceBorderBrush = Brush("#F5A623");
-    private static readonly SolidColorBrush DarkBrush = Brush("#372B25");
-    private static readonly SolidColorBrush RedBrush = Brush("#F04F67");
-    private static readonly SolidColorBrush BlueBrush = Brush("#4CB7F5");
+    private const int DefaultImageSize = 96;
+    private const char VariationSelector16 = '️';
+    private const ushort ForegroundPaletteIndex = 0xFFFF;
+    private static readonly ConcurrentDictionary<(string, int), ImageSource> Cache =
+        new();
+    private static readonly Lazy<ColorEmojiFont?> Font = new(
+        ColorEmojiFont.TryLoad,
+        LazyThreadSafetyMode.ExecutionAndPublication);
 
-    public static ImageSource GetImage(EmojiSticker sticker)
+    public static ImageSource GetImage(string emoji)
     {
-        return Cache.GetOrAdd(sticker, Render);
+        return GetImage(emoji, DefaultImageSize);
     }
 
-    private static ImageSource Render(EmojiSticker sticker)
+    /// <summary>
+    /// The layers are vector outlines, so every display size gets its own
+    /// exact rasterization. Reusing one large bitmap for the small palette
+    /// tiles pushed them through a heavy downscale that visibly blurred them.
+    /// </summary>
+    public static ImageSource GetImage(string emoji, int pixelSize)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(emoji);
+        var size = Math.Clamp(pixelSize, 12, 512);
+        return Cache.GetOrAdd((emoji, size), key => Render(key.Item1, key.Item2));
+    }
+
+    private static RenderTargetBitmap Render(string emoji, int pixelSize)
     {
         var visual = new DrawingVisual();
+
         using (var context = visual.RenderOpen())
         {
-            switch (sticker)
-            {
-                case EmojiSticker.ThumbsUp:
-                    DrawThumbsUp(context);
-                    break;
-                case EmojiSticker.Heart:
-                    DrawHeartSticker(context);
-                    break;
-                case EmojiSticker.Party:
-                    DrawParty(context);
-                    break;
-                case EmojiSticker.Star:
-                    DrawStarSticker(context);
-                    break;
-                default:
-                    DrawFace(context, sticker);
-                    break;
-            }
+            DrawEmoji(context, emoji, pixelSize);
         }
 
         var bitmap = new RenderTargetBitmap(
-            ImageSize,
-            ImageSize,
+            pixelSize,
+            pixelSize,
             96,
             96,
             PixelFormats.Pbgra32);
@@ -60,217 +69,260 @@ public static class EmojiStickerRenderer
         return bitmap;
     }
 
-    private static void DrawFace(DrawingContext context, EmojiSticker sticker)
-    {
-        context.DrawEllipse(
-            FaceBrush,
-            new Pen(FaceBorderBrush, 2.5),
-            new Point(32, 32),
-            27,
-            27);
-
-        switch (sticker)
-        {
-            case EmojiSticker.Laugh:
-                DrawClosedEye(context, 20, 25, slopesDown: false);
-                DrawClosedEye(context, 44, 25, slopesDown: true);
-                context.DrawGeometry(DarkBrush, null, CreateOpenMouth());
-                context.DrawEllipse(BlueBrush, null, new Point(13, 35), 4, 8);
-                context.DrawEllipse(BlueBrush, null, new Point(51, 35), 4, 8);
-                break;
-            case EmojiSticker.Wink:
-                DrawClosedEye(context, 20, 25, slopesDown: false);
-                context.DrawEllipse(DarkBrush, null, new Point(43, 25), 3, 4);
-                context.DrawGeometry(null, new Pen(DarkBrush, 3), CreateSmile());
-                break;
-            case EmojiSticker.Love:
-                context.DrawGeometry(RedBrush, null, CreateHeart(new Point(20, 24), 7));
-                context.DrawGeometry(RedBrush, null, CreateHeart(new Point(44, 24), 7));
-                context.DrawGeometry(null, new Pen(DarkBrush, 3), CreateSmile());
-                break;
-            case EmojiSticker.Cool:
-                context.DrawRoundedRectangle(DarkBrush, null, new Rect(12, 20, 17, 11), 3, 3);
-                context.DrawRoundedRectangle(DarkBrush, null, new Rect(35, 20, 17, 11), 3, 3);
-                context.DrawLine(new Pen(DarkBrush, 3), new Point(29, 24), new Point(35, 24));
-                context.DrawGeometry(null, new Pen(DarkBrush, 3), CreateSmile());
-                break;
-            case EmojiSticker.Cry:
-                context.DrawEllipse(DarkBrush, null, new Point(21, 24), 3, 4);
-                context.DrawEllipse(DarkBrush, null, new Point(43, 24), 3, 4);
-                context.DrawEllipse(BlueBrush, null, new Point(46, 36), 4, 9);
-                context.DrawGeometry(null, new Pen(DarkBrush, 3), CreateSadMouth());
-                break;
-            case EmojiSticker.Angry:
-                context.DrawLine(new Pen(DarkBrush, 3), new Point(15, 19), new Point(26, 23));
-                context.DrawLine(new Pen(DarkBrush, 3), new Point(49, 19), new Point(38, 23));
-                context.DrawEllipse(DarkBrush, null, new Point(21, 27), 3, 3.5);
-                context.DrawEllipse(DarkBrush, null, new Point(43, 27), 3, 3.5);
-                context.DrawGeometry(null, new Pen(DarkBrush, 3), CreateSadMouth());
-                break;
-            case EmojiSticker.Surprised:
-                context.DrawEllipse(DarkBrush, null, new Point(21, 24), 3.5, 5);
-                context.DrawEllipse(DarkBrush, null, new Point(43, 24), 3.5, 5);
-                context.DrawEllipse(DarkBrush, null, new Point(32, 43), 6, 8);
-                break;
-            default:
-                context.DrawEllipse(DarkBrush, null, new Point(21, 24), 3, 4);
-                context.DrawEllipse(DarkBrush, null, new Point(43, 24), 3, 4);
-                context.DrawGeometry(null, new Pen(DarkBrush, 3), CreateSmile());
-                break;
-        }
-    }
-
-    private static void DrawClosedEye(
+    private static void DrawEmoji(
         DrawingContext context,
-        double x,
-        double y,
-        bool slopesDown)
+        string emoji,
+        int pixelSize)
     {
-        var offset = slopesDown ? -3 : 3;
-        context.DrawLine(
-            new Pen(DarkBrush, 3),
-            new Point(x - 5, y + offset),
-            new Point(x + 5, y - offset));
-    }
+        var font = Font.Value;
 
-    private static void DrawThumbsUp(DrawingContext context)
-    {
-        var hand = Geometry(
-            new Point(17, 29),
-            new Point(27, 29),
-            new Point(32, 12),
-            new Point(38, 13),
-            new Point(39, 27),
-            new Point(53, 27),
-            new Point(55, 33),
-            new Point(49, 52),
-            new Point(25, 52),
-            new Point(17, 45));
-        context.DrawGeometry(Brush("#F2B84B"), new Pen(Brush("#A96A18"), 2.5), hand);
-        context.DrawRoundedRectangle(
-            Brush("#4CB7F5"),
-            new Pen(Brush("#2377A8"), 2),
-            new Rect(8, 28, 13, 26),
-            4,
-            4);
-    }
-
-    private static void DrawHeartSticker(DrawingContext context)
-    {
-        context.DrawGeometry(
-            RedBrush,
-            new Pen(Brush("#C52E49"), 2.5),
-            CreateHeart(new Point(32, 32), 25));
-        context.DrawEllipse(Brush("#66FFFFFF"), null, new Point(23, 20), 5, 3);
-    }
-
-    private static void DrawParty(DrawingContext context)
-    {
-        var cone = Geometry(new Point(13, 52), new Point(28, 16), new Point(52, 45));
-        context.DrawGeometry(Brush("#F04F67"), new Pen(Brush("#9E2740"), 2), cone);
-        context.DrawLine(new Pen(Brush("#FFD54F"), 5), new Point(18, 39), new Point(42, 34));
-        context.DrawLine(new Pen(Brush("#4CB7F5"), 4), new Point(22, 28), new Point(36, 25));
-        context.DrawEllipse(Brush("#4CB7F5"), null, new Point(12, 15), 3, 3);
-        context.DrawEllipse(Brush("#73D26C"), null, new Point(49, 14), 3, 3);
-        context.DrawEllipse(Brush("#F04F67"), null, new Point(54, 27), 2.5, 2.5);
-        context.DrawLine(new Pen(Brush("#9B6BDF"), 3), new Point(31, 9), new Point(34, 16));
-        context.DrawLine(new Pen(Brush("#F5A623"), 3), new Point(43, 6), new Point(40, 14));
-    }
-
-    private static void DrawStarSticker(DrawingContext context)
-    {
-        var points = new List<Point>();
-        for (var index = 0; index < 10; index++)
+        if (font is null)
         {
-            var radius = index % 2 == 0 ? 27 : 12;
-            var angle = (-Math.PI / 2) + (index * Math.PI / 5);
-            points.Add(new Point(
-                32 + (Math.Cos(angle) * radius),
-                32 + (Math.Sin(angle) * radius)));
+            return;
         }
 
-        context.DrawGeometry(
-            Brush("#FFD23F"),
-            new Pen(Brush("#E39A13"), 2.5),
-            Geometry(points.ToArray()));
-    }
+        var codepoint = GetPrimaryCodepoint(emoji);
 
-    private static StreamGeometry CreateSmile()
-    {
-        var geometry = new StreamGeometry();
-        using (var context = geometry.Open())
+        if (!font.Typeface.CharacterToGlyphMap.TryGetValue(
+                codepoint,
+                out var baseGlyph))
         {
-            context.BeginFigure(new Point(20, 38), false, false);
-            context.BezierTo(new Point(25, 49), new Point(39, 49), new Point(44, 38), true, false);
+            return;
         }
-        geometry.Freeze();
-        return geometry;
-    }
 
-    private static StreamGeometry CreateSadMouth()
-    {
-        var geometry = new StreamGeometry();
-        using (var context = geometry.Open())
+        var glyphSize = pixelSize * 0.875;
+        var layers = font.GetLayers(baseGlyph);
+        var group = new DrawingGroup();
+
+        using (var groupContext = group.Open())
         {
-            context.BeginFigure(new Point(22, 47), false, false);
-            context.BezierTo(new Point(27, 38), new Point(37, 38), new Point(42, 47), true, false);
-        }
-        geometry.Freeze();
-        return geometry;
-    }
+            foreach (var (layerGlyph, color) in layers)
+            {
+                var outline = font.Typeface.GetGlyphOutline(
+                    layerGlyph,
+                    glyphSize,
+                    glyphSize);
 
-    private static StreamGeometry CreateOpenMouth()
-    {
-        var geometry = new StreamGeometry();
-        using (var context = geometry.Open())
+                if (outline.IsEmpty())
+                {
+                    continue;
+                }
+
+                groupContext.DrawGeometry(
+                    new SolidColorBrush(color),
+                    null,
+                    outline);
+            }
+        }
+
+        var bounds = group.Bounds;
+
+        if (bounds.IsEmpty || bounds.Width <= 0 || bounds.Height <= 0)
         {
-            context.BeginFigure(new Point(19, 36), true, true);
-            context.BezierTo(new Point(23, 54), new Point(41, 54), new Point(45, 36), true, false);
-            context.LineTo(new Point(19, 36), true, false);
+            return;
         }
-        geometry.Freeze();
-        return geometry;
+
+        // Glyph outlines are baseline-relative; center the finished stack on
+        // the sticker canvas instead of reasoning about font metrics.
+        group.Transform = new TranslateTransform(
+            ((pixelSize - bounds.Width) / 2) - bounds.X,
+            ((pixelSize - bounds.Height) / 2) - bounds.Y);
+        group.Freeze();
+        context.DrawDrawing(group);
     }
 
-    private static StreamGeometry CreateHeart(Point center, double radius)
+    /// <summary>
+    /// The catalog uses single-rune emoji, optionally followed by VS16 to
+    /// force emoji presentation. The color layers live on the base glyph.
+    /// </summary>
+    private static int GetPrimaryCodepoint(string emoji)
     {
-        var geometry = new StreamGeometry();
-        using (var context = geometry.Open())
+        var trimmed = emoji.TrimEnd(VariationSelector16);
+        return trimmed.Length > 0
+            ? char.ConvertToUtf32(trimmed, 0)
+            : char.ConvertToUtf32(emoji, 0);
+    }
+
+    /// <summary>
+    /// The system color emoji typeface together with its parsed COLR layer
+    /// list and CPAL palette.
+    /// </summary>
+    private sealed class ColorEmojiFont
+    {
+        private readonly Dictionary<ushort, (ushort Glyph, ushort Palette)[]> _layers;
+        private readonly Color[] _palette;
+
+        private ColorEmojiFont(
+            GlyphTypeface typeface,
+            Dictionary<ushort, (ushort Glyph, ushort Palette)[]> layers,
+            Color[] palette)
         {
-            context.BeginFigure(new Point(center.X, center.Y + radius), true, true);
-            context.BezierTo(
-                new Point(center.X - (radius * 1.5), center.Y),
-                new Point(center.X - radius, center.Y - radius),
-                new Point(center.X, center.Y - (radius * 0.25)),
-                true,
-                false);
-            context.BezierTo(
-                new Point(center.X + radius, center.Y - radius),
-                new Point(center.X + (radius * 1.5), center.Y),
-                new Point(center.X, center.Y + radius),
-                true,
-                false);
+            Typeface = typeface;
+            _layers = layers;
+            _palette = palette;
         }
-        geometry.Freeze();
-        return geometry;
-    }
 
-    private static StreamGeometry Geometry(params Point[] points)
-    {
-        var geometry = new StreamGeometry();
-        using (var context = geometry.Open())
+        public GlyphTypeface Typeface { get; }
+
+        public IEnumerable<(ushort Glyph, Color Color)> GetLayers(ushort baseGlyph)
         {
-            context.BeginFigure(points[0], true, true);
-            context.PolyLineTo(points.Skip(1).ToArray(), true, false);
-        }
-        geometry.Freeze();
-        return geometry;
-    }
+            if (!_layers.TryGetValue(baseGlyph, out var layers) ||
+                layers.Length == 0)
+            {
+                // No color layers: fall back to the plain outline in a neutral
+                // ink so the sticker is still visible.
+                return [(baseGlyph, Color.FromRgb(0x37, 0x2B, 0x25))];
+            }
 
-    private static SolidColorBrush Brush(string color)
-    {
-        var brush = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color));
-        brush.Freeze();
-        return brush;
+            return layers.Select(layer => (
+                layer.Glyph,
+                layer.Palette == ForegroundPaletteIndex ||
+                layer.Palette >= _palette.Length
+                    ? Color.FromRgb(0x37, 0x2B, 0x25)
+                    : _palette[layer.Palette]));
+        }
+
+        public static ColorEmojiFont? TryLoad()
+        {
+            try
+            {
+                var typeface = new Typeface(
+                    new System.Windows.Media.FontFamily("Segoe UI Emoji"),
+                    FontStyles.Normal,
+                    FontWeights.Normal,
+                    FontStretches.Normal);
+
+                if (!typeface.TryGetGlyphTypeface(out var glyphTypeface))
+                {
+                    return null;
+                }
+
+                var fontBytes = File.ReadAllBytes(glyphTypeface.FontUri.LocalPath);
+                var tables = ReadTableDirectory(fontBytes);
+
+                if (!tables.TryGetValue("COLR", out var colrRange) ||
+                    !tables.TryGetValue("CPAL", out var cpalRange))
+                {
+                    return null;
+                }
+
+                var layers = ParseColrLayers(fontBytes, colrRange.Offset);
+                var palette = ParseCpalPalette(fontBytes, cpalRange.Offset);
+                return new ColorEmojiFont(glyphTypeface, layers, palette);
+            }
+            catch (Exception)
+            {
+                // Any parsing surprise falls back to monochrome stickers
+                // rather than breaking the editor.
+                return null;
+            }
+        }
+
+        private static Dictionary<string, (int Offset, int Length)> ReadTableDirectory(
+            byte[] font)
+        {
+            var start = 0;
+
+            // A font collection wraps the table directory of each face.
+            if (font.Length >= 16 &&
+                font[0] == 't' && font[1] == 't' && font[2] == 'c' && font[3] == 'f')
+            {
+                start = (int)ReadUInt32(font, 12);
+            }
+
+            var tableCount = ReadUInt16(font, start + 4);
+            var tables = new Dictionary<string, (int, int)>(
+                tableCount,
+                StringComparer.Ordinal);
+
+            for (var index = 0; index < tableCount; index++)
+            {
+                var recordOffset = start + 12 + (index * 16);
+                var tag = System.Text.Encoding.ASCII.GetString(
+                    font,
+                    recordOffset,
+                    4);
+                tables[tag] = (
+                    (int)ReadUInt32(font, recordOffset + 8),
+                    (int)ReadUInt32(font, recordOffset + 12));
+            }
+
+            return tables;
+        }
+
+        private static Dictionary<ushort, (ushort, ushort)[]> ParseColrLayers(
+            byte[] font,
+            int colrOffset)
+        {
+            var baseGlyphCount = ReadUInt16(font, colrOffset + 2);
+            var baseGlyphsOffset = colrOffset + (int)ReadUInt32(font, colrOffset + 4);
+            var layerRecordsOffset = colrOffset + (int)ReadUInt32(font, colrOffset + 8);
+            var layers = new Dictionary<ushort, (ushort, ushort)[]>(baseGlyphCount);
+
+            for (var index = 0; index < baseGlyphCount; index++)
+            {
+                var recordOffset = baseGlyphsOffset + (index * 6);
+                var baseGlyph = ReadUInt16(font, recordOffset);
+                var firstLayer = ReadUInt16(font, recordOffset + 2);
+                var layerCount = ReadUInt16(font, recordOffset + 4);
+                var glyphLayers = new (ushort, ushort)[layerCount];
+
+                for (var layer = 0; layer < layerCount; layer++)
+                {
+                    var layerOffset = layerRecordsOffset +
+                                      ((firstLayer + layer) * 4);
+                    glyphLayers[layer] = (
+                        ReadUInt16(font, layerOffset),
+                        ReadUInt16(font, layerOffset + 2));
+                }
+
+                layers[baseGlyph] = glyphLayers;
+            }
+
+            return layers;
+        }
+
+        private static Color[] ParseCpalPalette(byte[] font, int cpalOffset)
+        {
+            var colorRecordCount = ReadUInt16(font, cpalOffset + 6);
+            var colorRecordsOffset = cpalOffset +
+                                     (int)ReadUInt32(font, cpalOffset + 8);
+            // The first palette's records start at the first color index;
+            // Segoe UI Emoji keeps its default palette there.
+            var firstColorIndex = ReadUInt16(font, cpalOffset + 12);
+            var palette = new Color[colorRecordCount];
+
+            for (var index = 0; index < colorRecordCount; index++)
+            {
+                var recordOffset = colorRecordsOffset +
+                                   ((firstColorIndex + index) * 4);
+
+                if (recordOffset + 4 > font.Length)
+                {
+                    break;
+                }
+
+                palette[index] = Color.FromArgb(
+                    font[recordOffset + 3],
+                    font[recordOffset + 2],
+                    font[recordOffset + 1],
+                    font[recordOffset]);
+            }
+
+            return palette;
+        }
+
+        private static ushort ReadUInt16(byte[] data, int offset)
+        {
+            return (ushort)((data[offset] << 8) | data[offset + 1]);
+        }
+
+        private static uint ReadUInt32(byte[] data, int offset)
+        {
+            return ((uint)data[offset] << 24) |
+                   ((uint)data[offset + 1] << 16) |
+                   ((uint)data[offset + 2] << 8) |
+                   data[offset + 3];
+        }
     }
 }

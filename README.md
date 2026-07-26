@@ -1,4 +1,4 @@
-# Screenshot
+# SnapCut · 简截
 
 [简体中文](#简体中文) | [English](#english)
 
@@ -10,34 +10,34 @@
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
 [![Gitee mirror](https://img.shields.io/badge/Gitee-国内镜像-C71D23?style=flat-square&logo=gitee)](https://gitee.com/wwangyunhui/screenshot)
 
-![Screenshot icon](src/Screenshot.App/Assets/Screenshot.png)
+![SnapCut icon](src/Screenshot.App/Assets/Screenshot.png)
 
 ## 简体中文
 
-Screenshot 是一款面向 Windows 10/11 的轻量截图工具。它把区域截图、长截图、标注、OCR、钉图和可选翻译放在同一条紧凑工作流中，并优先在本机完成处理。
+SnapCut（简截）是一款面向 Windows 10/11 的轻量截图工具，取"简洁"与"直截了当"之意。它把区域截图、长截图、标注、OCR、钉图和可选翻译放在同一条紧凑工作流中，并优先在本机完成处理。
 
 ### 主要优点
 
 - **菜单、下拉框和悬浮提示也能截到**：快捷键触发时先冻结当前桌面画面，尽量保留右键菜单、通知区域菜单、下拉列表、悬浮提示等容易因失去焦点而消失的临时界面，再进入框选和编辑。
-- **截图后直接调整和编辑**：鼠标悬停到其他软件时可自动吸附整个窗口，单击直接选取，也可继续拖动自由框选；移动选区时底图保持固定，框内明亮、框外变暗。编辑后仍可用八个控制点扩展或缩小选区，边缘不会越过已有标注；并提供矩形、箭头、画笔、文字、12 种彩色表情贴纸、马赛克、颜色、线宽、撤销和重做。
+- **截图后直接调整和编辑**：鼠标悬停到其他软件时可自动吸附整个窗口，单击直接选取，也可继续拖动自由框选；移动选区时底图保持固定，框内明亮、框外变暗。编辑后仍可用八个控制点扩展或缩小选区，边缘不会越过已有标注；并提供矩形、箭头、画笔、文字、88 个系统原版彩色表情贴纸、马赛克、颜色、线宽、撤销和重做。
 - **双向长截图**：普通截图框选后直接点击工具栏的 `↕` 图标，沿用当前选区开始向上或向下滚动采集；真实滚轮会直接传递给下层窗口，支持重叠区域匹配、实时预览和结果编辑，右键可一次取消选区与预览。
 - **本地 OCR 与图片文字选择**：使用 Windows 本地 OCR 引擎，图片不需要上传；识别后可直接在截图、OCR 结果窗口和钉图上拖选文字并通过原生 Unicode 剪贴板复制，译文覆盖完成后同样可以选择和复制，识别语言取决于系统已安装的语言包。
 - **可控的在线翻译**：截图工具栏可自动检测原文语言、批量翻译 OCR 文字并按原行位置覆盖到图片，复制和保存会包含译文，整组译文可一步撤销；支持不同厂家的 OpenAI 兼容接口，配置服务地址和 API Key 后可主动获取该厂家的模型列表，也可手动输入模型标识。服务原样返回原文时会明确提示而不生成假译文。只有用户明确启用并点击翻译时才发送文字，API Key 使用当前用户 DPAPI 加密保存。
 - **高效的日常操作**：支持全局快捷键、系统托盘、截图历史、钉图、开机启动、深浅色主题，以及关闭窗口时最小化到后台或彻底退出；设置页显示当前版本，并发检测 Gitee 国内源和 GitHub 国际源，自动采用先返回的有效更新源，下载失败时切换备用源；安装版和免安装版覆盖更新时都会保留 `ScreenshotData`。首次运行默认同时显示任务栏图标和通知区域图标，避免用户找不到程序入口。
-- **数据跟随程序目录**：安装版与免安装版都把设置、加密凭据、历史和默认截图保存在 `Screenshot.exe` 旁的 `ScreenshotData`，不会把个人配置提交到源码仓库。
+- **数据跟随程序目录**：安装版与免安装版都把设置、加密凭据、历史和默认截图保存在 `SnapCut.exe` 旁的 `ScreenshotData`，不会把个人配置提交到源码仓库。
 
 ### 下载与安装
 
 下载最新的 x64 自包含版本：
 
-- [安装版 Screenshot Setup 1.3.2（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.3.2-win-x64.exe)
-- [免安装版 Screenshot Portable 1.3.2（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.3.2-win-x64.zip)
-- [安装版 Screenshot Setup 1.3.2（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v1.3.2/Screenshot-Setup-1.3.2-win-x64.exe)
-- [免安装版 Screenshot Portable 1.3.2（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v1.3.2/Screenshot-Portable-1.3.2-win-x64.zip)
+- [安装版 SnapCut Setup 2.0.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.0.0-win-x64.exe)
+- [免安装版 SnapCut Portable 2.0.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.0.0-win-x64.zip)
+- [安装版 SnapCut Setup 2.0.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.0.0/SnapCut-Setup-2.0.0-win-x64.exe)
+- [免安装版 SnapCut Portable 2.0.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.0.0/SnapCut-Portable-2.0.0-win-x64.zip)
 
-免安装版解压后直接运行 `Screenshot.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。1.3.2 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.0.0 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
 
-1.3.2 改进长截图的真实滚轮穿透、预览层级和一次右键取消逻辑；钉图会自动执行本地 OCR，可直接选择和复制原文，并可在已配置在线翻译时切换原文与译文；OCR 结果窗口也改进了文字选择、复制和译文显示。
+2.0.0 将软件更名为 SnapCut（简截）并启用全新图标；重写长截图拼接内核（链式顺序匹配、采样背压、DwmFlush 对齐拷屏、边界重锚），任意速度与来回滚动都能稳定拼接；实时预览改为全局整图并随图增高；后台静态内存降至约 25MB；表情贴纸升级为 88 个系统原版彩色表情并支持长截图编辑；箭头改为微信式锥形实心样式；新增应用级异常兜底，异常记录到 `ScreenshotData\Diagnostics\crash.log` 而不再闪退。**免安装版从 1.3.2 及更早版本升级时**：由于程序文件名由 Screenshot.exe 更名为 SnapCut.exe，旧版内置更新器无法自动完成本次替换，请手动下载新版免安装包解压使用（可把旧目录的 `ScreenshotData` 拷贝过去保留数据）；安装版用户仍可在程序内一键自动更新。
 
 1.3.0 是首个支持在线覆盖更新的版本；1.3.1 起同时提供 Gitee 国内源和 GitHub 国际源。左侧“版本更新”页面会并发检测两个来源，采用先返回的有效清单，下载失败时自动换源，并严格校验文件大小与 SHA-256。安装版静默覆盖原目录，免安装版安全替换程序文件，两种方式都保留 `ScreenshotData` 并自动重启。由 1.2.0 或更早版本升级时需手动安装一次 1.3.1，之后即可在程序内更新。
 
@@ -86,30 +86,30 @@ winget install --id JRSoftware.InnoSetup --exact
 
 ## English
 
-Screenshot is a lightweight capture utility for Windows 10 and 11. It combines region capture, scrolling capture, annotation, OCR, pinned images, and optional translation in one compact workflow while keeping processing local whenever possible.
+SnapCut is a lightweight capture utility for Windows 10 and 11. It combines region capture, scrolling capture, annotation, OCR, pinned images, and optional translation in one compact workflow while keeping processing local whenever possible.
 
-### Why Screenshot
+### Why SnapCut
 
 - **Capture menus, drop-downs, and tooltips**: the hotkey freezes the visible desktop before focus-sensitive UI can close, preserving transient surfaces such as context menus, notification-area menus, drop-down lists, and hover tooltips for selection and editing.
-- **Adjust and edit before finishing**: hover over another application to snap to its full window and click to select it, or drag to make a free-form selection. The desktop stays fixed while the selection moves, with a bright interior and dimmed exterior. After annotating, all eight handles remain available while protected bounds prevent existing ink from being cropped. Editing includes rectangles, arrows, freehand drawing, text, 12 colored emoji stickers, mosaic, colors, stroke widths, undo, and redo.
+- **Adjust and edit before finishing**: hover over another application to snap to its full window and click to select it, or drag to make a free-form selection. The desktop stays fixed while the selection moves, with a bright interior and dimmed exterior. After annotating, all eight handles remain available while protected bounds prevent existing ink from being cropped. Editing includes rectangles, arrows, freehand drawing, text, 88 native color emoji stickers, mosaic, colors, stroke widths, undo, and redo.
 - **Bidirectional scrolling capture**: make a normal region selection and click the `↕` toolbar icon to reuse that region for upward or downward scrolling capture. Physical wheel input passes directly to the underlying window, with overlap matching, live preview, result editing, and one-step right-click cancellation.
 - **Local OCR with selectable image text**: uses the Windows OCR engine without uploading images, then overlays selectable text directly on captures, OCR result windows, and pinned images, copying it through the native Unicode clipboard. Translated overlays are selectable and copyable as well. Available languages depend on installed Windows language packs.
 - **Translation under your control**: the capture toolbar automatically detects the source language, batch-translates OCR lines, and places translations over their original image locations. Copied and saved images include the translations, and the whole overlay can be undone in one step. Different OpenAI-compatible vendors are supported: after entering an endpoint and API key, users can explicitly fetch that vendor's model list or type a model id manually. An unchanged provider response is reported instead of being presented as a translation. Text is sent only after translation is explicitly enabled and requested, and API keys are protected with per-user Windows DPAPI encryption.
 - **Fast daily workflow**: configurable global hotkeys, system tray controls, capture history, pinned images, startup behavior, light/dark themes, and a choice between minimizing or fully exiting when the window is closed. The Update page probes the Gitee China mirror and GitHub concurrently, uses the first valid source, and falls back to the other source if a download fails. Installed and portable updates both preserve `ScreenshotData`. New installations show both taskbar and notification-area icons by default so the application remains easy to find.
-- **Data stays with the application**: installed and portable builds keep settings, encrypted credentials, history, and default captures in `ScreenshotData` beside `Screenshot.exe`. Personal configuration is excluded from the repository.
+- **Data stays with the application**: installed and portable builds keep settings, encrypted credentials, history, and default captures in `ScreenshotData` beside `SnapCut.exe`. Personal configuration is excluded from the repository.
 
 ### Download and install
 
 Download the latest self-contained x64 build:
 
-- [Screenshot Setup 1.3.2 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-1.3.2-win-x64.exe)
-- [Screenshot Portable 1.3.2 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-1.3.2-win-x64.zip)
-- [Screenshot Setup 1.3.2 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v1.3.2/Screenshot-Setup-1.3.2-win-x64.exe)
-- [Screenshot Portable 1.3.2 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v1.3.2/Screenshot-Portable-1.3.2-win-x64.zip)
+- [SnapCut Setup 2.0.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.0.0-win-x64.exe)
+- [SnapCut Portable 2.0.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.0.0-win-x64.zip)
+- [SnapCut Setup 2.0.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.0.0/SnapCut-Setup-2.0.0-win-x64.exe)
+- [SnapCut Portable 2.0.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.0.0/SnapCut-Portable-2.0.0-win-x64.zip)
 
-Extract the portable archive and run `Screenshot.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 1.3.2 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.0.0 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
 
-Version 1.3.2 improves physical-wheel pass-through, preview z-order, and one-step right-click cancellation during scrolling capture. Pinned images now run local OCR automatically, expose selectable original text, and can switch between original and translated text when translation is configured. The OCR result window also improves text selection, copying, and translated output.
+Version 2.0.0 renames the application to SnapCut with a new icon, rewrites the scrolling-capture stitching core (sequential chain matching, sampling backpressure, DwmFlush-aligned capture, and boundary re-anchoring) so any speed and direction changes stitch reliably, shows the whole stitched image in a growing live preview, reduces idle memory to about 25 MB, upgrades stickers to 88 native color emoji (including the scrolling-capture editor), introduces WeChat-style tapered arrows, and adds an application-level exception net that logs to `ScreenshotData\Diagnostics\crash.log` instead of crashing. **Portable users upgrading from 1.3.2 or earlier**: because the executable was renamed from Screenshot.exe to SnapCut.exe, the old in-app updater cannot apply this release automatically - download the new portable package once manually (copy the old `ScreenshotData` folder over to keep your data). Installed builds still update in place automatically.
 
 Version 1.3.0 introduced in-app updates. Starting with 1.3.1, the dedicated Update page probes the Gitee China mirror and GitHub concurrently, uses the first valid manifest, and switches source automatically if a download fails. Every package is checked against its declared size and SHA-256. Installed builds update in place; portable builds safely replace program files; both preserve `ScreenshotData` and restart automatically. Users on 1.2.0 or earlier need one final manual upgrade to 1.3.1, after which future releases can be installed in the app.
 

@@ -143,13 +143,13 @@ public sealed class ApplicationUpdateServiceTests
         var packagePath = Path.Combine(root, "update.zip");
         var target = Path.Combine(root, "target");
         Directory.CreateDirectory(Path.Combine(target, "ScreenshotData"));
-        File.WriteAllText(Path.Combine(target, "Screenshot.exe"), "old");
+        File.WriteAllText(Path.Combine(target, "SnapCut.exe"), "old");
         File.WriteAllText(
             Path.Combine(target, "ScreenshotData", "settings.json"),
             "personal");
         using (var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create))
         {
-            WriteEntry(archive, "Screenshot.exe", "new");
+            WriteEntry(archive, "SnapCut.exe", "new");
             WriteEntry(archive, "ScreenshotData/settings.json", "must-not-replace");
         }
 
@@ -157,7 +157,7 @@ public sealed class ApplicationUpdateServiceTests
         {
             PortableUpdateRunner.ApplyPackage(packagePath, target);
 
-            Assert.Equal("new", File.ReadAllText(Path.Combine(target, "Screenshot.exe")));
+            Assert.Equal("new", File.ReadAllText(Path.Combine(target, "SnapCut.exe")));
             Assert.Equal(
                 "personal",
                 File.ReadAllText(Path.Combine(

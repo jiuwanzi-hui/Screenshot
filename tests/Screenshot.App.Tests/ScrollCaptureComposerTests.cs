@@ -452,7 +452,7 @@ public sealed class ScrollCaptureComposerTests
     }
 
     [Fact]
-    public void LivePreviewKeepsReadableWidthAndFollowsTheCurrentViewport()
+    public void LivePreviewShowsTheWholeCapturedImage()
     {
         var previewOptions = Options with
         {
@@ -468,13 +468,25 @@ public sealed class ScrollCaptureComposerTests
             Assert.True(composer.TryAddFrame(frame, previewOptions, out _));
         }
 
-        using var preview = composer.ComposeLivePreview(96, 80);
-
-        Assert.Equal(96, preview.Width);
-        Assert.Equal(80, preview.Height);
-        for (var y = 0; y < preview.Height; y += 7)
+        // Within the height budget the preview is the whole image, unscaled.
+        using (var preview = composer.ComposeLivePreview(96, 300))
         {
-            Assert.Equal(ExpectedColor(15, y + 170), preview.GetPixel(15, y));
+            Assert.Equal(96, preview.Width);
+            Assert.Equal(260, preview.Height);
+            for (var y = 0; y < preview.Height; y += 7)
+            {
+                Assert.Equal(ExpectedColor(15, y), preview.GetPixel(15, y));
+            }
+        }
+
+        // Beyond the budget the whole image is scaled down, aspect preserved,
+        // never cropped to a slice.
+        using (var preview = composer.ComposeLivePreview(96, 80))
+        {
+            Assert.Equal(80, preview.Height);
+            Assert.Equal(
+                (int)Math.Round(96 * (80 / 260d)),
+                preview.Width);
         }
     }
 

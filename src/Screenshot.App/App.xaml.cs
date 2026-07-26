@@ -29,6 +29,7 @@ public partial class App : System.Windows.Application, IDisposable
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        DispatcherUnhandledException += OnDispatcherUnhandledException;
 
         if (PortableUpdateRunner.IsUpdateRequest(e.Args))
         {
@@ -141,12 +142,51 @@ public partial class App : System.Windows.Application, IDisposable
         {
             ShowMainWindow();
         }
+
+        // History cache files are session-scoped; sweep leftovers from earlier
+        // runs, then return the startup allocation burst to the OS so the tray
+        // idle starts small instead of holding the WPF warm-up garbage.
+        _ = Task.Run(CaptureHistoryService.CleanCacheDirectory);
+        _ = Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+            Core.MemoryFootprint.TrimAfterHeavyOperation);
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
         Dispose();
         base.OnExit(e);
+    }
+
+    /// <summary>
+    /// A background-resident tool must survive a failure in one interaction:
+    /// losing an overlay is recoverable, losing the tray process is not. The
+    /// exception is preserved for diagnosis instead of tearing the app down.
+    /// </summary>
+    private void OnDispatcherUnhandledException(
+        object sender,
+        System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        try
+        {
+            Directory.CreateDirectory(Core.AppMetadata.DiagnosticsDirectoryPath);
+            File.AppendAllText(
+                Path.Combine(
+                    Core.AppMetadata.DiagnosticsDirectoryPath,
+                    "crash.log"),
+                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {e.Exception}" +
+                    Environment.NewLine + Environment.NewLine);
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        _mainWindow?.ShowStatus(
+            "操作出现异常，已记录到 ScreenshotData\\Diagnostics\\crash.log。");
+        e.Handled = true;
     }
 
     public void Dispose()

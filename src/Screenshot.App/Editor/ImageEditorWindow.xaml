@@ -301,6 +301,20 @@
                                 <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="文字" />
                             </Grid>
                         </RadioButton>
+                        <RadioButton x:Name="EmojiToolButton"
+                                     Tag="Emoji"
+                                     Checked="OnToolSelected"
+                                     ToolTip="表情贴纸"
+                                     Style="{StaticResource GlassTool}">
+                            <Grid VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <editor:EmojiStickerImage Width="17" Height="17" HorizontalAlignment="Center" VerticalAlignment="Center" Sticker="😊" />
+                                <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="表情" />
+                            </Grid>
+                        </RadioButton>
                         <Separator Width="1"
                                    Height="24"
                                    Margin="5,0,12,0"
@@ -358,9 +372,16 @@
                         </StackPanel>
                     </DockPanel>
 
-                    <StackPanel Grid.Row="1"
-                                Margin="0,8,0,0"
-                                Orientation="Horizontal">
+                    <StackPanel Grid.Row="1" Margin="0,8,0,0">
+                        <ScrollViewer x:Name="EmojiPaletteScroll"
+                                      MaxHeight="94"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      VerticalScrollBarVisibility="Auto"
+                                      Visibility="Collapsed">
+                            <WrapPanel x:Name="EmojiPalettePanel" MaxWidth="560" />
+                        </ScrollViewer>
+                        <StackPanel x:Name="StrokeOptionsPanel"
+                                    Orientation="Horizontal">
                         <Button x:Name="CyanColorButton"
                                 Tag="#2EAFA5"
                                 Click="OnColorClick"
@@ -410,6 +431,7 @@
                                    VerticalAlignment="Center"
                                    Foreground="#BCEAE5"
                                    Text="3 px" />
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
             </Border>

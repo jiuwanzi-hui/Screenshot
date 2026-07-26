@@ -116,6 +116,7 @@ public partial class CaptureOverlayWindow : Window
                 TaskCreationOptions.RunContinuationsAsynchronously)
             : null;
         InitializeComponent();
+        PopulateInlineEmojiPalette();
         _windowSnapTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(50),
@@ -1426,8 +1427,8 @@ public partial class CaptureOverlayWindow : Window
 
     private void OnInlineEmojiClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not System.Windows.Controls.Button { Tag: string stickerName } ||
-            !Enum.TryParse<EmojiSticker>(stickerName, out var sticker))
+        if (sender is not System.Windows.Controls.Button { Tag: string sticker } ||
+            string.IsNullOrWhiteSpace(sticker))
         {
             return;
         }
@@ -1435,6 +1436,27 @@ public partial class CaptureOverlayWindow : Window
         InlineEditorCanvas.SelectEmoji(sticker);
         InlineEditorCanvas.SelectTool(EditorTool.Emoji);
         InlineEditorCanvas.Focus();
+    }
+
+    private void PopulateInlineEmojiPalette()
+    {
+        foreach (var emoji in Editor.EmojiStickerCatalog.All)
+        {
+            var button = new System.Windows.Controls.Button
+            {
+                Tag = emoji,
+                ToolTip = emoji,
+                Style = (Style)FindResource("InlineEmojiButton"),
+                Content = new Editor.EmojiStickerImage
+                {
+                    Width = 23,
+                    Height = 23,
+                    Sticker = emoji,
+                },
+            };
+            button.Click += OnInlineEmojiClick;
+            InlineEmojiPanel.Children.Add(button);
+        }
     }
 
     private void OnInlineUndoClick(object sender, RoutedEventArgs e)

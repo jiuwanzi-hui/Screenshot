@@ -6,11 +6,16 @@ namespace Screenshot.App.Core;
 public static class AppMetadata
 {
     public const string ApplicationName = "Screenshot";
+    // Brand name shown to the user. Kept separate from ApplicationName so
+    // renaming the product never disturbs mutexes, registrations or paths
+    // that existing installations depend on.
+    public const string DisplayName = "SnapCut";
     public const string DataDirectoryName = "ScreenshotData";
     public const string LegacyInstalledDataDirectoryName = "Screenshot";
     public const string InstalledMarkerFileName = "installed.marker";
     public const string CapturesDirectoryName = "Captures";
     public const string DiagnosticsDirectoryName = "Diagnostics";
+    public const string HistoryCacheDirectoryName = "HistoryCache";
     public const string UpdatesDirectoryName = "Updates";
     public const string StartupRegistrationValueName = "Screenshot.App";
 
@@ -40,6 +45,10 @@ public static class AppMetadata
     public static string DiagnosticsDirectoryPath => Path.Combine(
         DataDirectoryPath,
         DiagnosticsDirectoryName);
+
+    public static string HistoryCacheDirectoryPath => Path.Combine(
+        DataDirectoryPath,
+        HistoryCacheDirectoryName);
 
     public static string UpdatesDirectoryPath => Path.Combine(
         DataDirectoryPath,
