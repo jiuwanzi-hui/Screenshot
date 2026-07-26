@@ -358,13 +358,25 @@ public sealed class ApplicationUpdateService : IDisposable
         }
 
         var displayVersion = NormalizeVersion(version);
-        var installerName = $"Screenshot-Setup-{displayVersion}-win-x64.exe";
-        var portableName = $"Screenshot-Portable-{displayVersion}-win-x64.zip";
+        // The application was renamed from Screenshot to SnapCut in 2.0.0.
+        // Release assets may carry either brand: clients shipped before the
+        // rename hard-require the old names, so transitional releases publish
+        // old-named assets, and future releases are free to use the new name.
+        var installerNames = new[]
+        {
+            $"SnapCut-Setup-{displayVersion}-win-x64.exe",
+            $"Screenshot-Setup-{displayVersion}-win-x64.exe",
+        };
+        var portableNames = new[]
+        {
+            $"SnapCut-Portable-{displayVersion}-win-x64.zip",
+            $"Screenshot-Portable-{displayVersion}-win-x64.zip",
+        };
         return new ApplicationUpdateInfo(
             version,
             releasePage,
-            CreateAsset(manifest.Installer, installerName, preferredMirror),
-            CreateAsset(manifest.Portable, portableName, preferredMirror),
+            CreateAsset(manifest.Installer, installerNames, preferredMirror),
+            CreateAsset(manifest.Portable, portableNames, preferredMirror),
             preferredMirror);
     }
 
@@ -408,14 +420,18 @@ public sealed class ApplicationUpdateService : IDisposable
 
     private static ApplicationUpdateAsset CreateAsset(
         UpdateAssetManifest? manifest,
-        string expectedFileName,
+        IReadOnlyList<string> acceptedFileNames,
         ApplicationUpdateMirror preferredMirror)
     {
-        if (manifest is null ||
-            !string.Equals(
+        var expectedFileName = manifest is null
+            ? null
+            : acceptedFileNames.FirstOrDefault(name => string.Equals(
                 manifest.FileName,
-                expectedFileName,
-                StringComparison.OrdinalIgnoreCase) ||
+                name,
+                StringComparison.OrdinalIgnoreCase));
+
+        if (manifest is null ||
+            expectedFileName is null ||
             !TryCreateTrustedUri(manifest.GitHubUrl, out var githubUri) ||
             !TryCreateTrustedUri(manifest.GiteeUrl, out var giteeUri) ||
             !githubUri.AbsolutePath.EndsWith(
@@ -425,7 +441,7 @@ public sealed class ApplicationUpdateService : IDisposable
                 "/" + expectedFileName,
                 StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidDataException($"更新清单缺少 {expectedFileName}。");
+            throw new InvalidDataException($"更新清单缺少 {acceptedFileNames[0]}。");
         }
 
         var asset = new ApplicationUpdateAsset(

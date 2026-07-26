@@ -28,12 +28,12 @@ SnapCut（简截）是一款面向 Windows 10/11 的轻量截图工具，取"简
 
 ### 下载与安装
 
-下载最新的 x64 自包含版本：
+下载最新的 x64 自包含版本（发布文件名暂沿用 Screenshot- 前缀，以兼容旧版本的程序内自动更新；包内程序为 SnapCut.exe）：
 
-- [安装版 SnapCut Setup 2.0.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.0.0-win-x64.exe)
-- [免安装版 SnapCut Portable 2.0.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.0.0-win-x64.zip)
-- [安装版 SnapCut Setup 2.0.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.0.0/SnapCut-Setup-2.0.0-win-x64.exe)
-- [免安装版 SnapCut Portable 2.0.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.0.0/SnapCut-Portable-2.0.0-win-x64.zip)
+- [安装版 SnapCut Setup 2.0.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-2.0.0-win-x64.exe)
+- [免安装版 SnapCut Portable 2.0.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-2.0.0-win-x64.zip)
+- [安装版 SnapCut Setup 2.0.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.0.0/Screenshot-Setup-2.0.0-win-x64.exe)
+- [免安装版 SnapCut Portable 2.0.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.0.0/Screenshot-Portable-2.0.0-win-x64.zip)
 
 免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.0.0 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
 
@@ -100,12 +100,12 @@ SnapCut is a lightweight capture utility for Windows 10 and 11. It combines regi
 
 ### Download and install
 
-Download the latest self-contained x64 build:
+Download the latest self-contained x64 build (release file names keep the legacy Screenshot- prefix so older builds can still self-update; the packaged program is SnapCut.exe):
 
-- [SnapCut Setup 2.0.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.0.0-win-x64.exe)
-- [SnapCut Portable 2.0.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.0.0-win-x64.zip)
-- [SnapCut Setup 2.0.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.0.0/SnapCut-Setup-2.0.0-win-x64.exe)
-- [SnapCut Portable 2.0.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.0.0/SnapCut-Portable-2.0.0-win-x64.zip)
+- [SnapCut Setup 2.0.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-2.0.0-win-x64.exe)
+- [SnapCut Portable 2.0.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-2.0.0-win-x64.zip)
+- [SnapCut Setup 2.0.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.0.0/Screenshot-Setup-2.0.0-win-x64.exe)
+- [SnapCut Portable 2.0.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.0.0/Screenshot-Portable-2.0.0-win-x64.zip)
 
 Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.0.0 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
 
