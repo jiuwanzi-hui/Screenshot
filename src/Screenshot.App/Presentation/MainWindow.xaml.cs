@@ -257,9 +257,7 @@ public partial class MainWindow : Window, IDisposable
                 _updateCancellationSource.Token);
             _availableUpdate = result.AvailableUpdate;
             UpdateStatusText.Text = result.Message;
-            UpdateBadge.Visibility = result.AvailableUpdate is null
-                ? Visibility.Collapsed
-                : Visibility.Visible;
+            SetUpdateNavigationState(result.AvailableUpdate?.Version);
             if (result.AvailableUpdate is not null)
             {
                 InstallUpdateButton.Content =
@@ -285,6 +283,26 @@ public partial class MainWindow : Window, IDisposable
                 CheckForUpdatesButton.IsEnabled = true;
             }
         }
+    }
+
+    internal void SetUpdateNavigationState(Version? availableVersion)
+    {
+        if (availableVersion is null)
+        {
+            UpdateNavigationText.Text = "版本更新";
+            UpdateNavigationText.ClearValue(TextBlock.ForegroundProperty);
+            UpdateNavigationText.ToolTip = null;
+            return;
+        }
+
+        var normalizedVersion =
+            ApplicationUpdateService.NormalizeVersion(availableVersion);
+        UpdateNavigationText.Text = "有新版本";
+        UpdateNavigationText.SetResourceReference(
+            TextBlock.ForegroundProperty,
+            "AppWarmAccentBrush");
+        UpdateNavigationText.ToolTip =
+            $"发现 {normalizedVersion}，点击查看";
     }
 
     private async void OnInstallUpdateClick(object sender, RoutedEventArgs e)

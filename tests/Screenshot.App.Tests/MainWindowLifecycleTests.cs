@@ -146,6 +146,56 @@ public sealed class MainWindowLifecycleTests
         });
     }
 
+    [Fact]
+    public void UpdateNavigationTextFitsTheSidebarWithoutASeparateBadge()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                AppSettings.CreateDefault(),
+                new SettingsStore(Path.Combine(
+                    Path.GetTempPath(),
+                    "Screenshot.App.Tests",
+                    "update-badge-layout-settings.json")),
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+
+            window.ApplySettingsPalette(AppTheme.Light);
+            window.ShowFromTray();
+            var navigation = Assert.IsType<ListBox>(
+                window.FindName("SettingsNavigation"));
+            var updateText = Assert.IsType<TextBlock>(
+                window.FindName("UpdateNavigationText"));
+            window.SetUpdateNavigationState(new Version(2, 2, 2));
+            window.UpdateLayout();
+
+            var textPosition = updateText.TranslatePoint(new Point(), navigation);
+            Assert.Equal("有新版本", updateText.Text);
+            Assert.Same(
+                window.FindResource("AppWarmAccentBrush"),
+                updateText.Foreground);
+            Assert.Equal("发现 2.2.2，点击查看", updateText.ToolTip);
+            Assert.True(textPosition.X >= 0);
+            Assert.True(
+                textPosition.X + updateText.ActualWidth <= navigation.ActualWidth,
+                $"Update text exceeded navigation bounds: " +
+                $"right={textPosition.X + updateText.ActualWidth}, " +
+                $"width={navigation.ActualWidth}.");
+            Assert.Null(window.FindName("UpdateBadge"));
+
+            window.SetUpdateNavigationState(availableVersion: null);
+            Assert.Equal("版本更新", updateText.Text);
+            Assert.Equal(
+                DependencyProperty.UnsetValue,
+                updateText.ReadLocalValue(TextBlock.ForegroundProperty));
+            Assert.Null(updateText.ToolTip);
+
+            window.RequestExit();
+        });
+    }
+
     private sealed class FakeStartupRegistrationService : IStartupRegistrationService
     {
         public bool IsEnabled()
