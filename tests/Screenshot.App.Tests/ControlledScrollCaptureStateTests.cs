@@ -243,6 +243,45 @@ public sealed class ControlledScrollCaptureStateTests
     }
 
     [Theory]
+    [InlineData(65, 125, 90, 150, true)]
+    [InlineData(65, 125, 65, 150, false)]
+    [InlineData(65, 125, 160, 150, false)]
+    [InlineData(90, 150, 65, 175, false)]
+    public void InitialCrossingNeedsASecondConsistentFrame(
+        int previousMovementRows,
+        long previousInputMagnitude,
+        int currentMovementRows,
+        long currentInputMagnitude,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            ScrollCaptureService.IsControlledInitialCrossingConsistent(
+                previousMovementRows,
+                previousInputMagnitude,
+                currentMovementRows,
+                currentInputMagnitude));
+    }
+
+    [Theory]
+    [InlineData(423, 30, 20, 211)]
+    [InlineData(423, null, 20, 211)]
+    [InlineData(423, 200, 20, 403)]
+    public void ResumeAnchorCannotCommitAnUnmeasuredNearViewportJump(
+        int frameHeight,
+        int? expectedRows,
+        int minimumOverlapRows,
+        int expectedMaximum)
+    {
+        Assert.Equal(
+            expectedMaximum,
+            ScrollCaptureService.GetControlledResumeMaximumMovementRows(
+                frameHeight,
+                expectedRows,
+                minimumOverlapRows));
+    }
+
+    [Theory]
     [InlineData(
         ControlledScrollCaptureState.ScrollingDown,
         ControlledScrollCaptureState.PreparingReturnFromDown,

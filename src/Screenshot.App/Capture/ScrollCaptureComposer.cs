@@ -204,6 +204,44 @@ public sealed class ScrollCaptureComposer : IDisposable
         bool lockDirection,
         out ImageOverlapMatch? overlapMatch)
     {
+        return TryAddFrameCore(
+            frame,
+            direction,
+            options,
+            expectedNewRows,
+            lockDirection,
+            maximumAcceptedNewRows: null,
+            out overlapMatch);
+    }
+
+    internal bool TryAddFrame(
+        Bitmap frame,
+        ScrollCaptureDirection direction,
+        ScrollCaptureOptions options,
+        int? expectedNewRows,
+        bool lockDirection,
+        int? maximumAcceptedNewRows,
+        out ImageOverlapMatch? overlapMatch)
+    {
+        return TryAddFrameCore(
+            frame,
+            direction,
+            options,
+            expectedNewRows,
+            lockDirection,
+            maximumAcceptedNewRows,
+            out overlapMatch);
+    }
+
+    private bool TryAddFrameCore(
+        Bitmap frame,
+        ScrollCaptureDirection direction,
+        ScrollCaptureOptions options,
+        int? expectedNewRows,
+        bool lockDirection,
+        int? maximumAcceptedNewRows,
+        out ImageOverlapMatch? overlapMatch)
+    {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(frame);
         ArgumentNullException.ThrowIfNull(options);
@@ -492,6 +530,19 @@ public sealed class ScrollCaptureComposer : IDisposable
             // located viewport, not a lost one.
             LastRejectReason = "below-minimum";
             OnViewportLocated();
+            return false;
+        }
+
+        if (maximumAcceptedNewRows is { } maximumRows &&
+            newRows > maximumRows)
+        {
+            // Resume re-anchoring runs while the wheel driver is stopped. A
+            // near-full-viewport match there is usually a dynamic chat/layout
+            // reflow, not delayed scroll motion. Do not let even a nominally
+            // perfect single-frame match write a foreign block into the result.
+            LastRejectReason = "movement-cap-veto";
+            OnViewportLost(expectedNewRows, direction, frame.Height, options);
+            overlapMatch = null;
             return false;
         }
 

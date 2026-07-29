@@ -62,6 +62,7 @@ public static class ScrollCaptureService
     private const int ControlledSettleSamples = 2;
     private const int ControlledCompletionSettleAttempts = 10;
     private const int ControlledReturnInputOvershootPixels = 48;
+    private const double ControlledInitialCrossingMinimumConfidence = 0.965;
     private const int ControlledReanchorAttempts = 3;
     private const int ControlledReanchorDelayMilliseconds = 110;
     private const int ControlledAlignmentCorrectionAttempts = 12;
@@ -628,6 +629,8 @@ public static class ScrollCaptureService
             var returnSteps = 0;
             long outboundInputMagnitude = 0;
             long returnInputMagnitude = 0;
+            int? pendingInitialCrossingRows = null;
+            long pendingInitialCrossingInputMagnitude = 0;
             var resumeAnchorPending = false;
             var legHasVisibleMovement = false;
             var outboundHadVisibleMovement = false;
@@ -690,6 +693,8 @@ public static class ScrollCaptureService
                     outboundHadVisibleMovement = legHasVisibleMovement;
                     returnInputMagnitude = 0;
                     returnSteps = 0;
+                    pendingInitialCrossingRows = null;
+                    pendingInitialCrossingInputMagnitude = 0;
                     settleStationarySamples = 0;
                     scrollDriver.ResetDistance();
                     locatedInputMagnitude = 0;
@@ -805,13 +810,19 @@ public static class ScrollCaptureService
                                 scrollDriver,
                                 resumeFrame.Height,
                                 locatedInputMagnitude);
+                        var resumeMaximumAcceptedRows =
+                            GetControlledResumeMaximumMovementRows(
+                                resumeFrame.Height,
+                                resumeExpectedRows,
+                                options.MinimumOverlapRows);
                         var resumeAdded = await TryAddControlledFrameAsync(
                             composer,
                             resumeFrame,
                             resumeDirection,
                             options,
                             resumeExpectedRows,
-                            cancellationToken);
+                            cancellationToken,
+                            maximumAcceptedNewRows: resumeMaximumAcceptedRows);
                         resumeLocated = IsControlledFrameLocated(
                             resumeAdded,
                             composer.LastFrameMovementRows,
@@ -823,7 +834,12 @@ public static class ScrollCaptureService
                             ("located", resumeLocated),
                             ("added", resumeAdded),
                             ("stationary", resumeStationary),
+                            ("expectedRows", resumeExpectedRows),
+                            ("maximumAcceptedRows", resumeMaximumAcceptedRows),
                             ("movementRows", composer.LastFrameMovementRows),
+                            ("overlapRows", composer.LastOverlapRows),
+                            ("confidence", composer.LastOverlapConfidence),
+                            ("horizontalOffset", composer.LastHorizontalOffset),
                             ("reject", composer.LastRejectReason));
 
                         if (resumeAdded)
@@ -929,6 +945,9 @@ public static class ScrollCaptureService
                         ("added", settleAdded),
                         ("stationary", settleStationary),
                         ("movementRows", composer.LastFrameMovementRows),
+                        ("overlapRows", composer.LastOverlapRows),
+                        ("confidence", composer.LastOverlapConfidence),
+                        ("horizontalOffset", composer.LastHorizontalOffset),
                         ("reject", composer.LastRejectReason),
                         ("stableSamples", settleStationarySamples));
 
@@ -1118,6 +1137,7 @@ public static class ScrollCaptureService
                     locatedInputMagnitude);
                 bool added;
                 var initialReached = false;
+                var initialCrossingConfirmed = false;
                 ImageOverlapMatch? initialOverlap = null;
                 if (isReturning)
                 {
@@ -1129,8 +1149,12 @@ public static class ScrollCaptureService
                         initialFingerprint.IsPreviouslySeenComparedTo(
                             fingerprint);
                     var crossedInitial = initialReached;
-                    if (!crossedInitial &&
-                        returnInputMagnitude >= outboundInputMagnitude)
+                    if (initialReached)
+                    {
+                        pendingInitialCrossingRows = null;
+                        pendingInitialCrossingInputMagnitude = 0;
+                    }
+                    else if (returnInputMagnitude >= outboundInputMagnitude)
                     {
                         var expectedCrossingRows = (int)Math.Clamp(
                             returnInputMagnitude - outboundInputMagnitude,
@@ -1146,7 +1170,32 @@ public static class ScrollCaptureService
                                 expectedCrossingRows,
                                 options),
                             cancellationToken);
-                        crossedInitial = initialOverlap is not null;
+                        if (initialOverlap is null)
+                        {
+                            pendingInitialCrossingRows = null;
+                            pendingInitialCrossingInputMagnitude = 0;
+                        }
+                        else
+                        {
+                            var crossingRows = frame.Height -
+                                initialOverlap.OverlapRows;
+                            initialCrossingConfirmed =
+                                pendingInitialCrossingRows is { } previousRows &&
+                                IsControlledInitialCrossingConsistent(
+                                    previousRows,
+                                    pendingInitialCrossingInputMagnitude,
+                                    crossingRows,
+                                    returnInputMagnitude);
+                            crossedInitial = initialCrossingConfirmed;
+                            pendingInitialCrossingRows = crossingRows;
+                            pendingInitialCrossingInputMagnitude =
+                                returnInputMagnitude;
+                        }
+                    }
+                    else
+                    {
+                        pendingInitialCrossingRows = null;
+                        pendingInitialCrossingInputMagnitude = 0;
                     }
 
                     diagnostics.Record(
@@ -1159,6 +1208,7 @@ public static class ScrollCaptureService
                         ("minimumEvidenceMagnitude", minimumEvidenceMagnitude),
                         ("initialReached", initialReached),
                         ("crossedInitial", crossedInitial),
+                        ("initialCrossingConfirmed", initialCrossingConfirmed),
                         ("initialOverlapRows", initialOverlap?.OverlapRows),
                         ("initialOverlapConfidence", initialOverlap?.Confidence));
 
@@ -1251,6 +1301,9 @@ public static class ScrollCaptureService
                             ("added", retryAdded),
                             ("stationary", isStationary),
                             ("movementRows", composer.LastFrameMovementRows),
+                            ("overlapRows", composer.LastOverlapRows),
+                            ("confidence", composer.LastOverlapConfidence),
+                            ("horizontalOffset", composer.LastHorizontalOffset),
                             ("reject", composer.LastRejectReason));
 
                         if (frameLocated)
@@ -1300,7 +1353,11 @@ public static class ScrollCaptureService
                         processingTimestamp).TotalMilliseconds),
                     ("added", added),
                     ("stationary", isStationary),
+                    ("expectedRows", expectedRows),
                     ("movementRows", composer.LastFrameMovementRows),
+                    ("overlapRows", composer.LastOverlapRows),
+                    ("confidence", composer.LastOverlapConfidence),
+                    ("horizontalOffset", composer.LastHorizontalOffset),
                     ("reject", composer.LastRejectReason),
                     ("inputMode", "fixed-wheel-message"),
                     ("inputMagnitude", sampledInputMagnitude),
@@ -1448,6 +1505,9 @@ public static class ScrollCaptureService
                         ("added", completionAdded),
                         ("stationary", completionStationary),
                         ("movementRows", composer.LastFrameMovementRows),
+                        ("overlapRows", composer.LastOverlapRows),
+                        ("confidence", composer.LastOverlapConfidence),
+                        ("horizontalOffset", composer.LastHorizontalOffset),
                         ("reject", composer.LastRejectReason),
                         ("stableSamples", completionStationarySamples));
 
@@ -1764,7 +1824,7 @@ public static class ScrollCaptureService
                 frameHeight - ScrollCaptureOptions.Default.MinimumOverlapRows));
     }
 
-    private static ImageOverlapMatch? FindControlledInitialOverlap(
+    internal static ImageOverlapMatch? FindControlledInitialOverlap(
         Bitmap initialFrame,
         Bitmap returnFrame,
         ScrollCaptureDirection returnDirection,
@@ -1776,14 +1836,18 @@ public static class ScrollCaptureService
                 returnFrame,
                 initialFrame,
                 options.MinimumOverlapRows,
-                options.MinimumOverlapConfidence,
+                Math.Max(
+                    options.MinimumOverlapConfidence,
+                    ControlledInitialCrossingMinimumConfidence),
                 options.MinimumNewRows,
                 expectedCrossingRows)
             : ImageOverlapMatcher.FindVerticalOverlap(
                 initialFrame,
                 returnFrame,
                 options.MinimumOverlapRows,
-                options.MinimumOverlapConfidence,
+                Math.Max(
+                    options.MinimumOverlapConfidence,
+                    ControlledInitialCrossingMinimumConfidence),
                 options.MinimumNewRows,
                 expectedCrossingRows);
         if (match is null)
@@ -1798,13 +1862,51 @@ public static class ScrollCaptureService
             : null;
     }
 
+    internal static bool IsControlledInitialCrossingConsistent(
+        int previousMovementRows,
+        long previousInputMagnitude,
+        int currentMovementRows,
+        long currentInputMagnitude)
+    {
+        var movementDelta = currentMovementRows - previousMovementRows;
+        var inputDelta = currentInputMagnitude - previousInputMagnitude;
+        if (movementDelta <= 0 || inputDelta <= 0)
+        {
+            return false;
+        }
+
+        // After the initial viewport is crossed, both the overlap displacement
+        // and return-driver distance must continue in the same direction. The
+        // two units are only approximate, so allow a broad local tolerance but
+        // require a second independently captured frame before changing legs.
+        return Math.Abs((long)movementDelta - inputDelta) <=
+            Math.Max(24L, inputDelta);
+    }
+
+    internal static int GetControlledResumeMaximumMovementRows(
+        int frameHeight,
+        int? expectedRows,
+        int minimumOverlapRows)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(frameHeight, 2);
+        var maximumMatchableRows = frameHeight - Math.Clamp(
+            minimumOverlapRows,
+            1,
+            frameHeight - 1);
+        var expectedAllowance = Math.Max(0L, expectedRows ?? 0) * 3L;
+        return (int)Math.Min(
+            maximumMatchableRows,
+            Math.Max(frameHeight / 2L, expectedAllowance));
+    }
+
     private static Task<bool> TryAddControlledFrameAsync(
         ControlledScrollCaptureComposer composer,
         Bitmap frame,
         ScrollCaptureDirection direction,
         ScrollCaptureOptions options,
         int? expectedRows,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? maximumAcceptedNewRows = null)
     {
         // A fixed-rate wheel animation can legitimately leave only a few new
         // rows at startup or immediately before a pause. Advancing the viewport
@@ -1816,8 +1918,16 @@ public static class ScrollCaptureService
             : options;
         return Task.Run(
             () => direction == ScrollCaptureDirection.Down
-                ? composer.TryAddDown(frame, effectiveOptions, expectedRows)
-                : composer.TryAddUp(frame, effectiveOptions, expectedRows),
+                ? composer.TryAddDown(
+                    frame,
+                    effectiveOptions,
+                    expectedRows,
+                    maximumAcceptedNewRows)
+                : composer.TryAddUp(
+                    frame,
+                    effectiveOptions,
+                    expectedRows,
+                    maximumAcceptedNewRows),
             cancellationToken);
     }
 

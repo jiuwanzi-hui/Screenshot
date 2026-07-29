@@ -41,6 +41,12 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
 
     public string? LastRejectReason { get; private set; }
 
+    public int? LastOverlapRows { get; private set; }
+
+    public double? LastOverlapConfidence { get; private set; }
+
+    public int? LastHorizontalOffset { get; private set; }
+
     public void Initialize(Bitmap initialFrame, ScrollCaptureOptions options)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -60,7 +66,8 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
     public bool TryAddDown(
         Bitmap frame,
         ScrollCaptureOptions options,
-        int? expectedRows)
+        int? expectedRows,
+        int? maximumAcceptedNewRows = null)
     {
         EnsureInitialized();
         var preferredRows = GetPreferredExpectedRows(
@@ -72,7 +79,8 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
             options,
             preferredRows,
             lockDirection: true,
-            out _);
+            maximumAcceptedNewRows,
+            out var overlapMatch);
         if (added && _downward.LastFrameMovementRows is > 0)
         {
             RememberExpansionRows(
@@ -84,7 +92,7 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
                 GetFixedBottomExclusion(frame.Height),
                 _downward.LastFrameMovementRows);
         }
-        CopyDiagnosticsFrom(_downward);
+        CopyDiagnosticsFrom(_downward, overlapMatch);
         return added;
     }
 
@@ -115,7 +123,8 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
     public bool TryAddUp(
         Bitmap frame,
         ScrollCaptureOptions options,
-        int? expectedRows)
+        int? expectedRows,
+        int? maximumAcceptedNewRows = null)
     {
         EnsureInitialized();
         if (_upward is null)
@@ -132,7 +141,8 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
             options,
             preferredRows,
             lockDirection: true,
-            out _);
+            maximumAcceptedNewRows,
+            out var overlapMatch);
         if (added && _upward.LastFrameMovementRows is > 0)
         {
             RememberExpansionRows(
@@ -144,7 +154,7 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
                 GetFixedBottomExclusion(frame.Height),
                 _upward.LastFrameMovementRows);
         }
-        CopyDiagnosticsFrom(_upward);
+        CopyDiagnosticsFrom(_upward, overlapMatch);
         return added;
     }
 
@@ -218,10 +228,15 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
         }
     }
 
-    private void CopyDiagnosticsFrom(ScrollCaptureComposer composer)
+    private void CopyDiagnosticsFrom(
+        ScrollCaptureComposer composer,
+        ImageOverlapMatch? overlapMatch = null)
     {
         LastFrameMovementRows = composer.LastFrameMovementRows;
         LastRejectReason = composer.LastRejectReason;
+        LastOverlapRows = overlapMatch?.OverlapRows;
+        LastOverlapConfidence = overlapMatch?.Confidence;
+        LastHorizontalOffset = overlapMatch?.HorizontalOffset;
     }
 
     internal static int GetFixedBottomExclusion(int frameHeight)

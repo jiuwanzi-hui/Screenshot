@@ -1,18 +1,18 @@
 ﻿{
-    "version":  "2.2.0",
+    "version":  "2.2.1",
     "releasePage":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest",
     "installer":  {
-                      "fileName":  "Screenshot-Setup-2.2.0-win-x64.exe",
-                      "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-2.2.0-win-x64.exe",
-                      "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.0/Screenshot-Setup-2.2.0-win-x64.exe",
-                      "size":  52379442,
-                      "sha256":  "871328D17145957BCACE26C4D06BB6F8DD29B479E6E347CC683FD0A85FC1DD7D"
+                      "fileName":  "Screenshot-Setup-2.2.1-win-x64.exe",
+                      "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-2.2.1-win-x64.exe",
+                      "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.1/Screenshot-Setup-2.2.1-win-x64.exe",
+                      "size":  52395270,
+                      "sha256":  "0503575EC861041364A5CC31D7489ED8255BAFF01E9497CBA8BD06102D54DA3E"
                   },
     "portable":  {
-                     "fileName":  "Screenshot-Portable-2.2.0-win-x64.zip",
-                     "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-2.2.0-win-x64.zip",
-                     "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.0/Screenshot-Portable-2.2.0-win-x64.zip",
-                     "size":  72114201,
-                     "sha256":  "E2822F7EA8B54C59488396E3784ACDD4D9D92182730A4D2FF631E043236F3B2E"
+                     "fileName":  "Screenshot-Portable-2.2.1-win-x64.zip",
+                     "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-2.2.1-win-x64.zip",
+                     "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.1/Screenshot-Portable-2.2.1-win-x64.zip",
+                     "size":  72111406,
+                     "sha256":  "BC1FACDDECD67F8C85703B6B362485FB17F15B7C439028199CA889AF238E5E72"
                  }
 }
