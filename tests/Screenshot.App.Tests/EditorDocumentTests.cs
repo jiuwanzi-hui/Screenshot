@@ -66,4 +66,28 @@ public sealed class EditorDocumentTests
         Assert.Empty(document.Annotations);
         Assert.True(document.CanRedo);
     }
+
+    [Fact]
+    public void ReplacingAnAnnotationIsOneUndoableOperation()
+    {
+        var document = new EditorDocument();
+        var original = new RectangleAnnotation(
+            new Rect(10, 20, 30, 40),
+            Colors.Teal,
+            StrokeWidth: 3);
+        var replacement = original with
+        {
+            Bounds = new Rect(14, 24, 50, 60),
+        };
+
+        document.Add(original);
+        document.SetAt(0, replacement);
+        document.ReplaceAt(0, original, replacement);
+
+        Assert.Same(replacement, document.Annotations[0]);
+        document.Undo();
+        Assert.Same(original, document.Annotations[0]);
+        document.Redo();
+        Assert.Same(replacement, document.Annotations[0]);
+    }
 }

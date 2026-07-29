@@ -33,6 +33,11 @@ public sealed class ImageEditorCanvas : Canvas
     private WpfTextBox? _activeTextInput;
     private WpfPoint _activeTextPosition;
     private bool _isDrawing;
+    private int _selectedAnnotationIndex = -1;
+    private int _activeAnnotationHandle = -1;
+    private bool _isEditingAnnotation;
+    private WpfPoint _annotationEditStartPoint;
+    private EditorAnnotation? _annotationEditOriginal;
     private double _baseDisplayWidth;
     private double _baseDisplayHeight;
     private double _zoom = 1;
@@ -87,6 +92,7 @@ public sealed class ImageEditorCanvas : Canvas
         RenderTransformOrigin = new WpfPoint(0, 0);
         ApplyDisplayTransform();
         RebuildCanvas();
+        UpdateInteractionCursor(new WpfPoint(-1, -1));
         RaiseHistoryChanged();
     }
 
@@ -155,7 +161,16 @@ public sealed class ImageEditorCanvas : Canvas
     public void SelectTool(EditorTool tool)
     {
         CommitPendingText();
+        if (_isEditingAnnotation)
+        {
+            CommitAnnotationEdit();
+        }
+
         _selectedTool = tool;
+        _selectedAnnotationIndex = -1;
+        _activeAnnotationHandle = -1;
+        RebuildCanvas();
+        UpdateInteractionCursor(new WpfPoint(-1, -1));
     }
 
     public void SelectColor(WpfColor color)
@@ -256,6 +271,12 @@ public sealed class ImageEditorCanvas : Canvas
     {
         var wasCanceled = false;
 
+        if (_isEditingAnnotation)
+        {
+            CancelAnnotationEdit();
+            wasCanceled = true;
+        }
+
         if (_isDrawing)
         {
             _isDrawing = false;
@@ -292,6 +313,10 @@ public sealed class ImageEditorCanvas : Canvas
         _drawingPreview = null;
         _brushPoints = null;
         _isDrawing = false;
+        _selectedAnnotationIndex = -1;
+        _activeAnnotationHandle = -1;
+        _isEditingAnnotation = false;
+        _annotationEditOriginal = null;
         _baseDisplayWidth = 0;
         _baseDisplayHeight = 0;
         _zoom = 1;
@@ -312,10 +337,15 @@ public sealed class ImageEditorCanvas : Canvas
 
         CommitPendingText();
         var displayTransform = RenderTransform;
+        var hadSelectionAdorner = _selectedAnnotationIndex >= 0;
         RenderTransform = Transform.Identity;
 
         try
         {
+            if (hadSelectionAdorner)
+            {
+                RebuildCanvasCore(includeSelection: false);
+            }
             Measure(new WpfSize(Width, Height));
             Arrange(new Rect(0, 0, Width, Height));
             var renderedImage = new RenderTargetBitmap(
@@ -331,6 +361,10 @@ public sealed class ImageEditorCanvas : Canvas
         finally
         {
             RenderTransform = displayTransform;
+            if (hadSelectionAdorner)
+            {
+                RebuildCanvas();
+            }
         }
     }
 
@@ -345,6 +379,14 @@ public sealed class ImageEditorCanvas : Canvas
 
         CommitPendingText();
         var point = ClampPoint(e.GetPosition(this));
+
+        if (BeginAnnotationEdit(point))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        UpdateInteractionCursor(point);
 
         if (_selectedTool == EditorTool.Emoji)
         {
@@ -385,13 +427,20 @@ public sealed class ImageEditorCanvas : Canvas
     protected override void OnMouseMove(WpfMouseEventArgs e)
     {
         base.OnMouseMove(e);
+        var point = ClampPoint(e.GetPosition(this));
+        UpdateInteractionCursor(point);
+
+        if (_isEditingAnnotation)
+        {
+            UpdateAnnotationEdit(point);
+            e.Handled = true;
+            return;
+        }
 
         if (!_isDrawing || _drawingPreview is null)
         {
             return;
         }
-
-        var point = ClampPoint(e.GetPosition(this));
 
         switch (_selectedTool)
         {
@@ -412,6 +461,16 @@ public sealed class ImageEditorCanvas : Canvas
     {
         base.OnMouseLeftButtonUp(e);
 
+        if (_isEditingAnnotation)
+        {
+            var point = ClampPoint(e.GetPosition(this));
+            UpdateAnnotationEdit(point);
+            CommitAnnotationEdit();
+            UpdateInteractionCursor(point);
+            e.Handled = true;
+            return;
+        }
+
         if (!_isDrawing)
         {
             return;
@@ -429,6 +488,433 @@ public sealed class ImageEditorCanvas : Canvas
 
         AddDrawingAnnotation(endPoint);
         e.Handled = true;
+    }
+
+    private bool BeginAnnotationEdit(WpfPoint point)
+    {
+        var hitIndex = HitTestAnnotation(point);
+        if (hitIndex < 0)
+        {
+            var hadSelection = _selectedAnnotationIndex >= 0;
+            _selectedAnnotationIndex = -1;
+            if (hadSelection)
+            {
+                RebuildCanvas();
+            }
+            return false;
+        }
+
+        _selectedAnnotationIndex = hitIndex;
+        var annotation = _document.Annotations[hitIndex];
+        _activeAnnotationHandle = GetAnnotationHandle(annotation, point);
+        _annotationEditStartPoint = point;
+        _annotationEditOriginal = annotation;
+        _isEditingAnnotation = true;
+        CaptureMouse();
+        RebuildCanvas();
+        UpdateInteractionCursor(point);
+        return true;
+    }
+
+    private void UpdateAnnotationEdit(WpfPoint point)
+    {
+        if (!_isEditingAnnotation ||
+            _annotationEditOriginal is not { } original ||
+            _selectedAnnotationIndex < 0)
+        {
+            return;
+        }
+
+        var delta = point - _annotationEditStartPoint;
+        var updated = original switch
+        {
+            RectangleAnnotation rectangle => rectangle with
+            {
+                Bounds = _activeAnnotationHandle < 0
+                    ? new Rect(
+                        rectangle.Bounds.TopLeft + delta,
+                        rectangle.Bounds.Size)
+                    : ResizeRectangle(
+                        rectangle.Bounds,
+                        _activeAnnotationHandle,
+                        point),
+            },
+            ArrowAnnotation arrow => _activeAnnotationHandle switch
+            {
+                0 => arrow with { Start = point },
+                1 => arrow with { End = point },
+                _ => arrow with
+                {
+                    Start = arrow.Start + delta,
+                    End = arrow.End + delta,
+                },
+            },
+            TextAnnotation text => _activeAnnotationHandle == 8
+                ? text with
+                {
+                    FontSize = Math.Clamp(
+                        text.FontSize + ((delta.X + delta.Y) * 0.25),
+                        8,
+                        256),
+                }
+                : text with { Position = text.Position + delta },
+            EmojiAnnotation emoji => _activeAnnotationHandle == 8
+                ? emoji with
+                {
+                    FontSize = Math.Clamp(
+                        emoji.FontSize + ((delta.X + delta.Y) * 0.5),
+                        12,
+                        512),
+                }
+                : emoji with { Position = emoji.Position + delta },
+            _ => original,
+        };
+
+        _document.SetAt(_selectedAnnotationIndex, updated);
+        RebuildCanvas();
+    }
+
+    private void CommitAnnotationEdit()
+    {
+        if (!_isEditingAnnotation)
+        {
+            return;
+        }
+
+        if (Mouse.Captured == this)
+        {
+            ReleaseMouseCapture();
+        }
+
+        var index = _selectedAnnotationIndex;
+        var original = _annotationEditOriginal;
+        var current = index >= 0 && index < _document.Annotations.Count
+            ? _document.Annotations[index]
+            : null;
+        _isEditingAnnotation = false;
+        _activeAnnotationHandle = -1;
+        _annotationEditOriginal = null;
+
+        if (index >= 0 && original is not null && current is not null &&
+            !Equals(original, current))
+        {
+            _document.ReplaceAt(index, original, current);
+        }
+
+        RebuildCanvas();
+        RaiseHistoryChanged();
+    }
+
+    private void CancelAnnotationEdit()
+    {
+        if (!_isEditingAnnotation)
+        {
+            return;
+        }
+
+        if (Mouse.Captured == this)
+        {
+            ReleaseMouseCapture();
+        }
+
+        if (_selectedAnnotationIndex >= 0 &&
+            _annotationEditOriginal is not null)
+        {
+            _document.SetAt(
+                _selectedAnnotationIndex,
+                _annotationEditOriginal);
+        }
+
+        _isEditingAnnotation = false;
+        _activeAnnotationHandle = -1;
+        _annotationEditOriginal = null;
+        RebuildCanvas();
+    }
+
+    private int HitTestAnnotation(WpfPoint point)
+    {
+        for (var index = _document.Annotations.Count - 1; index >= 0; index--)
+        {
+            var annotation = _document.Annotations[index];
+            if (annotation is not (
+                RectangleAnnotation or
+                ArrowAnnotation or
+                TextAnnotation or
+                EmojiAnnotation))
+            {
+                continue;
+            }
+
+            if (IsAnnotationHit(annotation, point))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static bool IsAnnotationHit(
+        EditorAnnotation annotation,
+        WpfPoint point)
+    {
+        return annotation switch
+        {
+            RectangleAnnotation rectangle => IsRectangleBorderHit(
+                rectangle.Bounds,
+                point,
+                Math.Max(3, (rectangle.StrokeWidth / 2) + 2)),
+            ArrowAnnotation arrow => DistanceToSegment(
+                point,
+                arrow.Start,
+                arrow.End) <= Math.Max(5, (arrow.StrokeWidth * 2) + 2),
+            TextAnnotation text => Inflate(
+                GetTextBounds(text),
+                3).Contains(point),
+            EmojiAnnotation emoji => Inflate(
+                GetAnnotationBounds(emoji),
+                3).Contains(point),
+            _ => false,
+        };
+    }
+
+    private static bool IsRectangleBorderHit(
+        Rect bounds,
+        WpfPoint point,
+        double tolerance)
+    {
+        if (bounds.IsEmpty)
+        {
+            return false;
+        }
+
+        var outer = bounds;
+        outer.Inflate(tolerance, tolerance);
+        if (!outer.Contains(point))
+        {
+            return false;
+        }
+
+        var inner = bounds;
+        inner.Inflate(-tolerance, -tolerance);
+        return inner.Width <= 0 || inner.Height <= 0 || !inner.Contains(point);
+    }
+
+    private static int GetAnnotationHandle(
+        EditorAnnotation annotation,
+        WpfPoint point)
+    {
+        var handlePoints = GetAnnotationHandlePoints(annotation);
+        for (var index = 0; index < handlePoints.Count; index++)
+        {
+            if ((handlePoints[index] - point).Length <= 7)
+            {
+                return annotation is TextAnnotation or EmojiAnnotation
+                    ? 8
+                    : index;
+            }
+        }
+
+        return -1;
+    }
+
+    private void UpdateInteractionCursor(WpfPoint point)
+    {
+        if (_selectedAnnotationIndex >= 0 &&
+            _selectedAnnotationIndex < _document.Annotations.Count)
+        {
+            var selected = _document.Annotations[_selectedAnnotationIndex];
+            var handle = _isEditingAnnotation
+                ? _activeAnnotationHandle
+                : GetAnnotationHandle(selected, point);
+            if (handle >= 0)
+            {
+                Cursor = GetHandleCursor(selected, handle);
+                return;
+            }
+
+            if (_isEditingAnnotation || IsAnnotationHit(selected, point))
+            {
+                Cursor = WpfCursors.SizeAll;
+                return;
+            }
+        }
+
+        if (HitTestAnnotation(point) >= 0)
+        {
+            Cursor = WpfCursors.Hand;
+            return;
+        }
+
+        Cursor = _selectedTool == EditorTool.Text
+            ? WpfCursors.IBeam
+            : WpfCursors.Cross;
+    }
+
+    private static System.Windows.Input.Cursor GetHandleCursor(
+        EditorAnnotation annotation,
+        int handle)
+    {
+        return annotation switch
+        {
+            RectangleAnnotation => handle switch
+            {
+                0 or 4 => WpfCursors.SizeNWSE,
+                2 or 6 => WpfCursors.SizeNESW,
+                1 or 5 => WpfCursors.SizeNS,
+                3 or 7 => WpfCursors.SizeWE,
+                _ => WpfCursors.SizeAll,
+            },
+            TextAnnotation or EmojiAnnotation => WpfCursors.SizeNWSE,
+            ArrowAnnotation => WpfCursors.Cross,
+            _ => WpfCursors.SizeAll,
+        };
+    }
+
+    private static IReadOnlyList<WpfPoint> GetAnnotationHandlePoints(
+        EditorAnnotation annotation)
+    {
+        return annotation switch
+        {
+            RectangleAnnotation rectangle => GetRectangleHandlePoints(
+                rectangle.Bounds),
+            ArrowAnnotation arrow => [arrow.Start, arrow.End],
+            TextAnnotation text =>
+            [
+                new WpfPoint(
+                    GetTextBounds(text).Right,
+                    GetTextBounds(text).Bottom),
+            ],
+            EmojiAnnotation emoji =>
+            [
+                new WpfPoint(
+                    emoji.Position.X + (emoji.FontSize / 2),
+                    emoji.Position.Y + (emoji.FontSize / 2)),
+            ],
+            _ => [],
+        };
+    }
+
+    private static IReadOnlyList<WpfPoint> GetRectangleHandlePoints(Rect bounds)
+    {
+        return
+        [
+            bounds.TopLeft,
+            new WpfPoint(bounds.Left + (bounds.Width / 2), bounds.Top),
+            bounds.TopRight,
+            new WpfPoint(bounds.Right, bounds.Top + (bounds.Height / 2)),
+            bounds.BottomRight,
+            new WpfPoint(bounds.Left + (bounds.Width / 2), bounds.Bottom),
+            bounds.BottomLeft,
+            new WpfPoint(bounds.Left, bounds.Top + (bounds.Height / 2)),
+        ];
+    }
+
+    private static Rect ResizeRectangle(
+        Rect original,
+        int handle,
+        WpfPoint point)
+    {
+        if (handle < 0 || handle > 7)
+        {
+            return original;
+        }
+
+        var left = original.Left;
+        var top = original.Top;
+        var right = original.Right;
+        var bottom = original.Bottom;
+        if (handle is 0 or 6 or 7)
+        {
+            left = point.X;
+        }
+        if (handle is 0 or 1 or 2)
+        {
+            top = point.Y;
+        }
+        if (handle is 2 or 3 or 4)
+        {
+            right = point.X;
+        }
+        if (handle is 4 or 5 or 6)
+        {
+            bottom = point.Y;
+        }
+
+        const double minimumSize = 2;
+        if (right - left < minimumSize)
+        {
+            if (handle is 0 or 6 or 7)
+            {
+                left = right - minimumSize;
+            }
+            else
+            {
+                right = left + minimumSize;
+            }
+        }
+        if (bottom - top < minimumSize)
+        {
+            if (handle is 0 or 1 or 2)
+            {
+                top = bottom - minimumSize;
+            }
+            else
+            {
+                bottom = top + minimumSize;
+            }
+        }
+
+        return new Rect(
+            new WpfPoint(left, top),
+            new WpfPoint(right, bottom));
+    }
+
+    private void AddSelectionVisual()
+    {
+        if (_selectedAnnotationIndex < 0 ||
+            _selectedAnnotationIndex >= _document.Annotations.Count)
+        {
+            return;
+        }
+
+        var annotation = _document.Annotations[_selectedAnnotationIndex];
+        var handles = GetAnnotationHandlePoints(annotation);
+        for (var index = 0; index < handles.Count; index++)
+        {
+            var handle = new Ellipse
+            {
+                Width = 8,
+                Height = 8,
+                Fill = WpfBrushes.White,
+                Stroke = new SolidColorBrush(WpfColor.FromRgb(7, 92, 89)),
+                StrokeThickness = 1.5,
+                IsHitTestVisible = false,
+            };
+            SetLeft(handle, handles[index].X - 4);
+            SetTop(handle, handles[index].Y - 4);
+            Children.Add(handle);
+        }
+    }
+
+    private static double DistanceToSegment(
+        WpfPoint point,
+        WpfPoint start,
+        WpfPoint end)
+    {
+        var delta = end - start;
+        var lengthSquared = (delta.X * delta.X) + (delta.Y * delta.Y);
+        if (lengthSquared <= 0.001)
+        {
+            return (point - start).Length;
+        }
+
+        var projection =
+            (((point.X - start.X) * delta.X) +
+             ((point.Y - start.Y) * delta.Y)) / lengthSquared;
+        projection = Math.Clamp(projection, 0, 1);
+        var closest = start + (delta * projection);
+        return (point - closest).Length;
     }
 
     private void CreateDrawingPreview(WpfPoint point)
@@ -656,6 +1142,11 @@ public sealed class ImageEditorCanvas : Canvas
 
     private void RebuildCanvas()
     {
+        RebuildCanvasCore(includeSelection: true);
+    }
+
+    private void RebuildCanvasCore(bool includeSelection)
+    {
         Children.Clear();
 
         if (_capturedImage is null)
@@ -681,6 +1172,11 @@ public sealed class ImageEditorCanvas : Canvas
             }
 
             AddAnnotationVisual(annotation);
+        }
+
+        if (includeSelection && _selectedAnnotationIndex >= 0)
+        {
+            AddSelectionVisual();
         }
     }
 

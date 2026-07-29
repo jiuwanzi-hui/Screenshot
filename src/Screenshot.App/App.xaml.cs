@@ -68,6 +68,7 @@ public partial class App : System.Windows.Application, IDisposable
             settingsStore.Save(_currentSettings);
         }
         _themeManager = new AppThemeManager();
+        _themeManager.ThemeChanged += OnThemeChanged;
         _themeManager.Apply(_currentSettings.Theme);
         var startupRegistrationService = new StartupRegistrationService();
         var startupWarning = loadResult.Warning is null
@@ -92,6 +93,7 @@ public partial class App : System.Windows.Application, IDisposable
             _hotKeyManager,
             credentialStore,
             _translationHttpClient);
+        _mainWindow.ApplySettingsPalette(_themeManager.ResolvedTheme);
         MainWindow = _mainWindow;
         _mainWindow.SettingsSaved += OnSettingsSaved;
         _mainWindow.ExitRequested += OnExitRequested;
@@ -194,7 +196,11 @@ public partial class App : System.Windows.Application, IDisposable
         DisposeTrayIconService();
         DisposeHotKeyManager();
         DisposePinnedImageManager();
-        _themeManager?.Dispose();
+        if (_themeManager is not null)
+        {
+            _themeManager.ThemeChanged -= OnThemeChanged;
+            _themeManager.Dispose();
+        }
         _themeManager = null;
         _translationHttpClient?.Dispose();
         _translationHttpClient = null;
@@ -246,11 +252,13 @@ public partial class App : System.Windows.Application, IDisposable
     {
         _currentSettings = e.Settings;
         _themeManager?.Apply(e.Settings.Theme);
-        if (_themeManager is not null)
-        {
-            _trayIconService?.ApplyTheme(_themeManager.ResolvedTheme);
-        }
         _trayIconService?.SetVisible(e.Settings.ShowNotificationIcon);
+    }
+
+    private void OnThemeChanged(object? sender, AppTheme theme)
+    {
+        _mainWindow?.ApplySettingsPalette(theme);
+        _trayIconService?.ApplyTheme(theme);
     }
 
     private void OnHotKeyPressed(object? sender, HotKeyPressedEventArgs e)

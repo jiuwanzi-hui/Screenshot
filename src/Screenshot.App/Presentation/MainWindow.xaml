@@ -279,6 +279,7 @@
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="24" />
                                 <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBlock Height="24"
                                        FontFamily="Segoe MDL2 Assets"
@@ -295,6 +296,18 @@
                                        LineStackingStrategy="BlockLineHeight"
                                        Text="版本更新"
                                        VerticalAlignment="Center" />
+                            <Border x:Name="UpdateBadge"
+                                    Grid.Column="2"
+                                    Margin="6,0,0,0"
+                                    Padding="5,1"
+                                    Background="{DynamicResource AppWarmAccentBrush}"
+                                    CornerRadius="6"
+                                    Visibility="Collapsed">
+                                <TextBlock Foreground="#FFFFFF"
+                                           FontSize="10"
+                                           FontWeight="SemiBold"
+                                           Text="有更新" />
+                            </Border>
                         </Grid>
                     </ListBoxItem>
                 </ListBox>

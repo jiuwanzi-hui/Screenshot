@@ -12,6 +12,7 @@
         <SolidColorBrush x:Key="AppSubtleBorderBrush" Color="#A9CECA" />
         <SolidColorBrush x:Key="AppTextPrimaryBrush" Color="#1C252D" />
         <SolidColorBrush x:Key="AppTextSecondaryBrush" Color="#66757F" />
+        <SolidColorBrush x:Key="AppMutedTextBrush" Color="#66757F" />
         <SolidColorBrush x:Key="AppControlForegroundBrush" Color="#26464B" />
         <SolidColorBrush x:Key="AppAccentBrush" Color="#2EAFA5" />
         <SolidColorBrush x:Key="AppAccentMutedBrush" Color="#BFE8E2" />

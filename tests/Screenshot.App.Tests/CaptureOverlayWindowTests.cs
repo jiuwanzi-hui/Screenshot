@@ -64,10 +64,16 @@ public sealed class CaptureOverlayWindowTests
                     overlay.FindName("InlineUndoButton"));
                 var redoButton = Assert.IsType<Button>(
                     overlay.FindName("InlineRedoButton"));
-                Assert.Equal(44, undoButton.Width);
-                Assert.Equal(44, redoButton.Width);
-                Assert.Equal(22, Assert.IsType<Viewbox>(undoButton.Content).Width);
-                Assert.Equal(22, Assert.IsType<Viewbox>(redoButton.Content).Width);
+                Assert.Equal(36, undoButton.Width);
+                Assert.Equal(36, redoButton.Width);
+                Assert.Equal(
+                    18,
+                    Assert.IsType<System.Windows.Shapes.Path>(
+                        undoButton.Content).Width);
+                Assert.Equal(
+                    18,
+                    Assert.IsType<System.Windows.Shapes.Path>(
+                        redoButton.Content).Width);
 
                 var separator = Assert.IsType<Border>(
                     overlay.FindName("ActionHistorySeparator"));

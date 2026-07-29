@@ -55,6 +55,45 @@ public sealed class ImageEditorCanvasTests
     }
 
     [Fact]
+    public void RectangleHitTestingTargetsItsBorderInsteadOfItsInterior()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var bitmap = new Bitmap(100, 80, PixelFormat.Format32bppPArgb);
+            using var image = new CapturedImage((Bitmap)bitmap.Clone());
+            var editor = new ImageEditorCanvas();
+            editor.Initialize(image, displayWidth: 100, displayHeight: 80);
+
+            var documentField = typeof(ImageEditorCanvas).GetField(
+                "_document",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var hitTestMethod = typeof(ImageEditorCanvas).GetMethod(
+                "HitTestAnnotation",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(documentField);
+            Assert.NotNull(hitTestMethod);
+
+            var document = Assert.IsType<EditorDocument>(
+                documentField.GetValue(editor));
+            document.Add(new RectangleAnnotation(
+                new System.Windows.Rect(10, 10, 60, 40),
+                System.Windows.Media.Colors.Red,
+                4));
+
+            Assert.Equal(
+                -1,
+                Assert.IsType<int>(hitTestMethod.Invoke(
+                    editor,
+                    [new WpfPoint(40, 30)])));
+            Assert.Equal(
+                0,
+                Assert.IsType<int>(hitTestMethod.Invoke(
+                    editor,
+                    [new WpfPoint(10, 30)])));
+        });
+    }
+
+    [Fact]
     public void RendersTheCapturedImageAtItsOriginalPixelSize()
     {
         WpfTestHost.Invoke(() =>

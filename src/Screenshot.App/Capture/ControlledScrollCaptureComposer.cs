@@ -14,6 +14,8 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
 {
     private readonly ScrollCaptureComposer _downward = new(
         detectStationaryLeadingRows: false);
+    private readonly Queue<int> _recentDownwardExpansionRows = new(3);
+    private readonly Queue<int> _recentUpwardExpansionRows = new(3);
     private ScrollCaptureComposer? _upward;
     private int _initialFrameHeight;
     private bool _initialized;
@@ -61,20 +63,26 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
         int? expectedRows)
     {
         EnsureInitialized();
+        var preferredRows = GetPreferredExpectedRows(
+            expectedRows,
+            _recentDownwardExpansionRows);
         var added = _downward.TryAddFrame(
             frame,
             ScrollCaptureDirection.Down,
             options,
-            expectedRows,
+            preferredRows,
             lockDirection: true,
             out _);
-        if (_downward.LastFrameMovementRows.HasValue ||
-            _downward.LastRejectReason == "below-minimum")
+        if (added && _downward.LastFrameMovementRows is > 0)
         {
+            RememberExpansionRows(
+                _recentDownwardExpansionRows,
+                _downward.LastFrameMovementRows.Value);
             _downward.RefreshBoundaryViewport(
                 frame,
                 ScrollCaptureDirection.Down,
-                GetFixedBottomExclusion(frame.Height));
+                GetFixedBottomExclusion(frame.Height),
+                _downward.LastFrameMovementRows);
         }
         CopyDiagnosticsFrom(_downward);
         return added;
@@ -115,20 +123,26 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
             throw new InvalidOperationException("尚未开始向上扩展。");
         }
 
+        var preferredRows = GetPreferredExpectedRows(
+            expectedRows,
+            _recentUpwardExpansionRows);
         var added = _upward.TryAddFrame(
             frame,
             ScrollCaptureDirection.Up,
             options,
-            expectedRows,
+            preferredRows,
             lockDirection: true,
             out _);
-        if (_upward.LastFrameMovementRows.HasValue ||
-            _upward.LastRejectReason == "below-minimum")
+        if (added && _upward.LastFrameMovementRows is > 0)
         {
+            RememberExpansionRows(
+                _recentUpwardExpansionRows,
+                _upward.LastFrameMovementRows.Value);
             _upward.RefreshBoundaryViewport(
                 frame,
                 ScrollCaptureDirection.Up,
-                GetFixedBottomExclusion(frame.Height));
+                GetFixedBottomExclusion(frame.Height),
+                _upward.LastFrameMovementRows);
         }
         CopyDiagnosticsFrom(_upward);
         return added;
@@ -215,5 +229,52 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
         return frameHeight >= 120
             ? Math.Clamp(frameHeight / 20, 16, 24)
             : 0;
+    }
+
+    internal static int? GetPreferredExpectedRows(
+        int? inputExpectedRows,
+        IReadOnlyCollection<int> recentExpansionRows)
+    {
+        if (inputExpectedRows is not > 0 ||
+            recentExpansionRows.Count < 2)
+        {
+            return inputExpectedRows;
+        }
+
+        // Fixed wheel packets measure injected input, while the compositor can
+        // still be presenting inertia from preceding packets. Preserve the
+        // latest confirmed movement so a smaller packet count cannot pull a
+        // periodic code match one line behind. Ignore only a clear retry spike,
+        // measured against both preceding samples, so it cannot become the next
+        // frame's temporal prior.
+        var rows = recentExpansionRows.ToArray();
+        var movementTrend = rows[^1];
+        if (rows.Length >= 3)
+        {
+            var precedingMaximum = Math.Max(rows[^2], rows[^3]);
+            var spikeThreshold = Math.Max(
+                precedingMaximum * 2,
+                precedingMaximum + 32);
+            if (movementTrend > spikeThreshold)
+            {
+                movementTrend = precedingMaximum;
+            }
+        }
+
+        return Math.Max(
+            inputExpectedRows.Value,
+            movementTrend);
+    }
+
+    private static void RememberExpansionRows(
+        Queue<int> recentExpansionRows,
+        int movementRows)
+    {
+        if (recentExpansionRows.Count == 3)
+        {
+            _ = recentExpansionRows.Dequeue();
+        }
+
+        recentExpansionRows.Enqueue(movementRows);
     }
 }
