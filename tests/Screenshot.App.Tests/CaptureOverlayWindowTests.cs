@@ -1,8 +1,10 @@
 using System.Reflection;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using Screenshot.App.Capture;
 using Screenshot.App.Editor;
 using Screenshot.App.Pin;
@@ -1130,15 +1132,27 @@ public sealed class CaptureOverlayWindowTests
                     overlay.FindName("SelectionRectangle"));
                 var topMask = Assert.IsType<System.Windows.Shapes.Rectangle>(
                     overlay.FindName("TopMask"));
+                var shade = Assert.IsType<Border>(
+                    overlay.FindName("CaptureShade"));
+                var frozenScreen = Assert.IsType<Image>(
+                    overlay.FindName("FrozenScreenImage"));
                 var selectionLeft = Canvas.GetLeft(selectionRectangle);
                 var selectionTop = Canvas.GetTop(selectionRectangle);
                 var outlineLeft = Canvas.GetLeft(outline);
                 var outlineTop = Canvas.GetTop(outline);
+                var windowHandle = new WindowInteropHelper(overlay).Handle;
+                Assert.True(NativeMethods.GetWindowDisplayAffinity(
+                    windowHandle,
+                    out var displayAffinity));
+                Assert.Equal(0u, displayAffinity);
                 Assert.True(surface.IsHitTestVisible);
                 Assert.Equal(Visibility.Visible, outline.Visibility);
                 Assert.True(outline.Width > 0);
                 Assert.True(outline.Height > 0);
                 Assert.Equal(Visibility.Visible, topMask.Visibility);
+                Assert.Equal(Visibility.Collapsed, shade.Visibility);
+                Assert.Equal(Visibility.Collapsed, frozenScreen.Visibility);
+                Assert.Null(frozenScreen.Source);
                 Assert.True(outlineLeft + outline.StrokeThickness < selectionLeft);
                 Assert.True(outlineTop + outline.StrokeThickness < selectionTop);
                 Assert.True(
@@ -1313,5 +1327,14 @@ public sealed class CaptureOverlayWindowTests
         {
             WpfTestHost.Invoke(() => overlay?.Close());
         }
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetWindowDisplayAffinity(
+            IntPtr windowHandle,
+            out uint affinity);
     }
 }

@@ -12,10 +12,15 @@ namespace Screenshot.App.Capture;
 /// </summary>
 internal sealed class CapturedFrameGate
 {
-    private const int SignatureWidth = 48;
-    private const int SignatureHeight = 32;
-    private const double MaximumAverageDifference = 0.006;
-    private const double MaximumChangedSampleRatio = 0.035;
+    // The signature must be fine enough that a small scroll of sparse content
+    // (a chat log that is mostly background with a few text rows) still reads
+    // as changed. At 48x32 with the old thresholds a 30-row scroll of a sparse
+    // viewport was regularly classified stationary, which silently starved the
+    // stitcher of exactly the samples it needed.
+    private const int SignatureWidth = 96;
+    private const int SignatureHeight = 64;
+    private const double MaximumAverageDifference = 0.0035;
+    private const double MaximumChangedSampleRatio = 0.012;
     private byte[]? _acceptedSignature;
     private byte[]? _pendingSignature;
 

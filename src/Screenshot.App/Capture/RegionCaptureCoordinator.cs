@@ -254,12 +254,14 @@ public sealed class RegionCaptureCoordinator
 
                 try
                 {
+                    // Commit the selected region before installing the pointer
+                    // hook. Once capture starts, the region becomes a control
+                    // surface: click pauses/resumes and double-click reverses.
+                    await scrollSelection.LockForScrollingAsync(
+                        cancellationSource.Token);
                     using var wheelMonitor = new ScrollCaptureWheelMonitor(
                         initialRegion,
-                        _ => scrollSelection.LockForScrollingAsync(
-                                cancellationSource.Token)
-                            .GetAwaiter()
-                                .GetResult(),
+                        wheelDetected: null,
                         (x, y) => progressWindow.ContainsScreenPoint(x, y),
                         CancelFromSelection);
                     var latestSelectionRegion = initialRegion;
@@ -311,115 +313,153 @@ public sealed class RegionCaptureCoordinator
                             });
                     };
 
-                    var wheelReady = wheelMonitor.WheelEvents
-                        .WaitToReadAsync(cancellationSource.Token)
-                        .AsTask();
-                    var firstAction = await Task.WhenAny(
-                        completionSource.Task,
-                        wheelReady);
-                    CapturedImage? image;
-
-                    if (firstAction == completionSource.Task)
+                    ScrollCaptureTarget? target = null;
+                    progressWindow.Owner = null;
+                    await scrollSelection.SetVisibleAsync(
+                        isVisible: false,
+                        cancellationSource.Token);
+                    try
                     {
-                        image = scrollSelection.CaptureSnapshot();
-                    }
-                    else
-                    {
-                        // First wheel already locked click-through via the monitor.
-                        // Re-lock is cheap and ensures the hole is active before we
-                        // resolve the window under the selection center.
-                        await scrollSelection.LockForScrollingAsync(
-                            cancellationSource.Token);
-                        wheelMonitor.BlockNonWheelInput();
-                        ScrollCaptureTarget? target = null;
-                        progressWindow.Owner = null;
-                        await scrollSelection.SetVisibleAsync(
-                            isVisible: false,
-                            cancellationSource.Token);
-                        try
-                        {
-                            // WindowFromPoint cannot see through a layered WPF
-                            // window owned by another process. Hide the overlay
-                            // for one render turn while resolving the real target.
-                            await Task.Delay(30, cancellationSource.Token);
-                            _ = ForegroundWindowCaptureService
-                                .TryCreateScrollCaptureTargetFromSelection(
-                                    scrollSelection.CaptureRegion,
-                                    out target);
-                        }
-                        finally
-                        {
-                            await scrollSelection.SetVisibleAsync(
-                                isVisible: true,
-                                CancellationToken.None);
-                            if (!cancellationSource.IsCancellationRequested)
-                            {
-                                progressWindow.Owner = scrollSelection.OverlayWindow;
-                                progressWindow.BringToFront();
-                            }
-                        }
-
-                        if (target is null)
-                        {
-                            _statusReporter("无法识别选区下的可滚动窗口。");
-                            return;
-                        }
-
-                        // Activate the window under the selection so wheel input
-                        // reaches the right control without a manual pre-focus step.
-                        _ = ForegroundWindowCaptureService.TryFocusScrollTarget(target);
+                        // WindowFromPoint cannot see through a layered WPF
+                        // window owned by another process. Hide the overlay for
+                        // one render turn while resolving the real target.
                         await Task.Delay(30, cancellationSource.Token);
-
-                        // Capture region equals the user selection. Prefer the
-                        // pre-scroll snapshot so content before the first wheel
-                        // tick is retained.
-                        var firstFrame = ScrollCaptureService.CreateInitialFrame(
-                            initialImage.Bitmap,
-                            scrollSelection.CaptureRegion,
-                            target.CaptureRegion);
-                        UpdateProgress(
-                            progressWindow,
-                            new ScrollCapturePreviewState(
-                                CapturedImage.ToBitmapSource(firstFrame),
-                                1,
-                                0,
-                                0,
-                                firstFrame.Width,
-                                firstFrame.Height));
-                        var result = await ScrollCaptureService.CaptureOnWheelAsync(
-                            target,
-                            completionSource.Task,
-                            wheelMonitor.WheelEvents,
-                            previewChanged: previewState =>
-                                UpdateProgress(progressWindow, previewState),
-                            initialFrame: firstFrame,
-                            cancellationToken: cancellationSource.Token);
-                        image = result.Image;
-
-                        if (!result.IsSuccess || image is null)
+                        _ = ForegroundWindowCaptureService
+                            .TryCreateScrollCaptureTargetFromSelection(
+                                scrollSelection.CaptureRegion,
+                                out target);
+                    }
+                    finally
+                    {
+                        await scrollSelection.SetVisibleAsync(
+                            isVisible: true,
+                            CancellationToken.None);
+                        if (!cancellationSource.IsCancellationRequested)
                         {
-                            _statusReporter(result.ErrorMessage ?? "滚动截图失败。");
-                            return;
+                            progressWindow.Owner = scrollSelection.OverlayWindow;
+                            progressWindow.BringToFront();
                         }
+                    }
+
+                    if (target is null)
+                    {
+                        _statusReporter("无法识别选区下的可滚动窗口。");
+                        return;
+                    }
+
+                    // Activate the window under the selection so controlled
+                    // wheel input reaches the correct scroll viewer.
+                    _ = ForegroundWindowCaptureService.TryFocusScrollTarget(target);
+                    await Task.Delay(30, cancellationSource.Token);
+
+                    // Capture region equals the user selection. Prefer the
+                    // pre-scroll snapshot so content before the first controlled
+                    // step is retained.
+                    var firstFrame = ScrollCaptureService.CreateInitialFrame(
+                        initialImage.Bitmap,
+                        scrollSelection.CaptureRegion,
+                        target.CaptureRegion);
+                    UpdateProgress(
+                        progressWindow,
+                        new ScrollCapturePreviewState(
+                            CapturedImage.ToBitmapSource(firstFrame),
+                            1,
+                            0,
+                            0,
+                            firstFrame.Width,
+                            firstFrame.Height));
+                    wheelMonitor.EnableControlledCaptureInput();
+                    progressWindow.QueueInteractionState(
+                        ControlledScrollCaptureState.WaitingToStart);
+                    var result = await ScrollCaptureService.CaptureControlledAsync(
+                        target,
+                        completionSource.Task,
+                        wheelMonitor.PointerActions,
+                        stateChanged: progressWindow.QueueInteractionState,
+                        previewChanged: previewState =>
+                            UpdateProgress(progressWindow, previewState),
+                        initialFrame: firstFrame,
+                        cancellationToken: cancellationSource.Token);
+                    var image = result.Image;
+
+                    if (!result.IsSuccess || image is null)
+                    {
+                        _statusReporter(result.ErrorMessage ?? "滚动截图失败。");
+                        return;
                     }
 
                     CapturedImage? completedImage = image;
                     try
                     {
                         var settings = _settingsProvider();
-                        var historyItem = settings.KeepHistory
-                            ? _historyService.Add(completedImage, settings.HistoryLimit)
-                            : null;
                         if (editRequested)
                         {
+                            // Start the history copy on a worker before handing
+                            // ownership to the editor. Cloning a tall bitmap on
+                            // the dispatcher blocked the first editor paint for
+                            // seconds even though history encoding itself was
+                            // already asynchronous.
+                            var editorImage = completedImage;
+                            var historyCloneTask = settings.KeepHistory
+                                ? Task.Run(editorImage.Clone)
+                                : null;
                             var editor = new ImageEditorWindow(
-                                completedImage,
+                                editorImage,
                                 settings.SaveDirectory);
                             editor.Show();
                             completedImage = null;
+
+                            if (historyCloneTask is not null)
+                            {
+                                var historyLimit = settings.HistoryLimit;
+                                var historyService = _historyService;
+                                // Build the WPF surface off the UI thread, then
+                                // insert the history entry on the dispatcher so
+                                // the bound collection stays thread-safe without
+                                // delaying the editor open.
+                                _ = Task.Run(() =>
+                                {
+                                    CapturedImage? historyImage = null;
+                                    try
+                                    {
+                                        historyImage = historyCloneTask
+                                            .GetAwaiter()
+                                            .GetResult();
+                                        _ = historyImage.WarmPreview();
+                                        var preparedHistoryImage = historyImage;
+                                        historyImage = null;
+                                        _ = System.Windows.Application.Current
+                                            .Dispatcher
+                                            .BeginInvoke(
+                                                DispatcherPriority.Background,
+                                                () =>
+                                                {
+                                                    try
+                                                    {
+                                                        _ = historyService.Add(
+                                                            preparedHistoryImage,
+                                                            historyLimit);
+                                                    }
+                                                    finally
+                                                    {
+                                                        preparedHistoryImage.Dispose();
+                                                    }
+                                                });
+                                    }
+                                    catch
+                                    {
+                                        historyImage?.Dispose();
+                                    }
+                                });
+                            }
                         }
                         else
                         {
+                            var historyItem = settings.KeepHistory
+                                ? _historyService.Add(
+                                    completedImage,
+                                    settings.HistoryLimit)
+                                : null;
                             try
                             {
                                 await ClipboardImageService.SetImageAsync(
