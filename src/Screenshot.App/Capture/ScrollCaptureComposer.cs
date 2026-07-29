@@ -42,6 +42,7 @@ public sealed class ScrollCaptureComposer : IDisposable
     private int _currentFrameTop;
     private int _capturedContentTop;
     private int _capturedContentBottom;
+    private int _initialFrameHeight;
     private int? _lastSuccessfulNewRows;
     private ScrollCaptureDirection? _lastMatchedDirection;
     private int _stationaryLeadingRows;
@@ -233,6 +234,7 @@ public sealed class ScrollCaptureComposer : IDisposable
                 _currentFrameTop = 0;
                 _capturedContentTop = 0;
                 _capturedContentBottom = frame.Height;
+                _initialFrameHeight = frame.Height;
                 _topBoundaryFrame = initialTopBoundaryFrame;
                 _topBoundaryFrameTop = 0;
                 initialTopBoundaryFrame = null;
@@ -709,7 +711,8 @@ public sealed class ScrollCaptureComposer : IDisposable
     internal void RefreshBoundaryViewport(
         Bitmap frame,
         ScrollCaptureDirection direction,
-        int excludedBottomRows = 0)
+        int excludedBottomRows = 0,
+        int? maximumRefreshRows = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(frame);
@@ -725,13 +728,62 @@ public sealed class ScrollCaptureComposer : IDisposable
         // the complete visible boundary with the latest clean viewport so a
         // small strip error cannot survive into the final image.
         EnsureCompositeCache();
+        var sourceTop = 0;
         var copyHeight = frame.Height - Math.Clamp(
             excludedBottomRows,
             0,
             frame.Height - 1);
-        var destinationTop = direction == ScrollCaptureDirection.Down
-            ? _compositeContentTop + _compositeUsedHeight - frame.Height
-            : _compositeContentTop;
+        var logicalDestinationTop = direction == ScrollCaptureDirection.Down
+            ? _capturedContentBottom - frame.Height
+            : _capturedContentTop;
+
+        if (maximumRefreshRows is > 0)
+        {
+            var refreshRows = Math.Min(maximumRefreshRows.Value, frame.Height);
+            if (direction == ScrollCaptureDirection.Down)
+            {
+                var sourceBottom = sourceTop + copyHeight;
+                var limitedSourceTop = Math.Max(
+                    sourceTop,
+                    frame.Height - refreshRows);
+                logicalDestinationTop += limitedSourceTop - sourceTop;
+                sourceTop = limitedSourceTop;
+                copyHeight = Math.Max(0, sourceBottom - sourceTop);
+            }
+            else
+            {
+                copyHeight = Math.Min(copyHeight, refreshRows);
+            }
+        }
+
+        // The initial viewport is the one frame the user can inspect before
+        // scrolling. Never replace any part of it with a later smooth-scroll
+        // sample: a 2-5 px alignment error in the first small movement would
+        // otherwise compress several text rows near the start. Boundary refresh
+        // still repairs every pixel newly captured above or below that viewport.
+        if (direction == ScrollCaptureDirection.Down &&
+            logicalDestinationTop < _initialFrameHeight)
+        {
+            var skippedRows = Math.Min(
+                copyHeight,
+                _initialFrameHeight - logicalDestinationTop);
+            sourceTop += skippedRows;
+            logicalDestinationTop += skippedRows;
+            copyHeight -= skippedRows;
+        }
+        else if (direction == ScrollCaptureDirection.Up &&
+                 logicalDestinationTop + copyHeight > 0)
+        {
+            copyHeight = Math.Max(0, -logicalDestinationTop);
+        }
+
+        if (copyHeight <= 0)
+        {
+            return;
+        }
+
+        var destinationTop = _compositeContentTop +
+            (logicalDestinationTop - _capturedContentTop);
         using var graphics = Graphics.FromImage(_compositeCache!);
         graphics.CompositingMode = CompositingMode.SourceCopy;
         graphics.PixelOffsetMode = PixelOffsetMode.None;
@@ -739,7 +791,7 @@ public sealed class ScrollCaptureComposer : IDisposable
         graphics.DrawImage(
             frame,
             new Rectangle(0, destinationTop, frame.Width, copyHeight),
-            new Rectangle(0, 0, frame.Width, copyHeight),
+            new Rectangle(0, sourceTop, frame.Width, copyHeight),
             GraphicsUnit.Pixel);
     }
 

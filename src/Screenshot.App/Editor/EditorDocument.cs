@@ -3,8 +3,8 @@ namespace Screenshot.App.Editor;
 public sealed class EditorDocument
 {
     private readonly List<EditorAnnotation> _annotations = [];
-    private readonly Stack<AddAnnotationCommand> _undoStack = [];
-    private readonly Stack<AddAnnotationCommand> _redoStack = [];
+    private readonly Stack<IEditorCommand> _undoStack = [];
+    private readonly Stack<IEditorCommand> _redoStack = [];
 
     public IReadOnlyList<EditorAnnotation> Annotations => _annotations;
 
@@ -19,6 +19,37 @@ public sealed class EditorDocument
         var command = new AddAnnotationCommand(annotation);
         command.Execute(_annotations);
         _undoStack.Push(command);
+        _redoStack.Clear();
+    }
+
+    public void SetAt(int index, EditorAnnotation annotation)
+    {
+        ArgumentNullException.ThrowIfNull(annotation);
+        if ((uint)index >= (uint)_annotations.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        _annotations[index] = annotation;
+    }
+
+    public void ReplaceAt(
+        int index,
+        EditorAnnotation previous,
+        EditorAnnotation replacement)
+    {
+        ArgumentNullException.ThrowIfNull(previous);
+        ArgumentNullException.ThrowIfNull(replacement);
+        if ((uint)index >= (uint)_annotations.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        _annotations[index] = replacement;
+        _undoStack.Push(new ReplaceAnnotationCommand(
+            index,
+            previous,
+            replacement));
         _redoStack.Clear();
     }
 
@@ -57,5 +88,21 @@ public sealed class EditorDocument
         }
 
         _redoStack.Clear();
+    }
+}
+
+file sealed class ReplaceAnnotationCommand(
+    int index,
+    EditorAnnotation previous,
+    EditorAnnotation replacement) : IEditorCommand
+{
+    public void Execute(IList<EditorAnnotation> annotations)
+    {
+        annotations[index] = replacement;
+    }
+
+    public void Undo(IList<EditorAnnotation> annotations)
+    {
+        annotations[index] = previous;
     }
 }

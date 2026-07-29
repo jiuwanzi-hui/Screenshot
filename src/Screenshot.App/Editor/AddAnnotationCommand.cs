@@ -1,6 +1,13 @@
 namespace Screenshot.App.Editor;
 
-public sealed class AddAnnotationCommand
+public interface IEditorCommand
+{
+    void Execute(IList<EditorAnnotation> annotations);
+
+    void Undo(IList<EditorAnnotation> annotations);
+}
+
+public sealed class AddAnnotationCommand : IEditorCommand
 {
     public AddAnnotationCommand(EditorAnnotation annotation)
     {
@@ -9,7 +16,7 @@ public sealed class AddAnnotationCommand
 
     public EditorAnnotation Annotation { get; }
 
-    public void Execute(ICollection<EditorAnnotation> annotations)
+    public void Execute(IList<EditorAnnotation> annotations)
     {
         annotations.Add(Annotation);
     }

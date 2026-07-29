@@ -32,6 +32,7 @@ public partial class MainWindow : Window, IDisposable
     private bool _isApplyingSettings;
     private bool _translationApiKeyChanged;
     private ApplicationUpdateInfo? _availableUpdate;
+    private int _automaticUpdateCheckInProgress;
     private bool _disposed;
 
     public MainWindow(
@@ -70,6 +71,7 @@ public partial class MainWindow : Window, IDisposable
         _settingsApplyTimer.Tick += OnSettingsApplyTimerTick;
 
         InitializeComponent();
+        Activated += OnSettingsWindowActivated;
         DataContext = _settingsViewModel;
         UpdateThemeSelection(initialSettings.Theme);
         UpdateCloseBehaviorSelection(initialSettings.CloseBehavior);
@@ -86,6 +88,11 @@ public partial class MainWindow : Window, IDisposable
     public void ConfigureTaskbarVisibility(bool showInTaskbar)
     {
         ShowInTaskbar = showInTaskbar;
+    }
+
+    public void ApplySettingsPalette(AppTheme theme)
+    {
+        AppThemeManager.ApplySettingsPalette(Resources, theme);
     }
 
     public event EventHandler<SettingsSavedEventArgs>? SettingsSaved;
@@ -108,6 +115,11 @@ public partial class MainWindow : Window, IDisposable
         Activate();
     }
 
+    private void OnSettingsWindowActivated(object? sender, EventArgs e)
+    {
+        _ = CheckForUpdatesOnOpenAsync();
+    }
+
     public void ShowStatus(string message)
     {
         _settingsViewModel.SetStatus(message);
@@ -124,6 +136,7 @@ public partial class MainWindow : Window, IDisposable
         EndHotKeyCapture(restoreRegistrations: true);
         _settingsApplyTimer.Stop();
         _settingsApplyTimer.Tick -= OnSettingsApplyTimerTick;
+        Activated -= OnSettingsWindowActivated;
         Dispose();
         base.OnClosed(e);
     }
@@ -206,10 +219,37 @@ public partial class MainWindow : Window, IDisposable
 
     private async void OnCheckForUpdatesClick(object sender, RoutedEventArgs e)
     {
-        CheckForUpdatesButton.IsEnabled = false;
-        InstallUpdateButton.Visibility = Visibility.Collapsed;
-        UpdateProgressBar.Visibility = Visibility.Collapsed;
-        UpdateStatusText.Text = "正在检测 Gitee / GitHub 更新源...";
+        await CheckForUpdatesAsync(showBusyState: true);
+    }
+
+    private async Task CheckForUpdatesOnOpenAsync()
+    {
+        if (_disposed ||
+            Interlocked.Exchange(ref _automaticUpdateCheckInProgress, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await CheckForUpdatesAsync(showBusyState: false);
+        }
+        finally
+        {
+            Volatile.Write(ref _automaticUpdateCheckInProgress, 0);
+        }
+    }
+
+    private async Task CheckForUpdatesAsync(bool showBusyState)
+    {
+        if (showBusyState)
+        {
+            CheckForUpdatesButton.IsEnabled = false;
+            InstallUpdateButton.Visibility = Visibility.Collapsed;
+            UpdateProgressBar.Visibility = Visibility.Collapsed;
+            UpdateStatusText.Text = "正在检测 Gitee / GitHub 更新源...";
+        }
+
         try
         {
             var result = await _applicationUpdateService.CheckAsync(
@@ -217,20 +257,33 @@ public partial class MainWindow : Window, IDisposable
                 _updateCancellationSource.Token);
             _availableUpdate = result.AvailableUpdate;
             UpdateStatusText.Text = result.Message;
+            UpdateBadge.Visibility = result.AvailableUpdate is null
+                ? Visibility.Collapsed
+                : Visibility.Visible;
             if (result.AvailableUpdate is not null)
             {
                 InstallUpdateButton.Content =
                     $"下载并更新到 {ApplicationUpdateService.NormalizeVersion(result.AvailableUpdate.Version)}";
                 InstallUpdateButton.Visibility = Visibility.Visible;
             }
+            else if (!showBusyState)
+            {
+                InstallUpdateButton.Visibility = Visibility.Collapsed;
+            }
         }
         catch (OperationCanceledException)
         {
-            UpdateStatusText.Text = "已取消检查更新。";
+            if (showBusyState)
+            {
+                UpdateStatusText.Text = "已取消检查更新。";
+            }
         }
         finally
         {
-            CheckForUpdatesButton.IsEnabled = true;
+            if (showBusyState)
+            {
+                CheckForUpdatesButton.IsEnabled = true;
+            }
         }
     }
 

@@ -22,6 +22,54 @@ public sealed class AppThemeManager : IDisposable
 
     public AppTheme ResolvedTheme => _resolvedTheme;
 
+    public event EventHandler<AppTheme>? ThemeChanged;
+
+    /// <summary>
+    /// Applies the icon palette to a single settings window. Capture and editor
+    /// windows continue to resolve the legacy application resources.
+    /// </summary>
+    public static void ApplySettingsPalette(
+        ResourceDictionary resources,
+        AppTheme theme)
+    {
+        ArgumentNullException.ThrowIfNull(resources);
+
+        var isDark = theme == AppTheme.Dark;
+        resources["AppWindowBackgroundBrush"] = CreateGradientBrush(
+            isDark ? "#10191D" : "#F7F7FC",
+            isDark ? "#14272B" : "#F7F7FC");
+        resources["AppGlassBackgroundBrush"] = CreateGradientBrush(
+            isDark ? "#E617292E" : "#ECEDF8FF",
+            isDark ? "#E61D3539" : "#ECF0E9FF");
+        resources["AppSidebarBackgroundBrush"] = CreateGradientBrush(
+            isDark ? "#1A2D32" : "#E9EDFC",
+            isDark ? "#214044" : "#F0EBFB");
+        resources["AppPanelBackgroundBrush"] = CreateGradientBrush(
+            isDark ? "#20343A" : "#FCFBFF",
+            isDark ? "#285057" : "#F7F3FC");
+        resources["AppInputBackgroundBrush"] = CreateGradientBrush(
+            isDark ? "#1C3035" : "#FAF9FE",
+            isDark ? "#234147" : "#F3F0FC");
+        resources["AppAccentBrush"] = CreateGradientBrush(
+            isDark ? "#25B9AD" : "#617FF0",
+            isDark ? "#54D8CF" : "#9663E9");
+        resources["AppAccentMutedBrush"] = CreateGradientBrush(
+            isDark ? "#66305D5B" : "#E5E9FF",
+            isDark ? "#66407673" : "#F1E5FB");
+
+        SetSettingsColor(resources, "AppBorderBrush", isDark ? "#6684AAA5" : "#B4BCE6");
+        SetSettingsColor(resources, "AppSubtleBorderBrush", isDark ? "#526C918D" : "#D6D9EE");
+        SetSettingsColor(resources, "AppTextPrimaryBrush", isDark ? "#ECF8F6" : "#28243B");
+        SetSettingsColor(resources, "AppTextSecondaryBrush", isDark ? "#A8C5C2" : "#6B6A7C");
+        SetSettingsColor(resources, "AppMutedTextBrush", isDark ? "#A8C5C2" : "#6B6A7C");
+        SetSettingsColor(resources, "AppControlForegroundBrush", isDark ? "#DDF2EF" : "#3A3651");
+        SetSettingsColor(resources, "AppAccentForegroundBrush", isDark ? "#C6FFF8" : "#5548B8");
+        SetSettingsColor(resources, "AppSeparatorBrush", isDark ? "#465C706E" : "#E1E2F0");
+        SetSettingsColor(resources, "AppTooltipBackgroundBrush", isDark ? "#F21A2B30" : "#F9F8FFFF");
+        SetSettingsColor(resources, "AppTooltipForegroundBrush", isDark ? "#E4F5F2" : "#332C4C");
+        SetSettingsColor(resources, "AppWarmAccentBrush", isDark ? "#D7A061" : "#D09A5C");
+    }
+
     public AppThemeManager()
     {
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
@@ -96,6 +144,8 @@ public sealed class AppThemeManager : IDisposable
         {
             ApplyWindowChromeTheme(window, theme);
         }
+
+        ThemeChanged?.Invoke(this, theme);
     }
 
     private void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
@@ -152,6 +202,36 @@ public sealed class AppThemeManager : IDisposable
 
     private const int DwmwaUseImmersiveDarkMode = 20;
 
+    private static void SetSettingsColor(
+        ResourceDictionary resources,
+        string key,
+        string color)
+    {
+        var brush = new SolidColorBrush(
+            (WpfColor)WpfColorConverter.ConvertFromString(color));
+        brush.Freeze();
+        resources[key] = brush;
+    }
+
+    private static LinearGradientBrush CreateGradientBrush(
+        string startColor,
+        string endColor)
+    {
+        var brush = new LinearGradientBrush
+        {
+            StartPoint = new System.Windows.Point(0, 0),
+            EndPoint = new System.Windows.Point(1, 1),
+        };
+        brush.GradientStops.Add(new GradientStop(
+            (WpfColor)WpfColorConverter.ConvertFromString(startColor),
+            0));
+        brush.GradientStops.Add(new GradientStop(
+            (WpfColor)WpfColorConverter.ConvertFromString(endColor),
+            1));
+        brush.Freeze();
+        return brush;
+    }
+
     private static readonly IReadOnlyDictionary<string, string> LightColors =
         new Dictionary<string, string>
         {
@@ -164,6 +244,7 @@ public sealed class AppThemeManager : IDisposable
             ["AppSubtleBorderBrush"] = "#A9CECA",
             ["AppTextPrimaryBrush"] = "#1C252D",
             ["AppTextSecondaryBrush"] = "#66757F",
+            ["AppMutedTextBrush"] = "#66757F",
             ["AppControlForegroundBrush"] = "#26464B",
             ["AppAccentBrush"] = "#2EAFA5",
             ["AppAccentMutedBrush"] = "#BFE8E2",
@@ -185,6 +266,7 @@ public sealed class AppThemeManager : IDisposable
             ["AppSubtleBorderBrush"] = "#526B8784",
             ["AppTextPrimaryBrush"] = "#ECF8F6",
             ["AppTextSecondaryBrush"] = "#A8C5C2",
+            ["AppMutedTextBrush"] = "#A8C5C2",
             ["AppControlForegroundBrush"] = "#DDF2EF",
             ["AppAccentBrush"] = "#2EAFA5",
             ["AppAccentMutedBrush"] = "#4A2E6762",
