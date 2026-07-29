@@ -30,12 +30,14 @@ SnapCut（简截）是一款面向 Windows 10/11 的轻量截图工具，取"简
 
 下载最新的 x64 自包含版本（发布文件名暂沿用 Screenshot- 前缀，以兼容旧版本的程序内自动更新；包内程序为 SnapCut.exe）：
 
-- [安装版 SnapCut Setup 2.2.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-2.2.0-win-x64.exe)
-- [免安装版 SnapCut Portable 2.2.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-2.2.0-win-x64.zip)
-- [安装版 SnapCut Setup 2.2.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.0/Screenshot-Setup-2.2.0-win-x64.exe)
-- [免安装版 SnapCut Portable 2.2.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.0/Screenshot-Portable-2.2.0-win-x64.zip)
+- [安装版 SnapCut Setup 2.2.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-2.2.1-win-x64.exe)
+- [免安装版 SnapCut Portable 2.2.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-2.2.1-win-x64.zip)
+- [安装版 SnapCut Setup 2.2.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.1/Screenshot-Setup-2.2.1-win-x64.exe)
+- [免安装版 SnapCut Portable 2.2.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.1/Screenshot-Portable-2.2.1-win-x64.zip)
 
-免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.2.0 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.2.1 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+
+2.2.1 修复长截图在暂停恢复时偶尔接受异常大位移、插入重复内容的问题；回到初始视口后，改用更严格且连续一致的图像证据再开始反向扩展，避免周期性代码行被错误拼入、压缩或缺失。诊断日志同时补充重叠行数、置信度、横向偏移和预期位移，便于后续精准定位边缘场景。
 
 2.2.0 允许直接点击已经放置的矩形、箭头、文字和表情进行二次编辑，可继续调整位置、大小、端点和边角，并为可选择、放置和编辑状态提供对应鼠标指针；矩形只在精准边界范围内响应选择，不会阻挡在内部继续放置其他标注。设置窗口每次重新显示到前台都会自动检测更新，并新增柔和的浅色渐变与深青亮色渐变配色。截图工具栏改用大小统一的镂空矢量图标（保留原有表情图标）。长截图进一步修复初始视口接缝、暂停收尾、返回后反向扩展以及周期性代码行中的整行缺失和压缩。
 
@@ -106,12 +108,14 @@ SnapCut is a lightweight capture utility for Windows 10 and 11. It combines regi
 
 Download the latest self-contained x64 build (release file names keep the legacy Screenshot- prefix so older builds can still self-update; the packaged program is SnapCut.exe):
 
-- [SnapCut Setup 2.2.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-2.2.0-win-x64.exe)
-- [SnapCut Portable 2.2.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-2.2.0-win-x64.zip)
-- [SnapCut Setup 2.2.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.0/Screenshot-Setup-2.2.0-win-x64.exe)
-- [SnapCut Portable 2.2.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.0/Screenshot-Portable-2.2.0-win-x64.zip)
+- [SnapCut Setup 2.2.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-2.2.1-win-x64.exe)
+- [SnapCut Portable 2.2.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-2.2.1-win-x64.zip)
+- [SnapCut Setup 2.2.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.1/Screenshot-Setup-2.2.1-win-x64.exe)
+- [SnapCut Portable 2.2.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.1/Screenshot-Portable-2.2.1-win-x64.zip)
 
-Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.2.0 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.2.1 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+
+Version 2.2.1 prevents scrolling capture from accepting implausibly large motion after pausing and resuming, which could insert repeated content. Reverse extension after returning to the initial viewport now requires stricter, consecutively consistent image evidence, preventing periodic code lines from being inserted at the wrong position, compressed, or omitted. Diagnostics also include overlap rows, confidence, horizontal offset, and expected motion for more precise investigation of edge cases.
 
 Version 2.2.0 makes existing rectangles, arrows, text, and emoji directly selectable for later adjustment of position, size, endpoints, and corners, with distinct pointer feedback for selectable, placing, and editing states. Rectangles respond only on their precise border so their interior does not block placing another annotation. Settings now checks for updates every time it returns to the foreground and uses refreshed soft light gradients and deep cyan gradients in dark mode. Capture-toolbar actions use consistently sized outline vector icons while retaining the existing emoji icon. Scrolling capture receives additional fixes for the initial-viewport seam, pause settling, reverse extension after returning, and complete code lines lost or compressed on periodic content.
 

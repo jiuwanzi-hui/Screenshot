@@ -153,6 +153,84 @@ public sealed class ControlledScrollCaptureComposerTests
     }
 
     [Fact]
+    public void ResumeMovementCapRejectsANearViewportFalseExpansion()
+    {
+        const int width = 180;
+        const int viewportHeight = 423;
+        const int falseMovementRows = 373;
+        using var document = CreateDocument(
+            width,
+            viewportHeight + falseMovementRows);
+        using var initial = document.Clone(
+            new Rectangle(0, 0, width, viewportHeight),
+            PixelFormat.Format32bppPArgb);
+        using var reflowedResumeFrame = document.Clone(
+            new Rectangle(
+                0,
+                falseMovementRows,
+                width,
+                viewportHeight),
+            PixelFormat.Format32bppPArgb);
+        using var composer = new ControlledScrollCaptureComposer();
+        composer.Initialize(initial, ScrollCaptureOptions.Default);
+
+        var added = composer.TryAddDown(
+            reflowedResumeFrame,
+            ScrollCaptureOptions.Default,
+            expectedRows: 30,
+            maximumAcceptedNewRows: 211);
+
+        Assert.False(added);
+        Assert.Equal("movement-cap-veto", composer.LastRejectReason);
+        Assert.Null(composer.LastFrameMovementRows);
+        Assert.Equal(1, composer.FrameCount);
+        Assert.Equal(viewportHeight, composer.OutputHeight);
+    }
+
+    [Fact]
+    public void InitialCrossingRejectsAWeakDynamicContentOverlap()
+    {
+        const int width = 180;
+        const int viewportHeight = 180;
+        const int initialTop = 120;
+        const int crossingRows = 40;
+        using var document = CreateDocument(width, height: 360);
+        using var initial = document.Clone(
+            new Rectangle(0, initialTop, width, viewportHeight),
+            PixelFormat.Format32bppPArgb);
+        using var dynamicReturnFrame = document.Clone(
+            new Rectangle(
+                0,
+                initialTop - crossingRows,
+                width,
+                viewportHeight),
+            PixelFormat.Format32bppPArgb);
+        using (var graphics = Graphics.FromImage(dynamicReturnFrame))
+        using (var brush = new SolidBrush(Color.White))
+        {
+            graphics.FillRectangle(brush, 0, 80, width, 17);
+        }
+
+        var looseMatch = ImageOverlapMatcher.FindVerticalOverlap(
+            dynamicReturnFrame,
+            initial,
+            minimumOverlapRows: 20,
+            minimumConfidence: 0.94,
+            minimumNewRows: 4,
+            preferredNewRows: crossingRows);
+        Assert.NotNull(looseMatch);
+        Assert.InRange(looseMatch.Confidence, 0.94, 0.964999999);
+
+        var guardedMatch = ScrollCaptureService.FindControlledInitialOverlap(
+            initial,
+            dynamicReturnFrame,
+            ScrollCaptureDirection.Up,
+            expectedCrossingRows: crossingRows,
+            ScrollCaptureOptions.Default);
+        Assert.Null(guardedMatch);
+    }
+
+    [Fact]
     public void FullBoundaryViewportRepairsACorruptedIncrementalStrip()
     {
         const int width = 180;
