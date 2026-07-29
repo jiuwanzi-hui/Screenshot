@@ -92,8 +92,8 @@ public partial class ScrollCaptureProgressWindow : Window
             return;
         }
 
-        // Header row (58) + action row (54) + image margins and border.
-        const double ChromeHeight = 58 + 54 + 16;
+        // Header row (78) + action row (54) + image margins and border.
+        const double ChromeHeight = 78 + 54 + 16;
         var imagePaneWidth = Math.Max(80, ActualWidth - 36);
         var aspect = previewState.PixelHeight / (double)previewState.PixelWidth;
         var desiredHeight = Math.Clamp(
@@ -120,6 +120,81 @@ public partial class ScrollCaptureProgressWindow : Window
         ArgumentNullException.ThrowIfNull(previewState);
         Interlocked.Exchange(ref _pendingPreviewState, previewState);
         SchedulePreviewUpdate();
+    }
+
+    public void QueueInteractionState(ControlledScrollCaptureState state)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(
+                DispatcherPriority.Render,
+                () => QueueInteractionState(state));
+            return;
+        }
+
+        if (_isClosed)
+        {
+            return;
+        }
+
+        (StatusText.Text, InstructionText.Text) = state switch
+        {
+            ControlledScrollCaptureState.WaitingToStart =>
+                ("滚动截图 · 等待开始", "单击向下；双击向上；右键取消"),
+            ControlledScrollCaptureState.ScrollingDown =>
+                ("正在匀速向下滚动", "单击暂停；双击自动停稳后返回"),
+            ControlledScrollCaptureState.PreparingPauseDown =>
+                ("正在停止向下滚动", "正在补齐暂停位置的最后内容"),
+            ControlledScrollCaptureState.PausedDown =>
+                ("已暂停 · 向下阶段", "单击继续；双击返回并向上拼接"),
+            ControlledScrollCaptureState.BottomReached =>
+                ("已到达底部", "双击截取区域，开始向上拼接"),
+            ControlledScrollCaptureState.PreparingReturnFromDown =>
+                ("正在停止向下滚动", "停稳后自动返回初始位置"),
+            ControlledScrollCaptureState.ReturningToStart =>
+                ("正在快速返回初始位置", "单击暂停；返回期间不重复写入"),
+            ControlledScrollCaptureState.PausedReturning =>
+                ("已暂停 · 返回阶段", "单击继续快速返回初始位置"),
+            ControlledScrollCaptureState.AligningUpwardStart =>
+                ("正在对齐初始位置", "停稳后开始向上采集"),
+            ControlledScrollCaptureState.ScrollingUp =>
+                ("正在匀速向上采集", "单击暂停"),
+            ControlledScrollCaptureState.PreparingPauseUp =>
+                ("正在停止向上滚动", "正在补齐暂停位置的最后内容"),
+            ControlledScrollCaptureState.PausedUp =>
+                ("已暂停 · 向上采集", "单击继续"),
+            ControlledScrollCaptureState.ScrollingUpFirst =>
+                ("正在匀速向上滚动", "单击暂停；双击自动停稳后返回"),
+            ControlledScrollCaptureState.PreparingPauseUpFirst =>
+                ("正在停止向上滚动", "正在补齐暂停位置的最后内容"),
+            ControlledScrollCaptureState.PausedUpFirst =>
+                ("已暂停 · 向上阶段", "单击继续；双击返回并向下拼接"),
+            ControlledScrollCaptureState.TopReached =>
+                ("已到达顶部", "双击截取区域，开始向下拼接"),
+            ControlledScrollCaptureState.PreparingReturnFromUp =>
+                ("正在停止向上滚动", "停稳后自动返回初始位置"),
+            ControlledScrollCaptureState.ReturningDownToStart =>
+                ("正在快速返回初始位置", "单击暂停；返回期间不重复写入"),
+            ControlledScrollCaptureState.PausedReturningDown =>
+                ("已暂停 · 返回阶段", "单击继续快速返回初始位置"),
+            ControlledScrollCaptureState.AligningDownwardStart =>
+                ("正在对齐初始位置", "停稳后开始向下采集"),
+            ControlledScrollCaptureState.ScrollingDownSecond =>
+                ("正在匀速向下采集", "单击暂停"),
+            ControlledScrollCaptureState.PreparingPauseDownSecond =>
+                ("正在停止向下滚动", "正在补齐暂停位置的最后内容"),
+            ControlledScrollCaptureState.PausedDownSecond =>
+                ("已暂停 · 向下采集", "单击继续"),
+            ControlledScrollCaptureState.FinalTopReached =>
+                ("已到达顶部", "请选择编辑、完成或取消"),
+            ControlledScrollCaptureState.FinalBottomReached =>
+                ("已到达底部", "请选择编辑、完成或取消"),
+            ControlledScrollCaptureState.InputUnavailable =>
+                ("连续滚动输入不可用", "请选择编辑、完成或取消"),
+            ControlledScrollCaptureState.Completing =>
+                ("正在生成滚动截图", "请稍候"),
+            _ => (StatusText.Text, InstructionText.Text),
+        };
     }
 
     private void SchedulePreviewUpdate()

@@ -45,6 +45,47 @@
             <Setter Property="Foreground" Value="#FFFFFF" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
+        <Style x:Key="PreviewScrollViewerStyle" TargetType="ScrollViewer">
+            <Setter Property="Background" Value="{DynamicResource AppPanelBackgroundBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollViewer">
+                        <Grid Background="{TemplateBinding Background}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <ScrollContentPresenter x:Name="PART_ScrollContentPresenter"
+                                                    CanContentScroll="{TemplateBinding CanContentScroll}"
+                                                    Content="{TemplateBinding Content}"
+                                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                    Margin="{TemplateBinding Padding}" />
+                            <ScrollBar x:Name="PART_VerticalScrollBar"
+                                       Grid.Column="1"
+                                       Maximum="{TemplateBinding ScrollableHeight}"
+                                       Orientation="Vertical"
+                                       ViewportSize="{TemplateBinding ViewportHeight}"
+                                       Value="{TemplateBinding VerticalOffset}"
+                                       Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" />
+                            <ScrollBar x:Name="PART_HorizontalScrollBar"
+                                       Grid.Row="1"
+                                       Maximum="{TemplateBinding ScrollableWidth}"
+                                       Orientation="Horizontal"
+                                       ViewportSize="{TemplateBinding ViewportWidth}"
+                                       Value="{TemplateBinding HorizontalOffset}"
+                                       Visibility="{TemplateBinding ComputedHorizontalScrollBarVisibility}" />
+                            <Border Grid.Row="1"
+                                    Grid.Column="1"
+                                    Background="{TemplateBinding Background}" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Grid Background="{DynamicResource AppWindowBackgroundBrush}">
@@ -66,7 +107,8 @@
                         Margin="0,0,8,0"
                         VerticalAlignment="Center"
                         Orientation="Horizontal">
-                <Button Width="34"
+                <Button x:Name="ConfirmButton"
+                        Width="34"
                         Height="34"
                         Margin="0,0,8,0"
                         Background="{DynamicResource AppAccentBrush}"
@@ -98,7 +140,8 @@
                         Click="OnOcrClick"
                         Content="识别"
                         Style="{StaticResource PreviewCommandButton}" />
-                <Button Width="32"
+                <Button x:Name="CloseButton"
+                        Width="32"
                         Height="34"
                         Margin="0"
                         Background="Transparent"
@@ -123,12 +166,28 @@
                 BorderBrush="{DynamicResource AppSubtleBorderBrush}"
                 BorderThickness="1"
                 CornerRadius="10">
-            <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                          VerticalScrollBarVisibility="Auto">
-                <Image HorizontalAlignment="Center"
-                       VerticalAlignment="Center"
+            <ScrollViewer x:Name="PreviewScrollViewer"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Auto"
+                          PreviewMouseLeftButtonDown="OnPreviewMouseLeftButtonDown"
+                          PreviewMouseLeftButtonUp="OnPreviewMouseLeftButtonUp"
+                          PreviewMouseMove="OnPreviewMouseMove"
+                          PreviewMouseWheel="OnPreviewMouseWheel"
+                          LostMouseCapture="OnPreviewLostMouseCapture"
+                          ScrollChanged="OnPreviewScrollChanged"
+                          Style="{StaticResource PreviewScrollViewerStyle}">
+                <Image x:Name="PreviewImage"
+                       HorizontalAlignment="Left"
+                       VerticalAlignment="Top"
+                       RenderOptions.BitmapScalingMode="HighQuality"
                        Source="{Binding Preview}"
-                       Stretch="Uniform" />
+                       Stretch="None">
+                    <Image.LayoutTransform>
+                        <ScaleTransform x:Name="PreviewScaleTransform"
+                                        ScaleX="1"
+                                        ScaleY="1" />
+                    </Image.LayoutTransform>
+                </Image>
             </ScrollViewer>
         </Border>
     </Grid>

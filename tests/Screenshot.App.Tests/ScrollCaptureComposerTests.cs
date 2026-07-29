@@ -589,6 +589,72 @@ public sealed class ScrollCaptureComposerTests
     }
 
     [Fact]
+    public void ConfirmedBottomCannotAppendContentAfterReturningToTheBoundary()
+    {
+        const int width = 96;
+        const int height = 120;
+        using var composer = new ScrollCaptureComposer();
+
+        foreach (var top in new[] { 0, 80, 160 })
+        {
+            using var frame = CreateFrame(top, width, height);
+            Assert.True(composer.TryAddFrame(
+                frame,
+                ScrollCaptureDirection.Down,
+                Options,
+                out _));
+        }
+
+        var confirmedHeight = composer.OutputHeight;
+        using (var unrelatedMarker = CreateFrame(240, width, height))
+        {
+            Assert.False(composer.TryMarkBoundaryReached(
+                unrelatedMarker,
+                ScrollCaptureDirection.Down));
+        }
+
+        using (var actualBoundaryMarker = CreateFrame(160, width, height))
+        {
+            Assert.True(composer.TryMarkBoundaryReached(
+                actualBoundaryMarker,
+                ScrollCaptureDirection.Down));
+        }
+
+        using (var returnFrame = CreateFrame(80, width, height))
+        {
+            Assert.False(composer.TryAddFrame(
+                returnFrame,
+                ScrollCaptureDirection.Up,
+                Options,
+                out _));
+            Assert.NotNull(composer.LastFrameMovementRows);
+        }
+
+        using (var boundaryFrame = CreateFrame(160, width, height))
+        {
+            Assert.False(composer.TryAddFrame(
+                boundaryFrame,
+                ScrollCaptureDirection.Down,
+                Options,
+                out _));
+        }
+
+        // Even a perfectly matching frame that appears to continue past the
+        // edge cannot override the physical boundary evidence.
+        using (var beyondBoundaryFrame = CreateFrame(240, width, height))
+        {
+            Assert.False(composer.TryAddFrame(
+                beyondBoundaryFrame,
+                ScrollCaptureDirection.Down,
+                Options,
+                out _));
+            Assert.Equal("confirmed-bottom", composer.LastRejectReason);
+        }
+
+        Assert.Equal(confirmedHeight, composer.OutputHeight);
+    }
+
+    [Fact]
     public void PrependsNewContentAtTopAfterScrollingDownThenBackUp()
     {
         // Regression: after down-capture and return to the top boundary, further
@@ -784,6 +850,392 @@ public sealed class ScrollCaptureComposerTests
         Assert.Equal(3, composer.FrameCount);
         Assert.Equal(1, composer.AddedAboveFrameCount);
         Assert.Equal(1, composer.AddedBelowFrameCount);
+    }
+
+    [Fact]
+    public void DoesNotPrependDynamicStickyDashboardFramesDuringReverseScroll()
+    {
+        const int width = 360;
+        const int height = 260;
+        const int stickyRows = 52;
+        var options = Options with
+        {
+            MaximumFrames = 30,
+            MinimumOverlapRows = 24,
+            MinimumOverlapConfidence = 0.96,
+        };
+        using var composer = new ScrollCaptureComposer();
+
+        foreach (var top in new[] { 0, 72, 144, 216, 288 })
+        {
+            using var frame = CreateStickyDashboardFrame(
+                top,
+                width,
+                height,
+                stickyRows,
+                updateSeed: 0);
+            composer.TryAddFrame(
+                frame,
+                ScrollCaptureDirection.Down,
+                options,
+                expectedNewRows: 72,
+                lockDirection: true,
+                out _);
+        }
+
+        var capturedHeight = composer.OutputHeight;
+        var addedAbove = composer.AddedAboveFrameCount;
+        var addedBelow = composer.AddedBelowFrameCount;
+
+        // Return through already captured content. Each frame changes a wide
+        // dashboard value band and the scrollbar, matching the real failure
+        // where strict pixel fingerprints missed the old viewport and the
+        // composer prepended duplicate rows in the middle of the result.
+        var updateSeed = 1;
+        foreach (var top in new[] { 216, 144, 72, 0, 72, 144, 72, 0 })
+        {
+            var direction = top <= 72
+                ? ScrollCaptureDirection.Up
+                : updateSeed % 3 == 0
+                    ? ScrollCaptureDirection.Down
+                    : ScrollCaptureDirection.Up;
+            using var frame = CreateStickyDashboardFrame(
+                top,
+                width,
+                height,
+                stickyRows,
+                updateSeed++);
+            composer.TryAddFrame(
+                frame,
+                direction,
+                options,
+                expectedNewRows: 72,
+                lockDirection: true,
+                out _);
+        }
+
+        Assert.Equal(capturedHeight, composer.OutputHeight);
+        Assert.Equal(addedAbove, composer.AddedAboveFrameCount);
+        Assert.Equal(addedBelow, composer.AddedBelowFrameCount);
+    }
+
+    [Fact]
+    public void UpwardExpansionDoesNotRepeatAStickyDashboardHeader()
+    {
+        const int width = 360;
+        const int height = 260;
+        const int stickyRows = 52;
+        var options = Options with
+        {
+            MaximumFrames = 30,
+            MinimumOverlapRows = 24,
+            MinimumOverlapConfidence = 0.96,
+        };
+        using var composer = new ScrollCaptureComposer();
+
+        foreach (var (top, direction) in new[]
+                 {
+                     (300, ScrollCaptureDirection.Down),
+                     (372, ScrollCaptureDirection.Down),
+                     (444, ScrollCaptureDirection.Down),
+                     (372, ScrollCaptureDirection.Up),
+                     (300, ScrollCaptureDirection.Up),
+                     (228, ScrollCaptureDirection.Up),
+                     (156, ScrollCaptureDirection.Up),
+                 })
+        {
+            using var frame = CreateStickyDashboardFrame(
+                top,
+                width,
+                height,
+                stickyRows,
+                updateSeed: 0);
+            composer.TryAddFrame(
+                frame,
+                direction,
+                options,
+                expectedNewRows: 72,
+                lockDirection: true,
+                out _);
+        }
+
+        Assert.Equal(height + 288, composer.OutputHeight);
+        using var result = composer.Compose();
+        var headerControlColor = Color.FromArgb(255, 29, 49, 76).ToArgb();
+        var matchingRows = Enumerable.Range(0, result.Height)
+            .Count(y => result.GetPixel(20, y).ToArgb() == headerControlColor);
+
+        Assert.InRange(matchingRows, 20, 32);
+    }
+
+    [Fact]
+    public void ReturnFingerprintToleratesDynamicValuesButRejectsAnotherViewport()
+    {
+        const int width = 360;
+        const int height = 260;
+        const int stickyRows = 52;
+        using var original = CreateStickyDashboardFrame(
+            144,
+            width,
+            height,
+            stickyRows,
+            updateSeed: 0);
+        using var updated = CreateStickyDashboardFrame(
+            144,
+            width,
+            height,
+            stickyRows,
+            updateSeed: 7);
+        using var anotherViewport = CreateStickyDashboardFrame(
+            216,
+            width,
+            height,
+            stickyRows,
+            updateSeed: 7);
+        var originalFingerprint = ViewportFingerprint.Create(original);
+        var updatedFingerprint = ViewportFingerprint.Create(updated);
+        var anotherFingerprint = ViewportFingerprint.Create(anotherViewport);
+
+        Assert.False(originalFingerprint.IsSimilarTo(updatedFingerprint));
+        Assert.True(originalFingerprint.IsPreviouslySeenComparedTo(updatedFingerprint));
+        Assert.False(originalFingerprint.IsPreviouslySeenComparedTo(anotherFingerprint));
+    }
+
+    [Fact]
+    public void ReturnFingerprintLocatesShiftedDynamicDashboardViewport()
+    {
+        const int width = 360;
+        const int height = 260;
+        const int stickyRows = 52;
+        using var original = CreateStickyDashboardFrame(
+            144,
+            width,
+            height,
+            stickyRows,
+            updateSeed: 0);
+        using var shifted = CreateStickyDashboardFrame(
+            177,
+            width,
+            height,
+            stickyRows,
+            updateSeed: 9);
+        var originalFingerprint = ViewportFingerprint.Create(original);
+        var shiftedFingerprint = ViewportFingerprint.Create(shifted);
+
+        var found = originalFingerprint.TryLocatePreviouslySeenComparedTo(
+            shiftedFingerprint,
+            maximumPixelShift: 64,
+            out var shift,
+            out var score);
+        Assert.True(found, $"shift={shift}, score={score}");
+        Assert.InRange(shift, 29, 37);
+
+        using var unrelated = CreateRepeatingFrame(
+            width,
+            height,
+            Color.Magenta);
+        var unrelatedFingerprint = ViewportFingerprint.Create(unrelated);
+        Assert.False(originalFingerprint.TryLocatePreviouslySeenComparedTo(
+            unrelatedFingerprint,
+            maximumPixelShift: 64,
+            out _,
+            out _));
+    }
+
+    [Fact]
+    public void ShiftedDynamicReturnDoesNotDuplicateCapturedDashboardRows()
+    {
+        const int width = 360;
+        const int height = 260;
+        const int stickyRows = 52;
+        var options = Options with
+        {
+            MaximumFrames = 40,
+            MinimumOverlapRows = 24,
+            MinimumOverlapConfidence = 0.96,
+        };
+        using var composer = new ScrollCaptureComposer();
+
+        foreach (var top in new[] { 0, 80, 160, 240, 320 })
+        {
+            using var frame = CreateStickyDashboardFrame(
+                top,
+                width,
+                height,
+                stickyRows,
+                updateSeed: 0);
+            composer.TryAddFrame(
+                frame,
+                ScrollCaptureDirection.Down,
+                options,
+                expectedNewRows: 80,
+                lockDirection: true,
+                out _);
+        }
+
+        var capturedHeight = composer.OutputHeight;
+        var addedAbove = composer.AddedAboveFrameCount;
+        var addedBelow = composer.AddedBelowFrameCount;
+
+        var seed = 1;
+        foreach (var top in new[] { 287, 203, 119, 35 })
+        {
+            using var frame = CreateStickyDashboardFrame(
+                top,
+                width,
+                height,
+                stickyRows,
+                updateSeed: seed++);
+            composer.TryAddFrame(
+                frame,
+                ScrollCaptureDirection.Up,
+                options,
+                expectedNewRows: 84,
+                lockDirection: true,
+                out _);
+        }
+
+        Assert.Equal(capturedHeight, composer.OutputHeight);
+        Assert.Equal(addedAbove, composer.AddedAboveFrameCount);
+        Assert.Equal(addedBelow, composer.AddedBelowFrameCount);
+    }
+
+    [Fact]
+    public void UsesWheelTravelToResolveAPeriodicTopBoundaryCrossing()
+    {
+        const int width = 320;
+        const int height = 240;
+        const int initialTop = 300;
+        const int downTop = 318;
+        const int upperTop = 118;
+        var options = Options with
+        {
+            MinimumOverlapRows = 24,
+            MinimumOverlapConfidence = 0.96,
+        };
+        using var content = CreatePeriodicBandContent(
+            width,
+            initialTop + height + 32,
+            period: 44);
+        using var initial = Crop(content, initialTop, height);
+        using var down = Crop(content, downTop, height);
+        using var upper = Crop(content, upperTop, height);
+        using var composer = new ScrollCaptureComposer();
+
+        Assert.True(composer.TryAddFrame(initial, options, out _));
+        Assert.True(composer.TryAddFrame(
+            down,
+            ScrollCaptureDirection.Down,
+            options,
+            expectedNewRows: downTop - initialTop,
+            lockDirection: true,
+            out _));
+        Assert.True(composer.TryAddFrame(
+            upper,
+            ScrollCaptureDirection.Up,
+            options,
+            expectedNewRows: downTop - upperTop,
+            lockDirection: true,
+            out _));
+
+        Assert.Equal(downTop + height - upperTop, composer.OutputHeight);
+        Assert.Equal(1, composer.AddedAboveFrameCount);
+    }
+
+    [Fact]
+    public void WheelReturnWalkDoesNotSearchOrAppendInsideCapturedRange()
+    {
+        const int width = 160;
+        const int height = 140;
+        using var composer = new ScrollCaptureComposer();
+
+        foreach (var top in new[] { 0, 50, 100 })
+        {
+            using var frame = CreateFrame(top, width, height);
+            composer.TryAddFrame(
+                frame,
+                ScrollCaptureDirection.Down,
+                Options,
+                expectedNewRows: top == 0 ? null : 50,
+                lockDirection: true,
+                out _);
+        }
+
+        var capturedHeight = composer.OutputHeight;
+        using var unrelatedLiveFrame = CreateRepeatingFrame(
+            width,
+            height,
+            Color.Magenta);
+
+        Assert.False(composer.TryAddFrame(
+            unrelatedLiveFrame,
+            ScrollCaptureDirection.Up,
+            Options,
+            expectedNewRows: 40,
+            lockDirection: true,
+            out _));
+        Assert.Equal("wheel-return-reanchor", composer.LastRejectReason);
+        Assert.Equal(40, composer.LastFrameMovementRows);
+        Assert.Equal(capturedHeight, composer.OutputHeight);
+    }
+
+    [Fact]
+    public void ReturnWalkCrossesTopUsingTheStoredBoundaryAfterLosingCurrentAnchor()
+    {
+        const int width = 320;
+        const int height = 240;
+        const int initialTop = 300;
+        const int bottomTop = 500;
+        const int upperTop = 250;
+        var options = Options with
+        {
+            MinimumOverlapRows = 24,
+            MinimumOverlapConfidence = 0.96,
+        };
+        using var document = CreateCodeEditorContent(width, bottomTop + height + 20);
+        using var initial = Crop(document, initialTop, height);
+        using var bottom = Crop(document, bottomTop, height);
+        using var upper = Crop(document, upperTop, height);
+        using var unrelatedReturnFrame = CreateRepeatingFrame(
+            width,
+            height,
+            Color.Magenta);
+        using var composer = new ScrollCaptureComposer();
+
+        Assert.True(composer.TryAddFrame(initial, options, out _));
+        Assert.True(composer.TryAddFrame(
+            bottom,
+            ScrollCaptureDirection.Down,
+            options,
+            expectedNewRows: bottomTop - initialTop,
+            lockDirection: true,
+            out _));
+
+        // The first reverse sample has no usable image relation, as happens
+        // when matching falls behind a fling. It can safely walk inside the
+        // already captured range using wheel evidence.
+        Assert.False(composer.TryAddFrame(
+            unrelatedReturnFrame,
+            ScrollCaptureDirection.Up,
+            options,
+            expectedNewRows: 100,
+            lockDirection: true,
+            out _));
+        Assert.Equal("wheel-return-reanchor", composer.LastRejectReason);
+
+        // The next sample crosses the original top. It cannot match the
+        // unrelated current anchor, but it does overlap the stored top frame
+        // and must prepend immediately on this same upward pass.
+        Assert.True(composer.TryAddFrame(
+            upper,
+            ScrollCaptureDirection.Up,
+            options,
+            expectedNewRows: 150,
+            lockDirection: true,
+            out _));
+
+        Assert.Equal(bottomTop + height - upperTop, composer.OutputHeight);
+        Assert.Equal(1, composer.AddedAboveFrameCount);
     }
 
     [Fact]
@@ -1445,6 +1897,98 @@ public sealed class ScrollCaptureComposerTests
 
                 frame.SetPixel(x, y, color);
             }
+        }
+
+        return frame;
+    }
+
+    private static Bitmap CreateStickyDashboardFrame(
+        int documentTop,
+        int width,
+        int height,
+        int stickyRows,
+        int updateSeed)
+    {
+        var frame = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
+        using var graphics = Graphics.FromImage(frame);
+        graphics.Clear(Color.FromArgb(255, 8, 20, 38));
+
+        using (var headerBrush = new SolidBrush(Color.FromArgb(255, 18, 36, 58)))
+        using (var controlBrush = new SolidBrush(Color.FromArgb(255, 29, 49, 76)))
+        using (var accentBrush = new SolidBrush(Color.FromArgb(255, 22, 190, 177)))
+        {
+            graphics.FillRectangle(headerBrush, 0, 0, width, stickyRows);
+            graphics.FillRectangle(controlBrush, 12, 11, 82, 28);
+            graphics.FillRectangle(controlBrush, 104, 11, 82, 28);
+            graphics.FillRectangle(controlBrush, 196, 11, 82, 28);
+            graphics.FillRectangle(accentBrush, 292, 11, 54, 28);
+        }
+
+        // Live totals change while the same viewport is revisited. Keep these
+        // updates away from the left structural anchor, as in the dashboard
+        // from the reported capture.
+        using (var dynamicBrush = new SolidBrush(Color.FromArgb(
+                   255,
+                   45 + ((updateSeed * 31) % 140),
+                   70 + ((updateSeed * 47) % 120),
+                   100 + ((updateSeed * 19) % 110))))
+        {
+            graphics.FillRectangle(dynamicBrush, 218, 17, 52, 15);
+            graphics.FillRectangle(dynamicBrush, 310, 17, 24, 15);
+        }
+
+        for (var y = stickyRows; y < height; y++)
+        {
+            var documentY = documentTop + y - stickyRows;
+            var row = documentY / 44;
+            var withinRow = documentY % 44;
+            var background = row % 2 == 0
+                ? Color.FromArgb(255, 12, 28, 50)
+                : Color.FromArgb(255, 15, 32, 55);
+            using var backgroundBrush = new SolidBrush(background);
+            graphics.FillRectangle(backgroundBrush, 0, y, width, 1);
+
+            if (withinRow is 0 or 1)
+            {
+                using var separator = new Pen(Color.FromArgb(255, 40, 58, 82));
+                graphics.DrawLine(separator, 0, y, width - 1, y);
+            }
+
+            if (withinRow >= 13 && withinRow <= 16)
+            {
+                using var textBrush = new SolidBrush(Color.FromArgb(
+                    255,
+                    90 + ((row * 17) % 120),
+                    130 + ((row * 23) % 100),
+                    150 + ((row * 11) % 90)));
+                graphics.FillRectangle(textBrush, 14, y, 38 + ((row * 7) % 28), 1);
+                graphics.FillRectangle(textBrush, 112, y, 58, 1);
+                graphics.FillRectangle(textBrush, 224, y, 72, 1);
+            }
+        }
+
+        using (var liveCellBrush = new SolidBrush(Color.FromArgb(
+                   255,
+                   45 + ((updateSeed * 31) % 140),
+                   70 + ((updateSeed * 47) % 120),
+                   100 + ((updateSeed * 19) % 110))))
+        {
+            graphics.FillRectangle(
+                liveCellBrush,
+                width / 2,
+                stickyRows + 34,
+                width / 3,
+                18);
+        }
+
+        using (var scrollbarBrush = new SolidBrush(Color.FromArgb(
+                   255,
+                   80 + ((updateSeed * 29) % 130),
+                   100,
+                   125)))
+        {
+            var thumbTop = stickyRows + (documentTop % Math.Max(1, height - stickyRows - 30));
+            graphics.FillRectangle(scrollbarBrush, width - 8, thumbTop, 5, 28);
         }
 
         return frame;

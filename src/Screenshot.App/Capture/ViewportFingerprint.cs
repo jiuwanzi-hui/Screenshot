@@ -12,18 +12,37 @@ namespace Screenshot.App.Capture;
 internal sealed class ViewportFingerprint
 {
     private const int SampleColumns = 64;
-    private const int SampleRows = 96;
+    // Keep vertical sampling close to pixel resolution. Return samples rarely
+    // land on exactly the same scroll row; a coarse 96-row grid quantized a
+    // 30-40px return shift by several pixels and thin chat/table separators no
+    // longer aligned, so the historical locator selected a periodic row instead.
+    private const int SampleRows = 256;
     private const double MaximumAverageDifference = 0.004;
     private const double MaximumChangedWeightRatio = 0.004;
     private const double MaximumStationaryBodyAverageDifference = 0.045;
     private const double MaximumStationaryBodyChangedWeightRatio = 0.30;
     private const double MaximumStationaryAnchorAverageDifference = 0.012;
     private const double MaximumStationaryAnchorChangedWeightRatio = 0.06;
+    private const double MaximumReturnBodyAverageDifference = 0.035;
+    private const double MaximumReturnBodyChangedWeightRatio = 0.22;
+    private const double MaximumReturnAnchorAverageDifference = 0.011;
+    private const double MaximumReturnAnchorChangedWeightRatio = 0.055;
+    private const double MaximumShiftedReturnScore = 0.20;
     private readonly uint[] _samples;
+    private readonly int _sampledPixelSpan;
 
-    private ViewportFingerprint(uint[] samples)
+    public int SampledPixelSpan => _sampledPixelSpan;
+
+    public int SourceHeight { get; }
+
+    private ViewportFingerprint(
+        uint[] samples,
+        int sampledPixelSpan,
+        int sourceHeight)
     {
         _samples = samples;
+        _sampledPixelSpan = sampledPixelSpan;
+        SourceHeight = sourceHeight;
     }
 
     public static ViewportFingerprint Create(Bitmap bitmap)
@@ -124,7 +143,10 @@ internal sealed class ViewportFingerprint
                     }
                 }
 
-                return new ViewportFingerprint(samples);
+                return new ViewportFingerprint(
+                    samples,
+                    Math.Max(1, bottom - 2 - top),
+                    source.Height);
             }
             finally
             {
@@ -160,12 +182,16 @@ internal sealed class ViewportFingerprint
                 other,
                 rowOffset,
                 0,
-                SampleColumns);
+                SampleColumns,
+                SampleRows / 5,
+                SampleRows);
             var anchor = MeasureBandDifference(
                 other,
                 rowOffset,
                 0,
-                SampleColumns / 6);
+                SampleColumns / 6,
+                SampleRows / 5,
+                SampleRows);
 
             if (body is { } bodyMetrics &&
                 anchor is { } anchorMetrics &&
@@ -181,16 +207,190 @@ internal sealed class ViewportFingerprint
         return false;
     }
 
+    /// <summary>
+    /// Recognizes a previously captured viewport when live cells, hover states,
+    /// or a scrollbar have changed since it was first seen.
+    /// </summary>
+    public bool IsPreviouslySeenComparedTo(ViewportFingerprint other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+
+        // This deliberately sits between the pixel-strict historical match and
+        // the looser stationary-boundary check. The narrow left-side band acts
+        // as a structural page anchor; dynamic dashboard values normally live
+        // outside it, while repeated table rows alone cannot satisfy it.
+        // Historical anchors must not absorb a genuine one- or two-pixel
+        // document movement. The current-anchor stationary check already owns
+        // DWM/fractional-scroll jitter; return matching compares the same sample
+        // coordinates so it cannot introduce cumulative vertical drift.
+        var body = MeasureBandDifference(
+            other,
+            rowOffset: 0,
+            0,
+            SampleColumns);
+        var anchor = MeasureBandDifference(
+            other,
+            rowOffset: 0,
+            0,
+            SampleColumns / 6);
+
+        return body is { } bodyMetrics &&
+               anchor is { } anchorMetrics &&
+               bodyMetrics.Average <= MaximumReturnBodyAverageDifference &&
+               bodyMetrics.ChangedWeightRatio <= MaximumReturnBodyChangedWeightRatio &&
+               anchorMetrics.Average <= MaximumReturnAnchorAverageDifference &&
+               anchorMetrics.ChangedWeightRatio <= MaximumReturnAnchorChangedWeightRatio;
+    }
+
+    /// <summary>
+    /// Locates the same viewport content when the return sample was taken a
+    /// little before or after its historical sample. The returned pixel shift
+    /// is absolute relative to this fingerprint: positive means the new
+    /// viewport is further down the document.
+    /// </summary>
+    public bool TryLocatePreviouslySeenComparedTo(
+        ViewportFingerprint other,
+        int maximumPixelShift,
+        out int pixelShift,
+        out double score)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+
+        pixelShift = 0;
+        score = double.MaxValue;
+        if (_samples.Length != other._samples.Length ||
+            maximumPixelShift <= 0)
+        {
+            return false;
+        }
+
+        var pixelsPerSampleRow = _sampledPixelSpan /
+            (double)(SampleRows - 1);
+        var maximumRowOffset = Math.Clamp(
+            (int)Math.Ceiling(maximumPixelShift /
+                Math.Max(1d, pixelsPerSampleRow)),
+            1,
+            SampleRows / 3);
+        var found = false;
+        var bestAcceptedScore = double.MaxValue;
+        var bestObservedScore = double.MaxValue;
+        var bestObservedShift = 0;
+        var coarseCandidates = new List<(int RowOffset, double Score)>();
+
+        for (var rowOffset = -maximumRowOffset;
+             rowOffset <= maximumRowOffset;
+             rowOffset++)
+        {
+            if (rowOffset == 0)
+            {
+                continue;
+            }
+
+            var body = MeasureBandDifference(
+                other,
+                rowOffset,
+                0,
+                SampleColumns,
+                columnStride: 4);
+            var anchor = MeasureBandDifference(
+                other,
+                rowOffset,
+                0,
+                SampleColumns / 6,
+                columnStride: 2);
+            if (body is not { } bodyMetrics ||
+                anchor is not { } anchorMetrics)
+            {
+                continue;
+            }
+
+            var coarseScore =
+                bodyMetrics.Average +
+                (bodyMetrics.ChangedWeightRatio * 0.08) +
+                (anchorMetrics.Average * 2d) +
+                (anchorMetrics.ChangedWeightRatio * 0.16);
+            coarseCandidates.Add((rowOffset, coarseScore));
+        }
+
+        // Evaluating every color sample at every possible shift for every
+        // historical viewport made one reverse frame take hundreds of
+        // milliseconds. The sparse pass above keeps the structurally best
+        // shifts; only those finalists pay for the full comparison.
+        foreach (var candidate in coarseCandidates
+                     .OrderBy(candidate => candidate.Score)
+                     .Take(8))
+        {
+            var body = MeasureBandDifference(
+                other,
+                candidate.RowOffset,
+                0,
+                SampleColumns);
+            var anchor = MeasureBandDifference(
+                other,
+                candidate.RowOffset,
+                0,
+                SampleColumns / 6);
+            if (body is not { } bodyMetrics ||
+                anchor is not { } anchorMetrics)
+            {
+                continue;
+            }
+
+            var candidateScore =
+                bodyMetrics.Average +
+                (bodyMetrics.ChangedWeightRatio * 0.08) +
+                (anchorMetrics.Average * 2d) +
+                (anchorMetrics.ChangedWeightRatio * 0.16);
+            if (candidateScore < bestObservedScore)
+            {
+                bestObservedScore = candidateScore;
+                bestObservedShift = (int)Math.Round(
+                    -candidate.RowOffset * pixelsPerSampleRow);
+            }
+
+            if (candidateScore > MaximumShiftedReturnScore)
+            {
+                continue;
+            }
+
+            if (candidateScore >= bestAcceptedScore)
+            {
+                continue;
+            }
+
+            found = true;
+            bestAcceptedScore = candidateScore;
+            score = candidateScore;
+            pixelShift = (int)Math.Round(
+                -candidate.RowOffset * pixelsPerSampleRow);
+        }
+
+        if (!found)
+        {
+            score = bestObservedScore;
+            pixelShift = bestObservedShift;
+        }
+
+        return found;
+    }
+
     private DifferenceMetrics? MeasureBandDifference(
         ViewportFingerprint other,
         int rowOffset,
         int firstColumn,
-        int lastColumn)
+        int lastColumn,
+        int firstSampleRow = 0,
+        int lastSampleRow = SampleRows,
+        int columnStride = 1)
     {
         if (_samples.Length != other._samples.Length ||
             firstColumn < 0 ||
             lastColumn > SampleColumns ||
             firstColumn >= lastColumn ||
+            firstSampleRow < 0 ||
+            lastSampleRow > SampleRows ||
+            firstSampleRow >= lastSampleRow ||
+            columnStride <= 0 ||
             Math.Abs(rowOffset) >= SampleRows)
         {
             return null;
@@ -205,10 +405,22 @@ internal sealed class ViewportFingerprint
 
         for (var row = 0; row < comparedRows; row++)
         {
-            var leftRow = (leftStartRow + row) * SampleColumns;
-            var rightRow = (rightStartRow + row) * SampleColumns;
+            var leftSampleRow = leftStartRow + row;
+            var rightSampleRow = rightStartRow + row;
+            if (leftSampleRow < firstSampleRow ||
+                leftSampleRow >= lastSampleRow ||
+                rightSampleRow < firstSampleRow ||
+                rightSampleRow >= lastSampleRow)
+            {
+                continue;
+            }
 
-            for (var column = firstColumn; column < lastColumn; column++)
+            var leftRow = leftSampleRow * SampleColumns;
+            var rightRow = rightSampleRow * SampleColumns;
+
+            for (var column = firstColumn;
+                 column < lastColumn;
+                 column += columnStride)
             {
                 var left = _samples[leftRow + column];
                 var right = other._samples[rightRow + column];

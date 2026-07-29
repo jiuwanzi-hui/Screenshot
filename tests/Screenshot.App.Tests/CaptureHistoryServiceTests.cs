@@ -70,6 +70,14 @@ public sealed class CaptureHistoryServiceTests
                     System.Windows.Visibility.Collapsed,
                     Assert.IsType<System.Windows.Controls.Button>(
                         preview.FindName("EditButton")).Visibility);
+                Assert.Equal(
+                    System.Windows.Visibility.Collapsed,
+                    Assert.IsType<System.Windows.Controls.Button>(
+                        preview.FindName("ConfirmButton")).Visibility);
+                Assert.Equal(
+                    System.Windows.Visibility.Collapsed,
+                    Assert.IsType<System.Windows.Controls.Button>(
+                        preview.FindName("CloseButton")).Visibility);
             }
             finally
             {
@@ -77,5 +85,60 @@ public sealed class CaptureHistoryServiceTests
                 window.Close();
             }
         });
+    }
+
+    [Theory]
+    [InlineData(900, 1800, 0.5)]
+    [InlineData(800, 400, 2)]
+    [InlineData(400, 40000, 0.02)]
+    public void PreviewFitZoomUsesTheAvailableImageWidth(
+        double viewportWidth,
+        int imageWidth,
+        double expected)
+    {
+        Assert.Equal(
+            expected,
+            CapturePreviewWindow.CalculateFitWidthZoom(
+                viewportWidth,
+                imageWidth),
+            precision: 6);
+    }
+
+    [Fact]
+    public void PreviewWheelZoomIsIncrementalAndBounded()
+    {
+        var zoomedIn = CapturePreviewWindow.CalculateWheelZoom(1, 120);
+        var zoomedOut = CapturePreviewWindow.CalculateWheelZoom(1, -120);
+
+        Assert.True(zoomedIn > 1);
+        Assert.True(zoomedOut < 1);
+        Assert.Equal(
+            8,
+            CapturePreviewWindow.CalculateWheelZoom(8, 120));
+        Assert.Equal(
+            0.02,
+            CapturePreviewWindow.CalculateWheelZoom(0.02, -120));
+    }
+
+    [Theory]
+    [InlineData(560, 450, 220, 280, 900, 330)]
+    [InlineData(560, 450, 1200, 280, 900, 900)]
+    [InlineData(560, 450, 40, 280, 900, 280)]
+    public void PreviewWindowHeightFollowsTheScaledImageWithoutExceedingTheScreen(
+        double currentWindowHeight,
+        double viewportHeight,
+        double scaledImageHeight,
+        double minimumHeight,
+        double maximumHeight,
+        double expected)
+    {
+        Assert.Equal(
+            expected,
+            CapturePreviewWindow.CalculateAdaptiveWindowHeight(
+                currentWindowHeight,
+                viewportHeight,
+                scaledImageHeight,
+                minimumHeight,
+                maximumHeight));
     }
 }

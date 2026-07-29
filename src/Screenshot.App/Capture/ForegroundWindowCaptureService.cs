@@ -261,10 +261,121 @@ public static class ForegroundWindowCaptureService
             return true;
         }
 
+        return ScrollWithWheelInput(target, delta);
+    }
+
+    /// <summary>
+    /// Sends exactly one conventional wheel step even when the target exposes
+    /// a native vertical scrollbar.
+    /// </summary>
+    public static bool ScrollWithWheelInput(ScrollCaptureTarget target, int delta)
+    {
+        return ScrollWithWheelInputCore(
+            target,
+            NormalizeWheelDelta(delta));
+    }
+
+    /// <summary>
+    /// Injects one conventional wheel packet at the user's current point when
+    /// it lies inside the viewport. An outside pointer is routed through the
+    /// viewport only until Windows consumes that packet, then restored unless
+    /// the user moved it in the meantime.
+    /// </summary>
+    public static bool ScrollWithWheelMessage(
+        ScrollCaptureTarget target,
+        int delta)
+    {
+        if (!CanScroll(target, delta))
+        {
+            return false;
+        }
+
+        var normalizedDelta = Math.Clamp(delta, short.MinValue, short.MaxValue);
+        var attached = FocusScrollTarget(
+            target,
+            out var currentThreadId,
+            out var targetThreadId);
+        try
+        {
+            if (!NativeMethods.GetCursorPos(out var cursorPosition))
+            {
+                return false;
+            }
+
+            var routeThroughViewport = !target.CaptureRegion.Contains(
+                cursorPosition.X,
+                cursorPosition.Y);
+            var routeX = target.CaptureRegion.X +
+                (target.CaptureRegion.Width / 2);
+            var routeY = target.CaptureRegion.Y +
+                (target.CaptureRegion.Height / 2);
+            if (routeThroughViewport &&
+                !NativeMethods.SetCursorPos(routeX, routeY))
+            {
+                return false;
+            }
+
+            if (routeThroughViewport)
+            {
+                Thread.Sleep(10);
+            }
+
+            var wheelInput = new NativeInput
+            {
+                Type = NativeMethods.InputMouse,
+                Data = new NativeInputUnion
+                {
+                    Mouse = new NativeMouseInput
+                    {
+                        MouseData = unchecked((uint)normalizedDelta),
+                        Flags = NativeMethods.MouseEventWheel,
+                    },
+                },
+            };
+            var wheelSent = NativeMethods.SendInput(
+                1,
+                [wheelInput],
+                Marshal.SizeOf<NativeInput>()) == 1;
+
+            if (routeThroughViewport)
+            {
+                Thread.Sleep(10);
+                if (!NativeMethods.GetCursorPos(out var positionAfterWheel) ||
+                    (positionAfterWheel.X == routeX &&
+                     positionAfterWheel.Y == routeY))
+                {
+                    _ = NativeMethods.SetCursorPos(
+                        cursorPosition.X,
+                        cursorPosition.Y);
+                }
+            }
+
+            return wheelSent;
+        }
+        finally
+        {
+            if (attached)
+            {
+                _ = NativeMethods.AttachThreadInput(
+                    currentThreadId,
+                    targetThreadId,
+                    attach: false);
+            }
+        }
+    }
+
+    private static bool ScrollWithWheelInputCore(
+        ScrollCaptureTarget target,
+        int wheelDelta)
+    {
+        if (!CanScroll(target, wheelDelta))
+        {
+            return false;
+        }
+
         // Framework-hosted scroll viewers (including WPF and Chromium) often accept a
         // posted WM_MOUSEWHEEL but do not actually change their content. SendInput
         // produces the same real pointer input as a user wheel action.
-        var wheelDelta = NormalizeWheelDelta(delta);
         var attached = FocusScrollTarget(
             target,
             out var currentThreadId,
@@ -491,6 +602,34 @@ public static class ForegroundWindowCaptureService
 
         var offset = Math.Clamp(coordinate - virtualOrigin, 0, virtualLength - 1);
         return (int)Math.Round(offset * 65535d / (virtualLength - 1));
+    }
+
+    private static NativeInput CreateAbsolutePointerInput(
+        int x,
+        int y,
+        ScreenRegion virtualScreen)
+    {
+        return new NativeInput
+        {
+            Type = NativeMethods.InputMouse,
+            Data = new NativeInputUnion
+            {
+                Mouse = new NativeMouseInput
+                {
+                    DeltaX = NormalizeAbsolutePointerCoordinate(
+                        x,
+                        virtualScreen.X,
+                        virtualScreen.Width),
+                    DeltaY = NormalizeAbsolutePointerCoordinate(
+                        y,
+                        virtualScreen.Y,
+                        virtualScreen.Height),
+                    Flags = NativeMethods.MouseEventMove |
+                            NativeMethods.MouseEventAbsolute |
+                            NativeMethods.MouseEventVirtualDesktop,
+                },
+            },
+        };
     }
 
     private static bool FocusScrollTarget(

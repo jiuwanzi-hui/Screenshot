@@ -30,7 +30,7 @@
         </Border.Effect>
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="58" />
+                <RowDefinition Height="78" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="54" />
             </Grid.RowDefinitions>
@@ -45,6 +45,12 @@
                            FontSize="12"
                            Foreground="#91C8C5"
                            Text="1 帧 · 上 0 · 下 0" />
+                <TextBlock x:Name="InstructionText"
+                           Margin="0,3,0,0"
+                           FontSize="11"
+                           Foreground="#B8DDD9"
+                           Text="单击截取区域开始；右键取消"
+                           TextTrimming="CharacterEllipsis" />
             </StackPanel>
 
             <Border Grid.Row="1"

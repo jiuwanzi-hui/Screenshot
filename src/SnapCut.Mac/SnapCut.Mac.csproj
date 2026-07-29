@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>SnapCut.Mac</RootNamespace>
+    <AssemblyName>snapcut</AssemblyName>
+    <RuntimeIdentifiers>osx-x64;osx-arm64</RuntimeIdentifiers>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Description>SnapCut macOS frontend (CLI prototype) over the shared stitching core.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SnapCut.Core\SnapCut.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -8,6 +8,107 @@ public sealed record ImageOverlapMatch(int OverlapRows, double Confidence, int H
 
 public static class ImageOverlapMatcher
 {
+    internal static int FindStationaryLeadingRows(
+        Bitmap anchorFrame,
+        Bitmap nextFrame,
+        ScrollCaptureDirection direction,
+        int movementRows)
+    {
+        ArgumentNullException.ThrowIfNull(anchorFrame);
+        ArgumentNullException.ThrowIfNull(nextFrame);
+
+        if (anchorFrame.Width != nextFrame.Width ||
+            anchorFrame.Height != nextFrame.Height ||
+            movementRows < 12)
+        {
+            return 0;
+        }
+
+        var anchor = PixelBuffer.Create(anchorFrame);
+        var next = PixelBuffer.Create(nextFrame);
+        const int blockHeight = 4;
+        var maximumRows = Math.Min(
+            anchor.Height / 4,
+            Math.Min(240, anchor.Height - movementRows - blockHeight));
+        if (maximumRows < blockHeight * 3)
+        {
+            return 0;
+        }
+
+        var comparisonLeft = anchor.Width >= 160 ? anchor.Width / 10 : 0;
+        var comparisonRight = anchor.Width >= 160
+            ? anchor.Width - (anchor.Width / 10)
+            : anchor.Width;
+        var columnStep = Math.Max(1, (comparisonRight - comparisonLeft) / 96);
+        var lastFixedBottom = 0;
+        var consecutiveMovingBlocks = 0;
+
+        for (var top = 0; top + blockHeight <= maximumRows; top += blockHeight)
+        {
+            long stationaryDifference = 0;
+            long shiftedDifference = 0;
+            var samples = 0;
+
+            for (var y = top; y < top + blockHeight; y++)
+            {
+                for (var x = comparisonLeft; x < comparisonRight; x += columnStep)
+                {
+                    stationaryDifference += anchor.GetColorDifference(
+                        x,
+                        y,
+                        next,
+                        x,
+                        y);
+
+                    if (direction == ScrollCaptureDirection.Down)
+                    {
+                        shiftedDifference += anchor.GetColorDifference(
+                            x,
+                            y + movementRows,
+                            next,
+                            x,
+                            y);
+                    }
+                    else
+                    {
+                        shiftedDifference += anchor.GetColorDifference(
+                            x,
+                            y,
+                            next,
+                            x,
+                            y + movementRows);
+                    }
+
+                    samples++;
+                }
+            }
+
+            var maximumDifference = Math.Max(1d, samples * 255d * 3d);
+            var stationaryScore = stationaryDifference / maximumDifference;
+            var shiftedScore = shiftedDifference / maximumDifference;
+            var isFixed = stationaryScore <= 0.06 &&
+                (stationaryScore <= 0.012 ||
+                 stationaryScore + 0.018 <= shiftedScore);
+
+            if (isFixed)
+            {
+                lastFixedBottom = top + blockHeight;
+                consecutiveMovingBlocks = 0;
+                continue;
+            }
+
+            consecutiveMovingBlocks++;
+            if (consecutiveMovingBlocks >= 2)
+            {
+                break;
+            }
+        }
+
+        // A few coincident rows at the top are common in ordinary page content.
+        // Treat only a substantial, contiguous band as viewport-fixed chrome.
+        return lastFixedBottom >= 16 ? lastFixedBottom : 0;
+    }
+
     /// <param name="preferredNeighborhoodOnly">
     /// Restricts the search to the temporal fast path around
     /// <paramref name="preferredNewRows"/> and returns null instead of falling
@@ -95,6 +196,7 @@ public static class ImageOverlapMatcher
             currentPixels,
             ignoredLeft,
             comparisonRight);
+        List<OverlapCandidate>? profileCandidates = null;
 
         // Stage 0: WeChat-style temporal strip search. Continuous scrolling keeps
         // nearly the same displacement frame-to-frame; resolve that neighborhood
@@ -115,7 +217,8 @@ public static class ImageOverlapMatcher
                 minimumNewRows,
                 maximumNewRows,
                 minimumConfidence,
-                previousFrame.Height);
+                previousFrame.Height,
+                restrictToPreferredNeighborhood: preferredNeighborhoodOnly);
 
             // When scroll speed changes abruptly, the last displacement can
             // point at a periodic code row. Probe a conservative one-sixth
@@ -125,7 +228,8 @@ public static class ImageOverlapMatcher
                 previousFrame.Height / 6,
                 minimumNewRows,
                 maximumNewRows);
-            if ((fastMatch is null || fastMatch.Confidence < 0.97) &&
+            if (!preferredNeighborhoodOnly &&
+                (fastMatch is null || fastMatch.Confidence < 0.97) &&
                 Math.Abs(fallbackSeed - preferredSeed) > LocalRefineRadius)
             {
                 var fallbackMatch = TryTemporalFastPath(
@@ -142,7 +246,8 @@ public static class ImageOverlapMatcher
                     minimumNewRows,
                     maximumNewRows,
                     minimumConfidence,
-                    previousFrame.Height);
+                    previousFrame.Height,
+                    restrictToPreferredNeighborhood: preferredNeighborhoodOnly);
 
                 if (fallbackMatch is not null &&
                     (fastMatch is null ||
@@ -155,40 +260,55 @@ public static class ImageOverlapMatcher
 
             if (preferredNeighborhoodOnly)
             {
-                return fastMatch;
+                if (fastMatch is null)
+                {
+                    return null;
+                }
+
+                return HasReliableFeatureConsensus(
+                    previousPixels,
+                    currentPixels,
+                    previousFrame.Height - fastMatch.OverlapRows,
+                    fastMatch.HorizontalOffset,
+                    [previousFrame.Height - fastMatch.OverlapRows],
+                    comparisonRight,
+                    ignoredBottom)
+                        ? fastMatch
+                        : null;
             }
 
-            // A moderate local peak is useful as a ranking hint, but repeated
-            // code can produce one near the previous displacement when the
-            // user abruptly changes scroll speed. Only a strong temporal peak
-            // may bypass the global row-profile search.
-            if (fastMatch is { Confidence: >= 0.97 })
+            // Continuous scroll almost always stays near the prior step.
+            // Require a near-decisive temporal peak before skipping the
+            // global search: 0.97 still accepted false nearby periods after
+            // a sudden speed-up, while 0.99 forced too many full scans and
+            // let reverse flings fall behind the viewport.
+            if (fastMatch is { Confidence: >= 0.985 })
             {
-                return fastMatch;
+                if (HasReliableFeatureConsensus(
+                        previousPixels,
+                        currentPixels,
+                        previousFrame.Height - fastMatch.OverlapRows,
+                        fastMatch.HorizontalOffset,
+                        [previousFrame.Height - fastMatch.OverlapRows],
+                        comparisonRight,
+                        ignoredBottom))
+                {
+                    return fastMatch;
+                }
             }
         }
 
         // Stage 1: row-profile correlation ranks every displacement quickly.
         // This is closer to commercial long-screenshot strip matching and avoids
         // missing the true peak when sparse coarse sampling hits a flat region.
-        var profileCandidates = new List<OverlapCandidate>(
-            maximumNewRows - minimumNewRows + 1);
-
-        for (var newRows = minimumNewRows; newRows <= maximumNewRows; newRows++)
-        {
-            var profileScore = ScoreRowProfiles(
-                previousProfiles,
-                currentProfiles,
-                newRows,
-                ignoredBottom,
-                minimumOverlapRows,
-                topOffsets);
-
-            if (profileScore is { } score)
-            {
-                profileCandidates.Add(new OverlapCandidate(newRows, score));
-            }
-        }
+        profileCandidates ??= BuildProfileCandidates(
+            previousProfiles,
+            currentProfiles,
+            ignoredBottom,
+            minimumOverlapRows,
+            topOffsets,
+            minimumNewRows,
+            maximumNewRows);
 
         if (profileCandidates.Count == 0)
         {
@@ -243,8 +363,8 @@ public static class ImageOverlapMatcher
                 ignoredBottom,
                 minimumOverlapRows,
                 topOffsets,
-                targetRowSamples: previousFrame.Height >= 360 ? 72 : 96,
-                targetColumnSamples: previousFrame.Width >= 300 ? 56 : 48,
+                targetRowSamples: previousFrame.Height >= 360 ? 64 : 80,
+                targetColumnSamples: previousFrame.Width >= 300 ? 48 : 36,
                 minimumTexture: MinimumReliableTexture);
 
             if (denseComparison is { } denseMetrics &&
@@ -282,6 +402,21 @@ public static class ImageOverlapMatcher
             return null;
         }
 
+        if (!HasReliableFeatureConsensus(
+                previousPixels,
+                currentPixels,
+                bestCandidate.NewRows,
+                bestCandidate.HorizontalOffset,
+                SelectFeatureProbeRows(
+                    profileCandidates,
+                    bestCandidate.NewRows,
+                    preferredNewRows),
+                comparisonRight,
+                ignoredBottom))
+        {
+            return null;
+        }
+
         var zeroMotionComparison = FindZeroMotionComparison(
             previousPixels,
             currentPixels,
@@ -293,7 +428,10 @@ public static class ImageOverlapMatcher
         // can make the frame differ just enough to defeat an exact equality test.
         // A periodic card grid can then produce a convincing large shift. Prefer
         // zero displacement when its content score is close to the best shift.
-        if (IsProbablyNoMotion(zeroMotionComparison, bestCandidate))
+        if (IsProbablyNoMotion(
+                zeroMotionComparison,
+                bestCandidate,
+                preferredNewRows))
         {
             return null;
         }
@@ -308,10 +446,14 @@ public static class ImageOverlapMatcher
     private const double MinimumNoMotionConfidence = 0.93;
     private const double MaximumNoMotionConfidenceGap = 0.006;
     private const double MinimumHeaderConfidenceAdvantage = 0.04;
+    // Repeated table/chat rows can differ by only anti-aliasing noise while
+    // producing peaks one row-height apart. The wheel/previous displacement is
+    // independent evidence; allow a nearby peak to trail a distant repetition
+    // modestly without letting a genuinely weak match override image evidence.
     private const double TemporalConfidenceAdvantage = 0.006;
     private const double TemporalNearConfidenceGap = 0.004;
     private const double AmbiguousPeakConfidenceGap = 0.008;
-    private const int MaximumDenseCandidates = 12;
+    private const int MaximumDenseCandidates = 8;
     private const int MinimumTemporalNeighborhoodRadius = 12;
     private const int MaximumTemporalNeighborhoodRadius = 96;
     // Widest neighborhood the temporal fast path will rank. It only bounds the
@@ -329,12 +471,292 @@ public static class ImageOverlapMatcher
     // budget tests target <1s); a few seeds still recover peaks that rank a
     // few rows off under 1px horizontal DWM drift.
     private const int ProfileProbeNeighborhoodRadius = 2;
-    private const int ProfileNeighborhoodSeedCount = 4;
+    private const int ProfileNeighborhoodSeedCount = 2;
     private static readonly int[] HorizontalMicroOffsets = [0, -1, 1];
     private const int TemplateStripRows = 28;
     private const int MinimumTextureWeight = 4;
     private const int MaximumTextureWeight = 256;
     private const int RowProfileColumnSamples = 48;
+    private const int FeaturePointLimit = 128;
+    private const int FeaturePointSpacing = 9;
+    private const int FeaturePatchRadius = 2;
+    private const int FeatureMinimumCornerResponse = 72;
+    private const double FeatureMinimumVoteRatio = 0.32;
+    private const double FeatureMaximumPatchDifference = 48d;
+
+    private static List<OverlapCandidate> BuildProfileCandidates(
+        RowProfile[] previousProfiles,
+        RowProfile[] currentProfiles,
+        int ignoredBottom,
+        int minimumOverlapRows,
+        IReadOnlyList<int> topOffsets,
+        int minimumNewRows,
+        int maximumNewRows)
+    {
+        var candidates = new List<OverlapCandidate>(
+            maximumNewRows - minimumNewRows + 1);
+
+        for (var newRows = minimumNewRows; newRows <= maximumNewRows; newRows++)
+        {
+            var profileScore = ScoreRowProfiles(
+                previousProfiles,
+                currentProfiles,
+                newRows,
+                ignoredBottom,
+                minimumOverlapRows,
+                topOffsets);
+
+            if (profileScore is { } score)
+            {
+                candidates.Add(new OverlapCandidate(newRows, score));
+            }
+        }
+
+        return candidates;
+    }
+
+    private static bool HasReliableFeatureConsensus(
+        PixelBuffer previousFrame,
+        PixelBuffer currentFrame,
+        int selectedNewRows,
+        int horizontalOffset,
+        IReadOnlyCollection<int> candidateRows,
+        int comparisonRight,
+        int ignoredBottom)
+    {
+        if (selectedNewRows <= 0 || candidateRows.Count == 0)
+        {
+            return selectedNewRows == 0;
+        }
+
+        var points = SelectFeaturePoints(
+            currentFrame,
+            comparisonRight,
+            ignoredBottom);
+        if (points.Count < 8)
+        {
+            // Flat synthetic pages and large blank chat areas do not contain
+            // enough corners for a meaningful vote. The ordinary dense pixel
+            // score still owns those frames; feature consensus is a veto, not
+            // a replacement matcher.
+            return true;
+        }
+
+        var results = candidateRows
+            .Select(newRows => ScoreFeatureOffset(
+                previousFrame,
+                currentFrame,
+                points,
+                newRows,
+                horizontalOffset,
+                ignoredBottom))
+            .Where(result => result.Eligible >= 8)
+            .OrderByDescending(result => result.Score)
+            .ThenByDescending(result => result.Votes)
+            .ToArray();
+
+        var selected = results
+            .Where(result => Math.Abs(result.NewRows - selectedNewRows) <= 2)
+            .OrderByDescending(result => result.Score)
+            .FirstOrDefault();
+        if (selected.Eligible < 8)
+        {
+            return true;
+        }
+
+        var best = results.FirstOrDefault();
+        if (best.Eligible == 0)
+        {
+            return true;
+        }
+
+        var selectedHasEvidence =
+            selected.Votes >= Math.Max(5, (int)Math.Ceiling(selected.Eligible * 0.15)) &&
+            selected.VoteRatio >= FeatureMinimumVoteRatio;
+        if (!selectedHasEvidence)
+        {
+            // Sparse animated/dynamic content can make patch voting weak even
+            // though the whole overlap remains reliable. Do not reject unless
+            // a different offset has substantially stronger positive evidence.
+            return Math.Abs(best.NewRows - selectedNewRows) <= 2 ||
+                   best.Votes < selected.Votes + 8 ||
+                   best.Score < selected.Score + 0.16;
+        }
+
+        if (Math.Abs(best.NewRows - selectedNewRows) <= 2)
+        {
+            return true;
+        }
+
+        // A different displacement must win by both independent feature votes
+        // and a material score margin before it may veto the dense pixel match.
+        // This catches false periodic peaks without rejecting ordinary pages
+        // merely because two offsets contain a few similar rows.
+        return best.Votes < selected.Votes + 6 ||
+               best.Score < selected.Score + 0.10;
+    }
+
+    private static int[] SelectFeatureProbeRows(
+        IReadOnlyCollection<OverlapCandidate> profileCandidates,
+        int selectedNewRows,
+        int? preferredNewRows)
+    {
+        const int maximumProbeCount = 10;
+        const int minimumPeakSeparation = 6;
+        var rows = new List<int>(maximumProbeCount) { selectedNewRows };
+
+        // Feature voting adjudicates distinct profile peaks, not every row
+        // around the same peak. Scoring dozens of adjacent offsets repeated
+        // the same patch work and let the matcher fall seconds behind a fling.
+        // Snow Shot follows the same principle in the opposite order: features
+        // vote for a small set of displacement clusters before pixels are
+        // committed to the panorama.
+        foreach (var candidate in profileCandidates
+                     .OrderByDescending(item => item.Confidence)
+                     .ThenBy(item => preferredNewRows is { } preferred
+                         ? Math.Abs(item.NewRows - preferred)
+                         : item.NewRows))
+        {
+            if (rows.Any(row =>
+                    Math.Abs(row - candidate.NewRows) < minimumPeakSeparation))
+            {
+                continue;
+            }
+
+            rows.Add(candidate.NewRows);
+            if (rows.Count >= maximumProbeCount)
+            {
+                break;
+            }
+        }
+
+        return rows.ToArray();
+    }
+
+    private static List<FeaturePoint> SelectFeaturePoints(
+        PixelBuffer frame,
+        int comparisonRight,
+        int ignoredBottom)
+    {
+        var candidates = new List<FeaturePoint>();
+        var right = Math.Max(FeaturePatchRadius + 1, comparisonRight - FeaturePatchRadius - 1);
+        var bottom = Math.Max(
+            FeaturePatchRadius + 1,
+            frame.Height - ignoredBottom - FeaturePatchRadius - 1);
+        var xStep = Math.Max(6, frame.Width / 96);
+        var yStep = Math.Max(6, frame.Height / 96);
+
+        for (var y = FeaturePatchRadius + 2; y < bottom; y += yStep)
+        {
+            for (var x = FeaturePatchRadius + 2; x < right; x += xStep)
+            {
+                var horizontal = frame.GetColorDifference(
+                    x - 2,
+                    y,
+                    frame,
+                    x + 2,
+                    y);
+                var vertical = frame.GetColorDifference(
+                    x,
+                    y - 2,
+                    frame,
+                    x,
+                    y + 2);
+                var diagonal = frame.GetColorDifference(
+                    x - 2,
+                    y - 2,
+                    frame,
+                    x + 2,
+                    y + 2);
+                var response = Math.Min(horizontal, vertical) + (diagonal / 3);
+                if (response >= FeatureMinimumCornerResponse)
+                {
+                    candidates.Add(new FeaturePoint(x, y, response));
+                }
+            }
+        }
+
+        var selected = new List<FeaturePoint>(FeaturePointLimit);
+        foreach (var candidate in candidates.OrderByDescending(point => point.Response))
+        {
+            if (selected.Any(point =>
+                    Math.Abs(point.X - candidate.X) < FeaturePointSpacing &&
+                    Math.Abs(point.Y - candidate.Y) < FeaturePointSpacing))
+            {
+                continue;
+            }
+
+            selected.Add(candidate);
+            if (selected.Count >= FeaturePointLimit)
+            {
+                break;
+            }
+        }
+
+        return selected;
+    }
+
+    private static FeatureOffsetScore ScoreFeatureOffset(
+        PixelBuffer previousFrame,
+        PixelBuffer currentFrame,
+        IReadOnlyList<FeaturePoint> points,
+        int newRows,
+        int horizontalOffset,
+        int ignoredBottom)
+    {
+        var votes = 0;
+        var eligible = 0;
+        double similarityTotal = 0;
+        var comparisonBottom = currentFrame.Height - ignoredBottom - newRows;
+
+        foreach (var point in points)
+        {
+            var previousX = point.X - horizontalOffset;
+            var previousY = point.Y + newRows;
+            if (point.Y >= comparisonBottom ||
+                previousX - FeaturePatchRadius < 0 ||
+                previousX + FeaturePatchRadius >= previousFrame.Width ||
+                previousY - FeaturePatchRadius < 0 ||
+                previousY + FeaturePatchRadius >= previousFrame.Height)
+            {
+                continue;
+            }
+
+            eligible++;
+            var difference = 0d;
+            var samples = 0;
+            for (var dy = -FeaturePatchRadius; dy <= FeaturePatchRadius; dy += 2)
+            {
+                for (var dx = -FeaturePatchRadius; dx <= FeaturePatchRadius; dx += 2)
+                {
+                    difference += previousFrame.GetColorDifference(
+                        previousX + dx,
+                        previousY + dy,
+                        currentFrame,
+                        point.X + dx,
+                        point.Y + dy);
+                    samples++;
+                }
+            }
+
+            var averageDifference = difference / Math.Max(1, samples);
+            if (averageDifference <= FeatureMaximumPatchDifference)
+            {
+                votes++;
+                similarityTotal += 1d -
+                    (averageDifference / (FeatureMaximumPatchDifference * 1.5));
+            }
+        }
+
+        var voteRatio = eligible == 0 ? 0 : votes / (double)eligible;
+        var averageSimilarity = votes == 0 ? 0 : similarityTotal / votes;
+        return new FeatureOffsetScore(
+            newRows,
+            votes,
+            eligible,
+            voteRatio,
+            (voteRatio * 0.75) + (averageSimilarity * 0.25));
+    }
 
 
     private static ImageOverlapMatch? TryTemporalFastPath(
@@ -351,9 +773,12 @@ public static class ImageOverlapMatcher
         int minimumNewRows,
         int maximumNewRows,
         double minimumConfidence,
-        int frameHeight)
+        int frameHeight,
+        bool restrictToPreferredNeighborhood)
     {
-        var radius = GetTemporalScanRadius(preferredNewRows);
+        var radius = restrictToPreferredNeighborhood
+            ? GetTemporalNeighborhoodRadius(preferredNewRows)
+            : GetTemporalScanRadius(preferredNewRows);
         var from = Math.Max(minimumNewRows, preferredNewRows - radius);
         var to = Math.Min(maximumNewRows, preferredNewRows + radius);
         if (to < from)
@@ -364,7 +789,10 @@ public static class ImageOverlapMatcher
         // Prefer a cheap, decisive hit on the prior step before scanning the
         // whole neighborhood. Continuous scroll usually stays on the same
         // displacement; full-radius dense scoring is the fallback.
-        var seedColumnSamples = previousPixels.Width >= 300 ? 96 : 48;
+        // Seed scoring only needs to confirm the prior displacement. Dense
+        // enough to reject wrong periods, sparse enough that continuous
+        // scrolling stays inside one refresh interval.
+        var seedColumnSamples = previousPixels.Width >= 300 ? 80 : 48;
         var seedComparison = ScoreWithHorizontalMicroSearch(
             previousPixels,
             currentPixels,
@@ -374,7 +802,7 @@ public static class ImageOverlapMatcher
             ignoredBottom,
             minimumOverlapRows,
             topOffsets,
-            targetRowSamples: 96,
+            targetRowSamples: previousPixels.Height >= 360 ? 80 : 96,
             targetColumnSamples: seedColumnSamples,
             minimumTexture: MinimumReliableTexture);
 
@@ -394,7 +822,7 @@ public static class ImageOverlapMatcher
         // essentially exact match. This keeps frame processing below the screen
         // refresh interval, so intermediate viewports are not skipped.
         if (seedComparison is { } exactSeed &&
-            exactSeed.Confidence >= 0.998)
+            exactSeed.Confidence >= 0.995)
         {
             var refinedSeed = RefineAroundCandidate(
                 previousPixels,
@@ -413,7 +841,7 @@ public static class ImageOverlapMatcher
                 minimumConfidence,
                 preferredNewRows);
 
-            if (refinedSeed.Confidence >= 0.995 &&
+            if (refinedSeed.Confidence >= 0.99 &&
                 Math.Abs(refinedSeed.NewRows - preferredNewRows) <=
                     LocalRefineRadius)
             {
@@ -423,7 +851,10 @@ public static class ImageOverlapMatcher
                     comparisonLeft,
                     comparisonRight,
                     ignoredBottom);
-                if (!IsProbablyNoMotion(zeroMotion, refinedSeed))
+                if (!IsProbablyNoMotion(
+                        zeroMotion,
+                        refinedSeed,
+                        preferredNewRows))
                 {
                     return new ImageOverlapMatch(
                         frameHeight - refinedSeed.NewRows,
@@ -458,14 +889,14 @@ public static class ImageOverlapMatcher
                      .OrderByDescending(candidate => candidate.Confidence)
                      .ThenBy(candidate =>
                          Math.Abs(candidate.NewRows - preferredNewRows))
-                     .Take(8))
+                     .Take(4))
         {
             denseRows.Add(profile.NewRows);
         }
 
         foreach (var profile in temporalProfiles
                      .OrderByDescending(candidate => candidate.Confidence)
-                     .Take(3))
+                     .Take(1))
         {
             for (var candidateRows = Math.Max(from, profile.NewRows - 1);
                  candidateRows <= Math.Min(to, profile.NewRows + 1);
@@ -475,16 +906,16 @@ public static class ImageOverlapMatcher
             }
         }
 
-        for (var candidateRows = Math.Max(from, preferredNewRows - 4);
-             candidateRows <= Math.Min(to, preferredNewRows + 4);
-             candidateRows++)
+        for (var candidateRows = Math.Max(from, preferredNewRows - 2);
+             candidateRows <= Math.Min(to, preferredNewRows + 2);
+             candidateRows += 2)
         {
             denseRows.Add(candidateRows);
         }
 
         // Horizontal micro-search is still required so 1px lateral drift does
         // not zero out the true vertical peak.
-        var columnSamples = previousPixels.Width >= 300 ? 64 : 40;
+        var columnSamples = previousPixels.Width >= 300 ? 40 : 32;
         foreach (var newRows in denseRows)
         {
             if (newRows == preferredNewRows)
@@ -501,7 +932,7 @@ public static class ImageOverlapMatcher
                 ignoredBottom,
                 minimumOverlapRows,
                 topOffsets,
-                targetRowSamples: 64,
+                targetRowSamples: 48,
                 targetColumnSamples: columnSamples,
                 minimumTexture: MinimumReliableTexture);
 
@@ -515,10 +946,10 @@ public static class ImageOverlapMatcher
             }
         }
 
-        // Near-perfect seed with no competing neighborhood peak: accept after
-        // a tight local refine without waiting on weaker distant candidates.
+        // Strong seed with no competing neighborhood peak: accept after a
+        // tight local refine without waiting on weaker distant candidates.
         if (seedComparison is { } strongSeed &&
-            strongSeed.Confidence >= 0.995 &&
+            strongSeed.Confidence >= 0.99 &&
             candidates.Count > 0)
         {
             var strongCompetitor = false;
@@ -590,7 +1021,10 @@ public static class ImageOverlapMatcher
             comparisonRight,
             ignoredBottom);
 
-        if (IsProbablyNoMotion(zeroMotionComparison, bestCandidate))
+        if (IsProbablyNoMotion(
+                zeroMotionComparison,
+                bestCandidate,
+                preferredNewRows))
         {
             return null;
         }
@@ -607,8 +1041,8 @@ public static class ImageOverlapMatcher
         int preferredNewRows,
         double minimumConfidence)
     {
-        // Near-perfect strip matches are safe to accept immediately.
-        if (bestCandidate.Confidence >= 0.995)
+        // Strong strip matches are safe to accept immediately.
+        if (bestCandidate.Confidence >= 0.99)
         {
             return true;
         }
@@ -617,6 +1051,16 @@ public static class ImageOverlapMatcher
         // inside the neighborhood is usually a period of repeated content.
         var distance = Math.Abs(bestCandidate.NewRows - preferredNewRows);
         var radius = GetTemporalNeighborhoodRadius(preferredNewRows);
+        if (distance <= Math.Max(8, radius / 2) &&
+            bestCandidate.Confidence >= minimumConfidence + 0.004)
+        {
+            // A repeated table can have several equal peaks one row-period
+            // apart. When the strongest peak stays close to the established
+            // motion and comfortably clears the pixel threshold, temporal
+            // continuity is the independent evidence that selects the period.
+            return true;
+        }
+
         if (distance > Math.Max(4, radius / 3) &&
             bestCandidate.Confidence < minimumConfidence + 0.02)
         {
@@ -625,7 +1069,7 @@ public static class ImageOverlapMatcher
 
         if (candidates.Count == 1)
         {
-            return bestCandidate.Confidence >= Math.Min(0.985, minimumConfidence + 0.01);
+            return bestCandidate.Confidence >= Math.Min(0.99, minimumConfidence + 0.01);
         }
 
         var second = candidates
@@ -1168,7 +1612,7 @@ public static class ImageOverlapMatcher
 
         // Only reject weak winners. A clearly dominant match is kept even when
         // a distant runner-up exists.
-        return bestCandidate.Confidence < 0.985;
+        return bestCandidate.Confidence < 0.99;
     }
 
     private static ComparisonResult? FindBestComparison(
@@ -1186,7 +1630,29 @@ public static class ImageOverlapMatcher
         int horizontalOffset = 0,
         bool useStripEvidence = true)
     {
-        var comparisons = new List<(int Top, ComparisonResult Metrics)>();
+        var comparisons = new List<(
+            int Top,
+            int Left,
+            int Right,
+            ComparisonResult Metrics)>();
+        var comparisonWidth = comparisonRight - comparisonLeft;
+        var horizontalBands = new List<(int Left, int Right)>
+        {
+            (comparisonLeft, comparisonRight),
+        };
+        if (comparisonWidth >= 700 ||
+            comparisonWidth >= 480 &&
+            previousFrame.Height * 5 >= comparisonWidth * 6)
+        {
+            // Fixed navigation rails and floating action bars do not move with
+            // page content. A full-width comparison therefore fails even when
+            // the central document overlaps perfectly. Keep full width for
+            // chat/code, and add broad/central bands so one scrolling content
+            // region can outvote stationary edge chrome.
+            horizontalBands.Add((
+                comparisonLeft + (comparisonWidth / 4),
+                comparisonRight - (comparisonWidth / 4)));
+        }
 
         foreach (var comparisonTop in topOffsets)
         {
@@ -1198,78 +1664,98 @@ public static class ImageOverlapMatcher
                 continue;
             }
 
-            var comparison = CompareShiftedContent(
-                previousFrame,
-                currentFrame,
-                newRows,
-                comparisonLeft,
-                comparisonRight,
-                comparisonTop,
-                comparisonBottom,
-                targetRowSamples,
-                targetColumnSamples,
-                horizontalOffset);
-
-            var anchorRight = Math.Min(
-                comparisonRight,
-                comparisonLeft + Math.Max(
-                    48,
-                    (comparisonRight - comparisonLeft) / 6));
-            if (anchorRight - comparisonLeft >= 24)
+            foreach (var band in horizontalBands)
             {
-                var anchorComparison = CompareShiftedContent(
+                var comparison = CompareShiftedContent(
                     previousFrame,
                     currentFrame,
                     newRows,
-                    comparisonLeft,
-                    anchorRight,
+                    band.Left,
+                    band.Right,
                     comparisonTop,
                     comparisonBottom,
                     targetRowSamples,
-                    Math.Min(48, targetColumnSamples),
-                    horizontalOffset);
-
-                if (anchorComparison.Texture >= minimumTexture / 2)
-                {
-                    comparison = new ComparisonResult(
-                        (comparison.Confidence * 0.45) +
-                            (anchorComparison.Confidence * 0.55),
-                        Math.Max(comparison.Texture, anchorComparison.Texture));
-                }
-            }
-
-            // Commercial long-screenshot tools primarily match a stable mid-strip
-            // of the overlap. Blending that evidence suppresses sticky chrome and
-            // repeated card edges that only agree on a thin band. Dense ranking
-            // skips this for latency; local refine keeps it for stitch precision.
-            if (useStripEvidence)
-            {
-                var stripComparison = CompareOverlapStrip(
-                    previousFrame,
-                    currentFrame,
-                    newRows,
-                    comparisonLeft,
-                    comparisonRight,
-                    comparisonTop,
-                    comparisonBottom,
                     targetColumnSamples,
                     horizontalOffset);
 
-                if (stripComparison.Texture >= minimumTexture / 2)
+                var isFullWidth = band.Left == comparisonLeft &&
+                    band.Right == comparisonRight;
+                if (isFullWidth)
                 {
-                    comparison = new ComparisonResult(
-                        (comparison.Confidence * 0.62) +
-                            (stripComparison.Confidence * 0.38),
-                        Math.Max(comparison.Texture, stripComparison.Texture));
+                    var anchorRight = Math.Min(
+                        comparisonRight,
+                        comparisonLeft + Math.Max(
+                            48,
+                            comparisonWidth / 6));
+                    if (anchorRight - comparisonLeft >= 24)
+                    {
+                        var anchorComparison = CompareShiftedContent(
+                            previousFrame,
+                            currentFrame,
+                            newRows,
+                            comparisonLeft,
+                            anchorRight,
+                            comparisonTop,
+                            comparisonBottom,
+                            targetRowSamples,
+                            Math.Min(48, targetColumnSamples),
+                            horizontalOffset);
+
+                        // A line-number/chat-avatar rail that moves with the
+                        // document strengthens the match. A much weaker rail
+                        // is fixed chrome and must not sink valid body evidence.
+                        if (anchorComparison.Texture >= minimumTexture / 2 &&
+                            anchorComparison.Confidence >=
+                                comparison.Confidence - 0.04)
+                        {
+                            comparison = new ComparisonResult(
+                                (comparison.Confidence * 0.45) +
+                                    (anchorComparison.Confidence * 0.55),
+                                Math.Max(
+                                    comparison.Texture,
+                                    anchorComparison.Texture));
+                        }
+                    }
                 }
-            }
 
-            if (comparison.Texture < minimumTexture)
-            {
-                continue;
-            }
+                // Commercial long-screenshot tools primarily match a stable
+                // mid-strip of the overlap. Blend it within the same horizontal
+                // band so an excluded fixed rail cannot leak back into scoring.
+                if (useStripEvidence)
+                {
+                    var stripComparison = CompareOverlapStrip(
+                        previousFrame,
+                        currentFrame,
+                        newRows,
+                        band.Left,
+                        band.Right,
+                        comparisonTop,
+                        comparisonBottom,
+                        targetColumnSamples,
+                        horizontalOffset);
 
-            comparisons.Add((comparisonTop, comparison));
+                    if (stripComparison.Texture >= minimumTexture / 2)
+                    {
+                        comparison = new ComparisonResult(
+                            (comparison.Confidence * 0.62) +
+                                (stripComparison.Confidence * 0.38),
+                            Math.Max(
+                                comparison.Texture,
+                                stripComparison.Texture));
+                    }
+                }
+
+                if (comparison.Texture < minimumTexture)
+                {
+                    continue;
+                }
+
+                comparisons.Add((
+                    comparisonTop,
+                    band.Left,
+                    band.Right,
+                    comparison));
+            }
         }
 
         if (comparisons.Count == 0)
@@ -1278,17 +1764,27 @@ public static class ImageOverlapMatcher
         }
 
         var fullComparison = comparisons
+            .Where(comparison =>
+                comparison.Left == comparisonLeft &&
+                comparison.Right == comparisonRight)
             .OrderBy(comparison => comparison.Top)
-            .First();
+            .FirstOrDefault();
         var bestComparison = comparisons
             .OrderByDescending(comparison => comparison.Metrics.Confidence)
             .First();
+
+        if (fullComparison == default)
+        {
+            return bestComparison.Metrics;
+        }
 
         // A better lower band usually means sticky top chrome. Prefer it whenever
         // it is competitive: mid-strip blending can inflate the full-band score
         // enough that a large advantage threshold would incorrectly dilute a
         // near-perfect content match back under the caller confidence gate.
-        if (bestComparison.Top > fullComparison.Top)
+        if (bestComparison.Top > fullComparison.Top ||
+            bestComparison.Left != comparisonLeft ||
+            bestComparison.Right != comparisonRight)
         {
             var headerGap =
                 bestComparison.Metrics.Confidence -
@@ -1379,8 +1875,21 @@ public static class ImageOverlapMatcher
 
     private static bool IsProbablyNoMotion(
         ComparisonResult? zeroMotionComparison,
-        OverlapCandidate bestCandidate)
+        OverlapCandidate bestCandidate,
+        int? preferredNewRows)
     {
+        if (preferredNewRows is { } preferred &&
+            Math.Abs(bestCandidate.NewRows - preferred) <=
+                GetTemporalNeighborhoodRadius(preferred))
+        {
+            // Repeated table/chat rows can make zero displacement look almost
+            // identical to the real shifted viewport. Fresh wheel evidence and
+            // a nearby strong peak are sufficient to resolve that ambiguity;
+            // sustained physical no-motion is confirmed separately by the
+            // stationary-boundary detector.
+            return false;
+        }
+
         return zeroMotionComparison is { } zeroMotion &&
                zeroMotion.Confidence >= MinimumNoMotionConfidence &&
                zeroMotion.Confidence >=
@@ -1562,6 +2071,15 @@ public static class ImageOverlapMatcher
         int HorizontalOffset);
 
     private readonly record struct RowProfile(float R, float G, float B, float Edge);
+
+    private readonly record struct FeaturePoint(int X, int Y, int Response);
+
+    private readonly record struct FeatureOffsetScore(
+        int NewRows,
+        int Votes,
+        int Eligible,
+        double VoteRatio,
+        double Score);
 
     private sealed record OverlapCandidate(int NewRows, double Confidence, int HorizontalOffset = 0);
 

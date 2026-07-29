@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Diagnostics;
 using Screenshot.App.Capture;
 
 namespace Screenshot.App.Tests;
@@ -172,5 +173,84 @@ public sealed class ScrollCaptureServiceTests
         tracker.ObserveMovement(180, first.Delta);
         tracker.AddDelta(-480);
         Assert.Equal(360, tracker.GetExpectedRows(900, options));
+    }
+
+    [Fact]
+    public void StationaryBoundaryRequiresSustainedInputAndQueuesOnlyOnce()
+    {
+        var detector = new StationaryScrollBoundaryDetector();
+        var start = Stopwatch.GetTimestamp();
+        var beforeThreshold = start + (long)(Stopwatch.Frequency *
+            ((StationaryScrollBoundaryDetector.ConfirmationMilliseconds - 1) /
+                1000d));
+        var afterThreshold = start + (long)(Stopwatch.Frequency *
+            ((StationaryScrollBoundaryDetector.ConfirmationMilliseconds + 1) /
+                1000d));
+
+        Assert.False(detector.ShouldQueueMarker(
+            ScrollCaptureDirection.Down,
+            start,
+            pendingDelta: -120));
+        detector.ObserveWheel(
+            ScrollCaptureDirection.Down,
+            beforeThreshold,
+            delta: -240);
+        Assert.False(detector.ShouldQueueMarker(
+            ScrollCaptureDirection.Down,
+            beforeThreshold,
+            pendingDelta: -240));
+        Assert.True(detector.ShouldQueueMarker(
+            ScrollCaptureDirection.Down,
+            afterThreshold,
+            pendingDelta: -240));
+
+        detector.MarkQueued();
+        Assert.False(detector.ShouldQueueMarker(
+            ScrollCaptureDirection.Down,
+            afterThreshold + Stopwatch.Frequency,
+            pendingDelta: -480));
+
+        detector.Reset();
+        Assert.False(detector.ShouldQueueMarker(
+            ScrollCaptureDirection.Up,
+            afterThreshold + Stopwatch.Frequency,
+            pendingDelta: 120));
+
+        detector.ObserveWheel(
+            ScrollCaptureDirection.Up,
+            afterThreshold + (Stopwatch.Frequency * 2),
+            delta: 240);
+        Assert.True(detector.ShouldQueueMarker(
+            ScrollCaptureDirection.Up,
+            afterThreshold + (Stopwatch.Frequency * 2),
+            pendingDelta: 240));
+    }
+
+    [Fact]
+    public void StationaryBoundaryIgnoresWheelDeltaThatPredatesStationaryViewport()
+    {
+        var detector = new StationaryScrollBoundaryDetector();
+        var start = Stopwatch.GetTimestamp();
+        var afterThreshold = start + (long)(Stopwatch.Frequency *
+            ((StationaryScrollBoundaryDetector.ConfirmationMilliseconds + 20) /
+                1000d));
+
+        Assert.False(detector.ShouldQueueMarker(
+            ScrollCaptureDirection.Down,
+            start,
+            pendingDelta: -480));
+        Assert.False(detector.ShouldQueueMarker(
+            ScrollCaptureDirection.Down,
+            afterThreshold,
+            pendingDelta: -480));
+
+        detector.ObserveWheel(
+            ScrollCaptureDirection.Down,
+            afterThreshold + 1,
+            delta: -240);
+        Assert.True(detector.ShouldQueueMarker(
+            ScrollCaptureDirection.Down,
+            afterThreshold + 2,
+            pendingDelta: -720));
     }
 }

@@ -40,12 +40,25 @@ public sealed class CapturedImage : IDisposable
         }
     }
 
+    /// <summary>
+    /// Builds the WPF bitmap off the UI thread so the first Preview access
+    /// (history, clipboard, or editor) is only a frozen-source hand-off.
+    /// </summary>
+    public BitmapSource WarmPreview()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return Preview;
+    }
+
     public ScreenRegion? SourceRegion { get; }
 
     public CapturedImage Clone()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        return new CapturedImage((Bitmap)Bitmap.Clone(), SourceRegion);
+        lock (_previewSync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return new CapturedImage((Bitmap)Bitmap.Clone(), SourceRegion);
+        }
     }
 
     public static CapturedImage FromBitmapSource(
@@ -128,12 +141,15 @@ public sealed class CapturedImage : IDisposable
 
     public void Dispose()
     {
-        if (_disposed)
+        lock (_previewSync)
         {
-            return;
-        }
+            if (_disposed)
+            {
+                return;
+            }
 
-        _disposed = true;
-        Bitmap.Dispose();
+            _disposed = true;
+            Bitmap.Dispose();
+        }
     }
 }

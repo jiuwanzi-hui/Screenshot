@@ -1,5 +1,6 @@
 ﻿using System.Drawing;
 using System.Drawing.Imaging;
+using System.Diagnostics;
 using Screenshot.App.Capture;
 
 namespace Screenshot.App.Tests;
@@ -236,6 +237,219 @@ public sealed class ScrollCaptureFastScrollTests
             "反向滚动没有在顶部扩展任何内容。");
         Assert.Equal(bottomTop + height - finalTop, composer.OutputHeight);
         AssertMatchesDocument(document, composer, finalTop);
+    }
+
+    [Theory]
+    [InlineData(320, 240)]
+    [InlineData(760, 520)]
+    [InlineData(1280, 720)]
+    public void RemainsResponsiveAcrossMixedWheelBurstsAndRepeatedReversals(
+        int width,
+        int height)
+    {
+        // Slow movement, a downward fling, a sustained reverse run, another
+        // downward fling, and a final pair of short reversals. Run the same
+        // hostile sequence at three common selection sizes so matcher latency
+        // cannot hide behind one fixture.
+        var moves = new[]
+        {
+            4,
+            12,
+            Math.Max(24, height / 7),
+            Math.Max(40, height / 3),
+            Math.Max(60, (height * 3) / 5),
+            Math.Max(28, height / 5),
+            -Math.Max(20, height / 9),
+            -Math.Max(48, height / 3),
+            -Math.Max(72, (height * 2) / 3),
+            -Math.Max(36, height / 4),
+            Math.Max(16, height / 10),
+            Math.Max(52, height / 2),
+            Math.Max(72, (height * 3) / 4),
+            -Math.Max(28, height / 5),
+            Math.Max(32, height / 4),
+        };
+        var startTop = height * 4;
+        var positions = new List<int> { startTop };
+        foreach (var move in moves)
+        {
+            positions.Add(positions[^1] + move);
+        }
+
+        var minimumTop = positions.Min();
+        var maximumTop = positions.Max();
+        Assert.True(minimumTop >= 0);
+        using var document = CreateDocumentContent(
+            width,
+            maximumTop + height + 32);
+        using var composer = new ScrollCaptureComposer();
+        var maximumFrameDuration = TimeSpan.Zero;
+        var options = FastOptions with { MaximumFrames = positions.Count + 4 };
+
+        for (var index = 0; index < positions.Count; index++)
+        {
+            using var frame = Crop(document, positions[index], height);
+            var direction = index == 0 || moves[index - 1] >= 0
+                ? ScrollCaptureDirection.Down
+                : ScrollCaptureDirection.Up;
+            var stopwatch = Stopwatch.StartNew();
+            var added = composer.TryAddFrame(
+                frame,
+                direction,
+                options,
+                expectedNewRows: index == 0 ? null : Math.Abs(moves[index - 1]),
+                lockDirection: index > 0,
+                out _);
+            stopwatch.Stop();
+            maximumFrameDuration = stopwatch.Elapsed > maximumFrameDuration
+                ? stopwatch.Elapsed
+                : maximumFrameDuration;
+
+            Assert.True(
+                added || composer.LastFrameMovementRows is not null,
+                $"选区 {width}x{height} 在第 {index} 帧丢失锚点，" +
+                $"top={positions[index]}，原因={composer.LastRejectReason}。");
+        }
+
+        Assert.True(composer.AddedAboveFrameCount > 0);
+        Assert.True(composer.AddedBelowFrameCount > 0);
+        Assert.Equal(maximumTop - minimumTop + height, composer.OutputHeight);
+        Assert.True(
+            maximumFrameDuration < TimeSpan.FromSeconds(1.5),
+            $"单帧最长处理 {maximumFrameDuration.TotalMilliseconds:F0}ms，" +
+            "会使长截图预览看起来卡住。");
+        AssertMatchesDocument(document, composer, minimumTop);
+    }
+
+    [Theory]
+    [InlineData(320, 240, 73)]
+    [InlineData(760, 420, 137)]
+    [InlineData(1280, 560, 211)]
+    public void KeepsCompleteDocumentAcrossRepeatedBoundaryAndJitterCycles(
+        int width,
+        int height,
+        int maximumStep)
+    {
+        var documentHeight = (height * 5) + 137;
+        var bottomTop = documentHeight - height;
+        var startTop = height * 2;
+        var options = FastOptions with { MaximumFrames = 240 };
+        using var document = CreateDocumentContent(width, documentHeight);
+        using var composer = new ScrollCaptureComposer();
+        var currentTop = startTop;
+        using (var initial = Crop(document, currentTop, height))
+        {
+            Assert.True(composer.TryAddFrame(initial, options, out _));
+        }
+
+        void FeedPosition(int nextTop)
+        {
+            var direction = nextTop >= currentTop
+                ? ScrollCaptureDirection.Down
+                : ScrollCaptureDirection.Up;
+            var expectedRows = Math.Max(8, Math.Abs(nextTop - currentTop));
+            using var frame = Crop(document, nextTop, height);
+            var stopwatch = Stopwatch.StartNew();
+            composer.TryAddFrame(
+                frame,
+                direction,
+                options,
+                expectedRows,
+                lockDirection: true,
+                out _);
+            stopwatch.Stop();
+            Assert.True(
+                composer.LastFrameMovementRows is not null,
+                $"top={currentTop}->{nextTop} 丢失锚点，原因={composer.LastRejectReason}。");
+            Assert.True(
+                stopwatch.Elapsed < TimeSpan.FromSeconds(1.5),
+                $"top={currentTop}->{nextTop} 处理耗时 {stopwatch.Elapsed.TotalMilliseconds:F0}ms。");
+            currentTop = nextTop;
+        }
+
+        void FeedLeg(int targetTop, int seed)
+        {
+            var direction = Math.Sign(targetTop - currentTop);
+            var stepIndex = 0;
+            while (currentTop != targetTop)
+            {
+                var variedStep = (stepIndex % 5) switch
+                {
+                    0 => Math.Max(8, maximumStep / 5),
+                    1 => maximumStep,
+                    2 => Math.Max(12, maximumStep / 2),
+                    3 => Math.Max(8, maximumStep / 3),
+                    _ => Math.Max(10, (maximumStep * 4) / 5),
+                };
+                variedStep += (seed + stepIndex * 7) % 11;
+                var remaining = Math.Abs(targetTop - currentTop);
+                FeedPosition(currentTop + (direction * Math.Min(variedStep, remaining)));
+                stepIndex++;
+            }
+        }
+
+        // Start in the middle, reach the bottom, keep scrolling against the
+        // physical edge, then reverse through the whole captured range.
+        FeedLeg(bottomTop, seed: 1);
+        using (var bottom = Crop(document, bottomTop, height))
+        {
+            for (var index = 0; index < 4; index++)
+            {
+                Assert.False(composer.TryAddFrame(
+                    bottom,
+                    ScrollCaptureDirection.Down,
+                    options,
+                    expectedNewRows: maximumStep,
+                    lockDirection: true,
+                    out _));
+            }
+
+            Assert.True(composer.TryMarkBoundaryReached(
+                bottom,
+                ScrollCaptureDirection.Down));
+        }
+
+        FeedLeg(0, seed: 2);
+        using (var top = Crop(document, 0, height))
+        {
+            for (var index = 0; index < 4; index++)
+            {
+                Assert.False(composer.TryAddFrame(
+                    top,
+                    ScrollCaptureDirection.Up,
+                    options,
+                    expectedNewRows: maximumStep,
+                    lockDirection: true,
+                    out _));
+            }
+
+            Assert.True(composer.TryMarkBoundaryReached(
+                top,
+                ScrollCaptureDirection.Up));
+        }
+
+        Assert.Equal(documentHeight, composer.OutputHeight);
+        AssertMatchesDocument(document, composer);
+
+        // Two full cycles with direction jitter near both edges. Once both
+        // physical boundaries are confirmed, none of these return paths may
+        // change the output height or duplicate an edge strip.
+        for (var cycle = 0; cycle < 2; cycle++)
+        {
+            FeedLeg(bottomTop, seed: 10 + cycle);
+            FeedPosition(bottomTop - 23);
+            FeedPosition(bottomTop);
+            FeedPosition(bottomTop - 9);
+            FeedPosition(bottomTop);
+            FeedLeg(0, seed: 20 + cycle);
+            FeedPosition(17);
+            FeedPosition(0);
+            FeedPosition(8);
+            FeedPosition(0);
+
+            Assert.Equal(documentHeight, composer.OutputHeight);
+            AssertMatchesDocument(document, composer);
+        }
     }
 
     [Fact]

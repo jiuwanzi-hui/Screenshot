@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "1.3.2"
+  #define AppVersion "2.1.0"
 #endif
 
 #define AppName "SnapCut"
@@ -17,7 +17,7 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
 OutputDir=dist
-OutputBaseFilename=SnapCut-Setup-{#AppVersion}-win-x64
+OutputBaseFilename=Screenshot-Setup-{#AppVersion}-win-x64
 SetupIconFile=..\src\Screenshot.App\Assets\Screenshot.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 Compression=lzma2/ultra64

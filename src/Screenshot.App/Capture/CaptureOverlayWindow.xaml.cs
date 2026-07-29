@@ -2010,12 +2010,16 @@ public partial class CaptureOverlayWindow : Window
         SelectionRectangle.Fill = WpfBrushes.Transparent;
         SelectionRectangle.IsHitTestVisible = false;
         SelectionRectangle.Visibility = Visibility.Collapsed;
+        FrozenScreenImage.Source = null;
+        FrozenScreenImage.Visibility = Visibility.Collapsed;
+        CaptureShade.Visibility = Visibility.Collapsed;
+        SetSelectionMaskVisibility(Visibility.Visible);
         ScrollCaptureOutline.Visibility = Visibility.Visible;
         EnableScrollCaptureClickThrough();
 
-        // Drop the pre-overlay frozen snapshot once the selection is click-through.
-        // Subsequent CaptureScrollSelectionSnapshot / live sample frames must read
-        // the real window content under the hole, not the hotkey-time desktop image.
+        // Keep the frozen bitmap removed so both the selection and its shaded
+        // surroundings show the same live window while it scrolls. The four
+        // masks dim only the area outside the selected viewport.
         _screenSnapshot?.Dispose();
         _screenSnapshot = null;
     }
@@ -2079,11 +2083,6 @@ public partial class CaptureOverlayWindow : Window
             windowHandle,
             ExtendedWindowStyleIndex,
             new IntPtr(extendedStyle | ExtendedStyleNoActivate));
-
-        // A transparent layered WPF window can still win native mouse hit
-        // testing. Remove the selected viewport from the HWND region itself so
-        // wheel and button input is routed directly to the application below.
-        // The four shaded areas and the outline remain part of the window.
         ApplyScrollCaptureInputHole(windowHandle);
         _ = NativeMethods.SetWindowPos(
             windowHandle,
@@ -2139,7 +2138,6 @@ public partial class CaptureOverlayWindow : Window
                 return;
             }
 
-            // SetWindowRgn transfers ownership of a successful region to the OS.
             windowRegion = IntPtr.Zero;
         }
         finally

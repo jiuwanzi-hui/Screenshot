@@ -12,7 +12,7 @@ public sealed record ScrollCaptureOptions(
         MaximumFrames: 600,
         ScrollDelta: -240,
         MinimumOverlapRows: 20,
-        MinimumOverlapConfidence: 0.945,
+        MinimumOverlapConfidence: 0.94,
         MinimumNewRows: 4,
         FrameDelayMilliseconds: 1);
 }
