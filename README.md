@@ -30,12 +30,14 @@ SnapCut（简截）是一款面向 Windows 10/11 的轻量截图工具，取"简
 
 下载最新的 x64 自包含版本（发布文件名暂沿用 Screenshot- 前缀，以兼容旧版本的程序内自动更新；包内程序为 SnapCut.exe）：
 
-- [安装版 SnapCut Setup 2.2.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-2.2.1-win-x64.exe)
-- [免安装版 SnapCut Portable 2.2.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-2.2.1-win-x64.zip)
-- [安装版 SnapCut Setup 2.2.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.1/Screenshot-Setup-2.2.1-win-x64.exe)
-- [免安装版 SnapCut Portable 2.2.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.1/Screenshot-Portable-2.2.1-win-x64.zip)
+- [安装版 SnapCut Setup 2.2.2（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-2.2.2-win-x64.exe)
+- [免安装版 SnapCut Portable 2.2.2（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-2.2.2-win-x64.zip)
+- [安装版 SnapCut Setup 2.2.2（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.2/Screenshot-Setup-2.2.2-win-x64.exe)
+- [免安装版 SnapCut Portable 2.2.2（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.2/Screenshot-Portable-2.2.2-win-x64.zip)
 
-免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.2.1 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.2.2 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+
+2.2.2 修正设置侧栏的新版本提示：检测到更新时，“版本更新”文字直接替换为亮色“有新版本”，悬停可查看目标版本；没有更新时恢复原文字和导航颜色。移除会挤出侧栏、只显示一个“有”字的独立徽标，并加入亮色、恢复状态及侧栏边界回归。
 
 2.2.1 修复长截图在暂停恢复时偶尔接受异常大位移、插入重复内容的问题；回到初始视口后，改用更严格且连续一致的图像证据再开始反向扩展，避免周期性代码行被错误拼入、压缩或缺失。诊断日志同时补充重叠行数、置信度、横向偏移和预期位移，便于后续精准定位边缘场景。
 
@@ -108,12 +110,14 @@ SnapCut is a lightweight capture utility for Windows 10 and 11. It combines regi
 
 Download the latest self-contained x64 build (release file names keep the legacy Screenshot- prefix so older builds can still self-update; the packaged program is SnapCut.exe):
 
-- [SnapCut Setup 2.2.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-2.2.1-win-x64.exe)
-- [SnapCut Portable 2.2.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-2.2.1-win-x64.zip)
-- [SnapCut Setup 2.2.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.1/Screenshot-Setup-2.2.1-win-x64.exe)
-- [SnapCut Portable 2.2.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.1/Screenshot-Portable-2.2.1-win-x64.zip)
+- [SnapCut Setup 2.2.2 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Setup-2.2.2-win-x64.exe)
+- [SnapCut Portable 2.2.2 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Portable-2.2.2-win-x64.zip)
+- [SnapCut Setup 2.2.2 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.2/Screenshot-Setup-2.2.2-win-x64.exe)
+- [SnapCut Portable 2.2.2 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.2.2/Screenshot-Portable-2.2.2-win-x64.zip)
 
-Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.2.1 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.2.2 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+
+Version 2.2.2 fixes the new-version indicator in the Settings sidebar. When an update is available, the existing “Update” label is replaced in place by a highlighted “New version” label with a tooltip showing the target version; when no update is available, the original text and navigation color return. The separate badge that could overflow the narrow sidebar and show only one character has been removed, with regression coverage for highlight, reset, and sidebar bounds.
 
 Version 2.2.1 prevents scrolling capture from accepting implausibly large motion after pausing and resuming, which could insert repeated content. Reverse extension after returning to the initial viewport now requires stricter, consecutively consistent image evidence, preventing periodic code lines from being inserted at the wrong position, compressed, or omitted. Diagnostics also include overlap rows, confidence, horizontal offset, and expected motion for more precise investigation of edge cases.
 
