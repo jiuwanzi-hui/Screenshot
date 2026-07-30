@@ -119,13 +119,10 @@ public partial class OcrResultWindow : Window
         Loaded -= OnLoaded;
 
         // Auto-translate once, matching the WeChat flow where recognized text is
-        // rendered translated without a second click. This only runs when the user
-        // has selected a translation mode and the OCR pass produced text.
+        // rendered translated without a second click.
         if (_hasAutoTranslated ||
             !_ocrSucceeded ||
-            string.IsNullOrWhiteSpace(ResultTextBox.Text) ||
-            _settingsProvider().ResolveTranslationMode() ==
-                TranslationMode.Disabled)
+            string.IsNullOrWhiteSpace(ResultTextBox.Text))
         {
             return;
         }

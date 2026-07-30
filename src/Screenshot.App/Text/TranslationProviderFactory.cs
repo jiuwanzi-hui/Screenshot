@@ -44,24 +44,25 @@ public static class TranslationProviderFactory
         ArgumentNullException.ThrowIfNull(credentialStore);
         ArgumentNullException.ThrowIfNull(httpClient);
 
-        var translationMode = settings.ResolveTranslationMode();
-        if (translationMode == TranslationMode.Offline)
+        ITranslationProvider CreateProvider(TranslationProviderKind provider)
         {
-            return new OfflineTranslationProvider(
-                offlineModelManager ?? OfflineTranslationModelManager.Shared);
+            if (provider == TranslationProviderKind.Offline)
+            {
+                return new OfflineTranslationProvider(
+                    offlineModelManager ?? OfflineTranslationModelManager.Shared);
+            }
+
+            var providerId = ResolveProviderId(settings.TranslationProvider);
+            return new OpenAiCompatibleTranslationProvider(
+                settings.TranslationEndpoint,
+                settings.TranslationModel,
+                credentialStore.GetApiKey(providerId),
+                httpClient);
         }
 
-        if (translationMode != TranslationMode.Online)
-        {
-            return new NoTranslationProvider();
-        }
-
-        var providerId = ResolveProviderId(settings.TranslationProvider);
-
-        return new OpenAiCompatibleTranslationProvider(
-            settings.TranslationEndpoint,
-            settings.TranslationModel,
-            credentialStore.GetApiKey(providerId),
-            httpClient);
+        return new OrderedTranslationProvider(
+            settings.ResolveTranslationProviderPriority()
+                .Select(CreateProvider)
+                .ToArray());
     }
 }

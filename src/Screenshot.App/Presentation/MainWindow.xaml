@@ -695,31 +695,95 @@
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
                                Text="可以使用在线大模型，也可以下载安装后完全离线翻译" />
 
-                    <StackPanel Margin="0,24,0,0">
+                    <StackPanel x:Name="TranslationPriorityPanel"
+                                Margin="0,24,0,0">
                         <TextBlock FontSize="14"
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource AppTextPrimaryBrush}"
-                                   Text="翻译方式" />
-                        <ComboBox x:Name="TranslationModeComboBox"
-                                  Margin="0,8,0,0"
-                                  DisplayMemberPath="Label"
-                                  ItemsSource="{Binding TranslationModeOptions}"
-                                  SelectedValue="{Binding TranslationMode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                  SelectedValuePath="Value"
-                                  SelectionChanged="OnTranslationModeSelectionChanged" />
+                                   Text="翻译优先顺序" />
+                        <TextBlock Margin="0,6,0,0"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                   Text="按序号从上到下尝试；当前方式连接失败或翻译失败时自动使用下一项。"
+                                   TextWrapping="Wrap" />
+                        <ItemsControl Margin="0,10,0,0"
+                                      ItemsSource="{Binding TranslationPriorityItems}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,0,0,7"
+                                            Padding="12,9"
+                                            Background="{DynamicResource AppPanelBackgroundBrush}"
+                                            BorderBrush="{DynamicResource AppBorderBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="7">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="32" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="24"
+                                                    Height="24"
+                                                    VerticalAlignment="Center"
+                                                    Background="{DynamicResource AppAccentMutedBrush}"
+                                                    CornerRadius="4">
+                                                <TextBlock HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource AppAccentBrush}"
+                                                           Text="{Binding Position}" />
+                                            </Border>
+                                            <TextBlock Grid.Column="1"
+                                                       VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                                       Text="{Binding Label}" />
+                                            <StackPanel Grid.Column="2"
+                                                        Orientation="Horizontal">
+                                                <Button Width="30"
+                                                        Height="28"
+                                                        Padding="0"
+                                                        Click="OnMoveTranslationProviderUpClick"
+                                                        Content="↑"
+                                                        Focusable="False"
+                                                        IsEnabled="{Binding CanMoveUp}"
+                                                        Tag="{Binding Provider}"
+                                                        ToolTip="提高优先级" />
+                                                <Button Width="30"
+                                                        Height="28"
+                                                        Margin="6,0,0,0"
+                                                        Padding="0"
+                                                        Click="OnMoveTranslationProviderDownClick"
+                                                        Content="↓"
+                                                        Focusable="False"
+                                                        IsEnabled="{Binding CanMoveDown}"
+                                                        Tag="{Binding Provider}"
+                                                        ToolTip="降低优先级" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Margin="0,2,0,0"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                   Text="在线项被尝试时，只会发送识别出的文字，不会上传截图图片。"
+                                   TextWrapping="Wrap" />
                     </StackPanel>
 
-                    <StackPanel x:Name="TranslationDisabledPanel"
+                    <StackPanel x:Name="TranslationTargetLanguagePanel"
                                 Margin="0,18,0,0">
-                        <Border Padding="14,11"
-                                Background="{DynamicResource AppPanelBackgroundBrush}"
-                                BorderBrush="{DynamicResource AppBorderBrush}"
-                                BorderThickness="1"
-                                CornerRadius="8">
-                            <TextBlock Foreground="{DynamicResource AppTextSecondaryBrush}"
-                                       Text="翻译已关闭。文字识别仍会继续在本机运行。"
-                                       TextWrapping="Wrap" />
-                        </Border>
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="目标语言" />
+                        <ComboBox x:Name="TranslationTargetLanguageComboBox"
+                                  Margin="0,8,0,0"
+                                  DisplayMemberPath="Label"
+                                  ItemsSource="{Binding TranslationTargetLanguageOptions}"
+                                  SelectedValue="{Binding TranslationTargetLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                  SelectedValuePath="Value"
+                                  SelectionChanged="OnImmediateSettingChanged" />
                     </StackPanel>
 
                     <StackPanel x:Name="OnlineTranslationSettingsPanel"
@@ -733,20 +797,6 @@
                                        Text="识别出的文字会发送给你配置的在线服务；截图图片本身不会上传。"
                                        TextWrapping="Wrap" />
                         </Border>
-
-                        <StackPanel Margin="0,17,0,0">
-                            <TextBlock FontSize="14"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource AppTextPrimaryBrush}"
-                                       Text="目标语言" />
-                            <ComboBox x:Name="TranslationTargetLanguageComboBox"
-                                      Margin="0,8,0,0"
-                                      DisplayMemberPath="Label"
-                                      ItemsSource="{Binding TranslationTargetLanguageOptions}"
-                                      SelectedValue="{Binding TranslationTargetLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                      SelectedValuePath="Value"
-                                      SelectionChanged="OnImmediateSettingChanged" />
-                        </StackPanel>
 
                         <StackPanel Margin="0,17,0,0">
                             <TextBlock FontSize="14"
@@ -881,19 +931,6 @@
                             </StackPanel>
                         </Border>
 
-                        <StackPanel Margin="0,17,0,0">
-                            <TextBlock FontSize="14"
-                                       FontWeight="SemiBold"
-                                       Foreground="{DynamicResource AppTextPrimaryBrush}"
-                                       Text="目标语言" />
-                            <ComboBox x:Name="OfflineTranslationTargetLanguageComboBox"
-                                      Margin="0,8,0,0"
-                                      DisplayMemberPath="Label"
-                                      ItemsSource="{Binding OfflineTranslationTargetLanguageOptions}"
-                                      SelectedValue="{Binding TranslationTargetLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                      SelectedValuePath="Value"
-                                      SelectionChanged="OnImmediateSettingChanged" />
-                        </StackPanel>
                         <TextBlock Margin="0,14,0,0"
                                    FontSize="12"
                                    Foreground="{DynamicResource AppTextSecondaryBrush}"

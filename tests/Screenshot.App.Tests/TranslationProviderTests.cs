@@ -235,7 +235,7 @@ public sealed class TranslationProviderTests
     }
 
     [Fact]
-    public void UsesNoTranslationProviderWhenConsentIsDisabled()
+    public void TranslationRemainsAvailableWithoutTheLegacyConsentFlag()
     {
         var settings = AppSettings.CreateDefault() with
         {
@@ -249,11 +249,139 @@ public sealed class TranslationProviderTests
             new FakeCredentialStore("test-key"),
             client);
 
-        Assert.IsType<NoTranslationProvider>(provider);
+        var ordered = Assert.IsType<OrderedTranslationProvider>(provider);
+        Assert.Equal(
+            [
+                TranslationProviderFactory.OpenAiCompatibleProviderId,
+                TranslationProviderFactory.OfflineProviderId,
+            ],
+            ordered.ProviderIds);
     }
 
     [Fact]
-    public void ResolvesAnEmptyProviderToTheOpenAiCompatibleProvider()
+    public void AutomaticModeCreatesProvidersInTheConfiguredOrder()
+    {
+        var settings = AppSettings.CreateDefault() with
+        {
+            TranslationMode = TranslationMode.Automatic,
+            TranslationProviderPriority =
+            [
+                TranslationProviderKind.Offline,
+                TranslationProviderKind.Online,
+            ],
+        };
+        using var client = new HttpClient(new RecordingHandler("{}"));
+
+        var provider = Assert.IsType<OrderedTranslationProvider>(
+            TranslationProviderFactory.Create(
+                settings,
+                new FakeCredentialStore("test-key"),
+                client));
+
+        Assert.Equal(
+            [
+                TranslationProviderFactory.OfflineProviderId,
+                TranslationProviderFactory.OpenAiCompatibleProviderId,
+            ],
+            provider.ProviderIds);
+    }
+
+    [Fact]
+    public async Task OrderedProviderFallsBackForOcrSegmentTranslation()
+    {
+        var first = new StubTranslationProvider(
+            "First",
+            segmentResult: TranslationSegmentsResult.Failure("连接失败"));
+        var second = new StubTranslationProvider(
+            "Second",
+            segmentResult: new TranslationSegmentsResult(
+                true,
+                ["你好", "世界"],
+                null));
+        var provider = new OrderedTranslationProvider([first, second]);
+
+        var result = await provider.TranslateSegmentsAsync(
+            ["hello", "world"],
+            "auto",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(["你好", "世界"], result.Segments);
+        Assert.Equal(1, first.SegmentCallCount);
+        Assert.Equal(1, second.SegmentCallCount);
+    }
+
+    [Fact]
+    public async Task OrderedProviderStopsAfterTheFirstSuccessfulTranslation()
+    {
+        var first = new StubTranslationProvider(
+            "First",
+            textResult: new TranslationResult(true, "译文", null));
+        var second = new StubTranslationProvider(
+            "Second",
+            textResult: new TranslationResult(true, "不应调用", null));
+        var provider = new OrderedTranslationProvider([first, second]);
+
+        var result = await provider.TranslateAsync(
+            "source",
+            "auto",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal("译文", result.Text);
+        Assert.Equal(1, first.TextCallCount);
+        Assert.Equal(0, second.TextCallCount);
+    }
+
+    [Fact]
+    public async Task OrderedProviderReportsAllFailures()
+    {
+        var provider = new OrderedTranslationProvider([
+            new StubTranslationProvider(
+                "First",
+                textResult: TranslationResult.Failure("超时")),
+            new StubTranslationProvider(
+                "Second",
+                textResult: TranslationResult.Failure("未安装模型")),
+        ]);
+
+        var result = await provider.TranslateAsync(
+            "source",
+            "auto",
+            "zh-Hans");
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("First：超时", result.ErrorMessage);
+        Assert.Contains("Second：未安装模型", result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task OrderedProviderDoesNotTryAnotherProviderAfterCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var first = new StubTranslationProvider(
+            "First",
+            textHandler: _ =>
+            {
+                cancellation.Cancel();
+                return TranslationResult.Failure("翻译已取消");
+            });
+        var second = new StubTranslationProvider(
+            "Second",
+            textResult: new TranslationResult(true, "不应调用", null));
+        var provider = new OrderedTranslationProvider([first, second]);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            provider.TranslateAsync(
+                "source",
+                "auto",
+                "zh-Hans",
+                cancellation.Token));
+        Assert.Equal(0, second.TextCallCount);
+    }
+
+    [Fact]
+    public void ResolvesAnEmptyProviderInsideTheAutomaticChain()
     {
         var settings = AppSettings.CreateDefault() with
         {
@@ -268,7 +396,10 @@ public sealed class TranslationProviderTests
             new FakeCredentialStore("test-key"),
             client);
 
-        Assert.IsType<OpenAiCompatibleTranslationProvider>(provider);
+        var ordered = Assert.IsType<OrderedTranslationProvider>(provider);
+        Assert.Equal(
+            TranslationProviderFactory.OpenAiCompatibleProviderId,
+            ordered.ProviderIds[0]);
     }
 
     [Theory]
@@ -342,6 +473,52 @@ public sealed class TranslationProviderTests
                     Encoding.UTF8,
                     "application/json"),
             };
+        }
+    }
+
+    private sealed class StubTranslationProvider : ITranslationProvider
+    {
+        private readonly Func<CancellationToken, TranslationResult> _textHandler;
+        private readonly Func<CancellationToken, TranslationSegmentsResult>
+            _segmentHandler;
+
+        public StubTranslationProvider(
+            string id,
+            TranslationResult? textResult = null,
+            TranslationSegmentsResult? segmentResult = null,
+            Func<CancellationToken, TranslationResult>? textHandler = null)
+        {
+            Id = id;
+            _textHandler = textHandler ?? (_ => textResult ??
+                TranslationResult.Failure("未配置测试结果"));
+            _segmentHandler = _ => segmentResult ??
+                TranslationSegmentsResult.Failure("未配置测试结果");
+        }
+
+        public string Id { get; }
+
+        public int TextCallCount { get; private set; }
+
+        public int SegmentCallCount { get; private set; }
+
+        public Task<TranslationResult> TranslateAsync(
+            string text,
+            string sourceLanguage,
+            string targetLanguage,
+            CancellationToken cancellationToken = default)
+        {
+            TextCallCount++;
+            return Task.FromResult(_textHandler(cancellationToken));
+        }
+
+        public Task<TranslationSegmentsResult> TranslateSegmentsAsync(
+            IReadOnlyList<string> segments,
+            string sourceLanguage,
+            string targetLanguage,
+            CancellationToken cancellationToken = default)
+        {
+            SegmentCallCount++;
+            return Task.FromResult(_segmentHandler(cancellationToken));
         }
     }
 

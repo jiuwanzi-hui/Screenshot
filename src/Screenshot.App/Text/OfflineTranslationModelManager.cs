@@ -31,9 +31,13 @@ public sealed record OfflineTranslationInstallationResult(
 
 public sealed class OfflineTranslationModelManager : IDisposable
 {
+    private const int MaximumDownloadAttempts = 5;
+    private const int MaximumFileSystemAttempts = 8;
     private const string CompletionMarkerFileName = "pack.json";
     private const string ConfigurationFileName = "config.yml";
     private const string MultilingualDirectoryName = "Bergamot-Multilingual";
+    private static readonly TimeSpan DownloadResponseTimeout = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan DownloadReadTimeout = TimeSpan.FromMinutes(2);
     private static readonly Lazy<OfflineTranslationModelManager> SharedManager =
         new(() => new OfflineTranslationModelManager());
     private readonly HttpClient _httpClient;
@@ -48,10 +52,7 @@ public sealed class OfflineTranslationModelManager : IDisposable
     {
         InstallationDirectory = Path.GetFullPath(
             installationDirectory ?? AppMetadata.TranslationModelsDirectoryPath);
-        _httpClient = httpClient ?? new HttpClient
-        {
-            Timeout = TimeSpan.FromMinutes(15),
-        };
+        _httpClient = httpClient ?? CreateHttpClient();
         _ownsHttpClient = httpClient is null;
         _catalogService = new MozillaOfflineTranslationCatalogService(_httpClient);
     }
@@ -251,7 +252,7 @@ public sealed class OfflineTranslationModelManager : IDisposable
             var directionDownloaded = 0L;
             foreach (var file in direction.Files)
             {
-                await DownloadAndExtractAsync(
+                await DownloadAndExtractWithRetryAsync(
                     baseUrl,
                     file,
                     stagingDirectory,
@@ -283,14 +284,14 @@ public sealed class OfflineTranslationModelManager : IDisposable
                 }),
                 new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
                 cancellationToken);
-            ReplaceDirectionDirectory(direction.Id, stagingDirectory);
+            await ReplaceDirectionDirectoryAsync(direction.Id, stagingDirectory);
         }
         finally
         {
             if (Directory.Exists(stagingDirectory))
             {
                 EnsurePathIsInsideInstallationDirectory(stagingDirectory);
-                Directory.Delete(stagingDirectory, recursive: true);
+                await TryDeleteDirectoryAsync(stagingDirectory);
             }
         }
     }
@@ -344,7 +345,7 @@ public sealed class OfflineTranslationModelManager : IDisposable
         }
     }
 
-    private async Task DownloadAndExtractAsync(
+    private async Task DownloadAndExtractWithRetryAsync(
         string baseUrl,
         OfflineTranslationModelFile file,
         string directionDirectory,
@@ -353,11 +354,89 @@ public sealed class OfflineTranslationModelManager : IDisposable
         IProgress<OfflineTranslationDownloadProgress>? progress,
         CancellationToken cancellationToken)
     {
+        var destinationPath = Path.Combine(
+            directionDirectory,
+            file.InstalledFileName);
+        for (var attempt = 1; attempt <= MaximumDownloadAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var attemptPath = destinationPath + $".{Guid.NewGuid():N}.partial";
+            EnsurePathIsInsideInstallationDirectory(attemptPath);
+            try
+            {
+                await DownloadAndExtractAsync(
+                    baseUrl,
+                    file,
+                    attemptPath,
+                    previouslyDownloaded,
+                    totalDownloadSize,
+                    progress,
+                    cancellationToken);
+                await MoveFileWithRetryAsync(attemptPath, destinationPath);
+                return;
+            }
+            catch (Exception exception) when (
+                IsRetryableDownloadFailure(exception, cancellationToken))
+            {
+                await TryDeleteFileAsync(attemptPath);
+                if (attempt == MaximumDownloadAttempts)
+                {
+                    throw new IOException(
+                        $"{file.InstalledFileName} 连续下载 " +
+                        $"{MaximumDownloadAttempts} 次仍然失败：{exception.Message}",
+                        exception);
+                }
+
+                var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt - 1));
+                var failureDescription = exception is UnauthorizedAccessException ||
+                                         exception.InnerException is UnauthorizedAccessException
+                    ? "本地模型文件暂时被占用"
+                    : "模型下载中断";
+                progress?.Report(new OfflineTranslationDownloadProgress(
+                    previouslyDownloaded,
+                    totalDownloadSize,
+                    $"{failureDescription}，{delay.TotalSeconds:0} 秒后自动重试 " +
+                    $"({attempt + 1}/{MaximumDownloadAttempts}) · " +
+                    file.InstalledFileName));
+                await Task.Delay(delay, cancellationToken);
+            }
+            catch
+            {
+                await TryDeleteFileAsync(attemptPath);
+                throw;
+            }
+        }
+    }
+
+    private async Task DownloadAndExtractAsync(
+        string baseUrl,
+        OfflineTranslationModelFile file,
+        string destinationPath,
+        long previouslyDownloaded,
+        long totalDownloadSize,
+        IProgress<OfflineTranslationDownloadProgress>? progress,
+        CancellationToken cancellationToken)
+    {
         var requestUri = new Uri(new Uri(baseUrl), file.DownloadPath);
-        using var response = await _httpClient.GetAsync(
-            requestUri,
-            HttpCompletionOption.ResponseHeadersRead,
+        using var responseTimeout = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken);
+        responseTimeout.CancelAfter(DownloadResponseTimeout);
+        HttpResponseMessage response;
+        try
+        {
+            response = await _httpClient.GetAsync(
+                requestUri,
+                HttpCompletionOption.ResponseHeadersRead,
+                responseTimeout.Token);
+            responseTimeout.CancelAfter(Timeout.InfiniteTimeSpan);
+        }
+        catch (OperationCanceledException exception) when (
+            !cancellationToken.IsCancellationRequested)
+        {
+            throw new IOException("连接模型服务器超时。", exception);
+        }
+
+        using var responseScope = response;
         response.EnsureSuccessStatusCode();
         if (response.Content.Headers.ContentLength is long contentLength &&
             contentLength != file.DownloadSize)
@@ -375,13 +454,11 @@ public sealed class OfflineTranslationModelManager : IDisposable
                 previouslyDownloaded + bytesRead,
                 totalDownloadSize,
                 file.InstalledFileName)),
-            compressedHash);
+            compressedHash,
+            DownloadReadTimeout);
         await using var gzipStream = new GZipStream(
             progressStream,
             CompressionMode.Decompress);
-        var destinationPath = Path.Combine(
-            directionDirectory,
-            file.InstalledFileName);
         await using var destination = new FileStream(
             destinationPath,
             FileMode.CreateNew,
@@ -428,7 +505,32 @@ public sealed class OfflineTranslationModelManager : IDisposable
         }
     }
 
-    private void ReplaceDirectionDirectory(
+    private static HttpClient CreateHttpClient()
+    {
+        var handler = new SocketsHttpHandler
+        {
+            ConnectTimeout = TimeSpan.FromSeconds(30),
+        };
+        return new HttpClient(handler)
+        {
+            // Large multilingual packs can take much longer than the old
+            // fifteen-minute request limit on slower connections.
+            Timeout = TimeSpan.FromHours(6),
+        };
+    }
+
+    private static bool IsRetryableDownloadFailure(
+        Exception exception,
+        CancellationToken cancellationToken)
+    {
+        return !cancellationToken.IsCancellationRequested &&
+               (exception is HttpRequestException ||
+                exception is IOException ||
+                exception is UnauthorizedAccessException ||
+                exception is OperationCanceledException);
+    }
+
+    private async Task ReplaceDirectionDirectoryAsync(
         string directionId,
         string stagingDirectory)
     {
@@ -436,7 +538,7 @@ public sealed class OfflineTranslationModelManager : IDisposable
         EnsurePathIsInsideInstallationDirectory(finalDirectory);
         if (!Directory.Exists(finalDirectory))
         {
-            Directory.Move(stagingDirectory, finalDirectory);
+            await MoveDirectoryWithRetryAsync(stagingDirectory, finalDirectory);
             return;
         }
 
@@ -444,22 +546,167 @@ public sealed class OfflineTranslationModelManager : IDisposable
             ModelsDirectory,
             $".{directionId}.{Guid.NewGuid():N}.old");
         EnsurePathIsInsideInstallationDirectory(backupDirectory);
-        Directory.Move(finalDirectory, backupDirectory);
+        await MoveDirectoryWithRetryAsync(finalDirectory, backupDirectory);
         try
         {
-            Directory.Move(stagingDirectory, finalDirectory);
-            Directory.Delete(backupDirectory, recursive: true);
+            await MoveDirectoryWithRetryAsync(stagingDirectory, finalDirectory);
         }
         catch
         {
             if (!Directory.Exists(finalDirectory) &&
                 Directory.Exists(backupDirectory))
             {
-                Directory.Move(backupDirectory, finalDirectory);
+                await MoveDirectoryWithRetryAsync(backupDirectory, finalDirectory);
             }
 
             throw;
         }
+
+        await TryDeleteDirectoryAsync(backupDirectory);
+    }
+
+    private static async Task MoveFileWithRetryAsync(
+        string sourcePath,
+        string destinationPath)
+    {
+        Exception? lastException = null;
+        for (var attempt = 1; attempt <= MaximumFileSystemAttempts; attempt++)
+        {
+            try
+            {
+                File.Move(sourcePath, destinationPath);
+                return;
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                lastException = exception;
+                if (attempt < MaximumFileSystemAttempts)
+                {
+                    await Task.Delay(GetFileSystemRetryDelay(attempt));
+                }
+            }
+        }
+
+        throw new IOException(
+            $"无法保存模型文件 {Path.GetFileName(destinationPath)}，文件可能正被其他程序占用。",
+            lastException);
+    }
+
+    private static async Task MoveDirectoryWithRetryAsync(
+        string sourcePath,
+        string destinationPath)
+    {
+        Exception? lastException = null;
+        for (var attempt = 1; attempt <= MaximumFileSystemAttempts; attempt++)
+        {
+            try
+            {
+                Directory.Move(sourcePath, destinationPath);
+                return;
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                lastException = exception;
+                if (attempt < MaximumFileSystemAttempts)
+                {
+                    await Task.Delay(GetFileSystemRetryDelay(attempt));
+                }
+            }
+        }
+
+        throw new IOException(
+            $"无法安装模型目录 {Path.GetFileName(destinationPath)}，目录可能正被其他程序占用。",
+            lastException);
+    }
+
+    private static async Task<bool> TryDeleteFileAsync(string path)
+    {
+        for (var attempt = 1; attempt <= MaximumFileSystemAttempts; attempt++)
+        {
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    return true;
+                }
+
+                ClearReadOnlyAttribute(path);
+                File.Delete(path);
+                return !File.Exists(path);
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                if (attempt < MaximumFileSystemAttempts)
+                {
+                    await Task.Delay(GetFileSystemRetryDelay(attempt));
+                }
+            }
+        }
+
+        return !File.Exists(path);
+    }
+
+    private static async Task<bool> TryDeleteDirectoryAsync(string path)
+    {
+        for (var attempt = 1; attempt <= MaximumFileSystemAttempts; attempt++)
+        {
+            try
+            {
+                if (!Directory.Exists(path))
+                {
+                    return true;
+                }
+
+                ClearReadOnlyAttributes(path);
+                Directory.Delete(path, recursive: true);
+                return !Directory.Exists(path);
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                if (attempt < MaximumFileSystemAttempts)
+                {
+                    await Task.Delay(GetFileSystemRetryDelay(attempt));
+                }
+            }
+        }
+
+        return !Directory.Exists(path);
+    }
+
+    private static void ClearReadOnlyAttributes(string directoryPath)
+    {
+        ClearReadOnlyAttribute(directoryPath);
+        var options = new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            AttributesToSkip = FileAttributes.ReparsePoint,
+            IgnoreInaccessible = false,
+        };
+        foreach (var path in Directory.EnumerateFileSystemEntries(
+                     directoryPath,
+                     "*",
+                     options))
+        {
+            ClearReadOnlyAttribute(path);
+        }
+    }
+
+    private static void ClearReadOnlyAttribute(string path)
+    {
+        var attributes = File.GetAttributes(path);
+        if ((attributes & FileAttributes.ReadOnly) != 0)
+        {
+            File.SetAttributes(path, attributes & ~FileAttributes.ReadOnly);
+        }
+    }
+
+    private static TimeSpan GetFileSystemRetryDelay(int attempt)
+    {
+        return TimeSpan.FromMilliseconds(Math.Min(200 * attempt, 1_000));
     }
 
     private long GetAvailableSpace()
@@ -520,15 +767,18 @@ file sealed class DownloadProgressStream : Stream
     private readonly Stream _inner;
     private readonly Action<long> _progress;
     private readonly IncrementalHash? _hash;
+    private readonly TimeSpan _readTimeout;
 
     public DownloadProgressStream(
         Stream inner,
         Action<long> progress,
-        IncrementalHash? hash = null)
+        IncrementalHash? hash = null,
+        TimeSpan? readTimeout = null)
     {
         _inner = inner;
         _progress = progress;
         _hash = hash;
+        _readTimeout = readTimeout ?? Timeout.InfiniteTimeSpan;
     }
 
     public long BytesRead { get; private set; }
@@ -554,7 +804,24 @@ file sealed class DownloadProgressStream : Stream
         Memory<byte> buffer,
         CancellationToken cancellationToken = default)
     {
-        var read = await _inner.ReadAsync(buffer, cancellationToken);
+        using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+        if (_readTimeout != Timeout.InfiniteTimeSpan)
+        {
+            readTimeout.CancelAfter(_readTimeout);
+        }
+
+        int read;
+        try
+        {
+            read = await _inner.ReadAsync(buffer, readTimeout.Token);
+        }
+        catch (OperationCanceledException exception) when (
+            !cancellationToken.IsCancellationRequested)
+        {
+            throw new IOException("模型下载连续两分钟没有收到数据。", exception);
+        }
+
         Report(buffer.Span[..read]);
         return read;
     }
