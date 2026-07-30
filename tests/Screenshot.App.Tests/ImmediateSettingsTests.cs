@@ -75,8 +75,6 @@ public sealed class ImmediateSettingsTests : IDisposable
                 window.FindName("OcrLanguageComboBox"));
             var provider = Assert.IsType<ComboBox>(
                 window.FindName("TranslationProviderComboBox"));
-            var translationMode = Assert.IsType<ComboBox>(
-                window.FindName("TranslationModeComboBox"));
             var targetLanguage = Assert.IsType<ComboBox>(
                 window.FindName("TranslationTargetLanguageComboBox"));
             var model = Assert.IsType<ComboBox>(
@@ -85,7 +83,7 @@ public sealed class ImmediateSettingsTests : IDisposable
                 window.FindName("FetchTranslationModelsButton"));
 
             Assert.NotEmpty(ocrLanguage.Items);
-            Assert.Equal(3, translationMode.Items.Count);
+            Assert.Null(window.FindName("TranslationModeComboBox"));
             Assert.Single(provider.Items);
             Assert.True(targetLanguage.Items.Count >= 5);
             Assert.True(model.IsEditable);
@@ -102,15 +100,15 @@ public sealed class ImmediateSettingsTests : IDisposable
     }
 
     [Fact]
-    public void TranslationModeSelectionSavesOfflineWithoutOnlineConsent()
+    public void TranslationSettingsAlwaysShowPriorityAndBothProviders()
     {
         Directory.CreateDirectory(_testDirectory);
         var settingsPath = Path.Combine(_testDirectory, "settings.json");
         var settingsStore = new SettingsStore(settingsPath);
         var initialSettings = CreateSettings() with
         {
-            TranslationMode = TranslationMode.Online,
-            SendTextToOnlineTranslation = true,
+            TranslationMode = TranslationMode.Disabled,
+            SendTextToOnlineTranslation = false,
         };
 
         WpfTestHost.Invoke(() =>
@@ -124,25 +122,99 @@ public sealed class ImmediateSettingsTests : IDisposable
                 new FakeTranslationCredentialStore());
 
             window.Show();
-            var mode = Assert.IsType<ComboBox>(
-                window.FindName("TranslationModeComboBox"));
             var onlinePanel = Assert.IsType<StackPanel>(
                 window.FindName("OnlineTranslationSettingsPanel"));
             var offlinePanel = Assert.IsType<StackPanel>(
                 window.FindName("OfflineTranslationSettingsPanel"));
+            var priorityPanel = Assert.IsType<StackPanel>(
+                window.FindName("TranslationPriorityPanel"));
+            var targetLanguage = Assert.IsType<ComboBox>(
+                window.FindName("TranslationTargetLanguageComboBox"));
+            Assert.Null(window.FindName("TranslationModeComboBox"));
             Assert.Equal(Visibility.Visible, onlinePanel.Visibility);
-            Assert.Equal(Visibility.Collapsed, offlinePanel.Visibility);
-
-            mode.SelectedValue = nameof(TranslationMode.Offline);
-
-            Assert.Equal(Visibility.Collapsed, onlinePanel.Visibility);
             Assert.Equal(Visibility.Visible, offlinePanel.Visibility);
+            Assert.Equal(Visibility.Visible, priorityPanel.Visibility);
+            Assert.Equal(
+                TranslationLanguageCatalog.Languages.Count,
+                targetLanguage.Items.Count);
+            var viewModel = Assert.IsType<SettingsViewModel>(window.DataContext);
+            Assert.Equal(
+                TranslationMode.Automatic,
+                viewModel.CreateSettings().TranslationMode);
             window.RequestExit();
         });
+    }
 
-        var loaded = settingsStore.Load();
-        Assert.Equal(TranslationMode.Offline, loaded.Settings.TranslationMode);
-        Assert.False(loaded.Settings.SendTextToOnlineTranslation);
+    [Fact]
+    public void AutomaticTranslationShowsBothProvidersAndPriorityControls()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var settingsPath = Path.Combine(_testDirectory, "settings.json");
+        var settingsStore = new SettingsStore(settingsPath);
+        var initialSettings = CreateSettings() with
+        {
+            TranslationMode = TranslationMode.Automatic,
+            TranslationProviderPriority =
+            [
+                TranslationProviderKind.Online,
+                TranslationProviderKind.Offline,
+            ],
+        };
+
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                initialSettings,
+                settingsStore,
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+
+            window.Show();
+            var onlinePanel = Assert.IsType<StackPanel>(
+                window.FindName("OnlineTranslationSettingsPanel"));
+            var offlinePanel = Assert.IsType<StackPanel>(
+                window.FindName("OfflineTranslationSettingsPanel"));
+            var priorityPanel = Assert.IsType<StackPanel>(
+                window.FindName("TranslationPriorityPanel"));
+            var targetLanguage = Assert.IsType<ComboBox>(
+                window.FindName("TranslationTargetLanguageComboBox"));
+
+            Assert.Equal(Visibility.Visible, onlinePanel.Visibility);
+            Assert.Equal(Visibility.Visible, offlinePanel.Visibility);
+            Assert.Equal(Visibility.Visible, priorityPanel.Visibility);
+            Assert.Equal(
+                TranslationLanguageCatalog.Languages.Count,
+                targetLanguage.Items.Count);
+
+            window.RequestExit();
+        });
+    }
+
+    [Fact]
+    public void TranslationPriorityOrderIsIncludedInCreatedSettings()
+    {
+        var viewModel = new SettingsViewModel(CreateSettings() with
+        {
+            TranslationMode = TranslationMode.Automatic,
+            TranslationProviderPriority =
+            [
+                TranslationProviderKind.Online,
+                TranslationProviderKind.Offline,
+            ],
+        });
+
+        Assert.True(viewModel.MoveTranslationProvider(
+            TranslationProviderKind.Offline,
+            -1));
+        var settings = viewModel.CreateSettings();
+
+        Assert.Equal(TranslationMode.Automatic, settings.TranslationMode);
+        Assert.True(settings.SendTextToOnlineTranslation);
+        Assert.Equal(
+            [TranslationProviderKind.Offline, TranslationProviderKind.Online],
+            settings.TranslationProviderPriority);
     }
 
     [Fact]

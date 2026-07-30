@@ -147,6 +147,14 @@ public static class PortableUpdateRunner
                         StringComparison.OrdinalIgnoreCase) ||
                     relativePath.StartsWith(
                         AppMetadata.DataDirectoryName + Path.DirectorySeparatorChar,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(
+                        relativePath.TrimEnd(Path.DirectorySeparatorChar),
+                        AppMetadata.TranslationModelsDirectoryName,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    relativePath.StartsWith(
+                        AppMetadata.TranslationModelsDirectoryName +
+                            Path.DirectorySeparatorChar,
                         StringComparison.OrdinalIgnoreCase))
                 {
                     continue;

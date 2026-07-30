@@ -9,6 +9,13 @@ namespace Screenshot.App.Presentation;
 
 public sealed record SettingOption(string Value, string Label);
 
+public sealed record TranslationPriorityItem(
+    int Position,
+    TranslationProviderKind Provider,
+    string Label,
+    bool CanMoveUp,
+    bool CanMoveDown);
+
 public sealed class SettingsViewModel : INotifyPropertyChanged
 {
     private AppSettings _baseSettings;
@@ -25,7 +32,6 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private string _pinHotKey;
     private string _openSettingsHotKey;
     private string _ocrLanguageTag;
-    private TranslationMode _translationMode;
     private string _translationProvider;
     private string _translationEndpoint;
     private string _translationTargetLanguage;
@@ -49,7 +55,6 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _pinHotKey = settings.PinHotKey;
         _openSettingsHotKey = settings.OpenSettingsHotKey;
         _ocrLanguageTag = settings.OcrLanguageTag;
-        _translationMode = settings.ResolveTranslationMode();
         _translationProvider = TranslationProviderFactory.ResolveProviderId(
             settings.TranslationProvider);
         _translationEndpoint = settings.TranslationEndpoint;
@@ -57,6 +62,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _translationModel = TranslationProviderFactory.NormalizeModel(
             settings.TranslationEndpoint,
             settings.TranslationModel);
+        SetTranslationProviderPriority(
+            settings.ResolveTranslationProviderPriority());
         OcrLanguageOptions = CreateOcrLanguageOptions(settings.OcrLanguageTag);
         if (!string.IsNullOrWhiteSpace(_translationModel) &&
             !TranslationModelOptions.Contains(
@@ -78,12 +85,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             "OpenAI 兼容接口"),
     ];
 
-    public IReadOnlyList<SettingOption> TranslationModeOptions { get; } =
-    [
-        new(nameof(TranslationMode.Online), "在线大模型翻译"),
-        new(nameof(TranslationMode.Offline), "离线模型翻译"),
-        new(nameof(TranslationMode.Disabled), "关闭翻译"),
-    ];
+    public ObservableCollection<TranslationPriorityItem>
+        TranslationPriorityItems { get; } = [];
 
     public IReadOnlyList<SettingOption> TranslationTargetLanguageOptions { get; } =
         TranslationLanguageCatalog.Languages
@@ -186,12 +189,6 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _ocrLanguageTag, value);
     }
 
-    public TranslationMode TranslationMode
-    {
-        get => _translationMode;
-        set => SetProperty(ref _translationMode, value);
-    }
-
     public string TranslationProvider
     {
         get => _translationProvider;
@@ -245,9 +242,11 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             PinHotKey = PinHotKey,
             OpenSettingsHotKey = OpenSettingsHotKey,
             OcrLanguageTag = OcrLanguageTag,
-            TranslationMode = TranslationMode,
-            SendTextToOnlineTranslation =
-                TranslationMode == TranslationMode.Online,
+            TranslationMode = TranslationMode.Automatic,
+            SendTextToOnlineTranslation = true,
+            TranslationProviderPriority = TranslationPriorityItems
+                .Select(item => item.Provider)
+                .ToArray(),
             TranslationProvider = TranslationProvider,
             TranslationEndpoint = TranslationEndpoint,
             TranslationTargetLanguage = TranslationTargetLanguage,
@@ -271,7 +270,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         PinHotKey = settings.PinHotKey;
         OpenSettingsHotKey = settings.OpenSettingsHotKey;
         OcrLanguageTag = settings.OcrLanguageTag;
-        TranslationMode = settings.ResolveTranslationMode();
+        SetTranslationProviderPriority(
+            settings.ResolveTranslationProviderPriority());
         TranslationProvider = TranslationProviderFactory.ResolveProviderId(
             settings.TranslationProvider);
         TranslationEndpoint = settings.TranslationEndpoint;
@@ -307,6 +307,56 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         foreach (var model in values)
         {
             TranslationModelOptions.Add(model);
+        }
+    }
+
+    public bool MoveTranslationProvider(
+        TranslationProviderKind provider,
+        int offset)
+    {
+        var providers = TranslationPriorityItems
+            .Select(item => item.Provider)
+            .ToList();
+        var currentIndex = providers.IndexOf(provider);
+        var targetIndex = currentIndex + offset;
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= providers.Count)
+        {
+            return false;
+        }
+
+        (providers[currentIndex], providers[targetIndex]) =
+            (providers[targetIndex], providers[currentIndex]);
+        SetTranslationProviderPriority(providers);
+        return true;
+    }
+
+    private void SetTranslationProviderPriority(
+        IEnumerable<TranslationProviderKind> providers)
+    {
+        var values = providers
+            .Where(Enum.IsDefined)
+            .Distinct()
+            .ToList();
+        foreach (var provider in Enum.GetValues<TranslationProviderKind>())
+        {
+            if (!values.Contains(provider))
+            {
+                values.Add(provider);
+            }
+        }
+
+        TranslationPriorityItems.Clear();
+        for (var index = 0; index < values.Count; index++)
+        {
+            var provider = values[index];
+            TranslationPriorityItems.Add(new TranslationPriorityItem(
+                index + 1,
+                provider,
+                provider == TranslationProviderKind.Online
+                    ? "在线大模型"
+                    : "本机离线模型",
+                index > 0,
+                index < values.Count - 1));
         }
     }
 

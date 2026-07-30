@@ -20,11 +20,18 @@ public enum TranslationMode
     Disabled,
     Online,
     Offline,
+    Automatic,
+}
+
+public enum TranslationProviderKind
+{
+    Online,
+    Offline,
 }
 
 public sealed record AppSettings
 {
-    public int SettingsVersion { get; init; } = 2;
+    public int SettingsVersion { get; init; } = 3;
 
     public string SaveDirectory { get; init; } = GetDefaultSaveDirectory();
 
@@ -68,7 +75,13 @@ public sealed record AppSettings
     public string TranslationModel { get; init; } = "gpt-4.1-mini";
 
     public TranslationMode TranslationMode { get; init; } =
-        TranslationMode.Disabled;
+        TranslationMode.Automatic;
+
+    public TranslationProviderKind[] TranslationProviderPriority { get; init; } =
+    [
+        TranslationProviderKind.Online,
+        TranslationProviderKind.Offline,
+    ];
 
     public bool KeepHistory { get; init; }
 
@@ -81,29 +94,40 @@ public sealed record AppSettings
         return new AppSettings();
     }
 
-    public TranslationMode ResolveTranslationMode()
+    public IReadOnlyList<TranslationProviderKind> ResolveTranslationProviderPriority()
     {
-        if (!Enum.IsDefined(TranslationMode))
+        if (SettingsVersion < 3)
         {
-            return TranslationMode.Disabled;
+            return TranslationMode == TranslationMode.Offline
+                ? [TranslationProviderKind.Offline, TranslationProviderKind.Online]
+                : [TranslationProviderKind.Online, TranslationProviderKind.Offline];
         }
 
-        return TranslationMode == TranslationMode.Disabled &&
-               SendTextToOnlineTranslation
-            ? TranslationMode.Online
-            : TranslationMode;
+        var providers = (TranslationProviderPriority ?? [])
+            .Where(Enum.IsDefined)
+            .Distinct()
+            .ToList();
+        foreach (var provider in Enum.GetValues<TranslationProviderKind>())
+        {
+            if (!providers.Contains(provider))
+            {
+                providers.Add(provider);
+            }
+        }
+
+        return providers;
     }
 
     public AppSettings Normalize()
     {
         var defaults = CreateDefault();
-        // Settings written before translation modes existed only stored the
-        // online-consent flag. Preserve those users' existing configuration.
-        var translationMode = ResolveTranslationMode();
+        // Translation is invoked explicitly by the user. Keep the legacy mode
+        // only as a migration hint for which provider should be tried first.
+        var translationProviderPriority = ResolveTranslationProviderPriority();
 
         return this with
         {
-            SettingsVersion = Math.Max(SettingsVersion, 2),
+            SettingsVersion = Math.Max(SettingsVersion, 3),
             CloseBehavior = Enum.IsDefined(CloseBehavior)
                 ? CloseBehavior
                 : defaults.CloseBehavior,
@@ -134,9 +158,9 @@ public sealed record AppSettings
             TranslationModel = string.IsNullOrWhiteSpace(TranslationModel)
                 ? defaults.TranslationModel
                 : TranslationModel.Trim(),
-            TranslationMode = translationMode,
-            SendTextToOnlineTranslation =
-                translationMode == TranslationMode.Online,
+            TranslationMode = TranslationMode.Automatic,
+            TranslationProviderPriority = translationProviderPriority.ToArray(),
+            SendTextToOnlineTranslation = true,
             HistoryLimit = Math.Clamp(HistoryLimit, 0, 100),
         };
     }

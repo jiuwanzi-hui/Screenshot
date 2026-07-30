@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using BergamotTranslatorSharp;
 
 namespace Screenshot.App.Text;
@@ -69,9 +70,7 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
 
         var translated = segments.ToArray();
         var eligibleIndexes = Enumerable.Range(0, segments.Count)
-            .Where(index =>
-                !string.IsNullOrWhiteSpace(segments[index]) &&
-                segments[index].Any(char.IsLetter))
+            .Where(index => ShouldTranslateSegment(segments[index]))
             .ToArray();
         if (eligibleIndexes.Length == 0)
         {
@@ -216,6 +215,36 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
                (combined.IsReliable || combined.Confidence >= 0.70d)
             ? combined
             : segment;
+    }
+
+    private static bool ShouldTranslateSegment(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || !text.Any(char.IsLetter))
+        {
+            return false;
+        }
+
+        var value = text.Trim();
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+            uri.Scheme is "http" or "https" or "file")
+        {
+            return false;
+        }
+
+        if (value.Contains('\\') ||
+            (!value.Any(char.IsWhiteSpace) && value.Contains('/')))
+        {
+            return false;
+        }
+
+        if (value.Any(char.IsWhiteSpace))
+        {
+            return true;
+        }
+
+        var extension = Path.GetExtension(value);
+        return string.IsNullOrEmpty(extension) || extension.Length is < 2 or > 11 ||
+               !extension.AsSpan(1).ToArray().All(char.IsLetterOrDigit);
     }
 
     private sealed record SourceLanguageResolution(

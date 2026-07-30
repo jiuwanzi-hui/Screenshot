@@ -102,11 +102,7 @@ public partial class MainWindow : Window, IDisposable
             OnGlobalHotKeyCaptureInputReceived;
         Activated += OnSettingsWindowActivated;
         DataContext = _settingsViewModel;
-        UpdateTranslationModePresentation();
-        if (_settingsViewModel.TranslationMode == TranslationMode.Offline)
-        {
-            RefreshOfflineTranslationModelStatus();
-        }
+        RefreshOfflineTranslationModelStatus();
         UpdateThemeSelection(initialSettings.Theme);
         UpdateCloseBehaviorSelection(initialSettings.CloseBehavior);
         LoadTranslationApiKey(
@@ -694,62 +690,34 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
-    private void OnTranslationModeSelectionChanged(
+    private void OnMoveTranslationProviderUpClick(
         object sender,
-        SelectionChangedEventArgs e)
+        RoutedEventArgs e)
     {
-        if (!IsLoaded || _isApplyingSettings ||
-            sender is not System.Windows.Controls.ComboBox comboBox)
-        {
-            return;
-        }
-
-        comboBox.GetBindingExpression(
-            System.Windows.Controls.ComboBox.SelectedValueProperty)?.UpdateSource();
-        if (_settingsViewModel.TranslationMode == TranslationMode.Offline &&
-            !TranslationLanguageCatalog.OfflineTargetLanguages.Any(language =>
-                string.Equals(
-                    language.Tag,
-                    _settingsViewModel.TranslationTargetLanguage,
-                    StringComparison.OrdinalIgnoreCase)))
-        {
-            _settingsViewModel.TranslationTargetLanguage = "zh-Hans";
-        }
-
-        UpdateTranslationModePresentation();
-        ApplySettingsImmediately();
-        if (_settingsViewModel.TranslationMode == TranslationMode.Offline)
-        {
-            RefreshOfflineTranslationModelStatus();
-        }
-        else
-        {
-            Interlocked.Increment(ref _offlineModelPlanGeneration);
-            _offlineTranslationPlan = null;
-        }
+        MoveTranslationProvider(sender, -1);
     }
 
-    private void UpdateTranslationModePresentation()
+    private void OnMoveTranslationProviderDownClick(
+        object sender,
+        RoutedEventArgs e)
     {
-        if (OnlineTranslationSettingsPanel is null ||
-            OfflineTranslationSettingsPanel is null ||
-            TranslationDisabledPanel is null)
+        MoveTranslationProvider(sender, 1);
+    }
+
+    private void MoveTranslationProvider(object sender, int offset)
+    {
+        if (sender is not System.Windows.Controls.Button
+            {
+                Tag: TranslationProviderKind provider,
+            } || !_settingsViewModel.MoveTranslationProvider(provider, offset))
         {
             return;
         }
 
-        OnlineTranslationSettingsPanel.Visibility =
-            _settingsViewModel.TranslationMode == TranslationMode.Online
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-        OfflineTranslationSettingsPanel.Visibility =
-            _settingsViewModel.TranslationMode == TranslationMode.Offline
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-        TranslationDisabledPanel.Visibility =
-            _settingsViewModel.TranslationMode == TranslationMode.Disabled
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+        ApplySettingsImmediately();
+        var firstProvider = _settingsViewModel.TranslationPriorityItems[0].Label;
+        _settingsViewModel.SetStatus(
+            $"翻译优先顺序已更新，将先尝试{firstProvider}。");
     }
 
     private async void OnDownloadOfflineModelClick(
@@ -802,7 +770,6 @@ public partial class MainWindow : Window, IDisposable
         }
 
         button.IsEnabled = false;
-        TranslationModeComboBox.IsEnabled = false;
         OfflineModelDownloadProgressBar.Value = 0;
         OfflineModelDownloadProgressBar.Visibility = Visibility.Visible;
         OfflineModelDownloadProgressText.Visibility = Visibility.Visible;
@@ -836,7 +803,6 @@ public partial class MainWindow : Window, IDisposable
         finally
         {
             button.IsEnabled = true;
-            TranslationModeComboBox.IsEnabled = true;
             OfflineModelDownloadProgressBar.Visibility = Visibility.Collapsed;
             OfflineModelDownloadProgressText.Visibility = Visibility.Collapsed;
         }
@@ -867,8 +833,7 @@ public partial class MainWindow : Window, IDisposable
     private async void RefreshOfflineTranslationModelStatus()
     {
         if (OfflineModelStatusText is null || OfflineModelPathText is null ||
-            DownloadOfflineModelButton is null ||
-            _settingsViewModel.TranslationMode != TranslationMode.Offline)
+            DownloadOfflineModelButton is null)
         {
             return;
         }
@@ -967,7 +932,7 @@ public partial class MainWindow : Window, IDisposable
         }
 
         ApplySettingsImmediately();
-        if (ReferenceEquals(sender, OfflineTranslationTargetLanguageComboBox))
+        if (ReferenceEquals(sender, TranslationTargetLanguageComboBox))
         {
             RefreshOfflineTranslationModelStatus();
         }

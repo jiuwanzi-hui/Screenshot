@@ -86,6 +86,52 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task ReplacesAnOutdatedPackWhenItsFilesAreReadOnly()
+    {
+        var installed = Encoding.UTF8.GetBytes("updated offline model");
+        var compressed = Compress(installed);
+        var direction = new OfflineTranslationDirection(
+            "en-zh",
+            "English → 中文",
+            [CreateFile("model.gz", "model.bin", compressed, installed)],
+            "relative-paths: true\n",
+            "test-en-zh-v2");
+        var plan = new OfflineTranslationModelPlan(
+            "en",
+            "zh",
+            "English → 中文",
+            "https://models.example/",
+            [direction]);
+        var handler = new ModelDownloadHandler(new Dictionary<string, byte[]>
+        {
+            ["/model.gz"] = compressed,
+        });
+        using var client = new HttpClient(handler);
+        using var manager = new OfflineTranslationModelManager(
+            _testDirectory,
+            client);
+        var outdatedDirectory = Path.Combine(manager.ModelsDirectory, "en-zh");
+        Directory.CreateDirectory(outdatedDirectory);
+        var outdatedFile = Path.Combine(outdatedDirectory, "old-model.bin");
+        File.WriteAllText(outdatedFile, "outdated");
+        File.SetAttributes(outdatedFile, FileAttributes.ReadOnly);
+
+        var result = await manager.InstallAsync(plan);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.True(manager.GetStatus(plan).IsInstalled);
+        Assert.Equal(
+            installed,
+            File.ReadAllBytes(Path.Combine(
+                manager.ModelsDirectory,
+                "en-zh",
+                "model.bin")));
+        Assert.Empty(Directory.EnumerateDirectories(
+            manager.ModelsDirectory,
+            ".*.old"));
+    }
+
+    [Fact]
     public async Task RejectsAFileThatDoesNotMatchTheManifest()
     {
         var expected = Encoding.UTF8.GetBytes("expected model");
@@ -108,8 +154,9 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
             "中文 → English",
             "https://models.example/",
             [direction]);
-        using var client = new HttpClient(new ModelDownloadHandler(
-            new Dictionary<string, byte[]> { ["/model.gz"] = compressed }));
+        var handler = new ModelDownloadHandler(
+            new Dictionary<string, byte[]> { ["/model.gz"] = compressed });
+        using var client = new HttpClient(handler);
         using var manager = new OfflineTranslationModelManager(
             _testDirectory,
             client);
@@ -118,6 +165,7 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
 
         Assert.False(result.IsSuccess);
         Assert.Contains("完整性校验", result.ErrorMessage);
+        Assert.Equal(1, handler.RequestCount);
         Assert.False(manager.GetStatus(plan).IsInstalled);
         Assert.False(Directory.Exists(Path.Combine(
             manager.ModelsDirectory,
@@ -125,10 +173,52 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
     }
 
     [Fact]
-    public void FactorySelectsTheOfflineProviderWithoutOnlineConsent()
+    public async Task RetriesATransientDownloadFailureAutomatically()
+    {
+        var installed = Encoding.UTF8.GetBytes("resilient offline model");
+        var compressed = Compress(installed);
+        var file = CreateFile("model.gz", "model.bin", compressed, installed);
+        var plan = new OfflineTranslationModelPlan(
+            "en",
+            "zh",
+            "English → 中文",
+            "https://models.example/",
+            [new OfflineTranslationDirection(
+                "en-zh",
+                "English → 中文",
+                [file],
+                "relative-paths: true\n",
+                "test-en-zh-v1")]);
+        var handler = new TransientFailureDownloadHandler(compressed);
+        using var client = new HttpClient(handler);
+        using var manager = new OfflineTranslationModelManager(
+            _testDirectory,
+            client);
+        var progressValues = new List<OfflineTranslationDownloadProgress>();
+
+        var result = await manager.InstallAsync(
+            plan,
+            new SynchronousProgress<OfflineTranslationDownloadProgress>(
+                progressValues.Add));
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(2, handler.RequestCount);
+        Assert.Contains(progressValues, value =>
+            value.CurrentFileName.Contains("自动重试", StringComparison.Ordinal));
+        Assert.Equal(
+            installed,
+            File.ReadAllBytes(Path.Combine(
+                manager.ModelsDirectory,
+                "en-zh",
+                "model.bin")));
+    }
+
+    [Fact]
+    public void LegacyOfflineModeMigratesToOfflineFirstAutomaticFallback()
     {
         var settings = AppSettings.CreateDefault() with
         {
+            SettingsVersion = 2,
             TranslationMode = TranslationMode.Offline,
             SendTextToOnlineTranslation = false,
         };
@@ -144,11 +234,17 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
             client,
             manager);
 
-        Assert.IsType<OfflineTranslationProvider>(provider);
+        var ordered = Assert.IsType<OrderedTranslationProvider>(provider);
+        Assert.Equal(
+            [
+                TranslationProviderFactory.OfflineProviderId,
+                TranslationProviderFactory.OpenAiCompatibleProviderId,
+            ],
+            ordered.ProviderIds);
     }
 
     [Fact]
-    public void LegacyOnlineConsentMigratesToOnlineMode()
+    public void LegacyOnlineConsentMigratesToOnlineFirstAutomaticFallback()
     {
         var settings = (AppSettings.CreateDefault() with
         {
@@ -157,9 +253,12 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
             SendTextToOnlineTranslation = true,
         }).Normalize();
 
-        Assert.Equal(TranslationMode.Online, settings.TranslationMode);
+        Assert.Equal(TranslationMode.Automatic, settings.TranslationMode);
         Assert.True(settings.SendTextToOnlineTranslation);
-        Assert.Equal(2, settings.SettingsVersion);
+        Assert.Equal(3, settings.SettingsVersion);
+        Assert.Equal(
+            [TranslationProviderKind.Online, TranslationProviderKind.Offline],
+            settings.TranslationProviderPriority);
     }
 
     [Fact]
@@ -205,6 +304,30 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
 
         Assert.True(result.IsSuccess, result.ErrorMessage);
         Assert.Equal("你好，世界。", result.Text);
+    }
+
+    [Fact]
+    public async Task TechnicalFilePathsArePreservedWithoutLanguageDetection()
+    {
+        using var manager = new OfflineTranslationModelManager(_testDirectory);
+        var detector = new StubLanguageDetector("mg");
+        var provider = new OfflineTranslationProvider(manager, detector);
+        string[] paths =
+        [
+            "electron/main.ts",
+            "electron/migration.ts",
+            "electron/preload.ts",
+            "AGENTS.md",
+        ];
+
+        var result = await provider.TranslateSegmentsAsync(
+            paths,
+            "auto",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(paths, result.Segments);
+        Assert.Equal(0, detector.CallCount);
     }
 
     [Fact]
@@ -376,6 +499,28 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
         }
     }
 
+    private sealed class TransientFailureDownloadHandler(byte[] response)
+        : HttpMessageHandler
+    {
+        public int RequestCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            RequestCount++;
+            if (RequestCount == 1)
+            {
+                throw new HttpRequestException("模拟网络连接中断。");
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(response),
+            });
+        }
+    }
+
     private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
     {
         public void Report(T value) => report(value);
@@ -393,7 +538,12 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
     private sealed class StubLanguageDetector(string languageCode)
         : IOfflineLanguageDetector
     {
-        public OfflineLanguageDetectionResult Detect(string text) =>
-            new(languageCode, 1, true);
+        public int CallCount { get; private set; }
+
+        public OfflineLanguageDetectionResult Detect(string text)
+        {
+            CallCount++;
+            return new OfflineLanguageDetectionResult(languageCode, 1, true);
+        }
     }
 }

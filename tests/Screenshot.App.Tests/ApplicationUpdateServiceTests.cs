@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
+using Screenshot.App.Core;
 using Screenshot.App.Update;
 
 namespace Screenshot.App.Tests;
@@ -270,20 +271,34 @@ public sealed class ApplicationUpdateServiceTests
     }
 
     [Fact]
-    public void PortableApplyReplacesProgramButPreservesScreenshotData()
+    public void PortableApplyPreservesUserDataAndDownloadedTranslationModels()
     {
         var root = CreateTemporaryDirectory();
         var packagePath = Path.Combine(root, "update.zip");
         var target = Path.Combine(root, "target");
         Directory.CreateDirectory(Path.Combine(target, "ScreenshotData"));
+        Directory.CreateDirectory(Path.Combine(
+            target,
+            AppMetadata.TranslationModelsDirectoryName,
+            "en-zh"));
         File.WriteAllText(Path.Combine(target, "SnapCut.exe"), "old");
         File.WriteAllText(
             Path.Combine(target, "ScreenshotData", "settings.json"),
             "personal");
+        var modelPath = Path.Combine(
+            target,
+            AppMetadata.TranslationModelsDirectoryName,
+            "en-zh",
+            "model.bin");
+        File.WriteAllText(modelPath, "downloaded-model");
         using (var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create))
         {
             WriteEntry(archive, "SnapCut.exe", "new");
             WriteEntry(archive, "ScreenshotData/settings.json", "must-not-replace");
+            WriteEntry(
+                archive,
+                "TranslationModels/en-zh/model.bin",
+                "must-not-replace");
         }
 
         try
@@ -297,6 +312,7 @@ public sealed class ApplicationUpdateServiceTests
                     target,
                     "ScreenshotData",
                     "settings.json")));
+            Assert.Equal("downloaded-model", File.ReadAllText(modelPath));
         }
         finally
         {
