@@ -1,4 +1,5 @@
 using System.Windows;
+using Screenshot.App.Infrastructure;
 
 namespace Screenshot.App.Capture;
 
@@ -13,6 +14,7 @@ public partial class CaptureHistoryWindow : Window
         ArgumentNullException.ThrowIfNull(historyService);
 
         InitializeComponent();
+        WindowPlacementService.Track(this, WindowPlacementKeys.CaptureHistory);
         DataContext = historyService;
         _saveDirectory = string.IsNullOrWhiteSpace(saveDirectory)
             ? Core.AppMetadata.DefaultCaptureDirectory

@@ -15,9 +15,16 @@ public enum WindowCloseBehavior
     ExitApplication,
 }
 
+public enum TranslationMode
+{
+    Disabled,
+    Online,
+    Offline,
+}
+
 public sealed record AppSettings
 {
-    public int SettingsVersion { get; init; } = 1;
+    public int SettingsVersion { get; init; } = 2;
 
     public string SaveDirectory { get; init; } = GetDefaultSaveDirectory();
 
@@ -60,6 +67,9 @@ public sealed record AppSettings
 
     public string TranslationModel { get; init; } = "gpt-4.1-mini";
 
+    public TranslationMode TranslationMode { get; init; } =
+        TranslationMode.Disabled;
+
     public bool KeepHistory { get; init; }
 
     public int HistoryLimit { get; init; } = 20;
@@ -71,13 +81,29 @@ public sealed record AppSettings
         return new AppSettings();
     }
 
+    public TranslationMode ResolveTranslationMode()
+    {
+        if (!Enum.IsDefined(TranslationMode))
+        {
+            return TranslationMode.Disabled;
+        }
+
+        return TranslationMode == TranslationMode.Disabled &&
+               SendTextToOnlineTranslation
+            ? TranslationMode.Online
+            : TranslationMode;
+    }
+
     public AppSettings Normalize()
     {
         var defaults = CreateDefault();
+        // Settings written before translation modes existed only stored the
+        // online-consent flag. Preserve those users' existing configuration.
+        var translationMode = ResolveTranslationMode();
 
         return this with
         {
-            SettingsVersion = Math.Max(SettingsVersion, 1),
+            SettingsVersion = Math.Max(SettingsVersion, 2),
             CloseBehavior = Enum.IsDefined(CloseBehavior)
                 ? CloseBehavior
                 : defaults.CloseBehavior,
@@ -108,6 +134,9 @@ public sealed record AppSettings
             TranslationModel = string.IsNullOrWhiteSpace(TranslationModel)
                 ? defaults.TranslationModel
                 : TranslationModel.Trim(),
+            TranslationMode = translationMode,
+            SendTextToOnlineTranslation =
+                translationMode == TranslationMode.Online,
             HistoryLimit = Math.Clamp(HistoryLimit, 0, 100),
         };
     }

@@ -61,6 +61,33 @@ public sealed class ApplicationUpdateServiceTests
     }
 
     [Fact]
+    public async Task FallsBackToLegacyManifestNameWithoutChangingPackageNames()
+    {
+        var package = Encoding.UTF8.GetBytes("package");
+        var manifest = CreateManifest("2.3.0", package)
+            .Replace("Screenshot-Setup-", "SnapCut-Setup-")
+            .Replace("Screenshot-Portable-", "SnapCut-Portable-");
+        var handler = new ManifestNameFallbackHandler(manifest);
+        using var client = new HttpClient(handler);
+        using var service = new ApplicationUpdateService(
+            client,
+            new Uri("https://github.com/SnapCut-Update.json"),
+            CreateTemporaryPath(),
+            legacyManifestUri: new Uri(
+                "https://github.com/Screenshot-Update.json"));
+
+        var result = await service.CheckAsync(new Version(2, 2, 2));
+
+        Assert.True(result.IsSuccess, result.Message);
+        Assert.Equal(
+            ["SnapCut-Update.json", "Screenshot-Update.json"],
+            handler.RequestedFileNames);
+        Assert.Equal(
+            "SnapCut-Setup-2.3.0-win-x64.exe",
+            result.AvailableUpdate!.Installer.FileName);
+    }
+
+    [Fact]
     public async Task ReportsCurrentVersionAsUpToDate()
     {
         var package = Encoding.UTF8.GetBytes("package");
@@ -77,6 +104,85 @@ public sealed class ApplicationUpdateServiceTests
         Assert.True(result.IsSuccess);
         Assert.Null(result.AvailableUpdate);
         Assert.Contains("最新版本", result.Message);
+    }
+
+    [Fact]
+    public async Task LoadsFormalReleaseHistoryWithDatesNotesAndVerifiedPackages()
+    {
+        var package = Encoding.UTF8.GetBytes("package");
+        var historyJson = """
+        [
+          {
+            "tag_name": "v2.2.1",
+            "name": "SnapCut 2.2.1",
+            "body": "## SnapCut 2.2.1\n\n- 修复长截图接缝。\n\n## English\n\n- English notes.",
+            "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.2.1",
+            "published_at": "2026-07-29T12:39:05Z",
+            "draft": false,
+            "prerelease": false,
+            "assets": [
+              { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/releases/v2.2.1/Screenshot-Update.json" },
+              { "name": "Screenshot-Setup-2.2.1-win-x64.exe", "browser_download_url": "https://github.com/releases/v2.2.1/Screenshot-Setup-2.2.1-win-x64.exe" },
+              { "name": "Screenshot-Portable-2.2.1-win-x64.zip", "browser_download_url": "https://github.com/releases/v2.2.1/Screenshot-Portable-2.2.1-win-x64.zip" }
+            ]
+          },
+          {
+            "tag_name": "v2.2.2",
+            "name": "SnapCut 2.2.2",
+            "body": "- 修复版本提示。",
+            "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.2.2",
+            "published_at": "2026-07-29T13:11:46Z",
+            "draft": false,
+            "prerelease": false,
+            "assets": [
+              { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/releases/v2.2.2/SnapCut-Update.json" },
+              { "name": "SnapCut-Setup-2.2.2-win-x64.exe", "browser_download_url": "https://github.com/releases/v2.2.2/SnapCut-Setup-2.2.2-win-x64.exe" },
+              { "name": "SnapCut-Portable-2.2.2-win-x64.zip", "browser_download_url": "https://github.com/releases/v2.2.2/SnapCut-Portable-2.2.2-win-x64.zip" }
+            ]
+          },
+          {
+            "tag_name": "v3.0.0-preview",
+            "name": "Preview",
+            "draft": false,
+            "prerelease": true,
+            "assets": []
+          }
+        ]
+        """;
+        using var client = new HttpClient(new ReleaseHistoryResponseHandler(
+            historyJson,
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["v2.2.1"] = CreateManifest("2.2.1", package),
+                ["v2.2.2"] = CreateManifest("2.2.2", package)
+                    .Replace("Screenshot-Setup-", "SnapCut-Setup-")
+                    .Replace("Screenshot-Portable-", "SnapCut-Portable-"),
+            }));
+        using var service = new ApplicationUpdateService(
+            client,
+            new Uri("https://github.com/latest.json"),
+            CreateTemporaryPath(),
+            new Uri("https://github.com/releases.json"));
+
+        var result = await service.GetReleaseHistoryAsync();
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(2, result.Releases.Count);
+        Assert.Equal(new Version(2, 2, 2), result.Releases[0].Version);
+        Assert.Equal(
+            "SnapCut-Setup-2.2.2-win-x64.exe",
+            result.Releases[0].InstallableUpdate!.Installer.FileName);
+        var rollback = result.Releases[1];
+        Assert.Equal(new Version(2, 2, 1), rollback.Version);
+        Assert.Equal(new DateTimeOffset(2026, 7, 29, 12, 39, 5, TimeSpan.Zero), rollback.PublishedAt);
+        Assert.Contains("• 修复长截图接缝。", rollback.ReleaseNotes);
+        Assert.DoesNotContain("SnapCut 2.2.1", rollback.ReleaseNotes);
+        Assert.DoesNotContain("English notes", rollback.ReleaseNotes);
+        Assert.NotNull(rollback.InstallableUpdate);
+        Assert.Contains(
+            "/releases/download/v2.2.1/",
+            rollback.InstallableUpdate.Installer.GitHubDownloadUri.AbsolutePath);
+        Assert.Null(rollback.PackageWarning);
     }
 
     [Fact]
@@ -335,6 +441,44 @@ public sealed class ApplicationUpdateServiceTests
         }
     }
 
+    private sealed class ReleaseHistoryResponseHandler(
+        string historyJson,
+        IReadOnlyDictionary<string, string> manifests) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            string content;
+            if (path.EndsWith("/releases.json", StringComparison.OrdinalIgnoreCase))
+            {
+                content = historyJson;
+            }
+            else
+            {
+                var tag = manifests.Keys.FirstOrDefault(key =>
+                    path.Contains($"/{key}/", StringComparison.OrdinalIgnoreCase));
+                if (tag is null)
+                {
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)
+                    {
+                        RequestMessage = request,
+                    });
+                }
+
+                content = manifests[tag];
+            }
+
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(content, Encoding.UTF8, "application/json"),
+                RequestMessage = request,
+            };
+            return Task.FromResult(response);
+        }
+    }
+
     private sealed class MirrorFallbackResponseHandler(byte[] package) : HttpMessageHandler
     {
         public List<string> RequestedHosts { get; } = [];
@@ -353,6 +497,35 @@ public sealed class ApplicationUpdateServiceTests
                 : new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new ByteArrayContent(package),
+                    RequestMessage = request,
+                });
+        }
+    }
+
+    private sealed class ManifestNameFallbackHandler(string manifest)
+        : HttpMessageHandler
+    {
+        public List<string> RequestedFileNames { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var fileName = Path.GetFileName(request.RequestUri!.AbsolutePath);
+            RequestedFileNames.Add(fileName);
+            return Task.FromResult(fileName.StartsWith(
+                "SnapCut-",
+                StringComparison.OrdinalIgnoreCase)
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                {
+                    RequestMessage = request,
+                }
+                : new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        manifest,
+                        Encoding.UTF8,
+                        "application/json"),
                     RequestMessage = request,
                 });
         }

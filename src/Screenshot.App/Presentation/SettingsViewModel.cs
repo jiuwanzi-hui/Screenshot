@@ -25,7 +25,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private string _pinHotKey;
     private string _openSettingsHotKey;
     private string _ocrLanguageTag;
-    private bool _sendTextToOnlineTranslation;
+    private TranslationMode _translationMode;
     private string _translationProvider;
     private string _translationEndpoint;
     private string _translationTargetLanguage;
@@ -49,7 +49,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _pinHotKey = settings.PinHotKey;
         _openSettingsHotKey = settings.OpenSettingsHotKey;
         _ocrLanguageTag = settings.OcrLanguageTag;
-        _sendTextToOnlineTranslation = settings.SendTextToOnlineTranslation;
+        _translationMode = settings.ResolveTranslationMode();
         _translationProvider = TranslationProviderFactory.ResolveProviderId(
             settings.TranslationProvider);
         _translationEndpoint = settings.TranslationEndpoint;
@@ -78,18 +78,26 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             "OpenAI 兼容接口"),
     ];
 
-    public IReadOnlyList<SettingOption> TranslationTargetLanguageOptions { get; } =
+    public IReadOnlyList<SettingOption> TranslationModeOptions { get; } =
     [
-        new("zh-Hans", "简体中文（zh-Hans）"),
-        new("zh-Hant", "繁體中文（zh-Hant）"),
-        new("en", "English（en）"),
-        new("ja", "日本語（ja）"),
-        new("ko", "한국어（ko）"),
-        new("fr", "Français（fr）"),
-        new("de", "Deutsch（de）"),
-        new("es", "Español（es）"),
-        new("ru", "Русский（ru）"),
+        new(nameof(TranslationMode.Online), "在线大模型翻译"),
+        new(nameof(TranslationMode.Offline), "离线模型翻译"),
+        new(nameof(TranslationMode.Disabled), "关闭翻译"),
     ];
+
+    public IReadOnlyList<SettingOption> TranslationTargetLanguageOptions { get; } =
+        TranslationLanguageCatalog.Languages
+            .Select(language => new SettingOption(
+                language.Tag,
+                $"{language.DisplayName}（{language.Tag}）"))
+            .ToArray();
+
+    public IReadOnlyList<SettingOption> OfflineTranslationTargetLanguageOptions { get; } =
+        TranslationLanguageCatalog.OfflineTargetLanguages
+            .Select(language => new SettingOption(
+                language.Tag,
+                $"{language.DisplayName}（{language.Tag}）"))
+            .ToArray();
 
     public ObservableCollection<string> TranslationModelOptions { get; } = new(
     [
@@ -178,10 +186,10 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _ocrLanguageTag, value);
     }
 
-    public bool SendTextToOnlineTranslation
+    public TranslationMode TranslationMode
     {
-        get => _sendTextToOnlineTranslation;
-        set => SetProperty(ref _sendTextToOnlineTranslation, value);
+        get => _translationMode;
+        set => SetProperty(ref _translationMode, value);
     }
 
     public string TranslationProvider
@@ -237,7 +245,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             PinHotKey = PinHotKey,
             OpenSettingsHotKey = OpenSettingsHotKey,
             OcrLanguageTag = OcrLanguageTag,
-            SendTextToOnlineTranslation = SendTextToOnlineTranslation,
+            TranslationMode = TranslationMode,
+            SendTextToOnlineTranslation =
+                TranslationMode == TranslationMode.Online,
             TranslationProvider = TranslationProvider,
             TranslationEndpoint = TranslationEndpoint,
             TranslationTargetLanguage = TranslationTargetLanguage,
@@ -261,7 +271,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         PinHotKey = settings.PinHotKey;
         OpenSettingsHotKey = settings.OpenSettingsHotKey;
         OcrLanguageTag = settings.OcrLanguageTag;
-        SendTextToOnlineTranslation = settings.SendTextToOnlineTranslation;
+        TranslationMode = settings.ResolveTranslationMode();
         TranslationProvider = TranslationProviderFactory.ResolveProviderId(
             settings.TranslationProvider);
         TranslationEndpoint = settings.TranslationEndpoint;

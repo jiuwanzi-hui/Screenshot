@@ -1,0 +1,31 @@
+SnapCut third-party notices
+===========================
+
+BergamotTranslatorSharp
+Copyright (c) its contributors
+License: Mozilla Public License 2.0 (MPL-2.0)
+Source: https://github.com/Freeesia/BergamotTranslatorSharp
+
+Bergamot Translator
+Copyright (c) Mozilla and its contributors
+License: Mozilla Public License 2.0 (MPL-2.0)
+Source: https://github.com/browsermt/bergamot-translator
+
+Panlingo.LanguageIdentification.CLD3
+Copyright (c) 2024-2026 Alexander Gluschenko
+License: MIT
+Source: https://github.com/gluschenko/panlingo
+
+Compact Language Detector 3 (CLD3)
+Copyright (c) 2016 Google Inc.
+License: Apache License 2.0
+Source: https://github.com/google/cld3
+
+Optional offline translation models are not bundled with SnapCut. When the
+user confirms a download, the model files are fetched directly from Mozilla's
+official Firefox Translations model registry:
+https://storage.googleapis.com/moz-fx-translations-data--303e-prod-translations-data/db/models.json
+
+The notices and license files of the projects above remain available from
+their source repositories. SnapCut does not claim ownership of those projects
+or model files.

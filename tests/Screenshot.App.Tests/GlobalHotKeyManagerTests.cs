@@ -185,6 +185,75 @@ public sealed class GlobalHotKeyManagerTests
         Assert.Equal(0, registeredAfterClear);
     }
 
+    [Fact]
+    public void KeyboardCaptureConsumesKeyMessagesAndReportsOnlyKeyDown()
+    {
+        using var completed = new ManualResetEventSlim();
+        Exception? exception = null;
+        var inputs = new List<HotKeyCaptureInputEventArgs>();
+        var consumedBeforeCapture = true;
+        var consumedAltDown = false;
+        var consumedKeyDown = false;
+        var consumedKeyUp = false;
+        var consumedAltUp = false;
+        var consumedAfterCapture = true;
+
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                using var manager = new GlobalHotKeyManager();
+                manager.HotKeyCaptureInputReceived += (_, eventArgs) =>
+                    inputs.Add(eventArgs);
+
+                consumedBeforeCapture = manager.ProcessKeyboardInputForCapture(
+                    'A',
+                    isKeyDown: true);
+                manager.BeginKeyboardCapture();
+                consumedAltDown = manager.ProcessKeyboardInputForCapture(
+                    virtualKey: 0x12,
+                    isKeyDown: true);
+                consumedKeyDown = manager.ProcessKeyboardInputForCapture(
+                    'A',
+                    isKeyDown: true);
+                consumedKeyUp = manager.ProcessKeyboardInputForCapture(
+                    'A',
+                    isKeyDown: false);
+                consumedAltUp = manager.ProcessKeyboardInputForCapture(
+                    virtualKey: 0x12,
+                    isKeyDown: false);
+                manager.EndKeyboardCapture();
+                consumedAfterCapture = manager.ProcessKeyboardInputForCapture(
+                    'A',
+                    isKeyDown: true);
+            }
+            catch (Exception caughtException)
+            {
+                exception = caughtException;
+            }
+            finally
+            {
+                completed.Set();
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+
+        Assert.True(completed.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(thread.Join(TimeSpan.FromSeconds(5)));
+        Assert.Null(exception);
+        Assert.False(consumedBeforeCapture);
+        Assert.True(consumedAltDown);
+        Assert.True(consumedKeyDown);
+        Assert.True(consumedKeyUp);
+        Assert.True(consumedAltUp);
+        Assert.False(consumedAfterCapture);
+        var input = Assert.Single(inputs);
+        Assert.Equal((uint)'A', input.VirtualKey);
+        Assert.Equal(HotKeyModifiers.Alt, input.Modifiers);
+    }
+
     private static HotKeyBinding[] CreateBindings(
         HotKeyModifiers modifiers,
         uint firstVirtualKey)

@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
+using Screenshot.App.Infrastructure;
 
 namespace Screenshot.App.Capture;
 
@@ -14,6 +15,7 @@ public partial class CapturePreviewWindow : Window
     private readonly CapturedImage _capturedImage;
     private readonly string _saveDirectory;
     private readonly CaptureHistoryItem? _historyItem;
+    private readonly bool _hasSavedPlacement;
     private bool _fitToWidth = true;
     private bool _resizeWindowToImage;
     private bool _fitUpdatePending;
@@ -36,6 +38,9 @@ public partial class CapturePreviewWindow : Window
         _historyItem = historyItem;
 
         InitializeComponent();
+        _hasSavedPlacement = WindowPlacementService.Track(
+            this,
+            WindowPlacementKeys.CapturePreview);
         DataContext = _capturedImage;
         Loaded += OnLoaded;
         PreviewScrollViewer.SizeChanged += OnPreviewViewportSizeChanged;
@@ -57,7 +62,7 @@ public partial class CapturePreviewWindow : Window
     public void ConfigureForHistoryView()
     {
         Title = "截图历史查看";
-        _resizeWindowToImage = true;
+        _resizeWindowToImage = !_hasSavedPlacement;
         ConfirmButton.Visibility = Visibility.Collapsed;
         CloseButton.Visibility = Visibility.Collapsed;
         ReselectButton.Visibility = Visibility.Collapsed;

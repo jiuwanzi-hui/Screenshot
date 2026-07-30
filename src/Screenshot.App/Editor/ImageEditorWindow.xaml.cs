@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Screenshot.App.Capture;
+using Screenshot.App.Infrastructure;
 using WpfButton = System.Windows.Controls.Button;
 using WpfColor = System.Windows.Media.Color;
 using WpfColorConverter = System.Windows.Media.ColorConverter;
@@ -34,6 +35,7 @@ public partial class ImageEditorWindow : Window
         _saveDirectory = saveDirectory;
 
         InitializeComponent();
+        WindowPlacementService.Track(this, WindowPlacementKeys.ImageEditor);
         PopulateEmojiPalette();
         EditorCanvas.HistoryChanged += OnEditorHistoryChanged;
 

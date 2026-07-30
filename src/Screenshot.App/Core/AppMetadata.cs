@@ -17,6 +17,7 @@ public static class AppMetadata
     public const string DiagnosticsDirectoryName = "Diagnostics";
     public const string HistoryCacheDirectoryName = "HistoryCache";
     public const string UpdatesDirectoryName = "Updates";
+    public const string TranslationModelsDirectoryName = "TranslationModels";
     public const string StartupRegistrationValueName = "Screenshot.App";
 
     public static bool IsInstalled => File.Exists(Path.Combine(
@@ -33,6 +34,10 @@ public static class AppMetadata
     public static string SettingsPath => Path.Combine(
         DataDirectoryPath,
         "settings.json");
+
+    public static string WindowPlacementsPath => Path.Combine(
+        DataDirectoryPath,
+        "window-placements.json");
 
     public static string TranslationCredentialsPath => Path.Combine(
         DataDirectoryPath,
@@ -53,6 +58,10 @@ public static class AppMetadata
     public static string UpdatesDirectoryPath => Path.Combine(
         DataDirectoryPath,
         UpdatesDirectoryName);
+
+    public static string TranslationModelsDirectoryPath => Path.Combine(
+        AppContext.BaseDirectory,
+        TranslationModelsDirectoryName);
 
     public static Version CurrentVersion =>
         Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(0, 0, 0);

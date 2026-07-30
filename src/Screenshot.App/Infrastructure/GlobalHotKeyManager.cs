@@ -39,6 +39,21 @@ public sealed class HotKeyPressedEventArgs : EventArgs
     }
 }
 
+public sealed class HotKeyCaptureInputEventArgs : EventArgs
+{
+    public HotKeyCaptureInputEventArgs(
+        uint virtualKey,
+        HotKeyModifiers modifiers)
+    {
+        VirtualKey = virtualKey;
+        Modifiers = modifiers;
+    }
+
+    public uint VirtualKey { get; }
+
+    public HotKeyModifiers Modifiers { get; }
+}
+
 public sealed class GlobalHotKeyManager : IDisposable
 {
     private const int HotKeyAlreadyRegisteredError = 1409;
@@ -46,10 +61,14 @@ public sealed class GlobalHotKeyManager : IDisposable
     private const int MessageOnlyWindow = -3;
     private const int LowLevelKeyboardHook = 13;
     private const int WindowMessageKeyDown = 0x0100;
+    private const int WindowMessageKeyUp = 0x0101;
     private const int WindowMessageSystemKeyDown = 0x0104;
+    private const int WindowMessageSystemKeyUp = 0x0105;
     private const uint VirtualKeyShift = 0x10;
     private const uint VirtualKeyControl = 0x11;
     private const uint VirtualKeyAlt = 0x12;
+    private const uint VirtualKeyLeftWindows = 0x5B;
+    private const uint VirtualKeyRightWindows = 0x5C;
     private const uint VirtualKeyLeftShift = 0xA0;
     private const uint VirtualKeyRightShift = 0xA1;
     private const uint VirtualKeyLeftControl = 0xA2;
@@ -63,9 +82,11 @@ public sealed class GlobalHotKeyManager : IDisposable
     private readonly DispatcherTimer _preCaptureExpiryTimer;
     private readonly Dictionary<int, HotKeyBinding> _registeredBindings = [];
     private readonly HashSet<HotKeyAction> _preCapturedActions = [];
+    private readonly HashSet<uint> _capturedModifierKeysDown = [];
     private IntPtr _keyboardHook;
     private CapturedImage? _preCapturedScreen;
     private DateTimeOffset _preCapturedAt;
+    private bool _isKeyboardCaptureActive;
     private bool _disposed;
 
     public GlobalHotKeyManager()
@@ -93,8 +114,26 @@ public sealed class GlobalHotKeyManager : IDisposable
 
     public event EventHandler<HotKeyPressedEventArgs>? HotKeyPressed;
 
+    public event EventHandler<HotKeyCaptureInputEventArgs>? HotKeyCaptureInputReceived;
+
     public IReadOnlyList<HotKeyBinding> RegisteredBindings =>
         _registeredBindings.Values.OrderBy(binding => binding.Action).ToArray();
+
+    internal bool IsKeyboardCaptureActive => _isKeyboardCaptureActive;
+
+    public void BeginKeyboardCapture()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ClearPreCapturedScreen();
+        _capturedModifierKeysDown.Clear();
+        _isKeyboardCaptureActive = true;
+    }
+
+    public void EndKeyboardCapture()
+    {
+        _isKeyboardCaptureActive = false;
+        _capturedModifierKeysDown.Clear();
+    }
 
     public IReadOnlyList<HotKeyBinding> SuspendRegistrations()
     {
@@ -161,6 +200,7 @@ public sealed class GlobalHotKeyManager : IDisposable
         }
 
         _disposed = true;
+        EndKeyboardCapture();
         UnregisterAll();
         if (_keyboardHook != IntPtr.Zero)
         {
@@ -277,16 +317,92 @@ public sealed class GlobalHotKeyManager : IDisposable
         IntPtr wParam,
         IntPtr lParam)
     {
-        if (code >= 0 &&
-            (wParam.ToInt32() == WindowMessageKeyDown ||
-             wParam.ToInt32() == WindowMessageSystemKeyDown))
+        if (code >= 0)
         {
             var keyboardData = Marshal.PtrToStructure<NativeMethods.LowLevelKeyboardData>(
                 lParam);
-            TryPreCaptureTransientUi(keyboardData.VirtualKey);
+            var message = wParam.ToInt32();
+            var isKeyDown = message is
+                WindowMessageKeyDown or WindowMessageSystemKeyDown;
+            var isKeyUp = message is
+                WindowMessageKeyUp or WindowMessageSystemKeyUp;
+
+            if ((isKeyDown || isKeyUp) &&
+                ProcessKeyboardInputForCapture(
+                    keyboardData.VirtualKey,
+                    isKeyDown))
+            {
+                return new IntPtr(1);
+            }
+
+            if (isKeyDown)
+            {
+                TryPreCaptureTransientUi(keyboardData.VirtualKey);
+            }
         }
 
         return NativeMethods.CallNextHookEx(_keyboardHook, code, wParam, lParam);
+    }
+
+    internal bool ProcessKeyboardInputForCapture(
+        uint virtualKey,
+        bool isKeyDown)
+    {
+        if (!_isKeyboardCaptureActive)
+        {
+            return false;
+        }
+
+        if (IsModifierKey(virtualKey))
+        {
+            if (isKeyDown)
+            {
+                _capturedModifierKeysDown.Add(virtualKey);
+            }
+            else
+            {
+                _capturedModifierKeysDown.Remove(virtualKey);
+            }
+
+            return true;
+        }
+
+        if (isKeyDown)
+        {
+            HotKeyCaptureInputReceived?.Invoke(
+                this,
+                new HotKeyCaptureInputEventArgs(
+                    virtualKey,
+                    GetCapturedModifiers()));
+        }
+
+        return true;
+    }
+
+    private HotKeyModifiers GetCapturedModifiers()
+    {
+        var modifiers = HotKeyModifiers.None;
+        if (_capturedModifierKeysDown.Any(IsControlKey))
+        {
+            modifiers |= HotKeyModifiers.Control;
+        }
+
+        if (_capturedModifierKeysDown.Any(IsAltKey))
+        {
+            modifiers |= HotKeyModifiers.Alt;
+        }
+
+        if (_capturedModifierKeysDown.Any(IsShiftKey))
+        {
+            modifiers |= HotKeyModifiers.Shift;
+        }
+
+        if (_capturedModifierKeysDown.Any(IsWindowsKey))
+        {
+            modifiers |= HotKeyModifiers.Windows;
+        }
+
+        return modifiers;
     }
 
     private void TryPreCaptureTransientUi(uint virtualKey)
@@ -402,16 +518,35 @@ public sealed class GlobalHotKeyManager : IDisposable
             modifiers |= HotKeyModifiers.Shift;
         }
 
+        if (IsKeyDown(VirtualKeyLeftWindows) ||
+            IsKeyDown(VirtualKeyRightWindows) ||
+            virtualKey is VirtualKeyLeftWindows or VirtualKeyRightWindows)
+        {
+            modifiers |= HotKeyModifiers.Windows;
+        }
+
         return modifiers;
     }
 
     private static bool IsModifierKey(uint virtualKey)
     {
-        return virtualKey is
-            VirtualKeyShift or VirtualKeyLeftShift or VirtualKeyRightShift or
-            VirtualKeyControl or VirtualKeyLeftControl or VirtualKeyRightControl or
-            VirtualKeyAlt or VirtualKeyLeftAlt or VirtualKeyRightAlt;
+        return IsShiftKey(virtualKey) ||
+            IsControlKey(virtualKey) ||
+            IsAltKey(virtualKey) ||
+            IsWindowsKey(virtualKey);
     }
+
+    private static bool IsShiftKey(uint virtualKey) =>
+        virtualKey is VirtualKeyShift or VirtualKeyLeftShift or VirtualKeyRightShift;
+
+    private static bool IsControlKey(uint virtualKey) =>
+        virtualKey is VirtualKeyControl or VirtualKeyLeftControl or VirtualKeyRightControl;
+
+    private static bool IsAltKey(uint virtualKey) =>
+        virtualKey is VirtualKeyAlt or VirtualKeyLeftAlt or VirtualKeyRightAlt;
+
+    private static bool IsWindowsKey(uint virtualKey) =>
+        virtualKey is VirtualKeyLeftWindows or VirtualKeyRightWindows;
 
     private static bool IsKeyDown(uint virtualKey)
     {

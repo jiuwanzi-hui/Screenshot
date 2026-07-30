@@ -3,6 +3,7 @@ using Screenshot.App.Core;
 using Screenshot.App.Infrastructure;
 using Screenshot.App.Presentation;
 using Screenshot.App.Text;
+using Screenshot.App.Update;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -71,13 +72,83 @@ public sealed class MainWindowLifecycleTests
             Assert.True(captureBox.Focus());
             Keyboard.Focus(captureBox);
             Assert.True(window.IsCapturingHotKey);
+            Assert.True(hotKeyManager.IsKeyboardCaptureActive);
 
             window.Close();
 
             Assert.False(window.IsCapturingHotKey);
+            Assert.False(hotKeyManager.IsKeyboardCaptureActive);
             window.ShowFromTray();
             window.RequestExit();
         });
+    }
+
+    [Fact]
+    public void HookedKeyboardInputUpdatesTheFocusedShortcutAndEndsCaptureMode()
+    {
+        var settingsPath = Path.Combine(
+            Path.GetTempPath(),
+            "Screenshot.App.Tests",
+            $"hooked-hotkey-{Guid.NewGuid():N}.json");
+        var settingsStore = new SettingsStore(settingsPath);
+
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var settings = AppSettings.CreateDefault() with
+            {
+                SaveDirectory = Path.Combine(
+                    Path.GetTempPath(),
+                    "Screenshot.App.Tests",
+                    "hooked-hotkey-captures"),
+                RegionCaptureHotKey = "Ctrl+Alt+Shift+F13",
+                OcrHotKey = "Ctrl+Alt+Shift+F14",
+                PinHotKey = "Ctrl+Alt+Shift+F15",
+                OpenSettingsHotKey = "Ctrl+Alt+Shift+F16",
+            };
+            var window = new MainWindow(
+                settings,
+                settingsStore,
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+
+            window.ShowFromTray();
+            var navigation = Assert.IsType<ListBox>(
+                window.FindName("SettingsNavigation"));
+            navigation.SelectedIndex = 1;
+            window.UpdateLayout();
+            var captureBox = Assert.IsType<HotKeyCaptureBox>(
+                window.FindName("RegionCaptureHotKeyBox"));
+            Assert.True(captureBox.Focus());
+            Keyboard.Focus(captureBox);
+
+            var consumedControl = hotKeyManager.ProcessKeyboardInputForCapture(
+                virtualKey: 0x11,
+                isKeyDown: true);
+            var consumedAlt = hotKeyManager.ProcessKeyboardInputForCapture(
+                virtualKey: 0x12,
+                isKeyDown: true);
+            var consumedShift = hotKeyManager.ProcessKeyboardInputForCapture(
+                virtualKey: 0x10,
+                isKeyDown: true);
+            var consumedKey = hotKeyManager.ProcessKeyboardInputForCapture(
+                virtualKey: 0x81,
+                isKeyDown: true);
+
+            Assert.True(consumedControl);
+            Assert.True(consumedAlt);
+            Assert.True(consumedShift);
+            Assert.True(consumedKey);
+            Assert.Equal("Ctrl+Alt+Shift+F18", captureBox.Text);
+            Assert.False(window.IsCapturingHotKey);
+            Assert.False(hotKeyManager.IsKeyboardCaptureActive);
+            window.RequestExit();
+        });
+
+        var loaded = settingsStore.Load();
+        Assert.Null(loaded.Warning);
+        Assert.Equal("Ctrl+Alt+Shift+F18", loaded.Settings.RegionCaptureHotKey);
     }
 
     [Fact]
@@ -135,13 +206,95 @@ public sealed class MainWindowLifecycleTests
             Assert.IsType<TextBlock>(window.FindName("CurrentVersionText"));
             Assert.IsType<Button>(window.FindName("CheckForUpdatesButton"));
             Assert.IsType<Button>(window.FindName("InstallUpdateButton"));
+            Assert.IsType<ComboBox>(window.FindName("ReleaseHistorySelector"));
+            Assert.IsType<Border>(window.FindName("SelectedReleaseDetailsPanel"));
+            Assert.IsType<Button>(window.FindName("SelectedReleaseActionButton"));
             var navigation = Assert.IsType<ListBox>(window.FindName("SettingsNavigation"));
+            Assert.Null(navigation.FocusVisualStyle);
+            Assert.All(
+                navigation.Items.Cast<ListBoxItem>(),
+                item => Assert.Null(item.FocusVisualStyle));
             Assert.Equal(5, navigation.Items.Count);
             navigation.SelectedIndex = 4;
             window.UpdateLayout();
             var updatePanel = Assert.IsType<ScrollViewer>(
                 window.FindName("UpdateSettingsPanel"));
             Assert.Equal(Visibility.Visible, updatePanel.Visibility);
+            window.RequestExit();
+        });
+    }
+
+    [Fact]
+    public void ReleaseHistorySelectsCurrentVersionAndOffersVerifiedRollback()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                AppSettings.CreateDefault(),
+                new SettingsStore(Path.Combine(
+                    Path.GetTempPath(),
+                    "Screenshot.App.Tests",
+                    "release-history-settings.json")),
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+            var rollbackVersion = new Version(2, 2, 1);
+            var rollbackUpdate = new ApplicationUpdateInfo(
+                rollbackVersion,
+                new Uri("https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.2.1"),
+                new ApplicationUpdateAsset(
+                    "Screenshot-Setup-2.2.1-win-x64.exe",
+                    new Uri("https://github.com/Screenshot-Setup-2.2.1-win-x64.exe"),
+                    1,
+                    new string('A', 64)),
+                new ApplicationUpdateAsset(
+                    "Screenshot-Portable-2.2.1-win-x64.zip",
+                    new Uri("https://github.com/Screenshot-Portable-2.2.1-win-x64.zip"),
+                    1,
+                    new string('B', 64)),
+                ApplicationUpdateMirror.GitHub);
+            var history = new ApplicationReleaseHistoryResult(
+                true,
+                [
+                    new ApplicationReleaseInfo(
+                        AppMetadata.CurrentVersion,
+                        $"SnapCut {AppMetadata.DisplayVersion}",
+                        new DateTimeOffset(2026, 7, 30, 9, 0, 0, TimeSpan.FromHours(8)),
+                        "当前版本说明",
+                        new Uri("https://github.com/jiuwanzi-hui/Screenshot/releases/latest"),
+                        null,
+                        null),
+                    new ApplicationReleaseInfo(
+                        rollbackVersion,
+                        "SnapCut 2.2.1",
+                        new DateTimeOffset(2026, 7, 29, 20, 39, 5, TimeSpan.FromHours(8)),
+                        "修复长截图接缝。",
+                        rollbackUpdate.ReleasePage,
+                        rollbackUpdate,
+                        null),
+                ],
+                "已加载 2 个正式版本。");
+
+            window.UpdateReleaseHistory(history);
+
+            var selector = Assert.IsType<ComboBox>(
+                window.FindName("ReleaseHistorySelector"));
+            var details = Assert.IsType<Border>(
+                window.FindName("SelectedReleaseDetailsPanel"));
+            var action = Assert.IsType<Button>(
+                window.FindName("SelectedReleaseActionButton"));
+            Assert.Equal(2, selector.Items.Count);
+            Assert.Equal(Visibility.Visible, details.Visibility);
+            Assert.Equal(Visibility.Collapsed, action.Visibility);
+
+            selector.SelectedIndex = 1;
+
+            Assert.Equal(Visibility.Visible, action.Visibility);
+            Assert.Equal("回退到 2.2.1", action.Content);
+            Assert.Contains(
+                "修复长截图接缝",
+                Assert.IsType<TextBlock>(window.FindName("SelectedReleaseNotesText")).Text);
             window.RequestExit();
         });
     }

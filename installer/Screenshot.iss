@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "2.2.2"
+  #define AppVersion "2.3.0"
 #endif
 
 #define AppName "SnapCut"
@@ -17,7 +17,7 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 AllowNoIcons=yes
 OutputDir=dist
-OutputBaseFilename=Screenshot-Setup-{#AppVersion}-win-x64
+OutputBaseFilename=SnapCut-Setup-{#AppVersion}-win-x64
 SetupIconFile=..\src\Screenshot.App\Assets\Screenshot.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 Compression=lzma2/ultra64
@@ -57,6 +57,10 @@ Type: files; Name: "{app}\Screenshot.dll"
 Type: files; Name: "{app}\Screenshot.pdb"
 Type: files; Name: "{app}\Screenshot.deps.json"
 Type: files; Name: "{app}\Screenshot.runtimeconfig.json"
+
+[UninstallDelete]
+; Offline language packs are downloaded application assets rather than user data.
+Type: filesandordirs; Name: "{app}\TranslationModels"
 
 [Dirs]
 Name: "{app}\ScreenshotData"; Permissions: users-modify
