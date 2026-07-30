@@ -9,7 +9,7 @@
     <AssemblyName>SnapCut</AssemblyName>
     <RootNamespace>Screenshot.App</RootNamespace>
     <ApplicationIcon>Assets\Screenshot.ico</ApplicationIcon>
-    <Version>2.2.2</Version>
+    <Version>2.3.0</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Authors>Screenshot</Authors>
     <Product>SnapCut</Product>
@@ -19,6 +19,13 @@
 
   <ItemGroup>
     <Resource Include="Assets\Screenshot.ico" />
+    <Content Include="THIRD-PARTY-NOTICES.txt"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BergamotTranslatorSharp" Version="0.5.1" />
+    <PackageReference Include="Panlingo.LanguageIdentification.CLD3" Version="0.8.0" />
   </ItemGroup>
 
 </Project>

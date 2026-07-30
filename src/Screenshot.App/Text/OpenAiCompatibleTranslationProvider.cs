@@ -99,60 +99,318 @@ public sealed class OpenAiCompatibleTranslationProvider : ITranslationProvider
                 result.ErrorMessage ?? "翻译失败。");
         }
 
-        try
-        {
-            var json = StripMarkdownCodeFence(result.Text);
-            using var document = JsonDocument.Parse(json);
-            var translations = document.RootElement.GetProperty("translations");
-            var translatedById = new Dictionary<int, string>();
-            foreach (var item in translations.EnumerateArray())
-            {
-                var id = item.GetProperty("id").GetInt32();
-                var translatedText = item.GetProperty("text").GetString();
-                if (id < 0 || id >= segments.Count ||
-                    string.IsNullOrWhiteSpace(translatedText) ||
-                    !translatedById.TryAdd(id, translatedText.Trim()))
-                {
-                    return TranslationSegmentsResult.Failure(
-                        "翻译服务返回的分段结果不完整。");
-                }
-            }
-
-            if (translatedById.Count != segments.Count)
-            {
-                return TranslationSegmentsResult.Failure(
-                    "翻译服务返回的分段结果不完整。");
-            }
-
-            if (Enumerable.Range(0, segments.Count).All(id =>
-                    AreEquivalent(segments[id], translatedById[id])))
-            {
-                return TranslationSegmentsResult.Failure(
-                    "翻译服务原样返回了识别文字；请确认所选模型支持翻译，或文字是否已经是目标语言。");
-            }
-
-            return new TranslationSegmentsResult(
-                true,
-                Enumerable.Range(0, segments.Count)
-                    .Select(id => translatedById[id])
-                    .ToArray(),
-                ErrorMessage: null);
-        }
-        catch (JsonException)
+        var parseStatus = TryParseSegmentTranslations(
+            result.Text,
+            segments.Count,
+            out var translatedSegments);
+        if (parseStatus == SegmentTranslationParseStatus.InvalidFormat)
         {
             return TranslationSegmentsResult.Failure(
                 "翻译服务未按分段格式返回结果。");
         }
-        catch (InvalidOperationException)
-        {
-            return TranslationSegmentsResult.Failure(
-                "翻译服务未按分段格式返回结果。");
-        }
-        catch (KeyNotFoundException)
+
+        if (parseStatus == SegmentTranslationParseStatus.Incomplete)
         {
             return TranslationSegmentsResult.Failure(
                 "翻译服务返回的分段结果不完整。");
         }
+
+        if (Enumerable.Range(0, segments.Count).All(id =>
+                AreEquivalent(segments[id], translatedSegments[id])))
+        {
+            return TranslationSegmentsResult.Failure(
+                "翻译服务原样返回了识别文字；请确认所选模型支持翻译，或文字是否已经是目标语言。");
+        }
+
+        return new TranslationSegmentsResult(
+            true,
+            translatedSegments,
+            ErrorMessage: null);
+    }
+
+    private static SegmentTranslationParseStatus TryParseSegmentTranslations(
+        string responseText,
+        int expectedCount,
+        out IReadOnlyList<string> translatedSegments)
+    {
+        translatedSegments = [];
+        var foundJson = false;
+        foreach (var json in EnumerateJsonCandidates(responseText))
+        {
+            try
+            {
+                using var document = JsonDocument.Parse(json);
+                foundJson = true;
+                if (TryReadTranslations(
+                        document.RootElement,
+                        expectedCount,
+                        out translatedSegments))
+                {
+                    return SegmentTranslationParseStatus.Success;
+                }
+            }
+            catch (JsonException)
+            {
+                // A response can contain explanatory prose before a valid JSON
+                // object. Continue with the extracted candidates below.
+            }
+        }
+
+        return foundJson
+            ? SegmentTranslationParseStatus.Incomplete
+            : SegmentTranslationParseStatus.InvalidFormat;
+    }
+
+    private static bool TryReadTranslations(
+        JsonElement root,
+        int expectedCount,
+        out IReadOnlyList<string> translatedSegments)
+    {
+        translatedSegments = [];
+        if (root.ValueKind == JsonValueKind.String)
+        {
+            var nestedJson = root.GetString();
+            if (string.IsNullOrWhiteSpace(nestedJson))
+            {
+                return false;
+            }
+
+            foreach (var candidate in EnumerateJsonCandidates(nestedJson))
+            {
+                try
+                {
+                    using var nestedDocument = JsonDocument.Parse(candidate);
+                    if (TryReadTranslations(
+                            nestedDocument.RootElement,
+                            expectedCount,
+                            out translatedSegments))
+                    {
+                        return true;
+                    }
+                }
+                catch (JsonException)
+                {
+                }
+            }
+
+            return false;
+        }
+
+        JsonElement translations;
+        if (root.ValueKind == JsonValueKind.Array)
+        {
+            translations = root;
+        }
+        else if (root.ValueKind == JsonValueKind.Object &&
+                 TryGetPropertyIgnoreCase(root, "translations", out translations))
+        {
+        }
+        else
+        {
+            return false;
+        }
+
+        if (translations.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        var items = translations.EnumerateArray().ToArray();
+        if (items.Length != expectedCount)
+        {
+            return false;
+        }
+
+        if (items.All(item => item.ValueKind == JsonValueKind.String))
+        {
+            var ordered = items
+                .Select(item => item.GetString()?.Trim() ?? string.Empty)
+                .ToArray();
+            if (ordered.Any(string.IsNullOrWhiteSpace))
+            {
+                return false;
+            }
+
+            translatedSegments = ordered;
+            return true;
+        }
+
+        var translatedById = new Dictionary<int, string>();
+        for (var index = 0; index < items.Length; index++)
+        {
+            var item = items[index];
+            if (item.ValueKind != JsonValueKind.Object ||
+                !TryReadTranslationText(item, out var translatedText))
+            {
+                return false;
+            }
+
+            var id = index;
+            if (TryGetPropertyIgnoreCase(item, "id", out var idElement) &&
+                !TryReadSegmentId(idElement, out id))
+            {
+                return false;
+            }
+
+            if (id < 0 || id >= expectedCount ||
+                !translatedById.TryAdd(id, translatedText))
+            {
+                return false;
+            }
+        }
+
+        if (translatedById.Count != expectedCount)
+        {
+            return false;
+        }
+
+        translatedSegments = Enumerable.Range(0, expectedCount)
+            .Select(id => translatedById[id])
+            .ToArray();
+        return true;
+    }
+
+    private static bool TryReadTranslationText(
+        JsonElement item,
+        out string translatedText)
+    {
+        translatedText = string.Empty;
+        foreach (var propertyName in new[] { "text", "translation", "translatedText" })
+        {
+            if (!TryGetPropertyIgnoreCase(item, propertyName, out var textElement) ||
+                textElement.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            translatedText = textElement.GetString()?.Trim() ?? string.Empty;
+            return !string.IsNullOrWhiteSpace(translatedText);
+        }
+
+        return false;
+    }
+
+    private static bool TryReadSegmentId(JsonElement idElement, out int id)
+    {
+        id = -1;
+        if (idElement.ValueKind == JsonValueKind.Number)
+        {
+            return idElement.TryGetInt32(out id);
+        }
+
+        return idElement.ValueKind == JsonValueKind.String &&
+               int.TryParse(idElement.GetString(), out id);
+    }
+
+    private static bool TryGetPropertyIgnoreCase(
+        JsonElement element,
+        string propertyName,
+        out JsonElement value)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (string.Equals(
+                    property.Name,
+                    propertyName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static IEnumerable<string> EnumerateJsonCandidates(string value)
+    {
+        var trimmed = StripMarkdownCodeFence(value);
+        if (!string.IsNullOrWhiteSpace(trimmed))
+        {
+            yield return trimmed;
+        }
+
+        for (var start = 0; start < value.Length; start++)
+        {
+            if (value[start] is not ('{' or '['))
+            {
+                continue;
+            }
+
+            var candidate = TryExtractBalancedJson(value, start);
+            if (!string.IsNullOrWhiteSpace(candidate) &&
+                !string.Equals(candidate, trimmed, StringComparison.Ordinal))
+            {
+                yield return candidate;
+            }
+        }
+    }
+
+    private static string? TryExtractBalancedJson(string value, int start)
+    {
+        var stack = new Stack<char>();
+        var insideString = false;
+        var escaped = false;
+        for (var index = start; index < value.Length; index++)
+        {
+            var current = value[index];
+            if (insideString)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                }
+                else if (current == '\\')
+                {
+                    escaped = true;
+                }
+                else if (current == '"')
+                {
+                    insideString = false;
+                }
+
+                continue;
+            }
+
+            if (current == '"')
+            {
+                insideString = true;
+                continue;
+            }
+
+            if (current is '{' or '[')
+            {
+                stack.Push(current);
+                continue;
+            }
+
+            if (current is not ('}' or ']') || stack.Count == 0)
+            {
+                continue;
+            }
+
+            var opening = stack.Pop();
+            if ((opening == '{' && current != '}') ||
+                (opening == '[' && current != ']'))
+            {
+                return null;
+            }
+
+            if (stack.Count == 0)
+            {
+                return value[start..(index + 1)];
+            }
+        }
+
+        return null;
+    }
+
+    private enum SegmentTranslationParseStatus
+    {
+        InvalidFormat,
+        Incomplete,
+        Success,
     }
 
     private async Task<TranslationResult> SendTranslationRequestAsync(

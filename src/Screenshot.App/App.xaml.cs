@@ -52,6 +52,7 @@ public partial class App : System.Windows.Application, IDisposable
         }
 
         var dataMigrationResult = InstalledDataMigration.TryMigrateLegacyData();
+        WindowPlacementService.Initialize(AppMetadata.WindowPlacementsPath);
         var settingsStore = new SettingsStore();
         var isFirstRun = !File.Exists(settingsStore.SettingsPath);
         var loadResult = settingsStore.Load();

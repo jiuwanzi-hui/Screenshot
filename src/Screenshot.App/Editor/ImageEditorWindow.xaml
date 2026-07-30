@@ -10,22 +10,20 @@
         Height="820"
         MinWidth="760"
         MinHeight="560"
-        Background="#102027"
+        Background="{DynamicResource ImageEditorWindowBackgroundBrush}"
         FontFamily="Microsoft YaHei UI"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <Geometry x:Key="UndoIconGeometry">M 8,4 L 3,9 L 8,14 M 3,9 L 11,9 C 15,9 18,11.5 18,16</Geometry>
         <Geometry x:Key="RedoIconGeometry">M 12,4 L 17,9 L 12,14 M 17,9 L 9,9 C 5,9 2,11.5 2,16</Geometry>
-        <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}"
-                         Color="#14272D" />
         <Style x:Key="GlassButton" TargetType="Button">
             <Setter Property="Height" Value="32" />
             <Setter Property="MinWidth" Value="38" />
             <Setter Property="Margin" Value="0,0,6,0" />
             <Setter Property="Padding" Value="10,3" />
-            <Setter Property="Foreground" Value="#D9F5F1" />
-            <Setter Property="Background" Value="#D91A3037" />
-            <Setter Property="BorderBrush" Value="#5C6B9696" />
+            <Setter Property="Foreground" Value="{DynamicResource ImageEditorToolbarIconBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ImageEditorToolbarButtonBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ImageEditorToolbarButtonBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
@@ -42,11 +40,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ButtonBorder" Property="Background" Value="#F02A4B50" />
-                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="#8AE1D8D0" />
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ImageEditorToolbarButtonHoverBackgroundBrush}" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource ImageEditorToolbarButtonHoverBorderBrush}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="ButtonBorder" Property="Background" Value="#F0396666" />
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ImageEditorToolbarButtonPressedBackgroundBrush}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.4" />
@@ -60,9 +58,9 @@
             <Setter Property="Height" Value="32" />
             <Setter Property="Margin" Value="0,0,6,0" />
             <Setter Property="Padding" Value="10,3" />
-            <Setter Property="Foreground" Value="#D9F5F1" />
-            <Setter Property="Background" Value="#D91A3037" />
-            <Setter Property="BorderBrush" Value="#5C6B9696" />
+            <Setter Property="Foreground" Value="{DynamicResource ImageEditorToolbarIconBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ImageEditorToolbarButtonBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ImageEditorToolbarButtonBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="MinWidth" Value="52" />
             <Setter Property="GroupName" Value="EditorTool" />
@@ -80,14 +78,18 @@
                                               VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="ToolBorder" Property="Background" Value="#E62EAFA5" />
-                                <Setter TargetName="ToolBorder" Property="BorderBrush" Value="#B7F1E7E0" />
-                                <Setter Property="Foreground" Value="#092A2D" />
-                                <Setter Property="FontWeight" Value="SemiBold" />
-                            </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ToolBorder" Property="BorderBrush" Value="#8AE1D8D0" />
+                                <Setter TargetName="ToolBorder" Property="Background" Value="{DynamicResource ImageEditorToolbarButtonHoverBackgroundBrush}" />
+                                <Setter TargetName="ToolBorder" Property="BorderBrush" Value="{DynamicResource ImageEditorToolbarButtonHoverBorderBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ToolBorder" Property="Background" Value="{DynamicResource ImageEditorToolbarButtonPressedBackgroundBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="ToolBorder" Property="Background" Value="{DynamicResource ImageEditorToolbarButtonSelectedBackgroundBrush}" />
+                                <Setter TargetName="ToolBorder" Property="BorderBrush" Value="{DynamicResource ImageEditorToolbarButtonSelectedBorderBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource ImageEditorToolbarSelectedIconBrush}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -99,7 +101,7 @@
             <Setter Property="Height" Value="26" />
             <Setter Property="Margin" Value="0,0,7,0" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="BorderBrush" Value="#8AE1D8D0" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ImageEditorSwatchBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
@@ -115,7 +117,7 @@
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="SwatchCircle" Property="Stroke" Value="#E8FFFC" />
+                                <Setter TargetName="SwatchCircle" Property="Stroke" Value="{DynamicResource ImageEditorSwatchHoverBorderBrush}" />
                                 <Setter TargetName="SwatchCircle" Property="StrokeThickness" Value="2" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
@@ -135,7 +137,7 @@
                     <ControlTemplate TargetType="Slider">
                         <Grid VerticalAlignment="Center">
                             <Border Height="3"
-                                    Background="#405C7472"
+                                    Background="{DynamicResource ImageEditorSliderTrackBrush}"
                                     CornerRadius="1.5" />
                             <Track x:Name="PART_Track"
                                    Height="14"
@@ -147,7 +149,7 @@
                                             <ControlTemplate TargetType="RepeatButton">
                                                 <Border Height="3"
                                                         VerticalAlignment="Center"
-                                                        Background="#2EAFA5"
+                                                        Background="{DynamicResource AppAccentBrush}"
                                                         CornerRadius="1.5" />
                                             </ControlTemplate>
                                         </RepeatButton.Template>
@@ -166,8 +168,8 @@
                                 <Track.Thumb>
                                     <Thumb Width="14"
                                            Height="14"
-                                           Background="#2EAFA5"
-                                           BorderBrush="#C7FFF9"
+                                           Background="{DynamicResource AppAccentBrush}"
+                                           BorderBrush="{DynamicResource ImageEditorSliderThumbBorderBrush}"
                                            BorderThickness="2"
                                            Cursor="Hand">
                                         <Thumb.Template>
@@ -187,9 +189,10 @@
         </Style>
     </Window.Resources>
 
-    <Border Margin="10"
-            Background="#F212252C"
-            BorderBrush="#7A5BBDB5"
+    <Border x:Name="EditorShell"
+            Margin="10"
+            Background="{DynamicResource ImageEditorShellBackgroundBrush}"
+            BorderBrush="{DynamicResource ImageEditorShellBorderBrush}"
             BorderThickness="1"
             CornerRadius="16">
         <Border.Effect>
@@ -208,17 +211,18 @@
             <Canvas Grid.RowSpan="3"
                     IsHitTestVisible="False"
                     Opacity="0.45">
-                <Ellipse Width="3" Height="3" Fill="#8AE1D8" Canvas.Left="44" Canvas.Top="108" />
-                <Ellipse Width="2" Height="2" Fill="#5BB9B1" Canvas.Left="188" Canvas.Top="540" />
-                <Ellipse Width="3" Height="3" Fill="#8AE1D8" Canvas.Left="760" Canvas.Top="92" />
-                <Ellipse Width="2" Height="2" Fill="#5BB9B1" Canvas.Left="1010" Canvas.Top="620" />
-                <Ellipse Width="2" Height="2" Fill="#8AE1D8" Canvas.Left="520" Canvas.Top="720" />
+                <Ellipse Width="3" Height="3" Fill="{DynamicResource AppAccentBrush}" Canvas.Left="44" Canvas.Top="108" />
+                <Ellipse Width="2" Height="2" Fill="{DynamicResource AppAccentBrush}" Canvas.Left="188" Canvas.Top="540" />
+                <Ellipse Width="3" Height="3" Fill="{DynamicResource AppAccentBrush}" Canvas.Left="760" Canvas.Top="92" />
+                <Ellipse Width="2" Height="2" Fill="{DynamicResource AppAccentBrush}" Canvas.Left="1010" Canvas.Top="620" />
+                <Ellipse Width="2" Height="2" Fill="{DynamicResource AppAccentBrush}" Canvas.Left="520" Canvas.Top="720" />
             </Canvas>
 
-            <Border Grid.Row="0"
+            <Border x:Name="EditorToolbarPanel"
+                    Grid.Row="0"
                     Margin="12,12,12,8"
-                    Background="#D9183037"
-                    BorderBrush="#3E698084"
+                    Background="{DynamicResource ImageEditorToolbarBackgroundBrush}"
+                    BorderBrush="{DynamicResource ImageEditorToolbarBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="10">
                 <Grid Margin="12,8">
@@ -233,7 +237,7 @@
                                    VerticalAlignment="Center"
                                    FontSize="15"
                                    FontWeight="SemiBold"
-                                   Foreground="#E0F4F1"
+                                   Foreground="{DynamicResource ImageEditorTitleBrush}"
                                    Text="编辑截图" />
                         <RadioButton Tag="Rectangle"
                                      Checked="OnToolSelected"
@@ -318,7 +322,7 @@
                         <Separator Width="1"
                                    Height="24"
                                    Margin="5,0,12,0"
-                                   Background="#4B829095" />
+                                   Background="{DynamicResource ImageEditorSeparatorBrush}" />
                         <Button x:Name="UndoButton"
                                 Click="OnUndoClick"
                                 ToolTip="撤销"
@@ -327,7 +331,7 @@
                                 <Path Width="20" Height="20"
                                       Data="{StaticResource UndoIconGeometry}"
                                       Fill="Transparent"
-                                      Stroke="#D9F5F1"
+                                      Stroke="{DynamicResource ImageEditorToolbarIconBrush}"
                                       StrokeEndLineCap="Round"
                                       StrokeLineJoin="Round"
                                       StrokeStartLineCap="Round"
@@ -342,7 +346,7 @@
                                 <Path Width="20" Height="20"
                                       Data="{StaticResource RedoIconGeometry}"
                                       Fill="Transparent"
-                                      Stroke="#D9F5F1"
+                                      Stroke="{DynamicResource ImageEditorToolbarIconBrush}"
                                       StrokeEndLineCap="Round"
                                       StrokeLineJoin="Round"
                                       StrokeStartLineCap="Round"
@@ -386,7 +390,7 @@
                                 Tag="#2EAFA5"
                                 Click="OnColorClick"
                                 Background="#2EAFA5"
-                                BorderBrush="#F2FFFC"
+                                BorderBrush="{DynamicResource ImageEditorSliderThumbBorderBrush}"
                                 BorderThickness="2"
                                 ToolTip="青色"
                                 Style="{StaticResource GlassSwatch}" />
@@ -415,7 +419,7 @@
                         </Button>
                         <TextBlock Margin="0,0,8,0"
                                    VerticalAlignment="Center"
-                                   Foreground="#91C8C5"
+                                   Foreground="{DynamicResource ImageEditorMutedTextBrush}"
                                    Text="线宽" />
                         <Slider x:Name="StrokeWidthSlider"
                                 Margin="0,0,8,0"
@@ -429,17 +433,18 @@
                         <TextBlock x:Name="StrokeWidthText"
                                    MinWidth="34"
                                    VerticalAlignment="Center"
-                                   Foreground="#BCEAE5"
+                                   Foreground="{DynamicResource ImageEditorSecondaryTextBrush}"
                                    Text="3 px" />
                         </StackPanel>
                     </StackPanel>
                 </Grid>
             </Border>
 
-            <Border Grid.Row="1"
+            <Border x:Name="EditorWorkspace"
+                    Grid.Row="1"
                     Margin="12,0"
-                    Background="#AA0C171C"
-                    BorderBrush="#3F668087"
+                    Background="{DynamicResource ImageEditorWorkspaceBackgroundBrush}"
+                    BorderBrush="{DynamicResource ImageEditorWorkspaceBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="12"
                     ClipToBounds="True">
@@ -450,12 +455,12 @@
                               VerticalContentAlignment="Top"
                               PreviewMouseWheel="OnEditorPreviewMouseWheel">
                     <Border x:Name="EditorViewport"
-                            Background="#E61B2A30"
-                            BorderBrush="#485A7C7C"
+                            Background="{DynamicResource ImageEditorViewportBackgroundBrush}"
+                            BorderBrush="{DynamicResource ImageEditorViewportBorderBrush}"
                             BorderThickness="1"
                             ClipToBounds="True">
                         <editor:ImageEditorCanvas x:Name="EditorCanvas"
-                                                  Background="#E61B2A30"
+                                                  Background="{DynamicResource ImageEditorViewportBackgroundBrush}"
                                                   HorizontalAlignment="Left"
                                                   VerticalAlignment="Top" />
                     </Border>
@@ -466,7 +471,7 @@
                        Grid.Row="2"
                        Margin="16,0"
                        VerticalAlignment="Center"
-                       Foreground="#91C8C5"
+                       Foreground="{DynamicResource ImageEditorMutedTextBrush}"
                        TextTrimming="CharacterEllipsis" />
         </Grid>
     </Border>

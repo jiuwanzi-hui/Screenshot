@@ -79,6 +79,46 @@ public sealed class TranslationProviderTests
     }
 
     [Fact]
+    public async Task AcceptsJsonAfterProviderCommentary()
+    {
+        var handler = new RecordingHandler(
+            """{"choices":[{"message":{"content":"Translation result:\n```json\n{\"translations\":[{\"id\":0,\"text\":\"你好\"},{\"id\":1,\"text\":\"世界\"}]}\n```"}}]}""");
+        using var client = new HttpClient(handler);
+        var provider = new OpenAiCompatibleTranslationProvider(
+            "https://translation.example/v1/chat/completions",
+            "test-key",
+            client);
+
+        var result = await provider.TranslateSegmentsAsync(
+            ["hello", "world"],
+            "en",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(["你好", "世界"], result.Segments);
+    }
+
+    [Fact]
+    public async Task AcceptsAnOrderedStringArrayFromProvider()
+    {
+        var handler = new RecordingHandler(
+            """{"choices":[{"message":{"content":"[\"你好\",\"世界\"]"}}]}""");
+        using var client = new HttpClient(handler);
+        var provider = new OpenAiCompatibleTranslationProvider(
+            "https://translation.example/v1/chat/completions",
+            "test-key",
+            client);
+
+        var result = await provider.TranslateSegmentsAsync(
+            ["hello", "world"],
+            "en",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(["你好", "世界"], result.Segments);
+    }
+
+    [Fact]
     public async Task AutomaticallyDetectsTheSourceInsteadOfUsingTheOcrLanguage()
     {
         var handler = new RecordingHandler(

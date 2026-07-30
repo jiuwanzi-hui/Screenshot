@@ -4,6 +4,7 @@ using System.IO.Compression;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Screenshot.App.Core;
 
@@ -65,6 +66,20 @@ public sealed record ApplicationUpdateCheckResult(
     ApplicationUpdateInfo? AvailableUpdate,
     string Message);
 
+public sealed record ApplicationReleaseInfo(
+    Version Version,
+    string Title,
+    DateTimeOffset PublishedAt,
+    string ReleaseNotes,
+    Uri ReleasePage,
+    ApplicationUpdateInfo? InstallableUpdate,
+    string? PackageWarning);
+
+public sealed record ApplicationReleaseHistoryResult(
+    bool IsSuccess,
+    IReadOnlyList<ApplicationReleaseInfo> Releases,
+    string Message);
+
 public sealed class ApplicationUpdateService : IDisposable
 {
     private static readonly JsonSerializerOptions ManifestJsonOptions = new()
@@ -73,13 +88,21 @@ public sealed class ApplicationUpdateService : IDisposable
     };
 
     internal static readonly Uri DefaultGitHubManifestUri = new(
+        "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Update.json");
+    internal static readonly Uri LegacyGitHubManifestUri = new(
         "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/Screenshot-Update.json");
     internal static readonly Uri DefaultGitHubLatestReleaseUri = new(
         "https://github.com/jiuwanzi-hui/Screenshot/releases/latest");
     internal static readonly Uri DefaultGiteeManifestUri = new(
+        "https://gitee.com/wwangyunhui/screenshot/raw/main/updates/SnapCut-Update.json");
+    internal static readonly Uri LegacyGiteeManifestUri = new(
         "https://gitee.com/wwangyunhui/screenshot/raw/main/updates/Screenshot-Update.json");
     internal static readonly Uri DefaultGiteeLatestReleaseUri = new(
         "https://gitee.com/wwangyunhui/screenshot/releases/latest");
+    internal static readonly Uri DefaultGitHubReleaseHistoryUri = new(
+        "https://api.github.com/repos/jiuwanzi-hui/Screenshot/releases?per_page=20");
+    internal static readonly Uri DefaultGiteeReleaseHistoryUri = new(
+        "https://gitee.com/api/v5/repos/wwangyunhui/screenshot/releases?per_page=20");
 
     private const long MaximumPackageSize = 500L * 1024 * 1024;
     private readonly HttpClient _httpClient;
@@ -90,7 +113,9 @@ public sealed class ApplicationUpdateService : IDisposable
     public ApplicationUpdateService(
         HttpClient? httpClient = null,
         Uri? manifestUri = null,
-        string? updatesDirectory = null)
+        string? updatesDirectory = null,
+        Uri? releaseHistoryUri = null,
+        Uri? legacyManifestUri = null)
     {
         _httpClient = httpClient ?? new HttpClient
         {
@@ -103,18 +128,24 @@ public sealed class ApplicationUpdateService : IDisposable
                 new UpdateSource(
                     ApplicationUpdateMirror.Gitee,
                     DefaultGiteeManifestUri,
-                    DefaultGiteeLatestReleaseUri),
+                    LegacyGiteeManifestUri,
+                    DefaultGiteeLatestReleaseUri,
+                    DefaultGiteeReleaseHistoryUri),
                 new UpdateSource(
                     ApplicationUpdateMirror.GitHub,
                     DefaultGitHubManifestUri,
-                    DefaultGitHubLatestReleaseUri),
+                    LegacyGitHubManifestUri,
+                    DefaultGitHubLatestReleaseUri,
+                    DefaultGitHubReleaseHistoryUri),
             ]
             :
             [
                 new UpdateSource(
                     ApplicationUpdateMirror.GitHub,
                     manifestUri,
-                    DefaultGitHubLatestReleaseUri),
+                    legacyManifestUri,
+                    DefaultGitHubLatestReleaseUri,
+                    releaseHistoryUri ?? DefaultGitHubReleaseHistoryUri),
             ];
         _updatesDirectory = updatesDirectory ?? AppMetadata.UpdatesDirectoryPath;
     }
@@ -200,6 +231,45 @@ public sealed class ApplicationUpdateService : IDisposable
         throw new HttpRequestException(message, lastFailure);
     }
 
+    public async Task<ApplicationReleaseHistoryResult> GetReleaseHistoryAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var failures = new List<string>();
+        foreach (var source in _sources)
+        {
+            try
+            {
+                var releases = await GetReleaseHistoryFromSourceAsync(
+                    source,
+                    cancellationToken);
+                if (releases.Count > 0)
+                {
+                    return new ApplicationReleaseHistoryResult(
+                        true,
+                        releases,
+                        $"已从 {GetMirrorName(source.Mirror)}加载 {releases.Count} 个正式版本。");
+                }
+
+                failures.Add($"{GetMirrorName(source.Mirror)}：没有可显示的正式版本");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (
+                exception is HttpRequestException or JsonException or InvalidDataException or TaskCanceledException)
+            {
+                failures.Add($"{GetMirrorName(source.Mirror)}：{exception.Message}");
+            }
+        }
+
+        return new ApplicationReleaseHistoryResult(
+            false,
+            [],
+            "暂时无法读取版本历史：" +
+            string.Join("；", failures.Distinct(StringComparer.Ordinal)));
+    }
+
     private async Task DownloadFromUriAsync(
         ApplicationUpdateAsset asset,
         Uri downloadUri,
@@ -208,7 +278,7 @@ public sealed class ApplicationUpdateService : IDisposable
         CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, downloadUri);
-        request.Headers.UserAgent.ParseAdd($"Screenshot/{AppMetadata.DisplayVersion}");
+        request.Headers.UserAgent.ParseAdd($"SnapCut/{AppMetadata.DisplayVersion}");
         using var response = await _httpClient.SendAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,
@@ -255,6 +325,270 @@ public sealed class ApplicationUpdateService : IDisposable
         {
             throw new InvalidDataException("更新包 SHA-256 校验失败，已停止更新。");
         }
+    }
+
+    private async Task<IReadOnlyList<ApplicationReleaseInfo>> GetReleaseHistoryFromSourceAsync(
+        UpdateSource source,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, source.ReleaseHistoryUri);
+        request.Headers.UserAgent.ParseAdd($"SnapCut/{AppMetadata.DisplayVersion}");
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var releaseItems = await JsonSerializer.DeserializeAsync<List<ReleaseApiItem>>(
+            stream,
+            ManifestJsonOptions,
+            cancellationToken) ?? [];
+        var candidates = releaseItems
+            .Where(item => !item.IsDraft && !item.IsPrerelease)
+            .Select(item => new
+            {
+                Item = item,
+                Version = ParseReleaseVersion(item.TagName),
+            })
+            .Where(candidate => candidate.Version is not null)
+            .GroupBy(candidate => ComparableVersion(candidate.Version!))
+            .Select(group => group.First())
+            .OrderByDescending(candidate => candidate.Version)
+            .Take(20)
+            .ToArray();
+        var releases = await Task.WhenAll(candidates.Select(candidate =>
+            CreateReleaseInfoAsync(
+                source,
+                candidate.Item,
+                candidate.Version!,
+                cancellationToken)));
+        return releases
+            .OrderByDescending(release => ComparableVersion(release.Version))
+            .ToArray();
+    }
+
+    private async Task<ApplicationReleaseInfo> CreateReleaseInfoAsync(
+        UpdateSource source,
+        ReleaseApiItem release,
+        Version version,
+        CancellationToken cancellationToken)
+    {
+        var tagName = release.TagName!.Trim();
+        var releasePage = CreateReleasePageUri(
+            source.Mirror,
+            tagName,
+            release.HtmlUrl);
+        var publishedAt = release.PublishedAt ?? release.CreatedAt ?? DateTimeOffset.MinValue;
+        var title = string.IsNullOrWhiteSpace(release.Name)
+            ? $"SnapCut {NormalizeVersion(version)}"
+            : release.Name.Trim();
+        var releaseNotes = FormatReleaseNotes(release.Body);
+        ApplicationUpdateInfo? installableUpdate = null;
+        string? packageWarning = null;
+        var manifestAsset = release.Assets.FirstOrDefault(asset =>
+                string.Equals(
+                    asset.Name,
+                    "SnapCut-Update.json",
+                    StringComparison.OrdinalIgnoreCase)) ??
+            release.Assets.FirstOrDefault(asset =>
+                string.Equals(
+                    asset.Name,
+                    "Screenshot-Update.json",
+                    StringComparison.OrdinalIgnoreCase));
+        if (manifestAsset is null ||
+            !TryCreateTrustedUri(manifestAsset.BrowserDownloadUrl, out var manifestUri))
+        {
+            packageWarning = "此版本缺少可验证的在线更新清单，只能查看更新说明。";
+        }
+        else
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, manifestUri);
+                request.Headers.UserAgent.ParseAdd($"SnapCut/{AppMetadata.DisplayVersion}");
+                using var response = await _httpClient.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    cancellationToken);
+                response.EnsureSuccessStatusCode();
+                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+                var manifest = await JsonSerializer.DeserializeAsync<UpdateManifest>(
+                    stream,
+                    ManifestJsonOptions,
+                    cancellationToken);
+                var validated = ValidateManifest(manifest, source.Mirror);
+                if (ComparableVersion(validated.Version) != ComparableVersion(version))
+                {
+                    throw new InvalidDataException("Release 标签与更新清单版本不一致。");
+                }
+
+                EnsureReleaseContainsAsset(release, validated.Installer.FileName);
+                EnsureReleaseContainsAsset(release, validated.Portable.FileName);
+                installableUpdate = new ApplicationUpdateInfo(
+                    version,
+                    releasePage,
+                    CreateHistoricalAsset(
+                        validated.Installer,
+                        tagName,
+                        source.Mirror),
+                    CreateHistoricalAsset(
+                        validated.Portable,
+                        tagName,
+                        source.Mirror),
+                    source.Mirror);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (
+                exception is HttpRequestException or JsonException or InvalidDataException or TaskCanceledException)
+            {
+                packageWarning = $"此版本暂不能一键安装：{exception.Message}";
+            }
+        }
+
+        return new ApplicationReleaseInfo(
+            version,
+            title,
+            publishedAt,
+            releaseNotes,
+            releasePage,
+            installableUpdate,
+            packageWarning);
+    }
+
+    private static ApplicationUpdateAsset CreateHistoricalAsset(
+        ApplicationUpdateAsset validatedAsset,
+        string tagName,
+        ApplicationUpdateMirror preferredMirror)
+    {
+        var asset = new ApplicationUpdateAsset(
+            validatedAsset.FileName,
+            CreateReleaseDownloadUri(
+                ApplicationUpdateMirror.GitHub,
+                tagName,
+                validatedAsset.FileName),
+            CreateReleaseDownloadUri(
+                ApplicationUpdateMirror.Gitee,
+                tagName,
+                validatedAsset.FileName),
+            validatedAsset.Size,
+            validatedAsset.Sha256,
+            preferredMirror);
+        ValidateAsset(asset, validatedAsset.FileName);
+        return asset;
+    }
+
+    private static void EnsureReleaseContainsAsset(
+        ReleaseApiItem release,
+        string fileName)
+    {
+        if (!release.Assets.Any(asset => string.Equals(
+                asset.Name,
+                fileName,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidDataException($"Release 中缺少 {fileName}。");
+        }
+    }
+
+    private static Version? ParseReleaseVersion(string? tagName)
+    {
+        return Version.TryParse(tagName?.Trim().TrimStart('v', 'V'), out var version) &&
+               version.Major >= 1
+            ? version
+            : null;
+    }
+
+    private static Uri CreateReleasePageUri(
+        ApplicationUpdateMirror mirror,
+        string tagName,
+        string? apiReleasePage)
+    {
+        if (TryCreateTrustedUri(apiReleasePage, out var releasePage))
+        {
+            return releasePage;
+        }
+
+        var escapedTag = Uri.EscapeDataString(tagName);
+        return mirror == ApplicationUpdateMirror.Gitee
+            ? new Uri($"https://gitee.com/wwangyunhui/screenshot/releases/tag/{escapedTag}")
+            : new Uri($"https://github.com/jiuwanzi-hui/Screenshot/releases/tag/{escapedTag}");
+    }
+
+    private static Uri CreateReleaseDownloadUri(
+        ApplicationUpdateMirror mirror,
+        string tagName,
+        string fileName)
+    {
+        var escapedTag = Uri.EscapeDataString(tagName);
+        var escapedFileName = Uri.EscapeDataString(fileName);
+        return mirror == ApplicationUpdateMirror.Gitee
+            ? new Uri(
+                $"https://gitee.com/wwangyunhui/screenshot/releases/download/{escapedTag}/{escapedFileName}")
+            : new Uri(
+                $"https://github.com/jiuwanzi-hui/Screenshot/releases/download/{escapedTag}/{escapedFileName}");
+    }
+
+    internal static string FormatReleaseNotes(string? markdown)
+    {
+        if (string.IsNullOrWhiteSpace(markdown))
+        {
+            return "暂无更新说明。";
+        }
+
+        var output = new List<string>();
+        foreach (var sourceLine in markdown.Replace("\r", string.Empty).Split('\n'))
+        {
+            var line = sourceLine.Trim();
+            if (Regex.IsMatch(line, "^#{1,6}\\s*English\\s*$", RegexOptions.IgnoreCase))
+            {
+                break;
+            }
+
+            if (Regex.IsMatch(
+                    line,
+                    "^#{1,6}\\s*(下载|校验|SHA-?256)\\s*$",
+                    RegexOptions.IgnoreCase))
+            {
+                break;
+            }
+
+            if (Regex.IsMatch(
+                    line,
+                    "^#{1,6}\\s*(SnapCut|Screenshot)\\s+v?\\d+(?:\\.\\d+){1,3}\\s*$",
+                    RegexOptions.IgnoreCase))
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(line) ||
+                Regex.IsMatch(line, "^\\|?\\s*[-:]+(?:\\s*\\|\\s*[-:]+)+\\s*\\|?$") ||
+                line.StartsWith("安装版 SHA-256", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("免安装版 SHA-256", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            line = Regex.Replace(line, "^#{1,6}\\s*", string.Empty);
+            line = Regex.Replace(line, "^[-*+]\\s+", "• ");
+            line = Regex.Replace(line, "\\[([^]]+)]\\([^)]+\\)", "$1");
+            line = line.Replace("**", string.Empty).Replace("`", string.Empty);
+            if (line.StartsWith('|') && line.EndsWith('|'))
+            {
+                line = string.Join(" · ", line.Trim('|').Split('|').Select(cell => cell.Trim()));
+            }
+
+            output.Add(line);
+            if (output.Sum(value => value.Length + 1) >= 6000)
+            {
+                output.Add("…");
+                break;
+            }
+        }
+
+        return output.Count == 0 ? "暂无更新说明。" : string.Join(Environment.NewLine, output);
     }
 
     public void Dispose()
@@ -306,13 +640,19 @@ public sealed class ApplicationUpdateService : IDisposable
         Version currentVersion,
         CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, source.ManifestUri);
-        request.Headers.UserAgent.ParseAdd($"Screenshot/{NormalizeVersion(currentVersion)}");
-        using var response = await _httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
+        var manifest = await ReadManifestAsync(
+            source.ManifestUri,
+            currentVersion,
             cancellationToken);
-        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        if (manifest is null && source.LegacyManifestUri is not null)
+        {
+            manifest = await ReadManifestAsync(
+                source.LegacyManifestUri,
+                currentVersion,
+                cancellationToken);
+        }
+
+        if (manifest is null)
         {
             return await CheckLatestReleaseRedirectAsync(
                 source,
@@ -320,12 +660,6 @@ public sealed class ApplicationUpdateService : IDisposable
                 cancellationToken);
         }
 
-        response.EnsureSuccessStatusCode();
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        var manifest = await JsonSerializer.DeserializeAsync<UpdateManifest>(
-            stream,
-            ManifestJsonOptions,
-            cancellationToken);
         var update = ValidateManifest(manifest, source.Mirror);
         if (ComparableVersion(update.Version).CompareTo(ComparableVersion(currentVersion)) <= 0)
         {
@@ -339,6 +673,31 @@ public sealed class ApplicationUpdateService : IDisposable
             true,
             update,
             $"发现新版本 {NormalizeVersion(update.Version)}（{GetMirrorName(source.Mirror)}）。");
+    }
+
+    private async Task<UpdateManifest?> ReadManifestAsync(
+        Uri manifestUri,
+        Version currentVersion,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, manifestUri);
+        request.Headers.UserAgent.ParseAdd($"SnapCut/{NormalizeVersion(currentVersion)}");
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        response.EnsureSuccessStatusCode();
+        await using var stream = await response.Content.ReadAsStreamAsync(
+            cancellationToken);
+        return await JsonSerializer.DeserializeAsync<UpdateManifest>(
+            stream,
+            ManifestJsonOptions,
+            cancellationToken);
     }
 
     private static ApplicationUpdateInfo ValidateManifest(
@@ -359,9 +718,8 @@ public sealed class ApplicationUpdateService : IDisposable
 
         var displayVersion = NormalizeVersion(version);
         // The application was renamed from Screenshot to SnapCut in 2.0.0.
-        // Release assets may carry either brand: clients shipped before the
-        // rename hard-require the old names, so transitional releases publish
-        // old-named assets, and future releases are free to use the new name.
+        // Versions 2.1.0 and later accept both asset brands. The old manifest
+        // endpoint remains available while new releases use SnapCut package names.
         var installerNames = new[]
         {
             $"SnapCut-Setup-{displayVersion}-win-x64.exe",
@@ -389,7 +747,7 @@ public sealed class ApplicationUpdateService : IDisposable
             HttpMethod.Get,
             source.LatestReleaseUri);
         request.Headers.UserAgent.ParseAdd(
-            $"Screenshot/{NormalizeVersion(currentVersion)}");
+            $"SnapCut/{NormalizeVersion(currentVersion)}");
         using var response = await _httpClient.SendAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,
@@ -531,8 +889,49 @@ public sealed class ApplicationUpdateService : IDisposable
         public string? Sha256 { get; init; }
     }
 
+    private sealed class ReleaseApiItem
+    {
+        [JsonPropertyName("tag_name")]
+        public string? TagName { get; init; }
+
+        [JsonPropertyName("name")]
+        public string? Name { get; init; }
+
+        [JsonPropertyName("body")]
+        public string? Body { get; init; }
+
+        [JsonPropertyName("html_url")]
+        public string? HtmlUrl { get; init; }
+
+        [JsonPropertyName("published_at")]
+        public DateTimeOffset? PublishedAt { get; init; }
+
+        [JsonPropertyName("created_at")]
+        public DateTimeOffset? CreatedAt { get; init; }
+
+        [JsonPropertyName("draft")]
+        public bool IsDraft { get; init; }
+
+        [JsonPropertyName("prerelease")]
+        public bool IsPrerelease { get; init; }
+
+        [JsonPropertyName("assets")]
+        public IReadOnlyList<ReleaseApiAsset> Assets { get; init; } = [];
+    }
+
+    private sealed class ReleaseApiAsset
+    {
+        [JsonPropertyName("name")]
+        public string? Name { get; init; }
+
+        [JsonPropertyName("browser_download_url")]
+        public string? BrowserDownloadUrl { get; init; }
+    }
+
     private sealed record UpdateSource(
         ApplicationUpdateMirror Mirror,
         Uri ManifestUri,
-        Uri LatestReleaseUri);
+        Uri? LegacyManifestUri,
+        Uri LatestReleaseUri,
+        Uri ReleaseHistoryUri);
 }

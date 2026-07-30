@@ -97,6 +97,7 @@ public partial class CaptureOverlayWindow : Window
     private IReadOnlyList<TranslatedTextAnnotationRegion>?
         _inlineTranslatedAnnotationRegions;
     private bool _isShowingTranslatedText;
+    private bool _lastObservedTranslationOverlayExists;
     private bool _isScrollCaptureSelectionPublished;
     private bool _isScrollCaptureSelectionLocked;
     private bool _isScrollCaptureTemporarilyHidden;
@@ -1126,7 +1127,7 @@ public partial class CaptureOverlayWindow : Window
                 return;
             }
 
-            CaptureStatusText.Text = "文字识别完成，正在等待在线翻译服务返回...";
+            CaptureStatusText.Text = "文字识别完成，正在等待翻译结果...";
             var translationTimer = System.Diagnostics.Stopwatch.StartNew();
             var translation = await _options.TranslateTextAsync(recognition);
             translationTimer.Stop();
@@ -1165,7 +1166,7 @@ public partial class CaptureOverlayWindow : Window
                 _inlineTranslatedAnnotationRegions);
             SetInlineTranslationVisibility(isVisible: true);
             CaptureStatusText.Text +=
-                $" 在线翻译耗时 {translationTimer.Elapsed.TotalSeconds:F1} 秒。";
+                $" 翻译耗时 {translationTimer.Elapsed.TotalSeconds:F1} 秒。";
         }
         catch
         {
@@ -1555,19 +1556,42 @@ public partial class CaptureOverlayWindow : Window
     {
         InlineUndoButton.IsEnabled = InlineEditorCanvas.CanUndo;
         InlineRedoButton.IsEnabled = InlineEditorCanvas.CanRedo;
-        if (!InlineEditorCanvas.HasTranslationOverlay &&
-            _inlineTranslatedTextRegions is not null &&
-            _isShowingTranslatedText)
+        var hasTranslationOverlay = InlineEditorCanvas.HasTranslationOverlay;
+        if (hasTranslationOverlay == _lastObservedTranslationOverlayExists)
         {
-            if (_inlineOcrResult is { IsSuccess: true, Regions.Count: > 0 } recognition)
-            {
-                ShowSelectableTextOverlay(recognition.Regions, isTranslation: false);
-            }
-
-            _isShowingTranslatedText = false;
-            TranslateButtonText.Text = "译";
-            TranslateButton.ToolTip = "显示已缓存的译文";
+            return;
         }
+
+        _lastObservedTranslationOverlayExists = hasTranslationOverlay;
+        SynchronizeInlineTranslationPresentation();
+    }
+
+    private void SynchronizeInlineTranslationPresentation()
+    {
+        if (_inlineTranslatedTextRegions is { Count: > 0 } translatedRegions &&
+            InlineEditorCanvas.IsTranslationOverlayVisible)
+        {
+            ShowSelectableTextOverlay(translatedRegions, isTranslation: true);
+            TranslateButtonText.Text = "原";
+            TranslateButton.ToolTip = "显示原文";
+            return;
+        }
+
+        if (_inlineOcrResult is { IsSuccess: true, Regions.Count: > 0 } recognition)
+        {
+            ShowSelectableTextOverlay(recognition.Regions, isTranslation: false);
+        }
+        else
+        {
+            OcrTextOverlay.Children.Clear();
+            OcrTextOverlay.Visibility = Visibility.Collapsed;
+            _isShowingTranslatedText = false;
+        }
+
+        TranslateButtonText.Text = "译";
+        TranslateButton.ToolTip = _inlineTranslatedTextRegions is { Count: > 0 }
+            ? "显示已缓存的译文"
+            : "识别并翻译，覆盖到截图";
     }
 
     private bool BeginAction()

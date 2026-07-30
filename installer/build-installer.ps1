@@ -1,5 +1,6 @@
 param(
-    [string]$Version = "2.2.2"
+    [string]$Version = "2.3.0",
+    [switch]$SkipTrackedManifestUpdate
 )
 
 $ErrorActionPreference = "Stop"
@@ -56,14 +57,14 @@ if ($LASTEXITCODE -ne 0) {
 
 $installerPath = Join-Path `
     $installerOutputDirectory `
-    "Screenshot-Setup-$Version-win-x64.exe"
+    "SnapCut-Setup-$Version-win-x64.exe"
 if (-not (Test-Path -LiteralPath $installerPath)) {
     throw "Installer was not generated: $installerPath"
 }
 
 $portablePath = Join-Path `
     $installerOutputDirectory `
-    "Screenshot-Portable-$Version-win-x64.zip"
+    "SnapCut-Portable-$Version-win-x64.zip"
 Compress-Archive `
     -Path (Join-Path $publishDirectory "*") `
     -DestinationPath $portablePath `
@@ -74,9 +75,11 @@ if (-not (Test-Path -LiteralPath $portablePath)) {
     throw "Portable package was not generated: $portablePath"
 }
 
-$manifestPath = Join-Path $installerOutputDirectory "Screenshot-Update.json"
+$manifestPath = Join-Path $installerOutputDirectory "SnapCut-Update.json"
+$legacyManifestPath = Join-Path $installerOutputDirectory "Screenshot-Update.json"
 $trackedManifestDirectory = Join-Path $repositoryRoot "updates"
-$trackedManifestPath = Join-Path $trackedManifestDirectory "Screenshot-Update.json"
+$trackedManifestPath = Join-Path $trackedManifestDirectory "SnapCut-Update.json"
+$trackedLegacyManifestPath = Join-Path $trackedManifestDirectory "Screenshot-Update.json"
 $installerFile = Get-Item -LiteralPath $installerPath
 $portableFile = Get-Item -LiteralPath $portablePath
 $githubReleaseBaseUrl = "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download"
@@ -103,6 +106,27 @@ $manifest |
     ConvertTo-Json -Depth 4 |
     Set-Content -LiteralPath $manifestPath -Encoding UTF8
 New-Item -ItemType Directory -Path $trackedManifestDirectory -Force | Out-Null
-Copy-Item -LiteralPath $manifestPath -Destination $trackedManifestPath -Force
 
-Get-Item -LiteralPath $installerPath, $portablePath, $manifestPath, $trackedManifestPath
+# Existing 2.1.x and 2.2.x clients request this fixed legacy manifest name. Its package
+# entries intentionally point at the new SnapCut-named assets; clients shipped
+# since 2.1.0 accept both brands, so only one copy of each large package needs
+# to be uploaded to a release.
+Copy-Item -LiteralPath $manifestPath -Destination $legacyManifestPath -Force
+if (-not $SkipTrackedManifestUpdate) {
+    Copy-Item -LiteralPath $manifestPath -Destination $trackedManifestPath -Force
+    Copy-Item -LiteralPath $legacyManifestPath `
+        -Destination $trackedLegacyManifestPath `
+        -Force
+}
+
+$outputs = @(
+    $installerPath
+    $portablePath
+    $manifestPath
+    $legacyManifestPath
+)
+if (-not $SkipTrackedManifestUpdate) {
+    $outputs += $trackedManifestPath, $trackedLegacyManifestPath
+}
+
+Get-Item -LiteralPath $outputs

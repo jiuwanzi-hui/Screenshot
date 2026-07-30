@@ -17,6 +17,21 @@ public sealed class HotKeyCapturedEventArgs : EventArgs
 
 public sealed class HotKeyCaptureBox : WpfTextBox
 {
+    private const uint VirtualKeyBack = 0x08;
+    private const uint VirtualKeyEscape = 0x1B;
+    private const uint VirtualKeyDelete = 0x2E;
+    private const uint VirtualKeyShift = 0x10;
+    private const uint VirtualKeyControl = 0x11;
+    private const uint VirtualKeyAlt = 0x12;
+    private const uint VirtualKeyLeftWindows = 0x5B;
+    private const uint VirtualKeyRightWindows = 0x5C;
+    private const uint VirtualKeyLeftShift = 0xA0;
+    private const uint VirtualKeyRightShift = 0xA1;
+    private const uint VirtualKeyLeftControl = 0xA2;
+    private const uint VirtualKeyRightControl = 0xA3;
+    private const uint VirtualKeyLeftAlt = 0xA4;
+    private const uint VirtualKeyRightAlt = 0xA5;
+
     public HotKeyCaptureBox()
     {
         IsReadOnly = true;
@@ -32,6 +47,33 @@ public sealed class HotKeyCaptureBox : WpfTextBox
     {
         Text = string.Empty;
         HotKeyCaptured?.Invoke(this, new HotKeyCapturedEventArgs(string.Empty));
+    }
+
+    internal void ProcessCapturedVirtualKey(
+        uint virtualKey,
+        HotKeyModifiers modifiers)
+    {
+        if (virtualKey == VirtualKeyEscape && modifiers == HotKeyModifiers.None)
+        {
+            HotKeyCaptureCanceled?.Invoke(this, EventArgs.Empty);
+            return;
+        }
+
+        if (virtualKey is VirtualKeyBack or VirtualKeyDelete &&
+            modifiers == HotKeyModifiers.None)
+        {
+            ClearGesture();
+            return;
+        }
+
+        if (IsModifierVirtualKey(virtualKey) ||
+            !TryFormatGesture(virtualKey, modifiers, out var gesture))
+        {
+            return;
+        }
+
+        Text = gesture;
+        HotKeyCaptured?.Invoke(this, new HotKeyCapturedEventArgs(Text));
     }
 
     protected override void OnGotKeyboardFocus(KeyboardFocusChangedEventArgs e)
@@ -144,10 +186,46 @@ public sealed class HotKeyCaptureBox : WpfTextBox
         return true;
     }
 
+    internal static bool TryFormatGesture(
+        uint virtualKey,
+        HotKeyModifiers modifiers,
+        out string gesture)
+    {
+        if (modifiers == HotKeyModifiers.None || IsModifierVirtualKey(virtualKey))
+        {
+            gesture = string.Empty;
+            return false;
+        }
+
+        var capturedGesture = new HotKeyGesture(modifiers, virtualKey);
+        var formattedGesture = capturedGesture.ToString();
+        if (!HotKeyGesture.TryParse(
+                formattedGesture,
+                out var parsedGesture,
+                out _) ||
+            parsedGesture != capturedGesture)
+        {
+            gesture = string.Empty;
+            return false;
+        }
+
+        gesture = formattedGesture;
+        return true;
+    }
+
     private static bool IsModifierKey(Key key)
     {
         return key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or
             Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin;
+    }
+
+    private static bool IsModifierVirtualKey(uint virtualKey)
+    {
+        return virtualKey is
+            VirtualKeyShift or VirtualKeyLeftShift or VirtualKeyRightShift or
+            VirtualKeyControl or VirtualKeyLeftControl or VirtualKeyRightControl or
+            VirtualKeyAlt or VirtualKeyLeftAlt or VirtualKeyRightAlt or
+            VirtualKeyLeftWindows or VirtualKeyRightWindows;
     }
 
     private static bool TryGetVirtualKey(Key key, out uint virtualKey)

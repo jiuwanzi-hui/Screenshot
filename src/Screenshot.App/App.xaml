@@ -3,6 +3,13 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
+        <Style x:Key="{x:Static SystemParameters.FocusVisualStyleKey}">
+            <Setter Property="Control.Template">
+                <Setter.Value>
+                    <ControlTemplate />
+                </Setter.Value>
+            </Setter>
+        </Style>
         <SolidColorBrush x:Key="AppWindowBackgroundBrush" Color="#E8F3F1" />
         <SolidColorBrush x:Key="AppGlassBackgroundBrush" Color="#DDEEF1F2" />
         <SolidColorBrush x:Key="AppSidebarBackgroundBrush" Color="#D9ECEA" />
@@ -20,7 +27,46 @@
         <SolidColorBrush x:Key="AppSeparatorBrush" Color="#DCE4E8" />
         <SolidColorBrush x:Key="AppTooltipBackgroundBrush" Color="#F2F4FBFA" />
         <SolidColorBrush x:Key="AppTooltipForegroundBrush" Color="#183F43" />
+        <SolidColorBrush x:Key="EditorToolbarButtonBackgroundBrush" Color="#FCFDFD" />
+        <SolidColorBrush x:Key="EditorToolbarButtonBorderBrush" Color="#AEBBBD" />
+        <SolidColorBrush x:Key="EditorToolbarIconBrush" Color="#20272B" />
+        <SolidColorBrush x:Key="EditorToolbarButtonHoverBackgroundBrush" Color="#F0F8F7" />
+        <SolidColorBrush x:Key="EditorToolbarButtonHoverBorderBrush" Color="#62AFA9" />
+        <SolidColorBrush x:Key="EditorToolbarButtonPressedBackgroundBrush" Color="#DDEDEA" />
+        <SolidColorBrush x:Key="EditorToolbarButtonSelectedBackgroundBrush" Color="#DDF3F0" />
+        <SolidColorBrush x:Key="EditorToolbarButtonSelectedBorderBrush" Color="#2EAFA5" />
+        <SolidColorBrush x:Key="EditorToolbarConfirmBackgroundBrush" Color="#E4F6F2" />
+        <SolidColorBrush x:Key="EditorToolbarConfirmBorderBrush" Color="#58B8AC" />
+        <SolidColorBrush x:Key="EditorToolbarConfirmIconBrush" Color="#167A70" />
+        <SolidColorBrush x:Key="EditorToolbarCancelIconBrush" Color="#D84B57" />
+        <SolidColorBrush x:Key="ImageEditorToolbarButtonBackgroundBrush" Color="#FCFDFD" />
+        <SolidColorBrush x:Key="ImageEditorToolbarButtonBorderBrush" Color="#AEBBBD" />
+        <SolidColorBrush x:Key="ImageEditorToolbarIconBrush" Color="#20272B" />
+        <SolidColorBrush x:Key="ImageEditorToolbarButtonHoverBackgroundBrush" Color="#F0F8F7" />
+        <SolidColorBrush x:Key="ImageEditorToolbarButtonHoverBorderBrush" Color="#62AFA9" />
+        <SolidColorBrush x:Key="ImageEditorToolbarButtonPressedBackgroundBrush" Color="#DDEDEA" />
+        <SolidColorBrush x:Key="ImageEditorToolbarButtonSelectedBackgroundBrush" Color="#DDF3F0" />
+        <SolidColorBrush x:Key="ImageEditorToolbarButtonSelectedBorderBrush" Color="#2EAFA5" />
+        <SolidColorBrush x:Key="ImageEditorToolbarSelectedIconBrush" Color="#20272B" />
+        <SolidColorBrush x:Key="ImageEditorWindowBackgroundBrush" Color="#EEF7F6" />
+        <SolidColorBrush x:Key="ImageEditorShellBackgroundBrush" Color="#FCFEFE" />
+        <SolidColorBrush x:Key="ImageEditorShellBorderBrush" Color="#86B7B2" />
+        <SolidColorBrush x:Key="ImageEditorToolbarBackgroundBrush" Color="#F4FAF9" />
+        <SolidColorBrush x:Key="ImageEditorToolbarBorderBrush" Color="#B9D4D1" />
+        <SolidColorBrush x:Key="ImageEditorTitleBrush" Color="#1C252D" />
+        <SolidColorBrush x:Key="ImageEditorSeparatorBrush" Color="#CADCDA" />
+        <SolidColorBrush x:Key="ImageEditorWorkspaceBackgroundBrush" Color="#E5EFEE" />
+        <SolidColorBrush x:Key="ImageEditorWorkspaceBorderBrush" Color="#A9C4C1" />
+        <SolidColorBrush x:Key="ImageEditorViewportBackgroundBrush" Color="#DCE8E6" />
+        <SolidColorBrush x:Key="ImageEditorViewportBorderBrush" Color="#A5BFBC" />
+        <SolidColorBrush x:Key="ImageEditorMutedTextBrush" Color="#536B6F" />
+        <SolidColorBrush x:Key="ImageEditorSecondaryTextBrush" Color="#35575B" />
+        <SolidColorBrush x:Key="ImageEditorSliderTrackBrush" Color="#C9DAD7" />
+        <SolidColorBrush x:Key="ImageEditorSliderThumbBorderBrush" Color="#F8FFFE" />
+        <SolidColorBrush x:Key="ImageEditorSwatchBorderBrush" Color="#6E898B" />
+        <SolidColorBrush x:Key="ImageEditorSwatchHoverBorderBrush" Color="#1F3034" />
         <Style TargetType="Button">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Padding" Value="10,3" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Background" Value="{DynamicResource AppPanelBackgroundBrush}" />
@@ -56,10 +102,12 @@
             </Setter>
         </Style>
         <Style TargetType="CheckBox">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
         </Style>
         <Style TargetType="TextBox">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
@@ -80,6 +128,7 @@
             </Setter>
         </Style>
         <Style TargetType="PasswordBox">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
@@ -100,6 +149,7 @@
             </Setter>
         </Style>
         <Style TargetType="ComboBoxItem">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Padding" Value="10,7" />
             <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -132,6 +182,7 @@
             </Setter>
         </Style>
         <Style TargetType="ComboBox">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Height" Value="34" />
             <Setter Property="Padding" Value="10,0,38,0" />
             <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}" />

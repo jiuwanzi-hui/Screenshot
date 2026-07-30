@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Input;
 using Screenshot.App.Capture;
 using Screenshot.App.Core;
+using Screenshot.App.Infrastructure;
 
 namespace Screenshot.App.Text;
 
@@ -33,6 +34,7 @@ public partial class OcrResultWindow : Window
         _httpClient = httpClient;
 
         InitializeComponent();
+        WindowPlacementService.Track(this, WindowPlacementKeys.OcrResult);
         ResultTextBox.Text = result.Text;
         StatusText.Text = result.IsSuccess
             ? "识别完成"
@@ -118,11 +120,12 @@ public partial class OcrResultWindow : Window
 
         // Auto-translate once, matching the WeChat flow where recognized text is
         // rendered translated without a second click. This only runs when the user
-        // has already opted into online translation and the OCR pass produced text.
+        // has selected a translation mode and the OCR pass produced text.
         if (_hasAutoTranslated ||
             !_ocrSucceeded ||
             string.IsNullOrWhiteSpace(ResultTextBox.Text) ||
-            !_settingsProvider().SendTextToOnlineTranslation)
+            _settingsProvider().ResolveTranslationMode() ==
+                TranslationMode.Disabled)
         {
             return;
         }

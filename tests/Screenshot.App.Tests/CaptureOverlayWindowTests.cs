@@ -784,6 +784,10 @@ public sealed class CaptureOverlayWindowTests
                 Assert.Equal(Visibility.Visible, selectableTranslation.Visibility);
                 Assert.Equal("你好", translatedTextBox.Text);
                 Assert.True(translatedTextBox.IsReadOnly);
+                Assert.Equal(
+                    "原",
+                    Assert.IsType<TextBlock>(
+                        overlay?.FindName("TranslateButtonText")).Text);
 
                 var button = Assert.IsType<Button>(
                     overlay?.FindName("TranslateButton"));
@@ -801,6 +805,25 @@ public sealed class CaptureOverlayWindowTests
                     Assert.Single(selectableTranslation.Children
                         .OfType<TextBox>()).Text);
                 Assert.Equal(1, translationRequestCount);
+
+                editor.Undo();
+                Assert.False(editor.HasTranslationOverlay);
+                Assert.Equal(
+                    "译",
+                    Assert.IsType<TextBlock>(
+                        overlay?.FindName("TranslateButtonText")).Text);
+
+                editor.Redo();
+                Assert.True(editor.HasTranslationOverlay);
+                Assert.True(editor.IsTranslationOverlayVisible);
+                Assert.Equal(
+                    "你好",
+                    Assert.Single(selectableTranslation.Children
+                        .OfType<TextBox>()).Text);
+                Assert.Equal(
+                    "原",
+                    Assert.IsType<TextBlock>(
+                        overlay?.FindName("TranslateButtonText")).Text);
 
                 editor.Undo();
                 Assert.False(editor.HasTranslationOverlay);

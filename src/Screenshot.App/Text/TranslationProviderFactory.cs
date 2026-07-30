@@ -6,6 +6,7 @@ namespace Screenshot.App.Text;
 public static class TranslationProviderFactory
 {
     public const string OpenAiCompatibleProviderId = "OpenAICompatible";
+    public const string OfflineProviderId = "OfflineBergamot";
 
     // The OpenAI-compatible provider is the only supported type. Always resolve
     // to its stable id so legacy free-text values cannot silently disable translation.
@@ -36,13 +37,21 @@ public static class TranslationProviderFactory
     public static ITranslationProvider Create(
         AppSettings settings,
         ITranslationCredentialStore credentialStore,
-        HttpClient httpClient)
+        HttpClient httpClient,
+        OfflineTranslationModelManager? offlineModelManager = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(credentialStore);
         ArgumentNullException.ThrowIfNull(httpClient);
 
-        if (!settings.SendTextToOnlineTranslation)
+        var translationMode = settings.ResolveTranslationMode();
+        if (translationMode == TranslationMode.Offline)
+        {
+            return new OfflineTranslationProvider(
+                offlineModelManager ?? OfflineTranslationModelManager.Shared);
+        }
+
+        if (translationMode != TranslationMode.Online)
         {
             return new NoTranslationProvider();
         }

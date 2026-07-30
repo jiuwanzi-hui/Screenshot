@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Net.Http;
 using System.Windows;
@@ -13,8 +15,24 @@ using WinForms = System.Windows.Forms;
 
 namespace Screenshot.App.Presentation;
 
+internal sealed class ReleaseHistoryItemViewModel
+{
+    public required ApplicationReleaseInfo Release { get; init; }
+
+    public required string VersionText { get; init; }
+
+    public required string Title { get; init; }
+
+    public required string PublishedText { get; init; }
+
+    public required string StateText { get; init; }
+
+    public string DisplayText { get; set; } = string.Empty;
+}
+
 public partial class MainWindow : Window, IDisposable
 {
+    private static readonly Version MinimumAutomaticRollbackVersion = new(2, 0, 0);
     private readonly SettingsStore _settingsStore;
     private readonly IStartupRegistrationService _startupRegistrationService;
     private readonly GlobalHotKeyManager _globalHotKeyManager;
@@ -25,6 +43,7 @@ public partial class MainWindow : Window, IDisposable
     private readonly bool _ownsModelCatalogHttpClient;
     private readonly ApplicationUpdateService _applicationUpdateService;
     private readonly bool _ownsApplicationUpdateService;
+    private readonly OfflineTranslationModelManager _offlineTranslationModelManager;
     private readonly CancellationTokenSource _updateCancellationSource = new();
     private AppSettings _savedSettings;
     private IReadOnlyList<HotKeyBinding>? _suspendedHotKeyBindings;
@@ -32,7 +51,11 @@ public partial class MainWindow : Window, IDisposable
     private bool _isApplyingSettings;
     private bool _translationApiKeyChanged;
     private ApplicationUpdateInfo? _availableUpdate;
+    private ApplicationReleaseInfo? _selectedRelease;
+    private OfflineTranslationModelPlan? _offlineTranslationPlan;
+    private HotKeyCaptureBox? _activeHotKeyCaptureBox;
     private int _automaticUpdateCheckInProgress;
+    private int _offlineModelPlanGeneration;
     private bool _disposed;
 
     public MainWindow(
@@ -42,7 +65,8 @@ public partial class MainWindow : Window, IDisposable
         GlobalHotKeyManager globalHotKeyManager,
         ITranslationCredentialStore translationCredentialStore,
         HttpClient? modelCatalogHttpClient = null,
-        ApplicationUpdateService? applicationUpdateService = null)
+        ApplicationUpdateService? applicationUpdateService = null,
+        OfflineTranslationModelManager? offlineTranslationModelManager = null)
     {
         ArgumentNullException.ThrowIfNull(initialSettings);
         ArgumentNullException.ThrowIfNull(settingsStore);
@@ -63,6 +87,8 @@ public partial class MainWindow : Window, IDisposable
         _applicationUpdateService = applicationUpdateService ??
             new ApplicationUpdateService();
         _ownsApplicationUpdateService = applicationUpdateService is null;
+        _offlineTranslationModelManager = offlineTranslationModelManager ??
+            OfflineTranslationModelManager.Shared;
         _settingsViewModel = new SettingsViewModel(initialSettings);
         _settingsApplyTimer = new DispatcherTimer
         {
@@ -71,8 +97,16 @@ public partial class MainWindow : Window, IDisposable
         _settingsApplyTimer.Tick += OnSettingsApplyTimerTick;
 
         InitializeComponent();
+        WindowPlacementService.Track(this, WindowPlacementKeys.Settings);
+        _globalHotKeyManager.HotKeyCaptureInputReceived +=
+            OnGlobalHotKeyCaptureInputReceived;
         Activated += OnSettingsWindowActivated;
         DataContext = _settingsViewModel;
+        UpdateTranslationModePresentation();
+        if (_settingsViewModel.TranslationMode == TranslationMode.Offline)
+        {
+            RefreshOfflineTranslationModelStatus();
+        }
         UpdateThemeSelection(initialSettings.Theme);
         UpdateCloseBehaviorSelection(initialSettings.CloseBehavior);
         LoadTranslationApiKey(
@@ -149,6 +183,9 @@ public partial class MainWindow : Window, IDisposable
         }
 
         _disposed = true;
+        _globalHotKeyManager.HotKeyCaptureInputReceived -=
+            OnGlobalHotKeyCaptureInputReceived;
+        _globalHotKeyManager.EndKeyboardCapture();
         if (_ownsModelCatalogHttpClient)
         {
             _modelCatalogHttpClient.Dispose();
@@ -248,16 +285,23 @@ public partial class MainWindow : Window, IDisposable
             InstallUpdateButton.Visibility = Visibility.Collapsed;
             UpdateProgressBar.Visibility = Visibility.Collapsed;
             UpdateStatusText.Text = "正在检测 Gitee / GitHub 更新源...";
+            ReleaseHistoryStatusText.Text = "正在读取历史正式版本...";
         }
 
         try
         {
-            var result = await _applicationUpdateService.CheckAsync(
+            var updateTask = _applicationUpdateService.CheckAsync(
                 AppMetadata.CurrentVersion,
                 _updateCancellationSource.Token);
+            var historyTask = _applicationUpdateService.GetReleaseHistoryAsync(
+                _updateCancellationSource.Token);
+            await Task.WhenAll(updateTask, historyTask);
+            var result = await updateTask;
+            var historyResult = await historyTask;
             _availableUpdate = result.AvailableUpdate;
             UpdateStatusText.Text = result.Message;
             SetUpdateNavigationState(result.AvailableUpdate?.Version);
+            UpdateReleaseHistory(historyResult);
             if (result.AvailableUpdate is not null)
             {
                 InstallUpdateButton.Content =
@@ -312,14 +356,63 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
+        await InstallReleaseAsync(_availableUpdate);
+    }
+
+    private async void OnInstallSelectedReleaseClick(object sender, RoutedEventArgs e)
+    {
+        if (_selectedRelease?.InstallableUpdate is not { } update ||
+            !CanAutomaticallyInstall(_selectedRelease.Version))
+        {
+            return;
+        }
+
+        await InstallReleaseAsync(update);
+    }
+
+    private void OnOpenSelectedReleasePageClick(object sender, RoutedEventArgs e)
+    {
+        if (_selectedRelease is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _ = Process.Start(new ProcessStartInfo
+            {
+                FileName = _selectedRelease.ReleasePage.AbsoluteUri,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            _settingsViewModel.SetStatus($"无法打开发布页：{exception.Message}");
+        }
+    }
+
+    private async Task InstallReleaseAsync(ApplicationUpdateInfo update)
+    {
+        var targetVersion = ApplicationUpdateService.NormalizeVersion(update.Version);
+        var currentVersion = ApplicationUpdateService.NormalizeVersion(
+            AppMetadata.CurrentVersion);
+        var isRollback = CompareVersions(update.Version, AppMetadata.CurrentVersion) < 0;
+        var prompt = isRollback
+            ? $"即将从 {currentVersion} 回退到 {targetVersion}。\n\n" +
+              "旧版本可能无法识别新版本新增的设置字段，建议先备份 ScreenshotData。" +
+              "现有设置、历史和截图不会主动删除。\n\n" +
+              "下载完成后程序会自动关闭、覆盖并重新启动。是否继续？"
+            : "更新下载完成后程序会自动关闭并覆盖更新，然后重新启动。\n\n" +
+              "ScreenshotData 中的设置、历史和截图会保留。是否继续？";
+
         var confirmation = System.Windows.MessageBox.Show(
             this,
-            "更新下载完成后程序会自动关闭并覆盖更新，然后重新启动。\n\n" +
-            "ScreenshotData 中的设置、历史和截图会保留。是否继续？",
-            "更新 Screenshot",
+            prompt,
+            isRollback ? $"回退到 SnapCut {targetVersion}" : "更新 SnapCut",
             MessageBoxButton.YesNo,
-            MessageBoxImage.Information,
-            MessageBoxResult.Yes);
+            isRollback ? MessageBoxImage.Warning : MessageBoxImage.Information,
+            MessageBoxResult.No);
         if (confirmation != MessageBoxResult.Yes)
         {
             return;
@@ -327,15 +420,19 @@ public partial class MainWindow : Window, IDisposable
 
         CheckForUpdatesButton.IsEnabled = false;
         InstallUpdateButton.IsEnabled = false;
+        SelectedReleaseActionButton.IsEnabled = false;
+        ReleaseHistorySelector.IsEnabled = false;
         UpdateProgressBar.Value = 0;
         UpdateProgressBar.Visibility = Visibility.Visible;
         var asset = AppMetadata.IsInstalled
-            ? _availableUpdate.Installer
-            : _availableUpdate.Portable;
+            ? update.Installer
+            : update.Portable;
         var progress = new Progress<double>(value =>
         {
             UpdateProgressBar.Value = value * 100;
-            UpdateStatusText.Text = $"正在下载更新… {value:P0}";
+            UpdateStatusText.Text = isRollback
+                ? $"正在下载回退版本 {targetVersion}… {value:P0}"
+                : $"正在下载更新… {value:P0}";
         });
 
         try
@@ -344,8 +441,10 @@ public partial class MainWindow : Window, IDisposable
                 asset,
                 progress,
                 _updateCancellationSource.Token);
-            UpdateStatusText.Text = "校验完成，正在启动覆盖更新...";
-            ApplicationUpdateLauncher.Launch(_availableUpdate, packagePath);
+            UpdateStatusText.Text = isRollback
+                ? "校验完成，正在启动版本回退..."
+                : "校验完成，正在启动覆盖更新...";
+            ApplicationUpdateLauncher.Launch(update, packagePath);
             UpdateInstallationStarted?.Invoke(this, EventArgs.Empty);
         }
         catch (OperationCanceledException)
@@ -364,7 +463,140 @@ public partial class MainWindow : Window, IDisposable
     {
         CheckForUpdatesButton.IsEnabled = true;
         InstallUpdateButton.IsEnabled = true;
+        SelectedReleaseActionButton.IsEnabled =
+            _selectedRelease?.InstallableUpdate is not null &&
+            CanAutomaticallyInstall(_selectedRelease.Version) &&
+            CompareVersions(_selectedRelease.Version, AppMetadata.CurrentVersion) != 0;
+        ReleaseHistorySelector.IsEnabled = true;
         UpdateProgressBar.Visibility = Visibility.Collapsed;
+    }
+
+    internal void UpdateReleaseHistory(ApplicationReleaseHistoryResult result)
+    {
+        ReleaseHistoryStatusText.Text = result.Message;
+        if (!result.IsSuccess || result.Releases.Count == 0)
+        {
+            ReleaseHistorySelector.ItemsSource = null;
+            SelectedReleaseDetailsPanel.Visibility = Visibility.Collapsed;
+            _selectedRelease = null;
+            return;
+        }
+
+        var items = result.Releases
+            .Select(release => new ReleaseHistoryItemViewModel
+            {
+                Release = release,
+                VersionText = $"v{ApplicationUpdateService.NormalizeVersion(release.Version)}",
+                Title = release.Title,
+                PublishedText = release.PublishedAt == DateTimeOffset.MinValue
+                    ? "发布时间未知"
+                    : release.PublishedAt.ToLocalTime().ToString(
+                        "yyyy年M月d日 HH:mm",
+                        CultureInfo.GetCultureInfo("zh-CN")),
+                StateText = GetReleaseStateText(release),
+            })
+            .ToArray();
+        foreach (var item in items)
+        {
+            item.DisplayText =
+                $"{item.VersionText}　·　{item.PublishedText}　·　{item.StateText}";
+        }
+
+        ReleaseHistorySelector.ItemsSource = items;
+        ReleaseHistorySelector.SelectedItem = items.FirstOrDefault(item =>
+            CompareVersions(item.Release.Version, AppMetadata.CurrentVersion) == 0) ??
+            items[0];
+    }
+
+    private void OnReleaseHistorySelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (ReleaseHistorySelector.SelectedItem is not ReleaseHistoryItemViewModel item)
+        {
+            _selectedRelease = null;
+            SelectedReleaseDetailsPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var release = item.Release;
+        _selectedRelease = release;
+        SelectedReleaseDetailsPanel.Visibility = Visibility.Visible;
+        SelectedReleaseTitleText.Text =
+            $"{item.VersionText} · {release.Title}";
+        SelectedReleaseDateText.Text = $"发布时间：{item.PublishedText}";
+        SelectedReleaseStateText.Text = item.StateText;
+        SelectedReleaseNotesText.Text = release.ReleaseNotes;
+
+        var comparison = CompareVersions(release.Version, AppMetadata.CurrentVersion);
+        SelectedReleaseActionButton.Visibility = comparison == 0 ||
+            release.InstallableUpdate is null ||
+            !CanAutomaticallyInstall(release.Version)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        SelectedReleaseActionButton.Content = comparison < 0
+            ? $"回退到 {ApplicationUpdateService.NormalizeVersion(release.Version)}"
+            : $"更新到 {ApplicationUpdateService.NormalizeVersion(release.Version)}";
+        SelectedReleaseActionButton.IsEnabled =
+            SelectedReleaseActionButton.Visibility == Visibility.Visible;
+        SelectedReleasePackageStatusText.Text = GetReleasePackageStatus(release);
+    }
+
+    private static string GetReleaseStateText(ApplicationReleaseInfo release)
+    {
+        var comparison = CompareVersions(release.Version, AppMetadata.CurrentVersion);
+        if (comparison == 0)
+        {
+            return "当前版本";
+        }
+
+        if (release.InstallableUpdate is null)
+        {
+            return "仅查看";
+        }
+
+        if (!CanAutomaticallyInstall(release.Version))
+        {
+            return "需手动安装";
+        }
+
+        return comparison < 0 ? "可回退" : "可更新";
+    }
+
+    private static string GetReleasePackageStatus(ApplicationReleaseInfo release)
+    {
+        if (!string.IsNullOrWhiteSpace(release.PackageWarning))
+        {
+            return release.PackageWarning;
+        }
+
+        var comparison = CompareVersions(release.Version, AppMetadata.CurrentVersion);
+        if (comparison == 0)
+        {
+            return "这是当前正在运行的版本。";
+        }
+
+        if (!CanAutomaticallyInstall(release.Version))
+        {
+            return "2.0.0 以前的程序文件名和更新器结构不同，为避免留下冲突文件，只支持从发布页手动安装。";
+        }
+
+        return comparison < 0
+            ? "可使用经过大小和 SHA-256 校验的正式包回退；操作前建议备份 ScreenshotData。"
+            : "可使用经过大小和 SHA-256 校验的正式包更新。";
+    }
+
+    private static bool CanAutomaticallyInstall(Version version) =>
+        CompareVersions(version, MinimumAutomaticRollbackVersion) >= 0;
+
+    private static int CompareVersions(Version left, Version right)
+    {
+        static Version Comparable(Version version) => new(
+            version.Major,
+            version.Minor,
+            Math.Max(0, version.Build));
+
+        return Comparable(left).CompareTo(Comparable(right));
     }
 
     private void OnTranslationApiKeyPasswordChanged(object sender, RoutedEventArgs e)
@@ -462,6 +694,250 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
+    private void OnTranslationModeSelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || _isApplyingSettings ||
+            sender is not System.Windows.Controls.ComboBox comboBox)
+        {
+            return;
+        }
+
+        comboBox.GetBindingExpression(
+            System.Windows.Controls.ComboBox.SelectedValueProperty)?.UpdateSource();
+        if (_settingsViewModel.TranslationMode == TranslationMode.Offline &&
+            !TranslationLanguageCatalog.OfflineTargetLanguages.Any(language =>
+                string.Equals(
+                    language.Tag,
+                    _settingsViewModel.TranslationTargetLanguage,
+                    StringComparison.OrdinalIgnoreCase)))
+        {
+            _settingsViewModel.TranslationTargetLanguage = "zh-Hans";
+        }
+
+        UpdateTranslationModePresentation();
+        ApplySettingsImmediately();
+        if (_settingsViewModel.TranslationMode == TranslationMode.Offline)
+        {
+            RefreshOfflineTranslationModelStatus();
+        }
+        else
+        {
+            Interlocked.Increment(ref _offlineModelPlanGeneration);
+            _offlineTranslationPlan = null;
+        }
+    }
+
+    private void UpdateTranslationModePresentation()
+    {
+        if (OnlineTranslationSettingsPanel is null ||
+            OfflineTranslationSettingsPanel is null ||
+            TranslationDisabledPanel is null)
+        {
+            return;
+        }
+
+        OnlineTranslationSettingsPanel.Visibility =
+            _settingsViewModel.TranslationMode == TranslationMode.Online
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        OfflineTranslationSettingsPanel.Visibility =
+            _settingsViewModel.TranslationMode == TranslationMode.Offline
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        TranslationDisabledPanel.Visibility =
+            _settingsViewModel.TranslationMode == TranslationMode.Disabled
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+    }
+
+    private async void OnDownloadOfflineModelClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button button)
+        {
+            return;
+        }
+
+        var plan = _offlineTranslationPlan;
+        if (plan is null)
+        {
+            RefreshOfflineTranslationModelStatus();
+            _settingsViewModel.SetStatus(
+                "正在计算当前目标语言包所需的离线模型信息，请稍候。");
+            return;
+        }
+
+        var status = _offlineTranslationModelManager.GetStatus(plan);
+        if (status.IsInstalled)
+        {
+            RefreshOfflineTranslationModelStatus();
+            _settingsViewModel.SetStatus(
+                $"“{plan.DisplayName}”离线语言包已经安装。");
+            return;
+        }
+
+        var availableSpace = status.AvailableSpace > 0
+            ? FormatFileSize(status.AvailableSpace)
+            : "无法读取";
+        var confirmation = System.Windows.MessageBox.Show(
+            this,
+            $"将下载“{plan.DisplayName}”所需离线模型。\n" +
+            "源语言将在翻译时完全离线自动检测；非英语语言之间将通过 English 中转。\n" +
+            "\n" +
+            $"下载流量：{FormatFileSize(status.DownloadSize)}\n" +
+            $"新增安装占用：约 {FormatFileSize(status.InstalledSize)}\n" +
+            $"磁盘可用：{availableSpace}\n\n" +
+            $"安装位置：\n{status.InstallationDirectory}\n\n" +
+            "模型来自 Mozilla Firefox Translations。是否继续下载？",
+            "下载离线翻译模型",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Information,
+            MessageBoxResult.Yes);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        button.IsEnabled = false;
+        TranslationModeComboBox.IsEnabled = false;
+        OfflineModelDownloadProgressBar.Value = 0;
+        OfflineModelDownloadProgressBar.Visibility = Visibility.Visible;
+        OfflineModelDownloadProgressText.Visibility = Visibility.Visible;
+        OfflineModelDownloadProgressText.Text = "正在连接模型服务器...";
+        _settingsViewModel.SetStatus("正在下载并校验离线翻译模型...");
+        var progress = new Progress<OfflineTranslationDownloadProgress>(value =>
+        {
+            var percent = value.TotalBytes <= 0
+                ? 0
+                : Math.Clamp(
+                    (value.DownloadedBytes * 100d) / value.TotalBytes,
+                    0,
+                    100);
+            OfflineModelDownloadProgressBar.Value = percent;
+            OfflineModelDownloadProgressText.Text =
+                $"{percent:0}% · {FormatFileSize(value.DownloadedBytes)} / " +
+                $"{FormatFileSize(value.TotalBytes)} · {value.CurrentFileName}";
+        });
+
+        try
+        {
+            var result = await _offlineTranslationModelManager.InstallAsync(
+                plan,
+                progress,
+                _updateCancellationSource.Token);
+            RefreshOfflineTranslationModelStatus();
+            _settingsViewModel.SetStatus(result.IsSuccess
+                ? "离线翻译模型安装完成，现在可以断网翻译。"
+                : result.ErrorMessage ?? "离线翻译模型安装失败。");
+        }
+        finally
+        {
+            button.IsEnabled = true;
+            TranslationModeComboBox.IsEnabled = true;
+            OfflineModelDownloadProgressBar.Visibility = Visibility.Collapsed;
+            OfflineModelDownloadProgressText.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void OnOpenOfflineModelDirectoryClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        try
+        {
+            Directory.CreateDirectory(
+                _offlineTranslationModelManager.InstallationDirectory);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = _offlineTranslationModelManager.InstallationDirectory,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                System.ComponentModel.Win32Exception)
+        {
+            _settingsViewModel.SetStatus("无法打开离线模型目录。");
+        }
+    }
+
+    private async void RefreshOfflineTranslationModelStatus()
+    {
+        if (OfflineModelStatusText is null || OfflineModelPathText is null ||
+            DownloadOfflineModelButton is null ||
+            _settingsViewModel.TranslationMode != TranslationMode.Offline)
+        {
+            return;
+        }
+
+        var generation = Interlocked.Increment(ref _offlineModelPlanGeneration);
+        _offlineTranslationPlan = null;
+        DownloadOfflineModelButton.IsEnabled = false;
+        DownloadOfflineModelButton.Content = "正在计算...";
+        OfflineModelStatusText.Text = "正在读取 Mozilla 模型清单并计算所需空间...";
+        OfflineModelPathText.Text =
+            $"安装目录：{_offlineTranslationModelManager.InstallationDirectory}";
+        if (OfflineModelRouteText is not null)
+        {
+            OfflineModelRouteText.Text =
+                "源语言：自动检测（与文字识别语言设置无关） · " +
+                $"目标语言：{TranslationLanguageCatalog.GetDisplayName(_settingsViewModel.TranslationTargetLanguage)}";
+        }
+
+        OfflineTranslationModelPlanResult result;
+        try
+        {
+            result = await _offlineTranslationModelManager.PrepareTargetPlanAsync(
+                _settingsViewModel.TranslationTargetLanguage,
+                _updateCancellationSource.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+        if (generation != Volatile.Read(ref _offlineModelPlanGeneration) || _disposed)
+        {
+            return;
+        }
+
+        if (!result.IsSuccess || result.Plan is null)
+        {
+            OfflineModelStatusText.Text = result.ErrorMessage ??
+                "当前目标语言暂不支持离线翻译。";
+            DownloadOfflineModelButton.Content = "暂不支持";
+            DownloadOfflineModelButton.IsEnabled = false;
+            return;
+        }
+
+        var plan = result.Plan;
+        _offlineTranslationPlan = plan;
+        var status = _offlineTranslationModelManager.GetStatus(plan);
+        OfflineModelStatusText.Text = status.IsInstalled
+            ? $"已安装 · 目标语言包占用约 {FormatFileSize(plan.InstalledSize)}"
+            : $"未安装 · 本次需下载 {FormatFileSize(status.DownloadSize)}，" +
+              $"新增占用约 {FormatFileSize(status.InstalledSize)}";
+        DownloadOfflineModelButton.Content = status.IsInstalled
+            ? "模型已安装"
+            : "下载目标语言包";
+        DownloadOfflineModelButton.IsEnabled = true;
+    }
+
+    private static string FormatFileSize(long bytes)
+    {
+        const double mebibyte = 1024d * 1024d;
+        const double gibibyte = mebibyte * 1024d;
+        return bytes >= gibibyte
+            ? $"{bytes / gibibyte:0.0} GB"
+            : $"{bytes / mebibyte:0.0} MB";
+    }
+
     private void OnTextSettingChanged(object sender, TextChangedEventArgs e)
     {
         if (!_isApplyingSettings && IsLoaded)
@@ -491,6 +967,10 @@ public partial class MainWindow : Window, IDisposable
         }
 
         ApplySettingsImmediately();
+        if (ReferenceEquals(sender, OfflineTranslationTargetLanguageComboBox))
+        {
+            RefreshOfflineTranslationModelStatus();
+        }
     }
 
     private void OnThemeOptionChecked(object sender, RoutedEventArgs e)
@@ -572,7 +1052,7 @@ public partial class MainWindow : Window, IDisposable
                 return;
         }
 
-        if (!ApplySettingsImmediately())
+        if (!ApplySettingsImmediately(settingName))
         {
             RestoreCapturedHotKey(settingName);
             TryRestoreHotKeys();
@@ -585,15 +1065,32 @@ public partial class MainWindow : Window, IDisposable
         object sender,
         KeyboardFocusChangedEventArgs e)
     {
-        if (IsCapturingHotKey)
+        if (IsCapturingHotKey || sender is not HotKeyCaptureBox captureBox)
         {
             return;
         }
 
         _suspendedHotKeyBindings = _globalHotKeyManager.SuspendRegistrations();
+        _activeHotKeyCaptureBox = captureBox;
+        _globalHotKeyManager.BeginKeyboardCapture();
         IsCapturingHotKey = true;
         _settingsViewModel.SetStatus(
-            "请直接按下新的快捷键组合，按 Backspace 或 Delete 清空，按 Esc 取消。");
+            "请按下新的组合键；录入期间会屏蔽其他应用的全局快捷键。" +
+            "按 Backspace 或 Delete 清空，按 Esc 取消。");
+    }
+
+    private void OnGlobalHotKeyCaptureInputReceived(
+        object? sender,
+        HotKeyCaptureInputEventArgs e)
+    {
+        if (!IsCapturingHotKey || _activeHotKeyCaptureBox is null)
+        {
+            return;
+        }
+
+        _activeHotKeyCaptureBox.ProcessCapturedVirtualKey(
+            e.VirtualKey,
+            e.Modifiers);
     }
 
     private void OnHotKeyCaptureLostKeyboardFocus(
@@ -635,6 +1132,9 @@ public partial class MainWindow : Window, IDisposable
 
     private void EndHotKeyCapture(bool restoreRegistrations)
     {
+        _globalHotKeyManager.EndKeyboardCapture();
+        _activeHotKeyCaptureBox = null;
+
         if (!IsCapturingHotKey)
         {
             return;
@@ -669,13 +1169,13 @@ public partial class MainWindow : Window, IDisposable
         _settingsApplyTimer.Start();
     }
 
-    private bool ApplySettingsImmediately()
+    private bool ApplySettingsImmediately(string? editedHotKeySettingName = null)
     {
         _settingsApplyTimer.Stop();
-        return ApplySettings();
+        return ApplySettings(editedHotKeySettingName);
     }
 
-    private bool ApplySettings()
+    private bool ApplySettings(string? editedHotKeySettingName = null)
     {
         if (_isApplyingSettings)
         {
@@ -699,12 +1199,20 @@ public partial class MainWindow : Window, IDisposable
 
             Directory.CreateDirectory(settings.SaveDirectory);
 
-            var hotKeyRegistration = _globalHotKeyManager.Apply(hotKeyBindings);
+            var hotKeyRegistration =
+                _globalHotKeyManager.ApplyAvailable(hotKeyBindings);
+            var hotKeyWarning = hotKeyRegistration.IsSuccess
+                ? null
+                : hotKeyRegistration.ErrorMessage ?? "部分快捷键无法注册。";
 
-            if (!hotKeyRegistration.IsSuccess)
+            if (GetHotKeyAction(editedHotKeySettingName) is { } editedAction &&
+                hotKeyBindings.FirstOrDefault(
+                    binding => binding.Action == editedAction) is { } editedBinding &&
+                !_globalHotKeyManager.RegisteredBindings.Contains(editedBinding))
             {
                 _settingsViewModel.SetStatus(
-                    hotKeyRegistration.ErrorMessage ?? "无法注册快捷键。");
+                    hotKeyRegistration.ErrorMessage ??
+                    $"快捷键 {editedBinding.Gesture} 无法注册，请改用其他组合键。");
                 return false;
             }
 
@@ -744,7 +1252,9 @@ public partial class MainWindow : Window, IDisposable
             _settingsViewModel.Apply(settings);
             ConfigureTaskbarVisibility(settings.ShowTaskbarIcon);
             SettingsSaved?.Invoke(this, new SettingsSavedEventArgs(settings));
-            _settingsViewModel.SetStatus("设置已生效。");
+            _settingsViewModel.SetStatus(hotKeyWarning is null
+                ? "设置已生效。"
+                : $"其他设置已生效；{hotKeyWarning}");
             return true;
         }
         catch (Exception exception)
@@ -778,6 +1288,24 @@ public partial class MainWindow : Window, IDisposable
                 _settingsViewModel.OpenSettingsHotKey = _savedSettings.OpenSettingsHotKey;
                 break;
         }
+    }
+
+    private static HotKeyAction? GetHotKeyAction(string? settingName)
+    {
+        return settingName switch
+        {
+            nameof(SettingsViewModel.RegionCaptureHotKey) =>
+                HotKeyAction.RegionCapture,
+            nameof(SettingsViewModel.ScrollCaptureHotKey) =>
+                HotKeyAction.ScrollCapture,
+            nameof(SettingsViewModel.OcrHotKey) =>
+                HotKeyAction.RecognizeText,
+            nameof(SettingsViewModel.PinHotKey) =>
+                HotKeyAction.PinImage,
+            nameof(SettingsViewModel.OpenSettingsHotKey) =>
+                HotKeyAction.OpenSettings,
+            _ => null,
+        };
     }
 
     private void ShowSettingsSection(int sectionIndex)
@@ -828,7 +1356,7 @@ public partial class MainWindow : Window, IDisposable
         try
         {
             var savedBindings = HotKeyConfiguration.CreateBindings(_savedSettings);
-            _ = _globalHotKeyManager.Apply(savedBindings);
+            _ = _globalHotKeyManager.ApplyAvailable(savedBindings);
         }
         catch (Exception)
         {

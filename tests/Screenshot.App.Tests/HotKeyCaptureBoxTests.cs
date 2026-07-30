@@ -1,4 +1,5 @@
 using System.Windows.Input;
+using Screenshot.App.Core;
 using Screenshot.App.Presentation;
 
 namespace Screenshot.App.Tests;
@@ -70,6 +71,46 @@ public sealed class HotKeyCaptureBoxTests
 
             Assert.Equal(string.Empty, captureBox.Text);
             Assert.Equal(string.Empty, capturedGesture);
+        });
+    }
+
+    [Fact]
+    public void CapturesACombinationReportedByTheGlobalKeyboardHook()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var captureBox = new HotKeyCaptureBox();
+            string? capturedGesture = null;
+            captureBox.HotKeyCaptured += (_, eventArgs) =>
+                capturedGesture = eventArgs.Gesture;
+
+            captureBox.ProcessCapturedVirtualKey(
+                'A',
+                HotKeyModifiers.Alt);
+
+            Assert.Equal("Alt+A", captureBox.Text);
+            Assert.Equal("Alt+A", capturedGesture);
+        });
+    }
+
+    [Fact]
+    public void IgnoresAReportedKeyWithoutAModifier()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var captureBox = new HotKeyCaptureBox
+            {
+                Text = "Ctrl+Alt+S",
+            };
+            var captureRaised = false;
+            captureBox.HotKeyCaptured += (_, _) => captureRaised = true;
+
+            captureBox.ProcessCapturedVirtualKey(
+                'A',
+                HotKeyModifiers.None);
+
+            Assert.Equal("Ctrl+Alt+S", captureBox.Text);
+            Assert.False(captureRaised);
         });
     }
 }

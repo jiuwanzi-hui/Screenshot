@@ -27,13 +27,12 @@
         <Geometry x:Key="PinIconGeometry">M 6,2 H 12 L 11,6 L 14,9 L 10,10 L 9,16 L 7,10 L 3,9 L 6,6 Z</Geometry>
         <Geometry x:Key="CancelIconGeometry">M 4,4 L 14,14 M 14,4 L 4,14</Geometry>
         <Geometry x:Key="ConfirmIconGeometry">M 3,9 L 7,13 L 15,4</Geometry>
-        <SolidColorBrush x:Key="InlineIconBrush" Color="#E7F3F1" />
         <Style x:Key="InlineIconPath" TargetType="Path">
             <Setter Property="Width" Value="18" />
             <Setter Property="Height" Value="18" />
             <Setter Property="Stretch" Value="Uniform" />
             <Setter Property="Fill" Value="Transparent" />
-            <Setter Property="Stroke" Value="{StaticResource InlineIconBrush}" />
+            <Setter Property="Stroke" Value="{DynamicResource EditorToolbarIconBrush}" />
             <Setter Property="StrokeThickness" Value="1.7" />
             <Setter Property="StrokeStartLineCap" Value="Round" />
             <Setter Property="StrokeEndLineCap" Value="Round" />
@@ -45,10 +44,10 @@
             <Setter Property="Margin" Value="0,0,5,0" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="FontSize" Value="13" />
-            <Setter Property="Foreground" Value="{StaticResource InlineIconBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource EditorToolbarIconBrush}" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Background" Value="#D91F252D" />
-            <Setter Property="BorderBrush" Value="#526C7780" />
+            <Setter Property="Background" Value="{DynamicResource EditorToolbarButtonBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource EditorToolbarButtonBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -63,14 +62,27 @@
                                               VerticalAlignment="Center" />
                         </Border>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ToolBackground"
+                                        Property="Background"
+                                        Value="{DynamicResource EditorToolbarButtonHoverBackgroundBrush}" />
+                                <Setter TargetName="ToolBackground"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource EditorToolbarButtonHoverBorderBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ToolBackground"
+                                        Property="Background"
+                                        Value="{DynamicResource EditorToolbarButtonPressedBackgroundBrush}" />
+                            </Trigger>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="ToolBackground"
                                         Property="Background"
-                                        Value="#B44A666B" />
+                                        Value="{DynamicResource EditorToolbarButtonSelectedBackgroundBrush}" />
                                 <Setter TargetName="ToolBackground"
                                         Property="BorderBrush"
-                                        Value="#82D8CC" />
-                                <Setter Property="Foreground" Value="{StaticResource InlineIconBrush}" />
+                                        Value="{DynamicResource EditorToolbarButtonSelectedBorderBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource EditorToolbarIconBrush}" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -83,9 +95,9 @@
             <Setter Property="Height" Value="32" />
             <Setter Property="Margin" Value="0,0,5,0" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Foreground" Value="{StaticResource InlineIconBrush}" />
-            <Setter Property="Background" Value="#D91F252D" />
-            <Setter Property="BorderBrush" Value="#526C7780" />
+            <Setter Property="Foreground" Value="{DynamicResource EditorToolbarIconBrush}" />
+            <Setter Property="Background" Value="{DynamicResource EditorToolbarButtonBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource EditorToolbarButtonBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
@@ -101,11 +113,11 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ActionBackground" Property="Background" Value="#F02F3944" />
-                                <Setter TargetName="ActionBackground" Property="BorderBrush" Value="#82D8CC" />
+                                <Setter TargetName="ActionBackground" Property="Background" Value="{DynamicResource EditorToolbarButtonHoverBackgroundBrush}" />
+                                <Setter TargetName="ActionBackground" Property="BorderBrush" Value="{DynamicResource EditorToolbarButtonHoverBorderBrush}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="ActionBackground" Property="Background" Value="#F0446064" />
+                                <Setter TargetName="ActionBackground" Property="Background" Value="{DynamicResource EditorToolbarButtonPressedBackgroundBrush}" />
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
                                 <Setter TargetName="ActionBackground" Property="Opacity" Value="0.38" />
@@ -496,7 +508,7 @@
                                 Style="{StaticResource InlineActionButton}"
                                 ToolTip="识别并翻译，覆盖到截图">
                             <TextBlock x:Name="TranslateButtonText"
-                                       Foreground="{StaticResource InlineIconBrush}"
+                                       Foreground="{DynamicResource EditorToolbarIconBrush}"
                                        FontFamily="Microsoft YaHei UI"
                                        FontSize="14"
                                        FontWeight="SemiBold"
@@ -539,18 +551,18 @@
                                 Style="{StaticResource InlineActionButton}"
                                 ToolTip="取消截图">
                             <Path Data="{StaticResource CancelIconGeometry}"
-                                  Stroke="#F26D78"
+                                  Stroke="{DynamicResource EditorToolbarCancelIconBrush}"
                                   Style="{StaticResource InlineIconPath}" />
                         </Button>
                         <Button x:Name="ConfirmButton"
                                 Click="OnConfirmClick"
                                 Margin="4,0,0,0"
-                                Background="#B44A9E95"
-                                BorderBrush="#82D8CC"
+                                Background="{DynamicResource EditorToolbarConfirmBackgroundBrush}"
+                                BorderBrush="{DynamicResource EditorToolbarConfirmBorderBrush}"
                                 Style="{StaticResource InlineActionButton}"
                                 ToolTip="复制并完成截图">
                             <Path Data="{StaticResource ConfirmIconGeometry}"
-                                  Stroke="#72E0BD"
+                                  Stroke="{DynamicResource EditorToolbarConfirmIconBrush}"
                                   Style="{StaticResource InlineIconPath}" />
                         </Button>
                     </StackPanel>
