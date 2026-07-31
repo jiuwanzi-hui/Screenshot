@@ -28,7 +28,7 @@ public static class OpenAiCompatibleEndpointResolver
                 ? "/chat/completions"
                 : "/v1/chat/completions";
         }
-        else if (path.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        else
         {
             path += "/chat/completions";
         }

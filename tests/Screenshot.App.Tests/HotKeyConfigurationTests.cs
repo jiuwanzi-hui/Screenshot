@@ -123,4 +123,35 @@ public sealed class HotKeyConfigurationTests
             binding => binding.Action == HotKeyAction.PinImage &&
                        binding.Gesture.ToString() == "Ctrl+Alt+P");
     }
+
+    [Fact]
+    public void LegacyOcrSettingRegistersTheTranslationAction()
+    {
+        var settings = AppSettings.CreateDefault() with
+        {
+            RegionCaptureHotKey = string.Empty,
+            OcrHotKey = "Ctrl+Alt+T",
+        };
+
+        var bindings = HotKeyConfiguration.CreateBindings(settings);
+
+        Assert.Contains(
+            bindings,
+            binding => binding.Action == HotKeyAction.RecognizeText &&
+                       binding.Gesture.ToString() == "Ctrl+Alt+T");
+    }
+
+    [Fact]
+    public void InvalidLegacyOcrSettingUsesTheTranslationDisplayName()
+    {
+        var settings = AppSettings.CreateDefault() with
+        {
+            OcrHotKey = "T",
+        };
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => HotKeyConfiguration.CreateBindings(settings));
+
+        Assert.Contains("翻译", exception.Message);
+    }
 }

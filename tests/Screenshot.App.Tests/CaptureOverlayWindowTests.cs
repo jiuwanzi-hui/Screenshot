@@ -916,6 +916,92 @@ public sealed class CaptureOverlayWindowTests
     }
 
     [Fact]
+    public async Task TranslationShortcutModeRecognizesAndTranslatesAfterSelection()
+    {
+        CaptureOverlayWindow? overlay = null;
+        Task? enterAndTranslateTask = null;
+        var translationRequestCount = 0;
+
+        try
+        {
+            WpfTestHost.Invoke(() =>
+            {
+                var pinnedImageManager = new PinnedImageManager();
+                overlay = CaptureOverlayWindow.ShowInteractive(new CaptureOverlayOptions
+                {
+                    SaveDirectory = Path.GetTempPath(),
+                    KeepHistory = false,
+                    HistoryLimit = 0,
+                    HistoryService = new CaptureHistoryService(),
+                    PinnedImageManager = pinnedImageManager,
+                    StartOcrAsync = image =>
+                    {
+                        image.Dispose();
+                        return Task.CompletedTask;
+                    },
+                    TranslateTextAfterSelection = true,
+                    RecognizeTextAsync = _ => Task.FromResult(
+                        new OcrRecognitionResult(true, "hello", ErrorMessage: null)
+                        {
+                            Regions =
+                            [
+                                new OcrTextRegion("hello", 10, 12, 90, 24),
+                            ],
+                        }),
+                    TranslateTextAsync = _ =>
+                    {
+                        translationRequestCount++;
+                        return Task.FromResult(new TranslationSegmentsResult(
+                            true,
+                            ["你好"],
+                            ErrorMessage: null));
+                    },
+                    CaptureClosed = pinnedImageManager.Dispose,
+                });
+                overlay.UpdateLayout();
+
+                var updateMethod = typeof(CaptureOverlayWindow).GetMethod(
+                    "UpdateSelectionBounds",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var enterMethod = typeof(CaptureOverlayWindow).GetMethod(
+                    "EnterInlineEditorForCompletedSelectionAsync",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.NotNull(updateMethod);
+                Assert.NotNull(enterMethod);
+                updateMethod.Invoke(overlay, [new Rect(30, 30, 160, 100)]);
+                enterAndTranslateTask = Assert.IsAssignableFrom<Task>(
+                    enterMethod.Invoke(overlay, null));
+            });
+
+            await Assert.IsAssignableFrom<Task>(enterAndTranslateTask)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+
+            WpfTestHost.Invoke(() =>
+            {
+                var editor = Assert.IsType<ImageEditorCanvas>(
+                    overlay?.FindName("InlineEditorCanvas"));
+                var textOverlay = Assert.IsType<Canvas>(
+                    overlay?.FindName("OcrTextOverlay"));
+                var translatedText = Assert.Single(
+                    textOverlay.Children.OfType<TextBox>());
+
+                Assert.True(editor.HasTranslationOverlay);
+                Assert.True(editor.IsTranslationOverlayVisible);
+                Assert.Equal("你好", translatedText.Text);
+                Assert.Equal(1, translationRequestCount);
+                Assert.Equal(
+                    "原",
+                    Assert.IsType<TextBlock>(
+                        overlay?.FindName("TranslateButtonText")).Text);
+            });
+        }
+        finally
+        {
+            WpfTestHost.Invoke(() => overlay?.Close());
+        }
+    }
+
+    [Fact]
     public async Task FinalRightClickClosesOnlyAfterItsButtonUpIsConsumed()
     {
         CaptureOverlayWindow? overlay = null;

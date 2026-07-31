@@ -9,12 +9,86 @@ namespace Screenshot.App.Presentation;
 
 public sealed record SettingOption(string Value, string Label);
 
-public sealed record TranslationPriorityItem(
-    int Position,
-    TranslationProviderKind Provider,
-    string Label,
-    bool CanMoveUp,
-    bool CanMoveDown);
+public sealed class TranslationPriorityItem : INotifyPropertyChanged
+{
+    private bool _isAvailable;
+    private string _availabilityReason;
+
+    public TranslationPriorityItem(
+        int position,
+        TranslationProviderKind provider,
+        string label,
+        bool canMoveUp,
+        bool canMoveDown,
+        bool isAvailable = false,
+        string availabilityReason = "正在检查可用状态")
+    {
+        Position = position;
+        Provider = provider;
+        Label = label;
+        CanMoveUp = canMoveUp;
+        CanMoveDown = canMoveDown;
+        _isAvailable = isAvailable;
+        _availabilityReason = availabilityReason;
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public int Position { get; }
+
+    public TranslationProviderKind Provider { get; }
+
+    public string Label { get; }
+
+    public bool CanMoveUp { get; }
+
+    public bool CanMoveDown { get; }
+
+    public bool IsAvailable
+    {
+        get => _isAvailable;
+        private set
+        {
+            if (_isAvailable == value)
+            {
+                return;
+            }
+
+            _isAvailable = value;
+            PropertyChanged?.Invoke(
+                this,
+                new PropertyChangedEventArgs(nameof(IsAvailable)));
+            PropertyChanged?.Invoke(
+                this,
+                new PropertyChangedEventArgs(nameof(AvailabilityLabel)));
+        }
+    }
+
+    public string AvailabilityLabel => IsAvailable ? "可用" : "不可用";
+
+    public string AvailabilityReason
+    {
+        get => _availabilityReason;
+        private set
+        {
+            if (_availabilityReason == value)
+            {
+                return;
+            }
+
+            _availabilityReason = value;
+            PropertyChanged?.Invoke(
+                this,
+                new PropertyChangedEventArgs(nameof(AvailabilityReason)));
+        }
+    }
+
+    public void SetAvailability(bool isAvailable, string reason)
+    {
+        AvailabilityReason = reason;
+        IsAvailable = isAvailable;
+    }
+}
 
 public sealed class SettingsViewModel : INotifyPropertyChanged
 {
@@ -58,6 +132,13 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _translationProvider = TranslationProviderFactory.ResolveProviderId(
             settings.TranslationProvider);
         _translationEndpoint = settings.TranslationEndpoint;
+        var providerDefinition = TranslationProviderFactory.GetDefinition(
+            _translationProvider);
+        if (!string.IsNullOrWhiteSpace(providerDefinition.OfficialEndpoint) &&
+            string.IsNullOrWhiteSpace(_translationEndpoint))
+        {
+            _translationEndpoint = providerDefinition.OfficialEndpoint;
+        }
         _translationTargetLanguage = settings.TranslationTargetLanguage;
         _translationModel = TranslationProviderFactory.NormalizeModel(
             settings.TranslationEndpoint,
@@ -79,11 +160,14 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     public IReadOnlyList<SettingOption> OcrLanguageOptions { get; }
 
     public IReadOnlyList<SettingOption> TranslationProviderOptions { get; } =
-    [
-        new(
-            TranslationProviderFactory.OpenAiCompatibleProviderId,
-            "OpenAI 兼容接口"),
-    ];
+        TranslationProviderFactory.ProviderDefinitions
+            .Select(provider => new SettingOption(
+                provider.Id,
+                provider.DisplayName))
+            .ToArray();
+
+    public TranslationProviderFactory.ProviderDefinition SelectedTranslationProvider =>
+        TranslationProviderFactory.GetDefinition(TranslationProvider);
 
     public ObservableCollection<TranslationPriorityItem>
         TranslationPriorityItems { get; } = [];
@@ -310,6 +394,16 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         }
     }
 
+    public void UpdateTranslationProviderAvailability(
+        TranslationProviderKind provider,
+        bool isAvailable,
+        string reason)
+    {
+        TranslationPriorityItems
+            .FirstOrDefault(item => item.Provider == provider)?
+            .SetAvailability(isAvailable, reason);
+    }
+
     public bool MoveTranslationProvider(
         TranslationProviderKind provider,
         int offset)
@@ -333,6 +427,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private void SetTranslationProviderPriority(
         IEnumerable<TranslationProviderKind> providers)
     {
+        var availability = TranslationPriorityItems.ToDictionary(
+            item => item.Provider,
+            item => (item.IsAvailable, item.AvailabilityReason));
         var values = providers
             .Where(Enum.IsDefined)
             .Distinct()
@@ -349,6 +446,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         for (var index = 0; index < values.Count; index++)
         {
             var provider = values[index];
+            availability.TryGetValue(provider, out var currentAvailability);
             TranslationPriorityItems.Add(new TranslationPriorityItem(
                 index + 1,
                 provider,
@@ -356,7 +454,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
                     ? "在线大模型"
                     : "本机离线模型",
                 index > 0,
-                index < values.Count - 1));
+                index < values.Count - 1,
+                currentAvailability.IsAvailable,
+                currentAvailability.AvailabilityReason ?? "正在检查可用状态"));
         }
     }
 

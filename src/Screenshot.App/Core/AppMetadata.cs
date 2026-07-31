@@ -72,6 +72,12 @@ public static class AppMetadata
         CurrentVersion.Minor,
         Math.Max(0, CurrentVersion.Build));
 
+    public static string FormatUpdatedVersionStatus(string updatedVersion)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(updatedVersion);
+        return $"已更新到 {DisplayName} {updatedVersion.Trim()}。";
+    }
+
     internal static string ResolveDataDirectoryPath(string applicationDirectory)
     {
         return Path.Combine(applicationDirectory, DataDirectoryName);
