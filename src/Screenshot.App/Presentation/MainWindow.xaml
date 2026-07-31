@@ -124,6 +124,119 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="MouseDurationSlider" TargetType="Slider">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid Height="28" Background="Transparent">
+                            <Track x:Name="PART_Track"
+                                   Minimum="{TemplateBinding Minimum}"
+                                   Maximum="{TemplateBinding Maximum}"
+                                   Value="{TemplateBinding Value}"
+                                   IsDirectionReversed="False"
+                                   VerticalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                                  Focusable="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="8"
+                                                        Margin="0,0,-4,0"
+                                                        VerticalAlignment="Center"
+                                                        Background="{DynamicResource AppAccentBrush}"
+                                                        CornerRadius="4" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="24"
+                                           Height="24"
+                                           Focusable="False">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Grid Width="24" Height="24">
+                                                    <Border x:Name="ThumbHalo"
+                                                            Background="{DynamicResource AppAccentBrush}"
+                                                            CornerRadius="12"
+                                                            Opacity="0.18" />
+                                                    <Border x:Name="ThumbCore"
+                                                            Width="18"
+                                                            Height="18"
+                                                            Background="{DynamicResource AppAccentBrush}"
+                                                            BorderBrush="#F4FFFFFF"
+                                                            BorderThickness="2"
+                                                            CornerRadius="9"
+                                                            SnapsToDevicePixels="True" />
+                                                    <Ellipse Width="5"
+                                                             Height="5"
+                                                             Fill="#F7FFFFFF"
+                                                             IsHitTestVisible="False" />
+                                                </Grid>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="ThumbHalo"
+                                                                Property="Opacity"
+                                                                Value="0.34" />
+                                                        <Setter TargetName="ThumbCore"
+                                                                Property="Width"
+                                                                Value="20" />
+                                                        <Setter TargetName="ThumbCore"
+                                                                Property="Height"
+                                                                Value="20" />
+                                                        <Setter TargetName="ThumbCore"
+                                                                Property="CornerRadius"
+                                                                Value="10" />
+                                                    </Trigger>
+                                                    <Trigger Property="IsDragging" Value="True">
+                                                        <Setter TargetName="ThumbHalo"
+                                                                Property="Opacity"
+                                                                Value="0.48" />
+                                                        <Setter TargetName="ThumbCore"
+                                                                Property="Width"
+                                                                Value="16" />
+                                                        <Setter TargetName="ThumbCore"
+                                                                Property="Height"
+                                                                Value="16" />
+                                                        <Setter TargetName="ThumbCore"
+                                                                Property="CornerRadius"
+                                                                Value="8" />
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                                  Focusable="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="8"
+                                                        Margin="-4,0,0,0"
+                                                        VerticalAlignment="Center"
+                                                        Background="{DynamicResource AppAccentMutedBrush}"
+                                                        BorderBrush="{DynamicResource AppBorderBrush}"
+                                                        BorderThickness="0,1,1,1"
+                                                        CornerRadius="4" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style TargetType="{x:Type local:HotKeyCaptureBox}">
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}" />
@@ -466,7 +579,8 @@
                     <TextBlock Margin="0,7,0,0"
                                FontSize="13"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
-                               Text="使用修饰键加普通按键的组合" />
+                               TextWrapping="Wrap"
+                               Text="支持键盘组合、鼠标侧键、Ctrl / Alt / Shift + 鼠标键（可组合），以及长按左/中/右键" />
 
                     <StackPanel Margin="0,25,0,0">
                         <TextBlock FontSize="14"
@@ -490,7 +604,7 @@
                                                     Tag="RegionCaptureHotKey"
                                                     Text="{Binding RegionCaptureHotKey}"
                                                     TextAlignment="Center"
-                                                    ToolTip="单击后直接按下组合键" />
+                                                    ToolTip="单击后按下键盘或鼠标按键" />
                             <Button Grid.Column="1"
                                     Width="68"
                                     Margin="8,0,0,0"
@@ -533,7 +647,7 @@
                                                     Tag="OcrHotKey"
                                                     Text="{Binding OcrHotKey}"
                                                     TextAlignment="Center"
-                                                    ToolTip="单击后直接按下组合键" />
+                                                    ToolTip="单击后按下键盘或鼠标按键" />
                             <Button Grid.Column="1"
                                     Width="68"
                                     Margin="8,0,0,0"
@@ -576,7 +690,7 @@
                                                     Tag="PinHotKey"
                                                     Text="{Binding PinHotKey}"
                                                     TextAlignment="Center"
-                                                    ToolTip="单击后直接按下组合键" />
+                                                    ToolTip="单击后按下键盘或鼠标按键" />
                             <Button Grid.Column="1"
                                     Width="68"
                                     Margin="8,0,0,0"
@@ -619,7 +733,7 @@
                                                     Tag="OpenSettingsHotKey"
                                                     Text="{Binding OpenSettingsHotKey}"
                                                     TextAlignment="Center"
-                                                    ToolTip="单击后直接按下组合键" />
+                                                    ToolTip="单击后按下键盘或鼠标按键" />
                             <Button Grid.Column="1"
                                     Width="68"
                                     Margin="8,0,0,0"
@@ -638,6 +752,48 @@
                                 <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
                             </Button>
                         </Grid>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,18,16,12">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock FontSize="14"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                       Text="鼠标长按触发时间" />
+                            <Border Grid.Column="1"
+                                    Padding="9,3"
+                                    Background="{DynamicResource AppAccentMutedBrush}"
+                                    CornerRadius="8">
+                                <TextBlock FontSize="13"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource AppAccentForegroundBrush}"
+                                           Text="{Binding MouseLongPressMilliseconds, StringFormat={}{0} ms}" />
+                            </Border>
+                        </Grid>
+                        <Slider Margin="0,10,0,0"
+                                Style="{StaticResource MouseDurationSlider}"
+                                Minimum="300"
+                                Maximum="2000"
+                                TickFrequency="50"
+                                IsSnapToTickEnabled="True"
+                                SmallChange="50"
+                                LargeChange="100"
+                                Value="{Binding MouseLongPressMilliseconds, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                ValueChanged="OnMouseLongPressDurationChanged" />
+                        <CheckBox Margin="0,9,0,0"
+                                  IsChecked="{Binding MouseSideButtonsUseLongPress}"
+                                  Checked="OnImmediateSettingChanged"
+                                  Unchecked="OnImmediateSettingChanged"
+                                  Content="鼠标后退键和前进键也使用长按触发" />
+                        <TextBlock Margin="0,6,0,0"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                   TextWrapping="Wrap"
+                                   Text="单独左、中、右键默认按长按触发；侧键默认按下触发，勾选后也必须按满此时间。侧键短按仍执行原本的后退或前进操作，移动鼠标会取消本次长按。" />
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>

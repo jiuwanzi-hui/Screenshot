@@ -154,4 +154,45 @@ public sealed class HotKeyConfigurationTests
 
         Assert.Contains("翻译", exception.Message);
     }
+
+    [Theory]
+    [InlineData("鼠标后退键", "鼠标后退键", false)]
+    [InlineData("MouseForward", "鼠标前进键", false)]
+    [InlineData("鼠标左键", "长按鼠标左键", true)]
+    [InlineData("长按滚轮键", "长按鼠标中键", true)]
+    [InlineData("Ctrl+MouseRight", "Ctrl+鼠标右键", false)]
+    [InlineData("Alt+MouseLeft", "Alt+鼠标左键", false)]
+    [InlineData("Shift+MouseBack", "Shift+鼠标后退键", false)]
+    [InlineData("Ctrl+Alt+MouseForward", "Ctrl+Alt+鼠标前进键", false)]
+    public void ParsesAndFormatsMouseShortcuts(
+        string configured,
+        string expected,
+        bool requiresHold)
+    {
+        var parsed = HotKeyGesture.TryParse(
+            configured,
+            out var gesture,
+            out var errorMessage);
+
+        Assert.True(parsed, errorMessage);
+        Assert.True(gesture.IsMouseButton);
+        Assert.Equal(requiresHold, gesture.RequiresHold);
+        Assert.Equal(expected, gesture.ToString());
+    }
+
+    [Fact]
+    public void MouseShortcutCanBeUsedWithoutAKeyboardModifier()
+    {
+        var settings = AppSettings.CreateDefault() with
+        {
+            RegionCaptureHotKey = "MouseBack",
+        };
+
+        var bindings = HotKeyConfiguration.CreateBindings(settings);
+
+        Assert.Contains(
+            bindings,
+            binding => binding.Action == HotKeyAction.RegionCapture &&
+                       binding.Gesture.ToString() == "鼠标后退键");
+    }
 }

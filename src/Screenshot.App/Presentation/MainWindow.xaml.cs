@@ -84,6 +84,9 @@ public partial class MainWindow : Window, IDisposable
         _settingsStore = settingsStore;
         _startupRegistrationService = startupRegistrationService;
         _globalHotKeyManager = globalHotKeyManager;
+        _globalHotKeyManager.ConfigureMouseLongPress(
+            initialSettings.MouseLongPressMilliseconds,
+            initialSettings.MouseSideButtonsUseLongPress);
         _translationCredentialStore = translationCredentialStore;
         _modelCatalogHttpClient = modelCatalogHttpClient ?? new HttpClient
         {
@@ -1072,6 +1075,21 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
+    private void OnMouseLongPressDurationChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (!IsLoaded || _isApplyingSettings ||
+            sender is not System.Windows.Controls.Slider slider)
+        {
+            return;
+        }
+
+        slider.GetBindingExpression(
+            System.Windows.Controls.Slider.ValueProperty)?.UpdateSource();
+        ScheduleSettingsApply();
+    }
+
     private void OnThemeOptionChecked(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded || _isApplyingSettings ||
@@ -1363,7 +1381,8 @@ public partial class MainWindow : Window, IDisposable
         _globalHotKeyManager.BeginKeyboardCapture();
         IsCapturingHotKey = true;
         _settingsViewModel.SetStatus(
-            "请按下新的组合键；录入期间会屏蔽其他应用的全局快捷键。" +
+            "请按下键盘或鼠标组合；单独按左、中、右键会录为长按。" +
+            "录入期间会屏蔽其他应用的输入。" +
             "按 Backspace 或 Delete 清空，按 Esc 取消。");
     }
 
@@ -1376,9 +1395,7 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
-        _activeHotKeyCaptureBox.ProcessCapturedVirtualKey(
-            e.VirtualKey,
-            e.Modifiers);
+        _activeHotKeyCaptureBox.ProcessCapturedGesture(e.Gesture);
     }
 
     private void OnHotKeyCaptureLostKeyboardFocus(
@@ -1537,6 +1554,9 @@ public partial class MainWindow : Window, IDisposable
             }
 
             _savedSettings = settings;
+            _globalHotKeyManager.ConfigureMouseLongPress(
+                settings.MouseLongPressMilliseconds,
+                settings.MouseSideButtonsUseLongPress);
             _settingsViewModel.Apply(settings);
             ConfigureTaskbarVisibility(settings.ShowTaskbarIcon);
             SettingsSaved?.Invoke(this, new SettingsSavedEventArgs(settings));

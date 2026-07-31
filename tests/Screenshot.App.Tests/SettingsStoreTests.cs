@@ -29,6 +29,8 @@ public sealed class SettingsStoreTests : IDisposable
             SaveDirectory = Path.Combine(_testDirectory, "captures"),
             ShowTaskbarIcon = true,
             CloseBehavior = WindowCloseBehavior.ExitApplication,
+            MouseLongPressMilliseconds = 1150,
+            MouseSideButtonsUseLongPress = true,
         };
 
         store.Save(settings);
@@ -38,6 +40,8 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.True(loadResult.Settings.LaunchAtStartup);
         Assert.True(loadResult.Settings.ShowTaskbarIcon);
         Assert.Equal(settings.CloseBehavior, loadResult.Settings.CloseBehavior);
+        Assert.Equal(1150, loadResult.Settings.MouseLongPressMilliseconds);
+        Assert.True(loadResult.Settings.MouseSideButtonsUseLongPress);
         Assert.Equal(Path.GetFullPath(settings.SaveDirectory), loadResult.Settings.SaveDirectory);
     }
 

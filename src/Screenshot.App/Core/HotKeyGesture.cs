@@ -12,6 +12,12 @@ public enum HotKeyModifiers : uint
 
 public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint VirtualKey)
 {
+    public const uint VirtualKeyMouseLeft = 0x01;
+    public const uint VirtualKeyMouseRight = 0x02;
+    public const uint VirtualKeyMouseMiddle = 0x04;
+    public const uint VirtualKeyMouseBack = 0x05;
+    public const uint VirtualKeyMouseForward = 0x06;
+
     private const uint VirtualKeyTab = 0x09;
     private const uint VirtualKeyEscape = 0x1B;
     private const uint VirtualKeySpace = 0x20;
@@ -54,9 +60,17 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
             '+',
             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
+        if (tokens.Length == 1 &&
+            TryParseKey(tokens[0], out var unmodifiedMouseKey) &&
+            IsMouseVirtualKey(unmodifiedMouseKey))
+        {
+            gesture = new HotKeyGesture(HotKeyModifiers.None, unmodifiedMouseKey);
+            return true;
+        }
+
         if (tokens.Length < 2)
         {
-            errorMessage = "快捷键至少需要一个修饰键和一个普通按键。";
+            errorMessage = "键盘快捷键需要修饰键；鼠标侧键可单独使用，左、中、右键可长按使用。";
             return false;
         }
 
@@ -121,6 +135,24 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
 
         parts.Add(GetKeyName(VirtualKey));
         return string.Join("+", parts);
+    }
+
+    public bool IsMouseButton => IsMouseVirtualKey(VirtualKey);
+
+    public bool RequiresHold =>
+        Modifiers == HotKeyModifiers.None &&
+        VirtualKey is VirtualKeyMouseLeft or
+            VirtualKeyMouseRight or
+            VirtualKeyMouseMiddle;
+
+    public static bool IsMouseVirtualKey(uint virtualKey)
+    {
+        return virtualKey is
+            VirtualKeyMouseLeft or
+            VirtualKeyMouseRight or
+            VirtualKeyMouseMiddle or
+            VirtualKeyMouseBack or
+            VirtualKeyMouseForward;
     }
 
     public bool IsSystemReserved(out string errorMessage)
@@ -214,6 +246,14 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
 
         virtualKey = normalizedToken.ToUpperInvariant() switch
         {
+            "MOUSELEFT" or "LEFTMOUSE" or "鼠标左键" or "长按鼠标左键" =>
+                VirtualKeyMouseLeft,
+            "MOUSERIGHT" or "RIGHTMOUSE" or "鼠标右键" or "长按鼠标右键" =>
+                VirtualKeyMouseRight,
+            "MOUSEMIDDLE" or "MIDDLEMOUSE" or "鼠标中键" or "滚轮键" or
+                "长按鼠标中键" or "长按滚轮键" => VirtualKeyMouseMiddle,
+            "MOUSEBACK" or "XBUTTON1" or "鼠标后退键" => VirtualKeyMouseBack,
+            "MOUSEFORWARD" or "XBUTTON2" or "鼠标前进键" => VirtualKeyMouseForward,
             "TAB" => VirtualKeyTab,
             "ESC" or "ESCAPE" => VirtualKeyEscape,
             "SPACE" => VirtualKeySpace,
@@ -245,7 +285,7 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
         return virtualKey != 0;
     }
 
-    private static string GetKeyName(uint virtualKey)
+    private string GetKeyName(uint virtualKey)
     {
         if (virtualKey is >= 'A' and <= 'Z' or >= '0' and <= '9')
         {
@@ -259,6 +299,14 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
 
         return virtualKey switch
         {
+            VirtualKeyMouseLeft when Modifiers == HotKeyModifiers.None => "长按鼠标左键",
+            VirtualKeyMouseRight when Modifiers == HotKeyModifiers.None => "长按鼠标右键",
+            VirtualKeyMouseMiddle when Modifiers == HotKeyModifiers.None => "长按鼠标中键",
+            VirtualKeyMouseLeft => "鼠标左键",
+            VirtualKeyMouseRight => "鼠标右键",
+            VirtualKeyMouseMiddle => "鼠标中键",
+            VirtualKeyMouseBack => "鼠标后退键",
+            VirtualKeyMouseForward => "鼠标前进键",
             VirtualKeyTab => "Tab",
             VirtualKeyEscape => "Esc",
             VirtualKeySpace => "Space",

@@ -15,6 +15,158 @@ namespace Screenshot.App.Tests;
 public sealed class CaptureOverlayWindowTests
 {
     [Fact]
+    public async Task TriggerButtonReleaseEndsContinuedSelectionImmediately()
+    {
+        CaptureOverlayWindow? overlay = null;
+        CapturePointerContinuation? continuation = null;
+        PinnedImageManager? pinnedImageManager = null;
+        WpfTestHost.Invoke(() =>
+        {
+            continuation = new CapturePointerContinuation(
+                CapturePointerButton.Left);
+            pinnedImageManager = new PinnedImageManager();
+            overlay = CaptureOverlayWindow.ShowInteractive(
+                new CaptureOverlayOptions
+                {
+                    SaveDirectory = Path.GetTempPath(),
+                    KeepHistory = false,
+                    HistoryLimit = 0,
+                    HistoryService = new CaptureHistoryService(),
+                    PinnedImageManager = pinnedImageManager,
+                    StartOcrAsync = image =>
+                    {
+                        image.Dispose();
+                        return Task.CompletedTask;
+                    },
+                    InitialPointerContinuation = continuation,
+                });
+        });
+
+        continuation!.NotifyReleased();
+        await overlay!.ContinuedSelectionReleaseTask.WaitAsync(
+            TimeSpan.FromSeconds(2));
+
+        WpfTestHost.Invoke(() =>
+        {
+            var selectingField = typeof(CaptureOverlayWindow).GetField(
+                "_isSelecting",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(selectingField);
+            Assert.False(Assert.IsType<bool>(selectingField.GetValue(overlay)));
+            overlay.Close();
+            pinnedImageManager!.Dispose();
+        });
+    }
+
+    [Theory]
+    [InlineData(CapturePointerButton.Left)]
+    [InlineData(CapturePointerButton.Right)]
+    public void InteractiveOverlayTrustsHeldButtonFromMouseShortcut(
+        CapturePointerButton button)
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var pinnedImageManager = new PinnedImageManager();
+            var continuation = new CapturePointerContinuation(button);
+            var overlay = CaptureOverlayWindow.ShowInteractive(
+                new CaptureOverlayOptions
+                {
+                    SaveDirectory = Path.GetTempPath(),
+                    KeepHistory = false,
+                    HistoryLimit = 0,
+                    HistoryService = new CaptureHistoryService(),
+                    PinnedImageManager = pinnedImageManager,
+                    StartOcrAsync = image =>
+                    {
+                        image.Dispose();
+                        return Task.CompletedTask;
+                    },
+                    InitialPointerContinuation = continuation,
+                });
+
+            try
+            {
+                var selectingField = typeof(CaptureOverlayWindow).GetField(
+                    "_isSelecting",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var continuedButtonField = typeof(CaptureOverlayWindow).GetField(
+                    "_continuedSelectionButton",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+
+                Assert.NotNull(selectingField);
+                Assert.NotNull(continuedButtonField);
+                Assert.True(Assert.IsType<bool>(selectingField.GetValue(overlay)));
+                Assert.Equal(
+                    button,
+                    Assert.IsType<CapturePointerButton>(
+                        continuedButtonField.GetValue(overlay)));
+            }
+            finally
+            {
+                var surface = Assert.IsType<Grid>(
+                    overlay.FindName("CaptureSurface"));
+                overlay.Close();
+                Assert.False(surface.IsMouseCaptureWithin);
+                continuation.NotifyReleased();
+            }
+        });
+    }
+
+    [Fact]
+    public void ContinuedRightButtonDragCompletesSelectionWithoutSecondDown()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            _ = CaptureOverlayWindow.SelectAsync();
+            var overlay = Application.Current.Windows
+                .OfType<CaptureOverlayWindow>()
+                .Last();
+            overlay.UpdateLayout();
+
+            var beginMethod = typeof(CaptureOverlayWindow).GetMethod(
+                "BeginPointerSelection",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var completeMethod = typeof(CaptureOverlayWindow).GetMethod(
+                "CompletePointerSelectionAsync",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var selectingField = typeof(CaptureOverlayWindow).GetField(
+                "_isSelecting",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var boundsMethod = typeof(CaptureOverlayWindow).GetMethod(
+                "GetSelectionBounds",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var continuedButtonField = typeof(CaptureOverlayWindow).GetField(
+                "_continuedSelectionButton",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.NotNull(beginMethod);
+            Assert.NotNull(completeMethod);
+            Assert.NotNull(selectingField);
+            Assert.NotNull(boundsMethod);
+            Assert.NotNull(continuedButtonField);
+            beginMethod.Invoke(
+                overlay,
+                [new Point(100, 100), CapturePointerButton.Right, false]);
+            Assert.True(Assert.IsType<bool>(selectingField.GetValue(overlay)));
+            Assert.Equal(
+                CapturePointerButton.Right,
+                Assert.IsType<CapturePointerButton>(
+                    continuedButtonField.GetValue(overlay)));
+
+            var completion = Assert.IsAssignableFrom<Task>(completeMethod.Invoke(
+                overlay,
+                [new Point(320, 260)]));
+            Assert.True(completion.IsCompletedSuccessfully);
+            var selection = Assert.IsType<Rect>(
+                boundsMethod.Invoke(overlay, null));
+            Assert.True(selection.Width > 100);
+            Assert.True(selection.Height > 100);
+            Assert.False(Assert.IsType<bool>(selectingField.GetValue(overlay)));
+            Assert.False(overlay.IsVisible);
+        });
+    }
+
+    [Fact]
     public void InteractiveOverlayExposesResizeHandlesAndActionToolbar()
     {
         WpfTestHost.Invoke(() =>

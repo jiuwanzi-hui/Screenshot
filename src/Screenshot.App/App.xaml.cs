@@ -110,7 +110,8 @@ public partial class App : System.Windows.Application, IDisposable
             _pinnedImageManager,
             credentialStore,
             _translationHttpClient,
-            message => _mainWindow?.ShowStatus(message));
+            message => _mainWindow?.ShowStatus(message),
+            suspended => _hotKeyManager.SetMouseShortcutsSuspended(suspended));
 
         if (dataMigrationResult.Warning is not null)
         {
@@ -237,7 +238,7 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void OnRegionCaptureRequested(object? sender, EventArgs e)
     {
-        _ = Dispatcher.BeginInvoke(RequestRegionCapture);
+        _ = Dispatcher.BeginInvoke((Action)RequestRegionCapture);
     }
 
     private void OnScrollCaptureRequested(object? sender, EventArgs e)
@@ -272,19 +273,23 @@ public partial class App : System.Windows.Application, IDisposable
 
         if (e.Action == HotKeyAction.RegionCapture)
         {
-            RequestRegionCapture(e.DetachPreCapturedScreen());
+            RequestRegionCapture(
+                e.DetachPreCapturedScreen(),
+                e.CapturePointerContinuation);
         }
         else if (e.Action == HotKeyAction.RecognizeText)
         {
-            RequestTranslationCapture(e.DetachPreCapturedScreen());
+            RequestTranslationCapture(
+                e.DetachPreCapturedScreen(),
+                e.CapturePointerContinuation);
         }
         else if (e.Action == HotKeyAction.PinImage)
         {
-            RequestPinCapture();
+            RequestPinCapture(e.CapturePointerContinuation);
         }
         else if (e.Action == HotKeyAction.ScrollCapture)
         {
-            RequestScrollCapture();
+            RequestScrollCapture(e.CapturePointerContinuation);
         }
         else if (e.Action == HotKeyAction.OpenSettings)
         {
@@ -340,35 +345,54 @@ public partial class App : System.Windows.Application, IDisposable
         }
     }
 
-    private void RequestRegionCapture(CapturedImage? initialScreenSnapshot = null)
+    private void RequestRegionCapture()
     {
-        _ = RequestRegionCaptureAsync(initialScreenSnapshot);
+        RequestRegionCapture(
+            initialScreenSnapshot: null,
+            pointerContinuation: null);
     }
 
-    private void RequestTranslationCapture(CapturedImage? initialScreenSnapshot = null)
+    private void RequestRegionCapture(
+        CapturedImage? initialScreenSnapshot,
+        CapturePointerContinuation? pointerContinuation)
     {
-        _ = RequestTranslationCaptureAsync(initialScreenSnapshot);
+        _ = RequestRegionCaptureAsync(
+            initialScreenSnapshot,
+            pointerContinuation);
     }
 
-    private void RequestPinCapture()
+    private void RequestTranslationCapture(
+        CapturedImage? initialScreenSnapshot,
+        CapturePointerContinuation? pointerContinuation)
     {
-        _ = RequestPinCaptureAsync();
+        _ = RequestTranslationCaptureAsync(
+            initialScreenSnapshot,
+            pointerContinuation);
     }
 
-    private void RequestScrollCapture()
+    private void RequestPinCapture(
+        CapturePointerContinuation? pointerContinuation)
     {
-        _ = RequestScrollCaptureAsync();
+        _ = RequestPinCaptureAsync(pointerContinuation);
+    }
+
+    private void RequestScrollCapture(
+        CapturePointerContinuation? pointerContinuation)
+    {
+        _ = RequestScrollCaptureAsync(pointerContinuation);
     }
 
     private async Task RequestRegionCaptureAsync(
-        CapturedImage? initialScreenSnapshot = null)
+        CapturedImage? initialScreenSnapshot,
+        CapturePointerContinuation? pointerContinuation)
     {
         try
         {
             if (_regionCaptureCoordinator is not null)
             {
                 await _regionCaptureCoordinator.RequestCaptureAsync(
-                    initialScreenSnapshot);
+                    initialScreenSnapshot,
+                    pointerContinuation);
             }
             else
             {
@@ -382,14 +406,16 @@ public partial class App : System.Windows.Application, IDisposable
     }
 
     private async Task RequestTranslationCaptureAsync(
-        CapturedImage? initialScreenSnapshot = null)
+        CapturedImage? initialScreenSnapshot,
+        CapturePointerContinuation? pointerContinuation)
     {
         try
         {
             if (_regionCaptureCoordinator is not null)
             {
                 await _regionCaptureCoordinator.RequestTranslationCaptureAsync(
-                    initialScreenSnapshot);
+                    initialScreenSnapshot,
+                    pointerContinuation);
             }
             else
             {
@@ -402,13 +428,15 @@ public partial class App : System.Windows.Application, IDisposable
         }
     }
 
-    private async Task RequestPinCaptureAsync()
+    private async Task RequestPinCaptureAsync(
+        CapturePointerContinuation? pointerContinuation)
     {
         try
         {
             if (_regionCaptureCoordinator is not null)
             {
-                await _regionCaptureCoordinator.RequestPinCaptureAsync();
+                await _regionCaptureCoordinator.RequestPinCaptureAsync(
+                    pointerContinuation);
             }
         }
         catch (Exception)
@@ -461,13 +489,15 @@ public partial class App : System.Windows.Application, IDisposable
         }
     }
 
-    private async Task RequestScrollCaptureAsync()
+    private async Task RequestScrollCaptureAsync(
+        CapturePointerContinuation? pointerContinuation)
     {
         try
         {
             if (_regionCaptureCoordinator is not null)
             {
-                await _regionCaptureCoordinator.RequestScrollCaptureAsync();
+                await _regionCaptureCoordinator.RequestScrollCaptureAsync(
+                    pointerContinuation);
             }
         }
         catch (Exception)
