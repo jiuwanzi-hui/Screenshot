@@ -130,7 +130,8 @@ public partial class App : System.Windows.Application, IDisposable
         }
         else if (TryGetArgumentValue(e.Args, "--updated") is { } updatedVersion)
         {
-            _mainWindow.ShowStatus($"已更新到 Screenshot {updatedVersion}。");
+            _mainWindow.ShowStatus(
+                AppMetadata.FormatUpdatedVersionStatus(updatedVersion));
         }
 
         _trayIconService = new TrayIconService(_themeManager.ResolvedTheme);
@@ -275,7 +276,7 @@ public partial class App : System.Windows.Application, IDisposable
         }
         else if (e.Action == HotKeyAction.RecognizeText)
         {
-            RequestOcrCapture(e.DetachPreCapturedScreen());
+            RequestTranslationCapture(e.DetachPreCapturedScreen());
         }
         else if (e.Action == HotKeyAction.PinImage)
         {
@@ -344,9 +345,9 @@ public partial class App : System.Windows.Application, IDisposable
         _ = RequestRegionCaptureAsync(initialScreenSnapshot);
     }
 
-    private void RequestOcrCapture(CapturedImage? initialScreenSnapshot = null)
+    private void RequestTranslationCapture(CapturedImage? initialScreenSnapshot = null)
     {
-        _ = RequestOcrCaptureAsync(initialScreenSnapshot);
+        _ = RequestTranslationCaptureAsync(initialScreenSnapshot);
     }
 
     private void RequestPinCapture()
@@ -380,14 +381,14 @@ public partial class App : System.Windows.Application, IDisposable
         }
     }
 
-    private async Task RequestOcrCaptureAsync(
+    private async Task RequestTranslationCaptureAsync(
         CapturedImage? initialScreenSnapshot = null)
     {
         try
         {
             if (_regionCaptureCoordinator is not null)
             {
-                await _regionCaptureCoordinator.RequestOcrCaptureAsync(
+                await _regionCaptureCoordinator.RequestTranslationCaptureAsync(
                     initialScreenSnapshot);
             }
             else
@@ -397,7 +398,7 @@ public partial class App : System.Windows.Application, IDisposable
         }
         catch (Exception)
         {
-            _mainWindow?.ShowStatus("文字识别失败，请检查语言设置。");
+            _mainWindow?.ShowStatus("翻译失败，请检查文字识别与翻译设置。");
         }
     }
 

@@ -515,7 +515,7 @@
                         <TextBlock FontSize="14"
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource AppTextPrimaryBrush}"
-                                   Text="文字识别" />
+                                   Text="翻译" />
                         <Grid Margin="0,8,16,0">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -541,14 +541,14 @@
                                     Content="修改"
                                     Style="{StaticResource SecondaryButton}"
                                     Tag="OcrHotKeyBox"
-                                    ToolTip="修改文字识别快捷键" />
+                                    ToolTip="修改翻译快捷键" />
                             <Button Grid.Column="2"
                                     Width="34"
                                     Margin="6,0,0,0"
                                     Click="OnClearHotKeyClick"
                                     Style="{StaticResource SecondaryButton}"
                                     Tag="OcrHotKeyBox"
-                                    ToolTip="不设置文字识别快捷键">
+                                    ToolTip="不设置翻译快捷键">
                                 <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
                             </Button>
                         </Grid>
@@ -712,32 +712,128 @@
                                 <DataTemplate>
                                     <Border Margin="0,0,0,7"
                                             Padding="12,9"
-                                            Background="{DynamicResource AppPanelBackgroundBrush}"
-                                            BorderBrush="{DynamicResource AppBorderBrush}"
                                             BorderThickness="1"
-                                            CornerRadius="7">
+                                            CornerRadius="7"
+                                            ToolTip="{Binding AvailabilityReason}">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background"
+                                                        Value="{DynamicResource AppPanelBackgroundBrush}" />
+                                                <Setter Property="BorderBrush"
+                                                        Value="{DynamicResource AppBorderBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsAvailable}"
+                                                                 Value="True">
+                                                        <Setter Property="Background"
+                                                                Value="{DynamicResource AppAccentMutedBrush}" />
+                                                        <Setter Property="BorderBrush"
+                                                                Value="{DynamicResource AppAccentBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="32" />
                                                 <ColumnDefinition Width="*" />
                                                 <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
                                             </Grid.ColumnDefinitions>
                                             <Border Width="24"
                                                     Height="24"
                                                     VerticalAlignment="Center"
-                                                    Background="{DynamicResource AppAccentMutedBrush}"
                                                     CornerRadius="4">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background"
+                                                                Value="{DynamicResource AppInputBackgroundBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsAvailable}"
+                                                                         Value="True">
+                                                                <Setter Property="Background"
+                                                                        Value="{DynamicResource AppAccentMutedBrush}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
                                                 <TextBlock HorizontalAlignment="Center"
                                                            VerticalAlignment="Center"
                                                            FontWeight="SemiBold"
-                                                           Foreground="{DynamicResource AppAccentBrush}"
-                                                           Text="{Binding Position}" />
+                                                           Text="{Binding Position}">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground"
+                                                                    Value="{DynamicResource AppTextSecondaryBrush}" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsAvailable}"
+                                                                             Value="True">
+                                                                    <Setter Property="Foreground"
+                                                                            Value="{DynamicResource AppAccentBrush}" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
                                             </Border>
-                                            <TextBlock Grid.Column="1"
-                                                       VerticalAlignment="Center"
-                                                       Foreground="{DynamicResource AppTextPrimaryBrush}"
-                                                       Text="{Binding Label}" />
-                                            <StackPanel Grid.Column="2"
+                                            <StackPanel Grid.Column="1"
+                                                        VerticalAlignment="Center"
+                                                        Orientation="Horizontal">
+                                                <TextBlock VerticalAlignment="Center"
+                                                           Text="{Binding Label}">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground"
+                                                                    Value="{DynamicResource AppTextSecondaryBrush}" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsAvailable}"
+                                                                             Value="True">
+                                                                    <Setter Property="Foreground"
+                                                                            Value="{DynamicResource AppTextPrimaryBrush}" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </StackPanel>
+                                            <Border Grid.Column="2"
+                                                    Margin="8,0,10,0"
+                                                    Padding="7,2"
+                                                    VerticalAlignment="Top"
+                                                    CornerRadius="4"
+                                                    ToolTip="{Binding AvailabilityReason}">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background"
+                                                                Value="{DynamicResource AppInputBackgroundBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsAvailable}"
+                                                                         Value="True">
+                                                                <Setter Property="Background"
+                                                                        Value="{DynamicResource AppAccentBrush}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <TextBlock FontSize="11"
+                                                           Text="{Binding AvailabilityLabel}">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground"
+                                                                    Value="{DynamicResource AppTextSecondaryBrush}" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsAvailable}"
+                                                                             Value="True">
+                                                                    <Setter Property="Foreground"
+                                                                            Value="White" />
+                                                                    <Setter Property="FontWeight"
+                                                                            Value="SemiBold" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </Border>
+                                            <StackPanel Grid.Column="3"
                                                         Orientation="Horizontal">
                                                 <Button Width="30"
                                                         Height="28"
@@ -781,6 +877,7 @@
                                   Margin="0,8,0,0"
                                   DisplayMemberPath="Label"
                                   ItemsSource="{Binding TranslationTargetLanguageOptions}"
+                                  PreviewMouseWheel="OnTranslationSettingPreviewMouseWheel"
                                   SelectedValue="{Binding TranslationTargetLanguage, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                   SelectedValuePath="Value"
                                   SelectionChanged="OnImmediateSettingChanged" />
@@ -807,26 +904,34 @@
                                       Margin="0,8,0,0"
                                       DisplayMemberPath="Label"
                                       ItemsSource="{Binding TranslationProviderOptions}"
+                                      PreviewMouseWheel="OnTranslationSettingPreviewMouseWheel"
                                       SelectedValue="{Binding TranslationProvider, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                       SelectedValuePath="Value"
-                                      SelectionChanged="OnImmediateSettingChanged"
-                                      ToolTip="兼容 DeepSeek、OpenAI 等聊天补全接口" />
+                                      SelectionChanged="OnTranslationProviderSelectionChanged"
+                                      ToolTip="自定义兼容接口排在第一项；内置厂商会显示其官方兼容地址" />
                         </StackPanel>
 
                         <StackPanel Margin="0,17,0,0">
                             <TextBlock FontSize="14"
                                        FontWeight="SemiBold"
                                        Foreground="{DynamicResource AppTextPrimaryBrush}"
-                                       Text="HTTPS 接口地址" />
-                            <TextBox Height="34"
+                                       Text="兼容接口地址" />
+                            <TextBox x:Name="TranslationEndpointTextBox"
+                                     Height="34"
                                      Margin="0,8,0,0"
                                      Padding="10,3"
                                      VerticalContentAlignment="Center"
                                      BorderBrush="{DynamicResource AppBorderBrush}"
                                      LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
+                                     PreviewMouseWheel="OnTranslationSettingPreviewMouseWheel"
                                      TextChanged="OnTextSettingChanged"
                                      Text="{Binding TranslationEndpoint, UpdateSourceTrigger=PropertyChanged}"
-                                     ToolTip="DeepSeek 填 https://api.deepseek.com" />
+                                     ToolTip="内置厂商会自动填入官方地址；选择自定义后可填写任意 HTTPS 兼容地址" />
+                            <TextBlock x:Name="TranslationProviderOfficialSiteText"
+                                       Margin="0,6,0,0"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                       TextWrapping="Wrap" />
                         </StackPanel>
 
                         <StackPanel Margin="0,17,0,0">
@@ -844,6 +949,7 @@
                                           IsEditable="True"
                                           ItemsSource="{Binding TranslationModelOptions}"
                                           LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
+                                          PreviewMouseWheel="OnTranslationSettingPreviewMouseWheel"
                                           SelectionChanged="OnImmediateSettingChanged"
                                           Text="{Binding TranslationModel, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                           ToolTip="可以获取厂家模型，也可以手动输入模型标识" />
@@ -871,6 +977,7 @@
                                          BorderBrush="{DynamicResource AppBorderBrush}"
                                          LostKeyboardFocus="OnTranslationApiKeyLostKeyboardFocus"
                                          PasswordChanged="OnTranslationApiKeyPasswordChanged"
+                                         PreviewMouseWheel="OnTranslationSettingPreviewMouseWheel"
                                          ToolTip="仅加密保存在当前 Windows 用户下" />
                         </StackPanel>
                     </StackPanel>

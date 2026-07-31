@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -53,8 +55,12 @@ public partial class MainWindow : Window, IDisposable
     private ApplicationUpdateInfo? _availableUpdate;
     private ApplicationReleaseInfo? _selectedRelease;
     private OfflineTranslationModelPlan? _offlineTranslationPlan;
+    private string? _onlineModelCatalogFingerprint;
+    private IReadOnlyList<string> _verifiedTranslationModels = [];
+    private string? _onlineModelCatalogError;
     private HotKeyCaptureBox? _activeHotKeyCaptureBox;
     private int _automaticUpdateCheckInProgress;
+    private int _onlineAvailabilityCheckInProgress;
     private int _offlineModelPlanGeneration;
     private bool _disposed;
 
@@ -102,12 +108,14 @@ public partial class MainWindow : Window, IDisposable
             OnGlobalHotKeyCaptureInputReceived;
         Activated += OnSettingsWindowActivated;
         DataContext = _settingsViewModel;
+        RefreshTranslationProviderDetails();
         RefreshOfflineTranslationModelStatus();
         UpdateThemeSelection(initialSettings.Theme);
         UpdateCloseBehaviorSelection(initialSettings.CloseBehavior);
         LoadTranslationApiKey(
             TranslationProviderFactory.ResolveProviderId(
                 initialSettings.TranslationProvider));
+        RefreshOnlineTranslationAvailability();
         ShowSettingsSection(sectionIndex: 0);
         ShowOcrLanguageAvailability();
         CurrentVersionText.Text =
@@ -148,6 +156,8 @@ public partial class MainWindow : Window, IDisposable
     private void OnSettingsWindowActivated(object? sender, EventArgs e)
     {
         _ = CheckForUpdatesOnOpenAsync();
+        RefreshCachedOfflineTranslationInstallationState();
+        _ = VerifyOnlineTranslationAvailabilityAsync();
     }
 
     public void ShowStatus(string message)
@@ -598,6 +608,7 @@ public partial class MainWindow : Window, IDisposable
     private void OnTranslationApiKeyPasswordChanged(object sender, RoutedEventArgs e)
     {
         _settingsViewModel.TranslationApiKey = TranslationApiKeyBox.Password;
+        RefreshOnlineTranslationAvailability();
         if (_isApplyingSettings)
         {
             return;
@@ -611,22 +622,81 @@ public partial class MainWindow : Window, IDisposable
     {
         var resolvedProviderId = TranslationProviderFactory.ResolveProviderId(providerId);
         var apiKey = _translationCredentialStore.GetApiKey(resolvedProviderId);
-        if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            return;
-        }
 
         _isApplyingSettings = true;
         try
         {
-            TranslationApiKeyBox.Password = apiKey;
-            _settingsViewModel.TranslationApiKey = apiKey;
+            TranslationApiKeyBox.Password = apiKey ?? string.Empty;
+            _settingsViewModel.TranslationApiKey = apiKey ?? string.Empty;
             _translationApiKeyChanged = false;
         }
         finally
         {
             _isApplyingSettings = false;
         }
+    }
+
+    private void OnTranslationProviderSelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || _isApplyingSettings ||
+            !ReferenceEquals(sender, TranslationProviderComboBox))
+        {
+            return;
+        }
+
+        TranslationProviderComboBox.GetBindingExpression(
+            System.Windows.Controls.ComboBox.SelectedValueProperty)?.UpdateSource();
+
+        // Persist a key typed for the previous provider before switching the
+        // credential slot, so it can never be stored under the new provider.
+        if (_translationApiKeyChanged)
+        {
+            _translationCredentialStore.SetApiKey(
+                TranslationProviderFactory.ResolveProviderId(
+                    _savedSettings.TranslationProvider),
+                _settingsViewModel.TranslationApiKey);
+            _translationApiKeyChanged = false;
+        }
+
+        var previousProvider = TranslationProviderFactory.GetDefinition(
+            _savedSettings.TranslationProvider);
+        var provider = _settingsViewModel.SelectedTranslationProvider;
+        _isApplyingSettings = true;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(provider.OfficialEndpoint))
+            {
+                _settingsViewModel.TranslationEndpoint = provider.OfficialEndpoint;
+            }
+
+            var currentModel = _settingsViewModel.TranslationModel.Trim();
+            if (!string.IsNullOrWhiteSpace(provider.DefaultModel) &&
+                (string.IsNullOrWhiteSpace(currentModel) ||
+                 currentModel.Equals(
+                     previousProvider.DefaultModel,
+                     StringComparison.OrdinalIgnoreCase)))
+            {
+                _settingsViewModel.TranslationModel = provider.DefaultModel;
+            }
+
+            TranslationProviderOfficialSiteText.Text = provider.OfficialSite;
+            LoadTranslationApiKey(provider.Id);
+        }
+        finally
+        {
+            _isApplyingSettings = false;
+        }
+
+        ApplySettingsImmediately();
+        RefreshOnlineTranslationAvailability();
+    }
+
+    private void RefreshTranslationProviderDetails()
+    {
+        var provider = _settingsViewModel.SelectedTranslationProvider;
+        TranslationProviderOfficialSiteText.Text = provider.OfficialSite;
     }
 
     private void OnTranslationApiKeyLostKeyboardFocus(
@@ -651,23 +721,44 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
+        _settingsViewModel.UpdateTranslationProviderAvailability(
+            TranslationProviderKind.Online,
+            isAvailable: false,
+            "正在验证服务并获取模型列表");
         button.IsEnabled = false;
         button.Content = "获取中...";
         _settingsViewModel.SetStatus("正在从翻译服务获取模型列表...");
         try
         {
+            var requestFingerprint = CreateOnlineConfigurationFingerprint();
             var result = await TranslationModelCatalogService.FetchAsync(
                 _settingsViewModel.TranslationEndpoint,
                 TranslationApiKeyBox.Password,
                 _modelCatalogHttpClient);
+            if (!string.Equals(
+                    requestFingerprint,
+                    CreateOnlineConfigurationFingerprint(),
+                    StringComparison.Ordinal))
+            {
+                RefreshOnlineTranslationAvailability();
+                return;
+            }
+
+            _onlineModelCatalogFingerprint = requestFingerprint;
             if (!result.IsSuccess)
             {
+                _verifiedTranslationModels = [];
+                _onlineModelCatalogError =
+                    result.ErrorMessage ?? "获取模型失败。";
+                RefreshOnlineTranslationAvailability();
                 _settingsViewModel.SetStatus(
                     result.ErrorMessage ?? "获取模型失败。");
                 return;
             }
 
-            _settingsViewModel.SetTranslationModels(result.Models);
+            _onlineModelCatalogError = null;
+            _verifiedTranslationModels = result.Models;
+            SetTranslationModelsPreservingSelection(result.Models);
             if (result.Models.Count == 1)
             {
                 _settingsViewModel.TranslationModel = result.Models[0];
@@ -678,9 +769,16 @@ public partial class MainWindow : Window, IDisposable
                 result.Models.Count == 1
                     ? $"已获取并选择模型：{result.Models[0]}。"
                     : $"已获取 {result.Models.Count} 个模型，请在下拉框中选择。" );
+            RefreshOnlineTranslationAvailability();
         }
         catch
         {
+            _onlineModelCatalogFingerprint =
+                CreateOnlineConfigurationFingerprint();
+            _verifiedTranslationModels = [];
+            _onlineModelCatalogError =
+                "获取模型失败，请检查服务地址和网络连接。";
+            RefreshOnlineTranslationAvailability();
             _settingsViewModel.SetStatus("获取模型失败，请检查服务地址和网络连接。");
         }
         finally
@@ -840,6 +938,10 @@ public partial class MainWindow : Window, IDisposable
 
         var generation = Interlocked.Increment(ref _offlineModelPlanGeneration);
         _offlineTranslationPlan = null;
+        _settingsViewModel.UpdateTranslationProviderAvailability(
+            TranslationProviderKind.Offline,
+            isAvailable: false,
+            "正在检查当前目标语言所需的离线模型");
         DownloadOfflineModelButton.IsEnabled = false;
         DownloadOfflineModelButton.Content = "正在计算...";
         OfflineModelStatusText.Text = "正在读取 Mozilla 模型清单并计算所需空间...";
@@ -874,8 +976,13 @@ public partial class MainWindow : Window, IDisposable
 
         if (!result.IsSuccess || result.Plan is null)
         {
-            OfflineModelStatusText.Text = result.ErrorMessage ??
+            var error = result.ErrorMessage ??
                 "当前目标语言暂不支持离线翻译。";
+            OfflineModelStatusText.Text = error;
+            _settingsViewModel.UpdateTranslationProviderAvailability(
+                TranslationProviderKind.Offline,
+                isAvailable: false,
+                error);
             DownloadOfflineModelButton.Content = "暂不支持";
             DownloadOfflineModelButton.IsEnabled = false;
             return;
@@ -883,7 +990,25 @@ public partial class MainWindow : Window, IDisposable
 
         var plan = result.Plan;
         _offlineTranslationPlan = plan;
+        RefreshCachedOfflineTranslationInstallationState();
+    }
+
+    private void RefreshCachedOfflineTranslationInstallationState()
+    {
+        if (_offlineTranslationPlan is not { } plan ||
+            OfflineModelStatusText is null ||
+            DownloadOfflineModelButton is null)
+        {
+            return;
+        }
+
         var status = _offlineTranslationModelManager.GetStatus(plan);
+        _settingsViewModel.UpdateTranslationProviderAvailability(
+            TranslationProviderKind.Offline,
+            status.IsInstalled,
+            status.IsInstalled
+                ? $"当前目标语言所需的离线模型已安装（{plan.DisplayName}）"
+                : "当前目标语言所需的离线模型尚未下载");
         OfflineModelStatusText.Text = status.IsInstalled
             ? $"已安装 · 目标语言包占用约 {FormatFileSize(plan.InstalledSize)}"
             : $"未安装 · 本次需下载 {FormatFileSize(status.DownloadSize)}，" +
@@ -907,6 +1032,11 @@ public partial class MainWindow : Window, IDisposable
     {
         if (!_isApplyingSettings && IsLoaded)
         {
+            if (ReferenceEquals(sender, TranslationEndpointTextBox))
+            {
+                RefreshOnlineTranslationAvailability();
+            }
+
             ScheduleSettingsApply();
         }
     }
@@ -932,6 +1062,10 @@ public partial class MainWindow : Window, IDisposable
         }
 
         ApplySettingsImmediately();
+        if (ReferenceEquals(sender, TranslationModelComboBox))
+        {
+            RefreshOnlineTranslationAvailability();
+        }
         if (ReferenceEquals(sender, TranslationTargetLanguageComboBox))
         {
             RefreshOfflineTranslationModelStatus();
@@ -985,6 +1119,195 @@ public partial class MainWindow : Window, IDisposable
         KeyboardFocusChangedEventArgs e)
     {
         ApplySettingsImmediately();
+        RefreshOnlineTranslationAvailability();
+    }
+
+    private void RefreshOnlineTranslationAvailability()
+    {
+        if (TranslationApiKeyBox is null)
+        {
+            return;
+        }
+
+        var endpoint = _settingsViewModel.TranslationEndpoint.Trim();
+        if (string.IsNullOrWhiteSpace(endpoint))
+        {
+            SetOnlineTranslationUnavailable("请填写 API 接口地址");
+            return;
+        }
+
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri) ||
+            !endpointUri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase))
+        {
+            SetOnlineTranslationUnavailable("API 接口必须使用有效的 HTTPS 地址");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(TranslationApiKeyBox.Password))
+        {
+            SetOnlineTranslationUnavailable("请填写 API Key");
+            return;
+        }
+
+        var model = _settingsViewModel.TranslationModel.Trim();
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            SetOnlineTranslationUnavailable("请选择或填写翻译模型");
+            return;
+        }
+
+        var fingerprint = CreateOnlineConfigurationFingerprint();
+        if (!string.Equals(
+                fingerprint,
+                _onlineModelCatalogFingerprint,
+                StringComparison.Ordinal))
+        {
+            SetOnlineTranslationUnavailable("尚未验证模型，请点击“获取模型”");
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_onlineModelCatalogError))
+        {
+            SetOnlineTranslationUnavailable(_onlineModelCatalogError);
+            return;
+        }
+
+        if (!_verifiedTranslationModels.Contains(
+                model,
+                StringComparer.OrdinalIgnoreCase))
+        {
+            SetOnlineTranslationUnavailable(
+                "当前模型不在接口返回的可用模型中，请重新选择或获取模型");
+            return;
+        }
+
+        _settingsViewModel.UpdateTranslationProviderAvailability(
+            TranslationProviderKind.Online,
+            isAvailable: true,
+            $"已验证，模型 {model} 可用");
+    }
+
+    private async Task VerifyOnlineTranslationAvailabilityAsync()
+    {
+        if (Interlocked.Exchange(
+                ref _onlineAvailabilityCheckInProgress,
+                1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var endpoint = _settingsViewModel.TranslationEndpoint.Trim();
+            var apiKey = TranslationApiKeyBox.Password;
+            var model = _settingsViewModel.TranslationModel.Trim();
+            if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri) ||
+                !endpointUri.Scheme.Equals(
+                    "https",
+                    StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(apiKey) ||
+                string.IsNullOrWhiteSpace(model))
+            {
+                RefreshOnlineTranslationAvailability();
+                return;
+            }
+
+            var requestFingerprint = CreateOnlineConfigurationFingerprint();
+            _settingsViewModel.UpdateTranslationProviderAvailability(
+                TranslationProviderKind.Online,
+                isAvailable: false,
+                "正在自动验证在线模型");
+            var result = await TranslationModelCatalogService.FetchAsync(
+                endpoint,
+                apiKey,
+                _modelCatalogHttpClient,
+                _updateCancellationSource.Token);
+            if (_disposed || !string.Equals(
+                    requestFingerprint,
+                    CreateOnlineConfigurationFingerprint(),
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _onlineModelCatalogFingerprint = requestFingerprint;
+            _verifiedTranslationModels = result.IsSuccess
+                ? result.Models
+                : [];
+            _onlineModelCatalogError = result.IsSuccess
+                ? null
+                : result.ErrorMessage ?? "无法获取在线模型列表";
+            RefreshOnlineTranslationAvailability();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            Interlocked.Exchange(
+                ref _onlineAvailabilityCheckInProgress,
+                0);
+        }
+    }
+
+    private void SetOnlineTranslationUnavailable(string reason)
+    {
+        _settingsViewModel.UpdateTranslationProviderAvailability(
+            TranslationProviderKind.Online,
+            isAvailable: false,
+            reason);
+    }
+
+    private void SetTranslationModelsPreservingSelection(
+        IReadOnlyList<string> models)
+    {
+        var selectedModel = _settingsViewModel.TranslationModel.Trim();
+        _isApplyingSettings = true;
+        try
+        {
+            _settingsViewModel.SetTranslationModels(models);
+            if (!string.IsNullOrWhiteSpace(selectedModel))
+            {
+                _settingsViewModel.TranslationModel = selectedModel;
+                TranslationModelComboBox.Text = selectedModel;
+            }
+        }
+        finally
+        {
+            _isApplyingSettings = false;
+        }
+    }
+
+    private void OnTranslationSettingPreviewMouseWheel(
+        object sender,
+        MouseWheelEventArgs e)
+    {
+        if (sender is System.Windows.Controls.ComboBox
+            {
+                IsDropDownOpen: true,
+            } || TranslationSettingsPanel is null)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        TranslationSettingsPanel.ScrollToVerticalOffset(
+            TranslationSettingsPanel.VerticalOffset - (e.Delta / 3d));
+    }
+
+    private string CreateOnlineConfigurationFingerprint()
+    {
+        var value = string.Join(
+            "\n",
+            TranslationProviderFactory.ResolveProviderId(
+                _settingsViewModel.TranslationProvider),
+            _settingsViewModel.TranslationEndpoint.Trim(),
+            TranslationApiKeyBox.Password.Trim());
+        return Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     }
 
     private void OnHotKeyCaptured(object? sender, HotKeyCapturedEventArgs e)

@@ -45,6 +45,7 @@ public sealed class RegionCaptureCoordinator
     {
         return RequestInteractiveCaptureAsync(
             recognizeTextAfterSelection: false,
+            translateTextAfterSelection: false,
             initialScreenSnapshot);
     }
 
@@ -52,11 +53,22 @@ public sealed class RegionCaptureCoordinator
     {
         return RequestInteractiveCaptureAsync(
             recognizeTextAfterSelection: true,
+            translateTextAfterSelection: false,
+            initialScreenSnapshot);
+    }
+
+    public Task RequestTranslationCaptureAsync(
+        CapturedImage? initialScreenSnapshot = null)
+    {
+        return RequestInteractiveCaptureAsync(
+            recognizeTextAfterSelection: false,
+            translateTextAfterSelection: true,
             initialScreenSnapshot);
     }
 
     private Task RequestInteractiveCaptureAsync(
         bool recognizeTextAfterSelection,
+        bool translateTextAfterSelection,
         CapturedImage? initialScreenSnapshot)
     {
         if (_isCaptureInProgress)
@@ -81,6 +93,7 @@ public sealed class RegionCaptureCoordinator
                     RecognizeTextAsync = RecognizeTextAsync,
                     TranslateTextAsync = TranslateTextAsync,
                     RecognizeTextAfterSelection = recognizeTextAfterSelection,
+                    TranslateTextAfterSelection = translateTextAfterSelection,
                     StartScrollCaptureAsync = RequestScrollCaptureFromSelectionAsync,
                     CaptureClosed = OnInteractiveCaptureClosed,
                 },

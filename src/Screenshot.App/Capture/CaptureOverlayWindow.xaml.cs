@@ -41,6 +41,8 @@ public sealed class CaptureOverlayOptions
 
     public bool RecognizeTextAfterSelection { get; init; }
 
+    public bool TranslateTextAfterSelection { get; init; }
+
     public Func<ScreenRegion, Task>? StartScrollCaptureAsync { get; init; }
 
     public Action? CaptureClosed { get; init; }
@@ -507,7 +509,15 @@ public partial class CaptureOverlayWindow : Window
     private async Task EnterInlineEditorForCompletedSelectionAsync()
     {
         await EnterInlineEditorAsync();
-        if (_options?.RecognizeTextAfterSelection == true &&
+        if (_options?.TranslateTextAfterSelection == true &&
+            _options.RecognizeTextAsync is not null &&
+            _options.TranslateTextAsync is not null &&
+            InlineEditorCanvas.HasImage &&
+            !_isCompleted)
+        {
+            await TranslateInlineTextAsync();
+        }
+        else if (_options?.RecognizeTextAfterSelection == true &&
             _options.RecognizeTextAsync is not null &&
             InlineEditorCanvas.HasImage &&
             !_isCompleted)
@@ -1066,6 +1076,11 @@ public partial class CaptureOverlayWindow : Window
     }
 
     private async void OnTranslateClick(object sender, RoutedEventArgs e)
+    {
+        await TranslateInlineTextAsync();
+    }
+
+    private async Task TranslateInlineTextAsync()
     {
         if (_options?.RecognizeTextAsync is null ||
             _options.TranslateTextAsync is null)

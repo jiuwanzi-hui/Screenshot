@@ -83,6 +83,11 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
         Assert.Contains(progressValues, value =>
             value.DownloadedBytes == plan.DownloadSize);
         Assert.Equal(2, handler.RequestCount);
+
+        Directory.Delete(manager.ModelsDirectory, recursive: true);
+
+        Assert.False(manager.GetStatus(plan).IsInstalled);
+        Assert.True(manager.GetStatus(plan).DownloadSize > 0);
     }
 
     [Fact]

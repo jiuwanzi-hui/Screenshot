@@ -22,7 +22,7 @@ SnapCut（简截）是一款面向 Windows 10/11 的轻量截图工具，取"简
 - **截图后直接调整和编辑**：鼠标悬停到其他软件时可自动吸附整个窗口，单击直接选取，也可继续拖动自由框选；移动选区时底图保持固定，框内明亮、框外变暗。编辑后仍可用八个控制点扩展或缩小选区，边缘不会越过已有标注；已经放置的矩形、箭头、文字和表情可直接点击选中，再调整位置、大小、端点或边角，无需重新选择工具；并提供画笔、马赛克、颜色、线宽、撤销和重做。
 - **受控长截图**：普通截图框选后点击工具栏的 `↕` 图标；单击选区可匀速向下采集，等待开始时双击则可先向上采集。程序发送固定节拍的细粒度鼠标滚轮消息，鼠标指针可自由移动且不会被锁定。单击暂停会先停稳并补齐最后视口，再允许继续；第一方向内双击会停稳后快速返回初始位置且不重复写入，随后自动向相反方向匀速拼接。到达真实边界后只停止滚动并保留当前结果，等待用户编辑、确认或取消；实时预览持续显示完整结果。
 - **本地 OCR 与图片文字选择**：使用 Windows 本地 OCR 引擎，图片不需要上传；识别后可直接在截图、OCR 结果窗口和钉图上拖选文字并通过原生 Unicode 剪贴板复制，译文覆盖完成后同样可以选择和复制，识别语言取决于系统已安装的语言包。
-- **在线或完全离线的多语言翻译**：设置页直接显示在线大模型与本机 Bergamot 模型的优先顺序，用户可上下调整；翻译会按序尝试，上一项失败时自动使用下一项，不再需要选择翻译方式或单独开启翻译。翻译会自动识别截图文字的源语言，不再把 OCR 识别语言误当作翻译源语言；离线模型使用本机 CLD3 对每个 OCR 分段检测语言，并支持 Mozilla 当前模型清单里的 58 种源语言和 53 种目标语言。日文转中文等非英语组合会自动按“源语言 → English → 目标语言”中转。离线下载按目标语言打包，覆盖全部受支持源语言；确认前会实时显示本次下载流量、新增安装占用、磁盘余量和实际安装目录，网络断流或读取超时时会自动重试，已经校验完成的语言方向不会重新下载。文件会校验并解压到 `SnapCut.exe` 旁的 `TranslationModels`，语言检测和翻译过程都不上传文字；安装版或免安装版更新都会保留该目录，只有真正卸载软件时才删除。在线配置仍支持获取厂家模型列表或手动输入模型标识，API Key 使用当前用户 DPAPI 加密保存。翻译结果可以切换原文/译文并覆盖到最终图片，整组译文可一步撤销和重做。
+- **在线或完全离线的多语言翻译**：翻译快捷键可在框选后自动完成 OCR 与翻译；设置页直接显示在线大模型与本机 Bergamot 模型的优先顺序、真实可用状态和悬停原因，用户可上下调整，上一项失败时自动使用下一项。在线接口可选择 OpenAI、DeepSeek、通义千问、Claude、Gemini、Grok 等内置厂商或自定义兼容地址，并自动验证 API、模型列表和当前模型。翻译会自动识别截图文字的源语言；离线模型使用本机 CLD3 检测语言，并支持 Mozilla 当前模型清单里的多语言互译。离线下载会显示流量、安装占用、磁盘余量和实际目录，断流时自动重试；模型文件被移动或删除后，设置页回到前台会立即重新核验。文件保存在 `SnapCut.exe` 旁的 `TranslationModels`，安装版或免安装版更新都会保留该目录。API Key 使用当前用户 DPAPI 加密保存；翻译结果可切换原文/译文并覆盖到最终图片。
 - **高效的日常操作**：支持全局快捷键、系统托盘、截图历史、钉图、开机启动和完整的深浅色主题；设置、编辑截图、OCR 结果、截图历史和图片查看窗口会分别记住上次的位置、大小及最大化状态，显示器变化后会自动把窗口拉回可操作区域。设置窗口每次从小窗、通知区域或快捷键重新显示到前台时都会检测更新，有新版本会在“版本更新”入口显示提示，并发检测 Gitee 国内源和 GitHub 国际源，自动采用可用更新源，下载失败时切换备用源。“版本更新”页同时显示各正式版本的发布时间与更新内容，可选择 2.0.0 及之后的已校验版本进行更新或回退；更早版本因程序改名只提供发布页手动安装。安装版和免安装版覆盖时都会保留 `ScreenshotData`。首次运行默认同时显示任务栏图标和通知区域图标，避免用户找不到程序入口。
 - **数据跟随程序目录**：安装版与免安装版都把设置、加密凭据、历史和默认截图保存在 `SnapCut.exe` 旁的 `ScreenshotData`，不会把个人配置提交到源码仓库。
 
@@ -30,12 +30,14 @@ SnapCut（简截）是一款面向 Windows 10/11 的轻量截图工具，取"简
 
 下载最新的 x64 自包含版本。2.3.0 起发布附件统一使用 `SnapCut-Setup-*` 和 `SnapCut-Portable-*`；同时保留旧清单入口，2.1.0 及之后版本仍可在程序内在线更新：
 
-- [安装版 SnapCut Setup 2.3.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.3.1-win-x64.exe)
-- [免安装版 SnapCut Portable 2.3.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.3.1-win-x64.zip)
-- [安装版 SnapCut Setup 2.3.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.3.1/SnapCut-Setup-2.3.1-win-x64.exe)
-- [免安装版 SnapCut Portable 2.3.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.3.1/SnapCut-Portable-2.3.1-win-x64.zip)
+- [安装版 SnapCut Setup 2.4.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.4.0-win-x64.exe)
+- [免安装版 SnapCut Portable 2.4.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.4.0-win-x64.zip)
+- [安装版 SnapCut Setup 2.4.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.4.0/SnapCut-Setup-2.4.0-win-x64.exe)
+- [免安装版 SnapCut Portable 2.4.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.4.0/SnapCut-Portable-2.4.0-win-x64.zip)
 
-免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.3.1 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.4.0 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+
+2.4.0 将原“文字识别”快捷键升级为一键翻译：框选后自动完成本地 OCR、按优先级翻译并显示覆盖结果，旧快捷键配置保持兼容。在线服务新增自定义接口及 OpenAI、DeepSeek、通义千问、Claude、Gemini、Grok 等 14 个内置厂商，切换厂商时自动填入官方兼容地址并按厂商独立保存 API Key。翻译优先项会用“可用/不可用”小标显示实时状态，悬停可查看未配置 API、无法获取模型、当前模型无效或离线模型未下载等原因；设置窗口回到前台会重新验证在线模型和本地文件。设置页输入控件不再截获页面滚轮，刷新模型列表也不会清空当前选择。
 
 2.3.1 将在线大模型与离线模型改为可排序的翻译优先级，当前方式请求失败时自动尝试下一项。大型离线模型下载增加连接/读取停滞超时和自动重试，保留已经校验完成的语言方向，并加固临时文件占用、拒绝访问和只读目录的清理；模型已经安装成功但旧临时目录未能立即清理时，不再误报整次安装失败。安装版和免安装版覆盖更新都会保留 `TranslationModels`，技术路径与文件名也不会再被误送去翻译。
 
@@ -68,7 +70,7 @@ SnapCut（简截）是一款面向 Windows 10/11 的轻量截图工具，取"简
 | 功能 | 快捷键 |
 | --- | --- |
 | 区域截图 | `Ctrl+Alt+S` |
-| OCR | `Ctrl+Alt+O` |
+| 翻译 | `Ctrl+Alt+O` |
 | 钉图 | `Ctrl+Alt+P` |
 | 打开设置 | `Ctrl+Alt+,` |
 
@@ -106,7 +108,7 @@ SnapCut is a lightweight capture utility for Windows 10 and 11. It combines regi
 - **Adjust and edit before finishing**: hover over another application to snap to its full window and click to select it, or drag to make a free-form selection. The desktop stays fixed while the selection moves, with a bright interior and dimmed exterior. After annotating, all eight handles remain available while protected bounds prevent existing ink from being cropped. Existing rectangles, arrows, text, and emoji can be clicked directly and then moved or resized, including arrow endpoints and rectangle corners, without reselecting a tool. Freehand drawing, mosaic, colors, stroke widths, undo, and redo remain available.
 - **Controlled scrolling capture**: make a normal region selection, click the `↕` toolbar icon, then click inside the region to scroll downward slowly; double-click before starting to capture upward first. SnapCut sends fine-grained wheel messages at a fixed cadence without locking the pointer. Click to pause or resume; double-click during the first leg to settle, return quickly to the initial viewport without rewriting pixels, then continue in the opposite direction. At a real boundary scrolling stops while the current result remains available for editing, confirmation, or cancellation. The live preview always shows the complete result.
 - **Local OCR with selectable image text**: uses the Windows OCR engine without uploading images, then overlays selectable text directly on captures, OCR result windows, and pinned images, copying it through the native Unicode clipboard. Translated overlays are selectable and copyable as well. Available languages depend on installed Windows language packs.
-- **Online or fully offline multilingual translation**: Settings directly show a user-sortable priority for the online model and local Bergamot models. Translation tries them in order and automatically falls back after a failure, without a separate mode selector or enable switch. Source languages are detected automatically instead of treating the selected OCR language as the source. Offline translation runs CLD3 locally for each OCR segment and supports the 58 source languages and 53 target languages currently present in Mozilla's model registry. Non-English pairs such as Japanese to Chinese are routed through English. Offline downloads are packaged by target language and cover all supported source languages. Before downloading, SnapCut calculates and displays the actual transfer, additional installed size, free disk space, and destination; interrupted or stalled transfers retry automatically without downloading already verified language directions again. Files are verified and extracted to `TranslationModels` beside `SnapCut.exe`; app updates preserve this directory, while an actual uninstall removes it. Neither detection nor translation uploads text in offline mode. Online configuration supports vendor model discovery or a manually entered model id, with API keys protected by per-user Windows DPAPI. Translation results can switch between source and translated text and include the reversible translated overlay in copied or saved images.
+- **Online or fully offline multilingual translation**: the translation hotkey runs local OCR and translation immediately after region selection. Settings show a sortable priority, live available/unavailable badges, and hover reasons for online and local Bergamot providers. Online configuration includes custom endpoints plus built-in OpenAI, DeepSeek, Qwen, Claude, Gemini, Grok, and other vendor definitions, with automatic endpoint and model validation. Source languages are detected automatically; offline translation uses local CLD3 and Mozilla Bergamot models for multilingual routes. Downloads show transfer size, installed footprint, free space, and destination, retry interrupted transfers, and are revalidated whenever Settings returns to the foreground. Models stay in `TranslationModels` beside `SnapCut.exe` and survive installed or portable updates. API keys are protected by per-user Windows DPAPI, and translated overlays remain reversible and selectable.
 - **Fast daily workflow**: configurable global hotkeys, system tray controls, capture history, pinned images, startup behavior, and complete light/dark themes. Settings, image editors, OCR results, capture history, and image viewers each remember their last position, size, and maximized state; if the monitor layout changes, windows are brought back into a reachable work area. Whenever Settings returns to the foreground from the compact window, notification area, or hotkey, it checks for updates and highlights the Update entry when a newer release exists. Gitee and GitHub provide mirrored update sources with automatic download fallback. The Update page also lists formal releases with publication times and release notes; verified packages from 2.0.0 onward can be selected for an update or rollback, while older renamed builds link to manual installation. Installed and portable replacements preserve `ScreenshotData`. New installations show both taskbar and notification-area icons by default so the application remains easy to find.
 - **Data stays with the application**: installed and portable builds keep settings, encrypted credentials, history, and default captures in `ScreenshotData` beside `SnapCut.exe`. Personal configuration is excluded from the repository.
 
@@ -114,12 +116,14 @@ SnapCut is a lightweight capture utility for Windows 10 and 11. It combines regi
 
 Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-*` and `SnapCut-Portable-*` starting with 2.3.0. The legacy manifest endpoint remains available so versions 2.1.0 and later continue to update in-app:
 
-- [SnapCut Setup 2.3.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.3.1-win-x64.exe)
-- [SnapCut Portable 2.3.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.3.1-win-x64.zip)
-- [SnapCut Setup 2.3.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.3.1/SnapCut-Setup-2.3.1-win-x64.exe)
-- [SnapCut Portable 2.3.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.3.1/SnapCut-Portable-2.3.1-win-x64.zip)
+- [SnapCut Setup 2.4.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.4.0-win-x64.exe)
+- [SnapCut Portable 2.4.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.4.0-win-x64.zip)
+- [SnapCut Setup 2.4.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.4.0/SnapCut-Setup-2.4.0-win-x64.exe)
+- [SnapCut Portable 2.4.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.4.0/SnapCut-Portable-2.4.0-win-x64.zip)
 
-Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.3.1 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.4.0 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+
+Version 2.4.0 upgrades the former OCR hotkey into one-step translation: after region selection SnapCut performs local OCR, translates through the configured provider priority, and shows the translated overlay while preserving existing hotkey settings. Online configuration adds a custom endpoint and 14 built-in vendors including OpenAI, DeepSeek, Qwen, Claude, Gemini, and Grok; vendor endpoints are filled automatically and API keys remain separate per vendor. Provider rows now show live available/unavailable badges with precise hover reasons for missing credentials, model-list failures, invalid models, or missing offline files. Returning Settings to the foreground revalidates online and offline providers. Settings inputs no longer steal page-wheel scrolling, and refreshing a model list no longer clears the selected model.
 
 Version 2.3.1 makes online and offline translation providers user-sortable and automatically tries the next provider when the current one fails. Large offline-model downloads now detect connection or read stalls, retry automatically, and retain language directions that already passed verification. Cleanup is hardened for locked files, access-denied errors, and read-only directories; a noncritical stale-directory cleanup failure no longer reports a completed model installation as failed. Installed and portable updates preserve `TranslationModels`, and technical paths or filenames are no longer sent for translation.
 
@@ -152,7 +156,7 @@ Uninstall removes the program files, shortcuts, uninstall registration, and the 
 | Action | Hotkey |
 | --- | --- |
 | Region capture | `Ctrl+Alt+S` |
-| OCR | `Ctrl+Alt+O` |
+| Translation | `Ctrl+Alt+O` |
 | Pin image | `Ctrl+Alt+P` |
 | Open settings | `Ctrl+Alt+,` |
 

@@ -1,18 +1,18 @@
 ﻿{
-    "version":  "2.3.1",
+    "version":  "2.4.0",
     "releasePage":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest",
     "installer":  {
-                      "fileName":  "SnapCut-Setup-2.3.1-win-x64.exe",
-                      "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.3.1-win-x64.exe",
-                      "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v2.3.1/SnapCut-Setup-2.3.1-win-x64.exe",
-                      "size":  56544082,
-                      "sha256":  "4E0E368B9C54E03F682808DAF6183009E606339A1C9396F000410FBFCF9AE5C2"
+                      "fileName":  "SnapCut-Setup-2.4.0-win-x64.exe",
+                      "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.4.0-win-x64.exe",
+                      "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v2.4.0/SnapCut-Setup-2.4.0-win-x64.exe",
+                      "size":  56539971,
+                      "sha256":  "0C173B3FE3C231B63081F020AEE1D3CDE92A03C89CCFBC8D5C2307B2FFDDDAF0"
                   },
     "portable":  {
-                     "fileName":  "SnapCut-Portable-2.3.1-win-x64.zip",
-                     "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.3.1-win-x64.zip",
-                     "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v2.3.1/SnapCut-Portable-2.3.1-win-x64.zip",
-                     "size":  78760366,
-                     "sha256":  "A70216CB1F0C2385CA15A8C5C0C652B99F629A019A5CCCED6AA9F66FA5E66E15"
+                     "fileName":  "SnapCut-Portable-2.4.0-win-x64.zip",
+                     "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.4.0-win-x64.zip",
+                     "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v2.4.0/SnapCut-Portable-2.4.0-win-x64.zip",
+                     "size":  78763947,
+                     "sha256":  "D6907DA89627C6521B73F02E23DF109A479A519A5DD9B28D3CB322025B1DAD36"
                  }
 }

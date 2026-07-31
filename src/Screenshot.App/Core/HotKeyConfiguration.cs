@@ -75,7 +75,7 @@ public static class HotKeyConfiguration
         {
             HotKeyAction.RegionCapture => "区域截图",
             HotKeyAction.ScrollCapture => "长截图",
-            HotKeyAction.RecognizeText => "文字识别",
+            HotKeyAction.RecognizeText => "翻译",
             HotKeyAction.PinImage => "钉图",
             HotKeyAction.OpenSettings => "打开设置",
             _ => action.ToString(),

@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using Screenshot.App.Core;
 using Screenshot.App.Infrastructure;
@@ -11,6 +12,10 @@ namespace Screenshot.App.Tests;
 
 public sealed class ImmediateSettingsTests : IDisposable
 {
+    private static readonly string[] RefreshedTranslationModels =
+        ["model-a", "model-b"];
+    private static readonly object?[] TranslationModelRefreshArguments =
+        [RefreshedTranslationModels];
     private readonly string _testDirectory = Path.Combine(
         Path.GetTempPath(),
         "Screenshot.App.Tests",
@@ -84,7 +89,12 @@ public sealed class ImmediateSettingsTests : IDisposable
 
             Assert.NotEmpty(ocrLanguage.Items);
             Assert.Null(window.FindName("TranslationModeComboBox"));
-            Assert.Single(provider.Items);
+            Assert.Equal(
+                TranslationProviderFactory.ProviderDefinitions.Count,
+                provider.Items.Count);
+            Assert.Equal(
+                "自定义兼容接口",
+                Assert.IsType<SettingOption>(provider.Items[0]).Label);
             Assert.True(targetLanguage.Items.Count >= 5);
             Assert.True(model.IsEditable);
             Assert.Equal("deepseek-v4-flash", model.Text);
@@ -97,6 +107,187 @@ public sealed class ImmediateSettingsTests : IDisposable
         Assert.Null(loaded.Warning);
         Assert.Equal("en", loaded.Settings.TranslationTargetLanguage);
         Assert.Equal("deepseek-v4-flash", loaded.Settings.TranslationModel);
+    }
+
+    [Fact]
+    public void SelectingBuiltInProviderShowsItsOfficialEndpoint()
+    {
+        var viewModel = new SettingsViewModel(CreateSettings() with
+        {
+            TranslationProvider = TranslationProviderFactory.OpenAiCompatibleProviderId,
+            TranslationEndpoint = "https://proxy.example/v1",
+        });
+
+        Assert.Equal(
+            "https://proxy.example/v1",
+            viewModel.TranslationEndpoint);
+        Assert.Equal(
+            "自定义兼容接口",
+            viewModel.SelectedTranslationProvider.DisplayName);
+
+        viewModel.TranslationProvider = "DeepSeek";
+        viewModel.TranslationEndpoint =
+            viewModel.SelectedTranslationProvider.OfficialEndpoint;
+
+        Assert.Equal("https://api.deepseek.com", viewModel.TranslationEndpoint);
+        Assert.Equal(
+            "官方接口：https://api-docs.deepseek.com/",
+            viewModel.SelectedTranslationProvider.OfficialSite);
+    }
+
+    [Fact]
+    public void TranslationAvailabilitySurvivesPriorityReordering()
+    {
+        var viewModel = new SettingsViewModel(CreateSettings());
+        viewModel.UpdateTranslationProviderAvailability(
+            TranslationProviderKind.Online,
+            isAvailable: true,
+            "模型已验证");
+        viewModel.UpdateTranslationProviderAvailability(
+            TranslationProviderKind.Offline,
+            isAvailable: false,
+            "离线模型尚未下载");
+
+        Assert.True(viewModel.MoveTranslationProvider(
+            TranslationProviderKind.Offline,
+            offset: -1));
+
+        var online = Assert.Single(
+            viewModel.TranslationPriorityItems,
+            item => item.Provider == TranslationProviderKind.Online);
+        var offline = Assert.Single(
+            viewModel.TranslationPriorityItems,
+            item => item.Provider == TranslationProviderKind.Offline);
+        Assert.True(online.IsAvailable);
+        Assert.Equal("可用", online.AvailabilityLabel);
+        Assert.Equal("模型已验证", online.AvailabilityReason);
+        Assert.False(offline.IsAvailable);
+        Assert.Equal("不可用", offline.AvailabilityLabel);
+        Assert.Equal("离线模型尚未下载", offline.AvailabilityReason);
+    }
+
+    [Fact]
+    public void TranslationModelKeepsItsValueWhenTheCatalogIsRefreshed()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                CreateSettings() with
+                {
+                    TranslationEndpoint = "https://proxy.example/v1",
+                    TranslationModel = "selected-model",
+                },
+                new SettingsStore(Path.Combine(
+                    _testDirectory,
+                    "settings-model-preservation.json")),
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+            window.Show();
+            var model = Assert.IsType<ComboBox>(
+                window.FindName("TranslationModelComboBox"));
+            var refreshMethod = typeof(MainWindow).GetMethod(
+                "SetTranslationModelsPreservingSelection",
+                System.Reflection.BindingFlags.Instance |
+                System.Reflection.BindingFlags.NonPublic);
+            Assert.NotNull(refreshMethod);
+
+            refreshMethod.Invoke(window, TranslationModelRefreshArguments);
+
+            Assert.Equal("selected-model", model.Text);
+            Assert.Contains("selected-model", model.Items.Cast<string>());
+            window.RequestExit();
+        });
+    }
+
+    [Fact]
+    public void CollapsedTranslationModelBoxDoesNotConsumePageScrolling()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                CreateSettings() with
+                {
+                    TranslationEndpoint = "https://proxy.example/v1",
+                    TranslationModel = "selected-model",
+                },
+                new SettingsStore(Path.Combine(
+                    _testDirectory,
+                    "settings-model-wheel.json")),
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+            window.Show();
+            var model = Assert.IsType<ComboBox>(
+                window.FindName("TranslationModelComboBox"));
+            var wheel = new MouseWheelEventArgs(
+                Mouse.PrimaryDevice,
+                Environment.TickCount,
+                delta: -120)
+            {
+                RoutedEvent = UIElement.PreviewMouseWheelEvent,
+            };
+
+            model.RaiseEvent(wheel);
+
+            Assert.True(wheel.Handled);
+            Assert.Equal("selected-model", model.Text);
+            window.RequestExit();
+        });
+    }
+
+    [Fact]
+    public void ProviderSelectionUpdatesEndpointAndModelInTheSettingsWindow()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var settingsStore = new SettingsStore(
+            Path.Combine(_testDirectory, "settings-provider-selection.json"));
+
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                CreateSettings() with
+                {
+                    TranslationEndpoint = "https://proxy.example/v1",
+                    TranslationModel = "proxy-model",
+                },
+                settingsStore,
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+
+            window.Show();
+            var provider = Assert.IsType<ComboBox>(
+                window.FindName("TranslationProviderComboBox"));
+            var endpoint = Assert.IsType<TextBox>(
+                window.FindName("TranslationEndpointTextBox"));
+            var model = Assert.IsType<ComboBox>(
+                window.FindName("TranslationModelComboBox"));
+            var officialSite = Assert.IsType<TextBlock>(
+                window.FindName("TranslationProviderOfficialSiteText"));
+
+            provider.SelectedValue = "GoogleGemini";
+            Assert.Equal(
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+                endpoint.Text);
+            Assert.Equal("proxy-model", model.Text);
+            Assert.Contains("ai.google.dev", officialSite.Text);
+
+            window.RequestExit();
+        });
+
+        var loaded = settingsStore.Load();
+        Assert.Null(loaded.Warning);
+        Assert.Equal("GoogleGemini", loaded.Settings.TranslationProvider);
+        Assert.Equal(
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+            loaded.Settings.TranslationEndpoint);
+        Assert.Equal("proxy-model", loaded.Settings.TranslationModel);
     }
 
     [Fact]

@@ -21,6 +21,14 @@ public sealed class TranslationModelCatalogServiceTests
         "https://vendor.example/openai/v1/chat/completions",
         "https://vendor.example/openai/v1/models")]
     [InlineData(
+        "https://vendor.example/api/paas/v4",
+        "https://vendor.example/api/paas/v4/chat/completions",
+        "https://vendor.example/api/paas/v4/models")]
+    [InlineData(
+        "https://generativelanguage.googleapis.com/v1beta/openai",
+        "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "https://generativelanguage.googleapis.com/v1beta/openai/models")]
+    [InlineData(
         "https://api.deepseek.com",
         "https://api.deepseek.com/chat/completions",
         "https://api.deepseek.com/models")]
@@ -40,6 +48,32 @@ public sealed class TranslationModelCatalogServiceTests
                 .CreateModelsEndpoint(configuredEndpoint)?
                 .ToString()
                 .TrimEnd('/'));
+    }
+
+    [Fact]
+    public void ListsCustomEndpointFirstAndIncludesMajorCompatibleVendors()
+    {
+        var definitions = TranslationProviderFactory.ProviderDefinitions;
+
+        Assert.Equal(
+            TranslationProviderFactory.OpenAiCompatibleProviderId,
+            definitions[0].Id);
+        Assert.Equal("自定义兼容接口", definitions[0].DisplayName);
+        Assert.Contains(definitions, item => item.Id == "OpenAI");
+        Assert.Contains(definitions, item => item.Id == "DeepSeek");
+        Assert.Contains(definitions, item => item.Id == "DashScope");
+        Assert.Contains(definitions, item => item.Id == "Zhipu");
+        Assert.Contains(definitions, item => item.Id == "AnthropicClaude");
+        Assert.Contains(definitions, item => item.Id == "GoogleGemini");
+        Assert.Contains(definitions, item => item.Id == "XaiGrok");
+        Assert.Equal(
+            definitions.Count,
+            definitions.Select(item => item.Id)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Count());
+        Assert.All(
+            definitions.Skip(1),
+            item => Assert.StartsWith("https://", item.OfficialEndpoint));
     }
 
     [Fact]
