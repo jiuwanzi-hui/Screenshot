@@ -105,6 +105,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private string _ocrHotKey;
     private string _pinHotKey;
     private string _openSettingsHotKey;
+    private int _mouseLongPressMilliseconds;
+    private bool _mouseSideButtonsUseLongPress;
     private string _ocrLanguageTag;
     private string _translationProvider;
     private string _translationEndpoint;
@@ -128,6 +130,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _ocrHotKey = settings.OcrHotKey;
         _pinHotKey = settings.PinHotKey;
         _openSettingsHotKey = settings.OpenSettingsHotKey;
+        _mouseLongPressMilliseconds = settings.MouseLongPressMilliseconds;
+        _mouseSideButtonsUseLongPress = settings.MouseSideButtonsUseLongPress;
         _ocrLanguageTag = settings.OcrLanguageTag;
         _translationProvider = TranslationProviderFactory.ResolveProviderId(
             settings.TranslationProvider);
@@ -267,6 +271,18 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _openSettingsHotKey, value);
     }
 
+    public int MouseLongPressMilliseconds
+    {
+        get => _mouseLongPressMilliseconds;
+        set => SetProperty(ref _mouseLongPressMilliseconds, value);
+    }
+
+    public bool MouseSideButtonsUseLongPress
+    {
+        get => _mouseSideButtonsUseLongPress;
+        set => SetProperty(ref _mouseSideButtonsUseLongPress, value);
+    }
+
     public string OcrLanguageTag
     {
         get => _ocrLanguageTag;
@@ -325,6 +341,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             OcrHotKey = OcrHotKey,
             PinHotKey = PinHotKey,
             OpenSettingsHotKey = OpenSettingsHotKey,
+            MouseLongPressMilliseconds = MouseLongPressMilliseconds,
+            MouseSideButtonsUseLongPress = MouseSideButtonsUseLongPress,
             OcrLanguageTag = OcrLanguageTag,
             TranslationMode = TranslationMode.Automatic,
             SendTextToOnlineTranslation = true,
@@ -353,6 +371,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         OcrHotKey = settings.OcrHotKey;
         PinHotKey = settings.PinHotKey;
         OpenSettingsHotKey = settings.OpenSettingsHotKey;
+        MouseLongPressMilliseconds = settings.MouseLongPressMilliseconds;
+        MouseSideButtonsUseLongPress = settings.MouseSideButtonsUseLongPress;
         OcrLanguageTag = settings.OcrLanguageTag;
         SetTranslationProviderPriority(
             settings.ResolveTranslationProviderPriority());

@@ -53,6 +53,13 @@ public sealed class HotKeyCaptureBox : WpfTextBox
         uint virtualKey,
         HotKeyModifiers modifiers)
     {
+        ProcessCapturedGesture(new HotKeyGesture(modifiers, virtualKey));
+    }
+
+    internal void ProcessCapturedGesture(HotKeyGesture capturedGesture)
+    {
+        var virtualKey = capturedGesture.VirtualKey;
+        var modifiers = capturedGesture.Modifiers;
         if (virtualKey == VirtualKeyEscape && modifiers == HotKeyModifiers.None)
         {
             HotKeyCaptureCanceled?.Invoke(this, EventArgs.Empty);
@@ -67,7 +74,7 @@ public sealed class HotKeyCaptureBox : WpfTextBox
         }
 
         if (IsModifierVirtualKey(virtualKey) ||
-            !TryFormatGesture(virtualKey, modifiers, out var gesture))
+            !TryFormatGesture(capturedGesture, out var gesture))
         {
             return;
         }
@@ -191,13 +198,24 @@ public sealed class HotKeyCaptureBox : WpfTextBox
         HotKeyModifiers modifiers,
         out string gesture)
     {
-        if (modifiers == HotKeyModifiers.None || IsModifierVirtualKey(virtualKey))
+        return TryFormatGesture(
+            new HotKeyGesture(modifiers, virtualKey),
+            out gesture);
+    }
+
+    internal static bool TryFormatGesture(
+        HotKeyGesture capturedGesture,
+        out string gesture)
+    {
+        var virtualKey = capturedGesture.VirtualKey;
+        var modifiers = capturedGesture.Modifiers;
+        if ((modifiers == HotKeyModifiers.None && !capturedGesture.IsMouseButton) ||
+            IsModifierVirtualKey(virtualKey))
         {
             gesture = string.Empty;
             return false;
         }
 
-        var capturedGesture = new HotKeyGesture(modifiers, virtualKey);
         var formattedGesture = capturedGesture.ToString();
         if (!HotKeyGesture.TryParse(
                 formattedGesture,

@@ -20,6 +20,29 @@ using DrawingColor = System.Drawing.Color;
 
 namespace Screenshot.App.Capture;
 
+public enum CapturePointerButton
+{
+    Left,
+    Right,
+}
+
+public sealed class CapturePointerContinuation
+{
+    private readonly TaskCompletionSource _released = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+
+    internal CapturePointerContinuation(CapturePointerButton button)
+    {
+        Button = button;
+    }
+
+    public CapturePointerButton Button { get; }
+
+    internal Task WaitForReleaseAsync() => _released.Task;
+
+    internal void NotifyReleased() => _released.TrySetResult();
+}
+
 public sealed class CaptureOverlayOptions
 {
     public required string SaveDirectory { get; init; }
@@ -42,6 +65,8 @@ public sealed class CaptureOverlayOptions
     public bool RecognizeTextAfterSelection { get; init; }
 
     public bool TranslateTextAfterSelection { get; init; }
+
+    public CapturePointerContinuation? InitialPointerContinuation { get; init; }
 
     public Func<ScreenRegion, Task>? StartScrollCaptureAsync { get; init; }
 
@@ -68,6 +93,7 @@ public partial class CaptureOverlayWindow : Window
     private readonly ScreenRegion _virtualScreenBounds;
     private readonly CaptureOverlayOptions? _options;
     private readonly bool _isScrollCaptureSelection;
+    private readonly CapturePointerContinuation? _initialPointerContinuation;
     private readonly TaskCompletionSource<ScreenRegion?> _selectionCompletionSource =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<ScrollCaptureSelection?>?
@@ -82,6 +108,8 @@ public partial class CaptureOverlayWindow : Window
     private CapturedImage? _screenSnapshot;
     private EditorTool _selectedInlineTool = EditorTool.Rectangle;
     private bool _isSelecting;
+    private CapturePointerButton? _continuedSelectionButton;
+    private Task _continuedSelectionReleaseTask = Task.CompletedTask;
     private bool _isMovingSelection;
     private bool _isSelectionAdjustmentInProgress;
     private bool _isActionInProgress;
@@ -110,10 +138,13 @@ public partial class CaptureOverlayWindow : Window
     private CaptureOverlayWindow(
         CaptureOverlayOptions? options,
         bool isScrollCaptureSelection = false,
-        CapturedImage? initialScreenSnapshot = null)
+        CapturedImage? initialScreenSnapshot = null,
+        CapturePointerContinuation? initialPointerContinuation = null)
     {
         _options = options;
         _isScrollCaptureSelection = isScrollCaptureSelection;
+        _initialPointerContinuation =
+            initialPointerContinuation ?? options?.InitialPointerContinuation;
         _scrollCaptureSelectionCompletionSource = isScrollCaptureSelection
             ? new TaskCompletionSource<ScrollCaptureSelection?>(
                 TaskCreationOptions.RunContinuationsAsynchronously)
@@ -150,18 +181,23 @@ public partial class CaptureOverlayWindow : Window
         SourceInitialized += OnSourceInitialized;
     }
 
-    public static Task<ScreenRegion?> SelectAsync()
+    public static Task<ScreenRegion?> SelectAsync(
+        CapturePointerContinuation? initialPointerContinuation = null)
     {
-        var overlay = new CaptureOverlayWindow(options: null);
+        var overlay = new CaptureOverlayWindow(
+            options: null,
+            initialPointerContinuation: initialPointerContinuation);
         overlay.Show();
         return overlay._selectionCompletionSource.Task;
     }
 
-    public static Task<ScrollCaptureSelection?> SelectForScrollCaptureAsync()
+    public static Task<ScrollCaptureSelection?> SelectForScrollCaptureAsync(
+        CapturePointerContinuation? initialPointerContinuation = null)
     {
         var overlay = new CaptureOverlayWindow(
             options: null,
-            isScrollCaptureSelection: true);
+            isScrollCaptureSelection: true,
+            initialPointerContinuation: initialPointerContinuation);
         overlay.Show();
         return overlay._scrollCaptureSelectionCompletionSource!.Task;
     }
@@ -192,6 +228,9 @@ public partial class CaptureOverlayWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _isSelecting = false;
+        _continuedSelectionButton = null;
+        ReleaseOverlayMouseCapture();
         _windowSnapTimer.Stop();
         _windowSnapTimer.Tick -= OnWindowSnapTimerTick;
         if (_windowSource is not null)
@@ -245,6 +284,7 @@ public partial class CaptureOverlayWindow : Window
         CaptureSurface.Focus();
         Keyboard.Focus(CaptureSurface);
         _windowSnapTimer.Start();
+        BeginContinuedSelectionIfNeeded();
     }
 
     private void OnCaptureSurfaceKeyDown(object sender, WpfKeyEventArgs e)
@@ -294,6 +334,13 @@ public partial class CaptureOverlayWindow : Window
         object sender,
         MouseButtonEventArgs e)
     {
+        if (_isSelecting &&
+            _continuedSelectionButton == CapturePointerButton.Right)
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (_isScrollCaptureSelection && _isScrollCaptureSelectionPublished)
         {
             _cancelScrollCaptureAfterRightButtonUp = true;
@@ -315,10 +362,19 @@ public partial class CaptureOverlayWindow : Window
         ReturnToPreviousCaptureStateCore(deferFinalClose: true);
     }
 
-    private void OnCaptureSurfacePreviewMouseRightButtonUp(
+    private async void OnCaptureSurfacePreviewMouseRightButtonUp(
         object sender,
         MouseButtonEventArgs e)
     {
+        if (_isSelecting &&
+            _continuedSelectionButton == CapturePointerButton.Right)
+        {
+            e.Handled = true;
+            await CompletePointerSelectionAsync(
+                e.GetPosition(CaptureSurface));
+            return;
+        }
+
         if (_cancelScrollCaptureAfterRightButtonUp)
         {
             _cancelScrollCaptureAfterRightButtonUp = false;
@@ -409,10 +465,72 @@ public partial class CaptureOverlayWindow : Window
             return;
         }
 
-        _selectionStartPoint = e.GetPosition(CaptureSurface);
+        BeginPointerSelection(
+            e.GetPosition(CaptureSurface),
+            continuedButton: null,
+            allowWindowSnap: true);
+        e.Handled = true;
+    }
+
+    private void BeginContinuedSelectionIfNeeded()
+    {
+        if (_initialPointerContinuation is null)
+        {
+            return;
+        }
+
+        var cursorPosition = WinForms.Cursor.Position;
+        var startPoint = CaptureSurface.PointFromScreen(
+            new WpfPoint(cursorPosition.X, cursorPosition.Y));
+        BeginPointerSelection(
+            startPoint,
+            _initialPointerContinuation.Button,
+            allowWindowSnap: false);
+        _continuedSelectionReleaseTask = CompleteSelectionWhenTriggerButtonIsReleasedAsync(
+            _initialPointerContinuation);
+    }
+
+    internal Task ContinuedSelectionReleaseTask =>
+        _continuedSelectionReleaseTask;
+
+    private async Task CompleteSelectionWhenTriggerButtonIsReleasedAsync(
+        CapturePointerContinuation continuation)
+    {
+        await continuation.WaitForReleaseAsync();
+        if (_isCompleted)
+        {
+            return;
+        }
+
+        var completion = await Dispatcher.InvokeAsync(() =>
+        {
+            if (!_isSelecting ||
+                _continuedSelectionButton != continuation.Button)
+            {
+                return Task.CompletedTask;
+            }
+
+            var cursorPosition = WinForms.Cursor.Position;
+            var endPoint = CaptureSurface.PointFromScreen(
+                new WpfPoint(cursorPosition.X, cursorPosition.Y));
+            return CompletePointerSelectionAsync(endPoint);
+        });
+        await completion;
+    }
+
+    private void BeginPointerSelection(
+        WpfPoint startPoint,
+        CapturePointerButton? continuedButton,
+        bool allowWindowSnap)
+    {
+        _selectionStartPoint = new WpfPoint(
+            Math.Clamp(startPoint.X, 0, CaptureSurface.ActualWidth),
+            Math.Clamp(startPoint.Y, 0, CaptureSurface.ActualHeight));
+        _continuedSelectionButton = continuedButton;
         _isSelecting = true;
         _windowSnapTimer.Stop();
         _isWindowSnapClickPending =
+            allowWindowSnap &&
             WindowSnapRectangle.Visibility == Visibility.Visible &&
             _windowSnapBounds.HasValue;
         if (!_isWindowSnapClickPending)
@@ -426,7 +544,6 @@ public partial class CaptureOverlayWindow : Window
 
         CaptureSurface.CaptureMouse();
         CaptureSurface.Focus();
-        e.Handled = true;
     }
 
     private void OnCaptureSurfaceMouseMove(object sender, WpfMouseEventArgs e)
@@ -459,16 +576,24 @@ public partial class CaptureOverlayWindow : Window
 
     private async void OnCaptureSurfaceMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (!_isSelecting)
+        if (!_isSelecting ||
+            _continuedSelectionButton == CapturePointerButton.Right)
         {
             return;
         }
 
+        e.Handled = true;
+        await CompletePointerSelectionAsync(e.GetPosition(CaptureSurface));
+    }
+
+    private async Task CompletePointerSelectionAsync(WpfPoint endPoint)
+    {
         var snappedBounds = _isWindowSnapClickPending
             ? _windowSnapBounds
             : null;
         _isWindowSnapClickPending = false;
         _isSelecting = false;
+        _continuedSelectionButton = null;
         CaptureSurface.ReleaseMouseCapture();
         if (snappedBounds.HasValue)
         {
@@ -480,7 +605,7 @@ public partial class CaptureOverlayWindow : Window
         {
             UpdateSelectionBounds(new Rect(
                 _selectionStartPoint,
-                e.GetPosition(CaptureSurface)));
+                endPoint));
         }
 
         if (!HasValidSelection())
@@ -489,7 +614,6 @@ public partial class CaptureOverlayWindow : Window
             return;
         }
 
-        e.Handled = true;
         if (_isScrollCaptureSelection)
         {
             PrepareScrollCaptureSelection();
@@ -1814,6 +1938,7 @@ public partial class CaptureOverlayWindow : Window
         {
             SelectionRectangle.ReleaseMouseCapture();
         }
+        ReleaseOverlayMouseCapture();
 
         SelectionRectangle.IsHitTestVisible = true;
         SelectionRectangle.Fill = new WpfSolidColorBrush(
@@ -2360,8 +2485,19 @@ public partial class CaptureOverlayWindow : Window
         }
 
         _isCompleted = true;
+        _isSelecting = false;
+        _continuedSelectionButton = null;
+        ReleaseOverlayMouseCapture();
         _selectionCompletionSource.TrySetResult(result);
         Close();
+    }
+
+    private void ReleaseOverlayMouseCapture()
+    {
+        if (CaptureSurface.IsMouseCaptureWithin)
+        {
+            Mouse.Capture(null);
+        }
     }
 
     private static class NativeMethods

@@ -16,6 +16,7 @@ public sealed class RegionCaptureCoordinator
     private readonly ITranslationCredentialStore _translationCredentialStore;
     private readonly HttpClient _httpClient;
     private readonly Action<string> _statusReporter;
+    private readonly Action<bool>? _mouseShortcutSuppressionChanged;
     private bool _isCaptureInProgress;
 
     public RegionCaptureCoordinator(
@@ -24,7 +25,8 @@ public sealed class RegionCaptureCoordinator
         PinnedImageManager pinnedImageManager,
         ITranslationCredentialStore translationCredentialStore,
         HttpClient httpClient,
-        Action<string> statusReporter)
+        Action<string> statusReporter,
+        Action<bool>? mouseShortcutSuppressionChanged = null)
     {
         ArgumentNullException.ThrowIfNull(settingsProvider);
         ArgumentNullException.ThrowIfNull(historyService);
@@ -39,37 +41,47 @@ public sealed class RegionCaptureCoordinator
         _translationCredentialStore = translationCredentialStore;
         _httpClient = httpClient;
         _statusReporter = statusReporter;
+        _mouseShortcutSuppressionChanged = mouseShortcutSuppressionChanged;
     }
 
-    public Task RequestCaptureAsync(CapturedImage? initialScreenSnapshot = null)
+    public Task RequestCaptureAsync(
+        CapturedImage? initialScreenSnapshot = null,
+        CapturePointerContinuation? pointerContinuation = null)
     {
         return RequestInteractiveCaptureAsync(
             recognizeTextAfterSelection: false,
             translateTextAfterSelection: false,
-            initialScreenSnapshot);
+            initialScreenSnapshot,
+            pointerContinuation);
     }
 
-    public Task RequestOcrCaptureAsync(CapturedImage? initialScreenSnapshot = null)
+    public Task RequestOcrCaptureAsync(
+        CapturedImage? initialScreenSnapshot = null,
+        CapturePointerContinuation? pointerContinuation = null)
     {
         return RequestInteractiveCaptureAsync(
             recognizeTextAfterSelection: true,
             translateTextAfterSelection: false,
-            initialScreenSnapshot);
+            initialScreenSnapshot,
+            pointerContinuation);
     }
 
     public Task RequestTranslationCaptureAsync(
-        CapturedImage? initialScreenSnapshot = null)
+        CapturedImage? initialScreenSnapshot = null,
+        CapturePointerContinuation? pointerContinuation = null)
     {
         return RequestInteractiveCaptureAsync(
             recognizeTextAfterSelection: false,
             translateTextAfterSelection: true,
-            initialScreenSnapshot);
+            initialScreenSnapshot,
+            pointerContinuation);
     }
 
     private Task RequestInteractiveCaptureAsync(
         bool recognizeTextAfterSelection,
         bool translateTextAfterSelection,
-        CapturedImage? initialScreenSnapshot)
+        CapturedImage? initialScreenSnapshot,
+        CapturePointerContinuation? pointerContinuation)
     {
         if (_isCaptureInProgress)
         {
@@ -77,7 +89,7 @@ public sealed class RegionCaptureCoordinator
             return Task.CompletedTask;
         }
 
-        _isCaptureInProgress = true;
+        SetCaptureInProgress(true);
         var settings = _settingsProvider();
         try
         {
@@ -94,6 +106,7 @@ public sealed class RegionCaptureCoordinator
                     TranslateTextAsync = TranslateTextAsync,
                     RecognizeTextAfterSelection = recognizeTextAfterSelection,
                     TranslateTextAfterSelection = translateTextAfterSelection,
+                    InitialPointerContinuation = pointerContinuation,
                     StartScrollCaptureAsync = RequestScrollCaptureFromSelectionAsync,
                     CaptureClosed = OnInteractiveCaptureClosed,
                 },
@@ -102,25 +115,27 @@ public sealed class RegionCaptureCoordinator
         catch
         {
             initialScreenSnapshot?.Dispose();
-            _isCaptureInProgress = false;
+            SetCaptureInProgress(false);
             throw;
         }
 
         return Task.CompletedTask;
     }
 
-    public async Task RequestPinCaptureAsync()
+    public async Task RequestPinCaptureAsync(
+        CapturePointerContinuation? pointerContinuation = null)
     {
         if (_isCaptureInProgress)
         {
             return;
         }
 
-        _isCaptureInProgress = true;
+        SetCaptureInProgress(true);
 
         try
         {
-            var selection = await CaptureOverlayWindow.SelectAsync();
+            var selection = await CaptureOverlayWindow.SelectAsync(
+                pointerContinuation);
 
             if (selection is null)
             {
@@ -135,26 +150,31 @@ public sealed class RegionCaptureCoordinator
         }
         finally
         {
-            _isCaptureInProgress = false;
+            SetCaptureInProgress(false);
         }
     }
 
     private void OnInteractiveCaptureClosed()
     {
-        _isCaptureInProgress = false;
+        SetCaptureInProgress(false);
         // The overlay held a frozen full-desktop snapshot plus the capture
         // bitmaps; return that memory now so the tray idle stays small.
         Core.MemoryFootprint.TrimAfterHeavyOperation();
     }
 
-    public Task RequestScrollCaptureAsync()
+    public Task RequestScrollCaptureAsync(
+        CapturePointerContinuation? pointerContinuation = null)
     {
-        return RequestScrollCaptureAsync(initialSelection: null);
+        return RequestScrollCaptureAsync(
+            initialSelection: null,
+            pointerContinuation);
     }
 
     private Task RequestScrollCaptureFromSelectionAsync(ScreenRegion selection)
     {
-        return RequestScrollCaptureAsync(selection);
+        return RequestScrollCaptureAsync(
+            selection,
+            pointerContinuation: null);
     }
 
     private Task<OcrRecognitionResult> RecognizeTextAsync(CapturedImage image)
@@ -178,20 +198,23 @@ public sealed class RegionCaptureCoordinator
             settings.TranslationTargetLanguage);
     }
 
-    private async Task RequestScrollCaptureAsync(ScreenRegion? initialSelection)
+    private async Task RequestScrollCaptureAsync(
+        ScreenRegion? initialSelection,
+        CapturePointerContinuation? pointerContinuation)
     {
         if (_isCaptureInProgress)
         {
             return;
         }
 
-        _isCaptureInProgress = true;
+        SetCaptureInProgress(true);
 
         try
         {
             // Scroll target is resolved under the selection when scrolling starts.
             var scrollSelection = initialSelection is null
-                ? await CaptureOverlayWindow.SelectForScrollCaptureAsync()
+                ? await CaptureOverlayWindow.SelectForScrollCaptureAsync(
+                    pointerContinuation)
                 : await CaptureOverlayWindow.SelectForScrollCaptureAsync(
                     initialSelection.Value);
 
@@ -509,7 +532,7 @@ public sealed class RegionCaptureCoordinator
         }
         finally
         {
-            _isCaptureInProgress = false;
+            SetCaptureInProgress(false);
             Core.MemoryFootprint.TrimAfterHeavyOperation();
         }
     }
@@ -551,7 +574,7 @@ public sealed class RegionCaptureCoordinator
         }
         finally
         {
-            _isCaptureInProgress = false;
+            SetCaptureInProgress(false);
             Core.MemoryFootprint.TrimAfterHeavyOperation();
         }
     }
@@ -568,6 +591,17 @@ public sealed class RegionCaptureCoordinator
             _translationCredentialStore,
             _httpClient);
         window.Show();
+    }
+
+    private void SetCaptureInProgress(bool isInProgress)
+    {
+        if (_isCaptureInProgress == isInProgress)
+        {
+            return;
+        }
+
+        _isCaptureInProgress = isInProgress;
+        _mouseShortcutSuppressionChanged?.Invoke(isInProgress);
     }
 
     private static void UpdateProgress(

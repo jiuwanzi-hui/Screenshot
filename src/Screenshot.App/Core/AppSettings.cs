@@ -56,6 +56,10 @@ public sealed record AppSettings
 
     public string OpenSettingsHotKey { get; init; } = "Ctrl+Alt+Comma";
 
+    public int MouseLongPressMilliseconds { get; init; } = 700;
+
+    public bool MouseSideButtonsUseLongPress { get; init; }
+
     public string DefaultSaveFormat { get; init; } = "Png";
 
     public int DefaultFontSize { get; init; } = 16;
@@ -139,6 +143,10 @@ public sealed record AppSettings
             OcrHotKey = OcrHotKey?.Trim() ?? string.Empty,
             PinHotKey = PinHotKey?.Trim() ?? string.Empty,
             OpenSettingsHotKey = OpenSettingsHotKey?.Trim() ?? string.Empty,
+            MouseLongPressMilliseconds = Math.Clamp(
+                MouseLongPressMilliseconds,
+                300,
+                2000),
             DefaultSaveFormat = string.IsNullOrWhiteSpace(DefaultSaveFormat)
                 ? defaults.DefaultSaveFormat
                 : DefaultSaveFormat.Trim(),
