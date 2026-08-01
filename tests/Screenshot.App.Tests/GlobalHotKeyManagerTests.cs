@@ -281,7 +281,7 @@ public sealed class GlobalHotKeyManagerTests
     }
 
     [Fact]
-    public void FindsImmediateAndHoldMouseBindingsPrecisely()
+    public void FindsMouseBindingsWithTheExpectedTriggerMode()
     {
         var bindings = new[]
         {
@@ -302,18 +302,18 @@ public sealed class GlobalHotKeyManagerTests
             HotKeyGesture.VirtualKeyMouseLeft,
             HotKeyModifiers.None,
             requiresHold: true);
-        var immediate = GlobalHotKeyManager.FindMouseBinding(
+        var modifiedHold = GlobalHotKeyManager.FindMouseBinding(
             bindings,
             HotKeyGesture.VirtualKeyMouseLeft,
             HotKeyModifiers.Control,
-            requiresHold: false);
+            requiresHold: true);
 
         Assert.Equal(HotKeyAction.RegionCapture, hold?.Action);
-        Assert.Equal(HotKeyAction.RecognizeText, immediate?.Action);
+        Assert.Equal(HotKeyAction.RecognizeText, modifiedHold?.Action);
         Assert.Null(GlobalHotKeyManager.FindMouseBinding(
             bindings,
             HotKeyGesture.VirtualKeyMouseLeft,
-            HotKeyModifiers.Alt,
+            HotKeyModifiers.Control,
             requiresHold: false));
     }
 
@@ -403,10 +403,12 @@ public sealed class GlobalHotKeyManagerTests
                 triggered.Set();
             };
 
-            Assert.True(manager.ProcessMouseButtonInputForTest(
+            Assert.False(manager.ProcessMouseButtonInputForTest(
                 HotKeyGesture.VirtualKeyMouseRight,
                 isButtonDown: true,
                 modifiers: HotKeyModifiers.Control));
+            manager.ProcessPendingMouseHolds(
+                DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1));
         });
 
         Assert.True(triggered.Wait(TimeSpan.FromSeconds(2)));
@@ -462,17 +464,19 @@ public sealed class GlobalHotKeyManagerTests
             Assert.Equal(0, triggeredCount);
 
             manager.SetMouseShortcutsSuspended(false);
-            Assert.True(manager.ProcessMouseButtonInputForTest(
+            Assert.False(manager.ProcessMouseButtonInputForTest(
                 HotKeyGesture.VirtualKeyMouseLeft,
                 isButtonDown: true,
                 modifiers: HotKeyModifiers.Control));
+            manager.ProcessPendingMouseHolds(
+                DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1));
         });
 
         Assert.True(triggered.Wait(TimeSpan.FromSeconds(2)));
         WpfTestHost.Invoke(() =>
         {
             Assert.Equal(1, triggeredCount);
-            Assert.True(manager!.ProcessMouseButtonInputForTest(
+            Assert.False(manager!.ProcessMouseButtonInputForTest(
                 HotKeyGesture.VirtualKeyMouseLeft,
                 isButtonDown: false,
                 modifiers: HotKeyModifiers.Control));
@@ -481,7 +485,7 @@ public sealed class GlobalHotKeyManagerTests
     }
 
     [Fact]
-    public void MouseHoldDoesNotTriggerAfterEarlyRelease()
+    public void ModifiedMouseHoldDoesNotTriggerAfterEarlyRelease()
     {
         WpfTestHost.Invoke(() =>
         {
@@ -491,18 +495,20 @@ public sealed class GlobalHotKeyManagerTests
                 new HotKeyBinding(
                     HotKeyAction.OpenSettings,
                     new HotKeyGesture(
-                        HotKeyModifiers.None,
-                        HotKeyGesture.VirtualKeyMouseRight)),
+                        HotKeyModifiers.Control,
+                        HotKeyGesture.VirtualKeyMouseLeft)),
             ]).IsSuccess);
             var triggered = false;
             manager.HotKeyPressed += (_, _) => triggered = true;
 
             Assert.False(manager.ProcessMouseButtonInputForTest(
-                HotKeyGesture.VirtualKeyMouseRight,
-                isButtonDown: true));
+                HotKeyGesture.VirtualKeyMouseLeft,
+                isButtonDown: true,
+                modifiers: HotKeyModifiers.Control));
             Assert.False(manager.ProcessMouseButtonInputForTest(
-                HotKeyGesture.VirtualKeyMouseRight,
-                isButtonDown: false));
+                HotKeyGesture.VirtualKeyMouseLeft,
+                isButtonDown: false,
+                modifiers: HotKeyModifiers.Control));
             manager.ProcessPendingMouseHolds(
                 DateTimeOffset.UtcNow + TimeSpan.FromSeconds(2));
 
@@ -511,7 +517,7 @@ public sealed class GlobalHotKeyManagerTests
     }
 
     [Fact]
-    public void MouseHoldDoesNotTriggerAfterDragging()
+    public void ModifiedMouseHoldDoesNotTriggerAfterDragging()
     {
         WpfTestHost.Invoke(() =>
         {
@@ -521,17 +527,18 @@ public sealed class GlobalHotKeyManagerTests
                 new HotKeyBinding(
                     HotKeyAction.OpenSettings,
                     new HotKeyGesture(
-                        HotKeyModifiers.None,
-                        HotKeyGesture.VirtualKeyMouseMiddle)),
+                        HotKeyModifiers.Control,
+                        HotKeyGesture.VirtualKeyMouseLeft)),
             ]).IsSuccess);
             var triggered = false;
             manager.HotKeyPressed += (_, _) => triggered = true;
 
             Assert.False(manager.ProcessMouseButtonInputForTest(
-                HotKeyGesture.VirtualKeyMouseMiddle,
+                HotKeyGesture.VirtualKeyMouseLeft,
                 isButtonDown: true,
                 x: 100,
-                y: 100));
+                y: 100,
+                modifiers: HotKeyModifiers.Control));
             manager.ProcessMouseMoveForTest(x: 120, y: 100);
             manager.ProcessPendingMouseHolds(
                 DateTimeOffset.UtcNow + TimeSpan.FromSeconds(2));

@@ -140,7 +140,6 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
     public bool IsMouseButton => IsMouseVirtualKey(VirtualKey);
 
     public bool RequiresHold =>
-        Modifiers == HotKeyModifiers.None &&
         VirtualKey is VirtualKeyMouseLeft or
             VirtualKeyMouseRight or
             VirtualKeyMouseMiddle;
@@ -299,9 +298,9 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
 
         return virtualKey switch
         {
-            VirtualKeyMouseLeft when Modifiers == HotKeyModifiers.None => "长按鼠标左键",
-            VirtualKeyMouseRight when Modifiers == HotKeyModifiers.None => "长按鼠标右键",
-            VirtualKeyMouseMiddle when Modifiers == HotKeyModifiers.None => "长按鼠标中键",
+            VirtualKeyMouseLeft when RequiresHold => "长按鼠标左键",
+            VirtualKeyMouseRight when RequiresHold => "长按鼠标右键",
+            VirtualKeyMouseMiddle when RequiresHold => "长按鼠标中键",
             VirtualKeyMouseLeft => "鼠标左键",
             VirtualKeyMouseRight => "鼠标右键",
             VirtualKeyMouseMiddle => "鼠标中键",

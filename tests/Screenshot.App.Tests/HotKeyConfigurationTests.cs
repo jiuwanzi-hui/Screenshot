@@ -160,8 +160,8 @@ public sealed class HotKeyConfigurationTests
     [InlineData("MouseForward", "鼠标前进键", false)]
     [InlineData("鼠标左键", "长按鼠标左键", true)]
     [InlineData("长按滚轮键", "长按鼠标中键", true)]
-    [InlineData("Ctrl+MouseRight", "Ctrl+鼠标右键", false)]
-    [InlineData("Alt+MouseLeft", "Alt+鼠标左键", false)]
+    [InlineData("Ctrl+MouseRight", "Ctrl+长按鼠标右键", true)]
+    [InlineData("Alt+MouseLeft", "Alt+长按鼠标左键", true)]
     [InlineData("Shift+MouseBack", "Shift+鼠标后退键", false)]
     [InlineData("Ctrl+Alt+MouseForward", "Ctrl+Alt+鼠标前进键", false)]
     public void ParsesAndFormatsMouseShortcuts(

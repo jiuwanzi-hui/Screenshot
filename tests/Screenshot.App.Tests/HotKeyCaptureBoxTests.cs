@@ -117,7 +117,7 @@ public sealed class HotKeyCaptureBoxTests
     [Theory]
     [InlineData(HotKeyGesture.VirtualKeyMouseBack, HotKeyModifiers.None, "鼠标后退键")]
     [InlineData(HotKeyGesture.VirtualKeyMouseLeft, HotKeyModifiers.None, "长按鼠标左键")]
-    [InlineData(HotKeyGesture.VirtualKeyMouseMiddle, HotKeyModifiers.Control, "Ctrl+鼠标中键")]
+    [InlineData(HotKeyGesture.VirtualKeyMouseMiddle, HotKeyModifiers.Control, "Ctrl+长按鼠标中键")]
     [InlineData(HotKeyGesture.VirtualKeyMouseForward, HotKeyModifiers.Alt | HotKeyModifiers.Shift, "Alt+Shift+鼠标前进键")]
     public void CapturesMouseButtonsReportedByTheGlobalHook(
         uint virtualKey,

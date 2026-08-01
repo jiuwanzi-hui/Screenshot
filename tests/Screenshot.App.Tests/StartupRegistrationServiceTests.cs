@@ -33,6 +33,25 @@ public sealed class StartupRegistrationServiceTests : IDisposable
         Assert.EndsWith(" --background", command, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void RejectsAndRepairsAStartupEntryThatTargetsAnOldExecutable()
+    {
+        var oldRegistration = new StartupRegistrationService(
+            _valueName,
+            () => "\"C:\\Program Files\\Screenshot\\Screenshot.exe\" --background");
+        var currentRegistration = new StartupRegistrationService(
+            _valueName,
+            () => "\"C:\\Program Files\\SnapCut\\SnapCut.exe\" --background");
+
+        oldRegistration.SetEnabled(enabled: true);
+
+        Assert.False(currentRegistration.IsEnabled());
+
+        currentRegistration.SetEnabled(enabled: true);
+
+        Assert.True(currentRegistration.IsEnabled());
+    }
+
     public void Dispose()
     {
         new StartupRegistrationService(_valueName).SetEnabled(enabled: false);

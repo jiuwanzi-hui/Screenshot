@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "2.5.0"
+  #define AppVersion "2.5.1"
 #endif
 
 #define AppName "SnapCut"
@@ -65,6 +65,10 @@ Type: filesandordirs; Name: "{app}\TranslationModels"
 [Dirs]
 Name: "{app}\ScreenshotData"; Permissions: users-modify
 
+[Registry]
+; 在线更新时保留用户现有的开机启动选择，并刷新可能已过期的程序路径。
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Screenshot.App"; ValueData: """{app}\{#AppExeName}"" --background"; Flags: uninsdeletevalue; Check: ShouldRefreshStartupRegistration
+
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
@@ -87,6 +91,14 @@ end;
 function IsUpdateMode: Boolean;
 begin
   Result := CompareText(ExpandConstant('{param:UPDATE|0}'), '1') = 0;
+end;
+
+function ShouldRefreshStartupRegistration: Boolean;
+begin
+  Result := IsUpdateMode and RegValueExists(
+    HKEY_CURRENT_USER,
+    'Software\Microsoft\Windows\CurrentVersion\Run',
+    'Screenshot.App');
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
