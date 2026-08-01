@@ -21,7 +21,11 @@ public sealed class StartupRegistrationService : IStartupRegistrationService
     public bool IsEnabled()
     {
         using var key = Registry.CurrentUser.OpenSubKey(StartupRegistryPath);
-        return key?.GetValue(_valueName) is string value && !string.IsNullOrWhiteSpace(value);
+        return key?.GetValue(_valueName) is string value &&
+               string.Equals(
+                   value.Trim(),
+                   _commandFactory(),
+                   StringComparison.OrdinalIgnoreCase);
     }
 
     public void SetEnabled(bool enabled)

@@ -30,12 +30,14 @@ SnapCut（简截）是一款面向 Windows 10/11 的轻量截图工具，取"简
 
 下载最新的 x64 自包含版本。2.3.0 起发布附件统一使用 `SnapCut-Setup-*` 和 `SnapCut-Portable-*`；同时保留旧清单入口，2.1.0 及之后版本仍可在程序内在线更新：
 
-- [安装版 SnapCut Setup 2.5.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.5.0-win-x64.exe)
-- [免安装版 SnapCut Portable 2.5.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.5.0-win-x64.zip)
-- [安装版 SnapCut Setup 2.5.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.5.0/SnapCut-Setup-2.5.0-win-x64.exe)
-- [免安装版 SnapCut Portable 2.5.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.5.0/SnapCut-Portable-2.5.0-win-x64.zip)
+- [安装版 SnapCut Setup 2.5.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.5.1-win-x64.exe)
+- [免安装版 SnapCut Portable 2.5.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.5.1-win-x64.zip)
+- [安装版 SnapCut Setup 2.5.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.5.1/SnapCut-Setup-2.5.1-win-x64.exe)
+- [免安装版 SnapCut Portable 2.5.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.5.1/SnapCut-Portable-2.5.1-win-x64.zip)
 
-免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.5.0 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.5.1 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+
+2.5.1 修复 `Ctrl+鼠标左键` 与资源管理器多选文件的冲突：左、中、右键及其修饰键组合现在统一采用可配置的长按触发，短按与移动拖拽继续交给当前软件；达到时长后仍可保持按住并直接拖动截图框。开机启动状态现在会精确校验完整启动命令，在线更新时若用户已经启用开机启动，也会将旧程序路径刷新为当前安装路径，避免更新后勾选状态失效。
 
 2.5.0 新增完整的鼠标快捷键：可单独使用鼠标后退键、前进键，或组合 `Ctrl`、`Alt`、`Shift` 与鼠标左/中/右/侧键；单独左、中、右键采用长按触发，侧键可选择即时或长按触发，长按时间可在 `300–2000 ms` 调整。使用左键或右键触发区域截图、翻译、钉图或长截图时，可保持按住并直接拖动框选，第一次松开即完成选区。截图会话期间会暂停新的鼠标快捷键，完成、取消或关闭时强制释放鼠标捕获，避免点击穿透、重复触发或左键被持续占用。快捷键录制期间会拦截鼠标输入，不会误触其他软件。
 
@@ -76,7 +78,7 @@ SnapCut（简截）是一款面向 Windows 10/11 的轻量截图工具，取"简
 | 钉图 | `Ctrl+Alt+P` |
 | 打开设置 | `Ctrl+Alt+,` |
 
-所有快捷键都可以在设置中修改或清空。录入时既可按键盘组合，也可直接按鼠标后退键、前进键，或使用 `Ctrl`、`Alt`、`Shift` 及其组合加鼠标左/中/右/侧键。鼠标左键、中键、右键单独录入时按长按方式触发，短按和拖动维持原操作；鼠标后退键和前进键默认按下触发，也可在设置中改为必须按满长按时间，未达到时间的短按仍执行原本的后退或前进操作。长按时间可在 `300–2000 ms` 调整，默认 `700 ms`。使用左键或右键触发区域截图、翻译、钉图或长截图时，可以继续按住并直接拖动框选，松开触发键即可完成选区；截图会话期间会暂停识别新的鼠标快捷键，结束或取消后自动恢复，避免框内点击再次触发截图。含 `Win` 键的组合仍由 Windows 保留。
+所有快捷键都可以在设置中修改或清空。录入时既可按键盘组合，也可直接按鼠标后退键、前进键，或使用 `Ctrl`、`Alt`、`Shift` 及其组合加鼠标左/中/右/侧键。鼠标左键、中键、右键无论是否带修饰键都按长按方式触发；未达到时长的短按和移动拖拽维持原操作，因此 `Ctrl+左键` 仍可正常多选文件。鼠标后退键和前进键默认按下触发，也可在设置中改为必须按满长按时间，未达到时间的短按仍执行原本的后退或前进操作。长按时间可在 `300–2000 ms` 调整，默认 `700 ms`。使用左键或右键触发区域截图、翻译、钉图或长截图时，可以继续按住并直接拖动框选，松开触发键即可完成选区；截图会话期间会暂停识别新的鼠标快捷键，结束或取消后自动恢复，避免框内点击再次触发截图。含 `Win` 键的组合仍由 Windows 保留。
 
 ### 从源码构建
 
@@ -118,12 +120,14 @@ SnapCut is a lightweight capture utility for Windows 10 and 11. It combines regi
 
 Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-*` and `SnapCut-Portable-*` starting with 2.3.0. The legacy manifest endpoint remains available so versions 2.1.0 and later continue to update in-app:
 
-- [SnapCut Setup 2.5.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.5.0-win-x64.exe)
-- [SnapCut Portable 2.5.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.5.0-win-x64.zip)
-- [SnapCut Setup 2.5.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.5.0/SnapCut-Setup-2.5.0-win-x64.exe)
-- [SnapCut Portable 2.5.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.5.0/SnapCut-Portable-2.5.0-win-x64.zip)
+- [SnapCut Setup 2.5.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.5.1-win-x64.exe)
+- [SnapCut Portable 2.5.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.5.1-win-x64.zip)
+- [SnapCut Setup 2.5.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.5.1/SnapCut-Setup-2.5.1-win-x64.exe)
+- [SnapCut Portable 2.5.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.5.1/SnapCut-Portable-2.5.1-win-x64.zip)
 
-Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.5.0 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.5.1 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+
+Version 2.5.1 resolves the conflict between `Ctrl+Left` and file multi-selection in Explorer. Left, middle, and right buttons, including modified combinations, now use the configured hold duration; short clicks and pointer movement continue to reach the active application, while holding long enough still transitions directly into drag-to-select capture. Startup registration now validates the complete launch command, and an online update refreshes an enabled startup entry from an obsolete executable path to the current installation path.
 
 Version 2.5.0 adds complete mouse hotkeys: use Back or Forward directly, or combine `Ctrl`, `Alt`, and `Shift` with left, middle, right, Back, or Forward. Unmodified left, middle, and right buttons use a configurable `300–2000 ms` hold; side buttons can trigger immediately or use the same hold duration. When left or right starts region capture, translation, pinning, or scrolling capture, keep holding and drag immediately, then release once to finish the selection. New mouse hotkeys are paused while a capture session is active, and every finish, cancel, close, or error path releases capture ownership to prevent click-through, duplicate activation, or a stuck mouse button. Mouse input is also intercepted while recording a shortcut so other applications are not triggered accidentally.
 

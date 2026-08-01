@@ -580,7 +580,7 @@
                                FontSize="13"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
                                TextWrapping="Wrap"
-                               Text="支持键盘组合、鼠标侧键、Ctrl / Alt / Shift + 鼠标键（可组合），以及长按左/中/右键" />
+                               Text="支持键盘组合和鼠标键；左/中/右键（含修饰键组合）需长按触发，短按和拖动保持原操作" />
 
                     <StackPanel Margin="0,25,0,0">
                         <TextBlock FontSize="14"
@@ -793,7 +793,7 @@
                                    FontSize="12"
                                    Foreground="{DynamicResource AppTextSecondaryBrush}"
                                    TextWrapping="Wrap"
-                                   Text="单独左、中、右键默认按长按触发；侧键默认按下触发，勾选后也必须按满此时间。侧键短按仍执行原本的后退或前进操作，移动鼠标会取消本次长按。" />
+                                   Text="左、中、右键及其 Ctrl / Alt / Shift 组合均须按满此时间，短按保持原操作；移动鼠标会取消本次长按。侧键默认按下触发，勾选后也使用长按。" />
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>
