@@ -8,6 +8,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/jiuwanzi-hui/Screenshot?style=flat-square)](https://github.com/jiuwanzi-hui/Screenshot/stargazers)
 [![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows11)](https://www.microsoft.com/windows)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
+[![License: Personal Non-Commercial](https://img.shields.io/badge/license-personal%20non--commercial-D94B64?style=flat-square)](LICENSE)
 [![Gitee mirror](https://img.shields.io/badge/Gitee-国内镜像-C71D23?style=flat-square&logo=gitee)](https://gitee.com/wwangyunhui/screenshot)
 
 ![SnapCut icon](src/Screenshot.App/Assets/Screenshot.png)
@@ -15,6 +16,8 @@
 ## 简体中文
 
 SnapCut（简截）是一款面向 Windows 10/11 的轻量截图工具，取"简洁"与"直截了当"之意。它把区域截图、长截图、标注、OCR、钉图和可选翻译放在同一条紧凑工作流中，并优先在本机完成处理。
+
+> **许可声明：本项目不是 OSI 定义的开源软件。** 源代码仅授权自然人用于个人、非商业的学习、运行和修改；未经版权所有者书面许可，禁止任何商业、盈利、企业内部业务用途，以及安装包、可执行文件或其他二进制版本的再分发。为个人学习或向本项目贡献而建立的非商业源码分支，必须保留完整许可证和版权声明。详见 [LICENSE](LICENSE)。第三方组件仍适用各自的原许可证。
 
 ### 主要优点
 
@@ -105,6 +108,8 @@ winget install --id JRSoftware.InnoSetup --exact
 ## English
 
 SnapCut is a lightweight capture utility for Windows 10 and 11. It combines region capture, scrolling capture, annotation, OCR, pinned images, and optional translation in one compact workflow while keeping processing local whenever possible.
+
+> **License notice: this project is not open-source software as defined by the OSI.** The source is licensed to individuals solely for personal, non-commercial study, use, and modification. Commercial use, revenue-generating use, internal business use, and redistribution of installers, executables, or other binary builds require prior written permission from the copyright holder. Non-commercial source forks created for personal study or contributing to this project must retain the complete license and copyright notice. See [LICENSE](LICENSE). Third-party components remain under their respective licenses.
 
 ### Why SnapCut
 
