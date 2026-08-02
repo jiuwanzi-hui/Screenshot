@@ -11,7 +11,8 @@
     <ApplicationIcon>Assets\Screenshot.ico</ApplicationIcon>
     <Version>2.5.1</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
-    <Authors>Screenshot</Authors>
+    <Authors>九万字 (jiuwanzi-hui)</Authors>
+    <Copyright>Copyright © 2026 九万字 (jiuwanzi-hui). All rights reserved.</Copyright>
     <Product>SnapCut</Product>
     <AssemblyTitle>SnapCut</AssemblyTitle>
     <Description>轻量 Windows 截图工具</Description>
@@ -20,6 +21,9 @@
   <ItemGroup>
     <Resource Include="Assets\Screenshot.ico" />
     <Content Include="THIRD-PARTY-NOTICES.txt"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\LICENSE"
+             Link="LICENSE.txt"
              CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
