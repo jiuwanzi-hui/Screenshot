@@ -1622,7 +1622,8 @@ public partial class MainWindow : Window, IDisposable
             HotKeySettingsPanel is null ||
             OcrSettingsPanel is null ||
             TranslationSettingsPanel is null ||
-            UpdateSettingsPanel is null)
+            UpdateSettingsPanel is null ||
+            DonateSettingsPanel is null)
         {
             return;
         }
@@ -1640,6 +1641,9 @@ public partial class MainWindow : Window, IDisposable
             ? Visibility.Visible
             : Visibility.Collapsed;
         UpdateSettingsPanel.Visibility = sectionIndex == 4
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        DonateSettingsPanel.Visibility = sectionIndex == 5
             ? Visibility.Visible
             : Visibility.Collapsed;
     }

@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "2.5.1",
+    [string]$Version = "2.6.0",
     [switch]$SkipTrackedManifestUpdate
 )
 

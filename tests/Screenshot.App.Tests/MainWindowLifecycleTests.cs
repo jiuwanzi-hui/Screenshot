@@ -214,12 +214,20 @@ public sealed class MainWindowLifecycleTests
             Assert.All(
                 navigation.Items.Cast<ListBoxItem>(),
                 item => Assert.Null(item.FocusVisualStyle));
-            Assert.Equal(5, navigation.Items.Count);
+            Assert.Equal(6, navigation.Items.Count);
             navigation.SelectedIndex = 4;
             window.UpdateLayout();
             var updatePanel = Assert.IsType<ScrollViewer>(
                 window.FindName("UpdateSettingsPanel"));
             Assert.Equal(Visibility.Visible, updatePanel.Visibility);
+            navigation.SelectedIndex = 5;
+            window.UpdateLayout();
+            var donatePanel = Assert.IsType<ScrollViewer>(
+                window.FindName("DonateSettingsPanel"));
+            Assert.Equal(Visibility.Visible, donatePanel.Visibility);
+            var donateQrImage = Assert.IsType<Image>(
+                window.FindName("DonateQrImage"));
+            Assert.NotNull(donateQrImage.Source);
             window.RequestExit();
         });
     }

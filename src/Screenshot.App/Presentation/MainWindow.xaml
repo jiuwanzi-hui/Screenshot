@@ -416,6 +416,29 @@
                                        VerticalAlignment="Center" />
                         </Grid>
                     </ListBoxItem>
+                    <ListBoxItem Style="{StaticResource NavigationItem}">
+                        <Grid Height="24">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="24" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Height="24"
+                                       FontFamily="Segoe MDL2 Assets"
+                                       FontSize="17"
+                                       LineHeight="24"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       Text="&#xE8D4;"
+                                       TextAlignment="Center"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1"
+                                       Height="24"
+                                       Margin="10,0,0,0"
+                                       LineHeight="24"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       Text="打赏支持"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </ListBoxItem>
                 </ListBox>
             </Grid>
         </Border>
@@ -1372,6 +1395,88 @@
                                FontSize="13"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
                                Text="更新包会校验文件大小和 SHA-256。覆盖更新不会删除 ScreenshotData 中的设置、历史和截图。"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <ScrollViewer x:Name="DonateSettingsPanel"
+                          Grid.Row="0"
+                          Grid.RowSpan="2"
+                          VerticalScrollBarVisibility="Auto"
+                          Visibility="Collapsed">
+                <StackPanel Margin="0,0,16,0">
+                    <TextBlock FontSize="22"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="打赏支持" />
+                    <TextBlock Margin="0,7,0,0"
+                               FontSize="13"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               Text="源码公开与长期维护不易，感谢每一份支持。你的鼓励会用于后续功能升级和 macOS 版本开发。"
+                               TextWrapping="Wrap" />
+
+                    <Border Margin="0,26,0,0"
+                            Padding="24"
+                            Background="{DynamicResource AppPanelBackgroundBrush}"
+                            BorderBrush="{DynamicResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <Border Width="238"
+                                        Height="238"
+                                        Padding="8"
+                                        Background="White"
+                                        BorderBrush="{DynamicResource AppBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6">
+                                    <Image x:Name="DonateQrImage"
+                                           Source="/SnapCut;component/Assets/DonateQr.jpg"
+                                           Stretch="Uniform"
+                                           SnapsToDevicePixels="True" />
+                                </Border>
+                                <TextBlock Margin="0,10,0,0"
+                                           HorizontalAlignment="Center"
+                                           FontSize="13"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                           Text="微信扫码打赏" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1"
+                                        Margin="26,2,0,0"
+                                        VerticalAlignment="Center">
+                                <TextBlock FontSize="18"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                           Text="多谢各位老板支持！"
+                                           TextWrapping="Wrap" />
+                                <TextBlock Margin="0,12,0,0"
+                                           FontSize="13"
+                                           Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                           LineHeight="22"
+                                           Text="你的支持会帮助 SnapCut 持续保持轻量、灵活和本地优先，并继续完善长截图、翻译、历史记录和鼠标快捷键等功能。"
+                                           TextWrapping="Wrap" />
+                                <Border Margin="0,18,0,0"
+                                        Padding="12,9"
+                                        Background="{DynamicResource AppAccentMutedBrush}"
+                                        CornerRadius="8">
+                                    <TextBlock FontSize="13"
+                                               Foreground="{DynamicResource AppAccentForegroundBrush}"
+                                               Text="后续计划：支持 macOS"
+                                               TextWrapping="Wrap" />
+                                </Border>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Margin="0,18,0,0"
+                               FontSize="12"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               Text="打赏仅用于个人非商业项目的持续维护与开发。SnapCut 采用个人非商业许可证，详情请查看仓库中的 LICENSE。"
                                TextWrapping="Wrap" />
                 </StackPanel>
             </ScrollViewer>
