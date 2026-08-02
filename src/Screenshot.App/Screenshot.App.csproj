@@ -9,7 +9,7 @@
     <AssemblyName>SnapCut</AssemblyName>
     <RootNamespace>Screenshot.App</RootNamespace>
     <ApplicationIcon>Assets\Screenshot.ico</ApplicationIcon>
-    <Version>2.5.1</Version>
+    <Version>2.6.0</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Authors>九万字 (jiuwanzi-hui)</Authors>
     <Copyright>Copyright © 2026 九万字 (jiuwanzi-hui). All rights reserved.</Copyright>
@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <Resource Include="Assets\Screenshot.ico" />
+    <Resource Include="Assets\DonateQr.jpg" />
     <Content Include="THIRD-PARTY-NOTICES.txt"
              CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\LICENSE"
