@@ -187,6 +187,98 @@ public sealed class ApplicationUpdateServiceTests
     }
 
     [Fact]
+    public async Task UsesBundledReleaseHistoryWhenBothPublicApisAreRateLimited()
+    {
+        var directory = CreateTemporaryDirectory();
+        var bundledPath = Path.Combine(directory, "SnapCut-Releases.json");
+        File.WriteAllText(
+            bundledPath,
+            CreateSingleReleaseHistoryJson("2.6.0", "SnapCut"));
+        var handler = new NetworkUnavailableHandler(HttpStatusCode.Forbidden);
+        try
+        {
+            using var client = new HttpClient(handler);
+            using var service = new ApplicationUpdateService(
+                client,
+                new Uri("https://github.com/latest.json"),
+                directory,
+                new Uri("https://api.github.com/releases.json"),
+                staticReleaseHistoryUri: new Uri(
+                    "https://raw.githubusercontent.com/static-releases.json"),
+                bundledReleaseHistoryPath: bundledPath);
+
+            var result = await service.GetReleaseHistoryAsync();
+
+            Assert.True(result.IsSuccess, result.Message);
+            Assert.Single(result.Releases);
+            Assert.Equal(new Version(2, 6, 0), result.Releases[0].Version);
+            Assert.Contains("程序内置清单", result.Message);
+            Assert.DoesNotContain(
+                handler.RequestedPaths,
+                path => path.EndsWith("/releases.json", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task UsesCachedHistoryWithoutRequestingTheRateLimitedListAgain()
+    {
+        var directory = CreateTemporaryDirectory();
+        var cachePath = Path.Combine(directory, "release-history-cache.json");
+        var package = Encoding.UTF8.GetBytes("package");
+        var historyJson = CreateSingleReleaseHistoryJson("2.6.0", "SnapCut");
+        try
+        {
+            using (var client = new HttpClient(new ReleaseHistoryResponseHandler(
+                       historyJson,
+                       new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                       {
+                           ["v2.6.0"] = CreateManifest("2.6.0", package)
+                               .Replace("Screenshot-Setup-", "SnapCut-Setup-")
+                               .Replace("Screenshot-Portable-", "SnapCut-Portable-"),
+                       })))
+            using (var service = new ApplicationUpdateService(
+                       client,
+                       new Uri("https://github.com/latest.json"),
+                       directory,
+                       new Uri("https://api.github.com/releases.json"),
+                       releaseHistoryCachePath: cachePath,
+                       bundledReleaseHistoryPath: Path.Combine(directory, "missing.json")))
+            {
+                var onlineResult = await service.GetReleaseHistoryAsync();
+                Assert.True(onlineResult.IsSuccess, onlineResult.Message);
+            }
+
+            Assert.True(File.Exists(cachePath));
+            var unavailableHandler = new NetworkUnavailableHandler(HttpStatusCode.Forbidden);
+            using var unavailableClient = new HttpClient(unavailableHandler);
+            using var cachedService = new ApplicationUpdateService(
+                unavailableClient,
+                new Uri("https://github.com/latest.json"),
+                directory,
+                new Uri("https://api.github.com/releases.json"),
+                releaseHistoryCachePath: cachePath,
+                bundledReleaseHistoryPath: Path.Combine(directory, "missing.json"));
+
+            var cachedResult = await cachedService.GetReleaseHistoryAsync();
+
+            Assert.True(cachedResult.IsSuccess, cachedResult.Message);
+            Assert.Single(cachedResult.Releases);
+            Assert.Contains("本地缓存", cachedResult.Message);
+            Assert.DoesNotContain(
+                unavailableHandler.RequestedPaths,
+                path => path.EndsWith("/releases.json", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task MissingManifestFallsBackToLatestReleaseRedirect()
     {
         using var client = new HttpClient(new LatestRedirectResponseHandler(
@@ -388,6 +480,30 @@ public sealed class ApplicationUpdateServiceTests
         """;
     }
 
+    private static string CreateSingleReleaseHistoryJson(
+        string version,
+        string assetPrefix)
+    {
+        return $$"""
+        [
+          {
+            "tag_name": "v{{version}}",
+            "name": "SnapCut {{version}}",
+            "body": "- 修复版本历史读取。",
+            "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v{{version}}",
+            "published_at": "2026-08-02T03:28:47Z",
+            "draft": false,
+            "prerelease": false,
+            "assets": [
+              { "name": "{{assetPrefix}}-Update.json", "browser_download_url": "https://github.com/releases/v{{version}}/{{assetPrefix}}-Update.json" },
+              { "name": "{{assetPrefix}}-Setup-{{version}}-win-x64.exe", "browser_download_url": "https://github.com/releases/v{{version}}/{{assetPrefix}}-Setup-{{version}}-win-x64.exe" },
+              { "name": "{{assetPrefix}}-Portable-{{version}}-win-x64.zip", "browser_download_url": "https://github.com/releases/v{{version}}/{{assetPrefix}}-Portable-{{version}}-win-x64.zip" }
+            ]
+          }
+        ]
+        """;
+    }
+
     private static void WriteEntry(
         ZipArchive archive,
         string name,
@@ -515,6 +631,23 @@ public sealed class ApplicationUpdateServiceTests
                     Content = new ByteArrayContent(package),
                     RequestMessage = request,
                 });
+        }
+    }
+
+    private sealed class NetworkUnavailableHandler(HttpStatusCode statusCode)
+        : HttpMessageHandler
+    {
+        public List<string> RequestedPaths { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            RequestedPaths.Add(request.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(statusCode)
+            {
+                RequestMessage = request,
+            });
         }
     }
 

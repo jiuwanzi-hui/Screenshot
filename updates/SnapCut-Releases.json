@@ -1,0 +1,156 @@
+[
+  {
+    "tag_name": "v2.6.1",
+    "name": "SnapCut 2.6.1",
+    "body": "- 修复 Gitee 和 GitHub 公共 API 同时限流时版本历史为空。\n- 新增远程静态清单、程序内置清单和本地缓存多级兜底。\n- 临时刷新失败时保留已显示版本，更新与回退仍校验文件大小和 SHA-256。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.6.1",
+    "published_at": "2026-08-03T09:57:00+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.1/SnapCut-Update.json" },
+      { "name": "SnapCut-Setup-2.6.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.1/SnapCut-Setup-2.6.1-win-x64.exe" },
+      { "name": "SnapCut-Portable-2.6.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.1/SnapCut-Portable-2.6.1-win-x64.zip" }
+    ]
+  },
+  {
+    "tag_name": "v2.6.0",
+    "name": "SnapCut 2.6.0",
+    "body": "- 新增打赏支持页面并明确标注微信打赏。\n- 加入个人非商业许可证声明，安装版与免安装版均分发许可证文件。\n- 为后续功能升级和 macOS 版本开发完善项目说明。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.6.0",
+    "published_at": "2026-08-02T03:28:47Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.0/SnapCut-Update.json" },
+      { "name": "SnapCut-Setup-2.6.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.0/SnapCut-Setup-2.6.0-win-x64.exe" },
+      { "name": "SnapCut-Portable-2.6.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.0/SnapCut-Portable-2.6.0-win-x64.zip" }
+    ]
+  },
+  {
+    "tag_name": "v2.5.1",
+    "name": "SnapCut 2.5.1",
+    "body": "- 修复 Ctrl+鼠标左键与资源管理器多选文件冲突。\n- 带修饰键的鼠标左、中、右键统一使用长按触发。\n- 修复更新后开机启动配置和旧程序路径失效。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.5.1",
+    "published_at": "2026-08-01T07:54:28Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.1/SnapCut-Update.json" },
+      { "name": "SnapCut-Setup-2.5.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.1/SnapCut-Setup-2.5.1-win-x64.exe" },
+      { "name": "SnapCut-Portable-2.5.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.1/SnapCut-Portable-2.5.1-win-x64.zip" }
+    ]
+  },
+  {
+    "tag_name": "v2.5.0",
+    "name": "SnapCut 2.5.0",
+    "body": "- 新增鼠标左、中、右、前进、后退键及修饰键组合快捷方式。\n- 鼠标快捷键长按时间可配置。\n- 修复截图结束后鼠标被持续占用和重复触发。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.5.0",
+    "published_at": "2026-07-31T14:16:21Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.0/SnapCut-Update.json" },
+      { "name": "SnapCut-Setup-2.5.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.0/SnapCut-Setup-2.5.0-win-x64.exe" },
+      { "name": "SnapCut-Portable-2.5.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.0/SnapCut-Portable-2.5.0-win-x64.zip" }
+    ]
+  },
+  {
+    "tag_name": "v2.4.0",
+    "name": "SnapCut 2.4.0",
+    "body": "- 新增框选后自动 OCR 翻译快捷键。\n- 新增自定义兼容接口及多家在线模型厂商配置。\n- 翻译来源显示实时可用状态，并完善离线模型检查。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.4.0",
+    "published_at": "2026-07-31T06:11:22Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.4.0/SnapCut-Update.json" },
+      { "name": "SnapCut-Setup-2.4.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.4.0/SnapCut-Setup-2.4.0-win-x64.exe" },
+      { "name": "SnapCut-Portable-2.4.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.4.0/SnapCut-Portable-2.4.0-win-x64.zip" }
+    ]
+  },
+  {
+    "tag_name": "v2.3.1",
+    "name": "SnapCut 2.3.1",
+    "body": "- 翻译来源支持排序并在失败时自动切换。\n- 大型离线模型下载支持停滞检测、自动重试和断点复用。\n- 更新时保留 TranslationModels 目录。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.3.1",
+    "published_at": "2026-07-30T12:44:22Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.1/SnapCut-Update.json" },
+      { "name": "SnapCut-Setup-2.3.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.1/SnapCut-Setup-2.3.1-win-x64.exe" },
+      { "name": "SnapCut-Portable-2.3.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.1/SnapCut-Portable-2.3.1-win-x64.zip" }
+    ]
+  },
+  {
+    "tag_name": "v2.3.0",
+    "name": "SnapCut 2.3.0",
+    "body": "- 新增在线大模型和完全离线的多语言翻译。\n- 设置页新增正式版本历史和已校验版本回退入口。\n- 修复免安装版快捷键、主题保存和窗口位置记忆。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.3.0",
+    "published_at": "2026-07-30T09:00:24Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.0/SnapCut-Update.json" },
+      { "name": "SnapCut-Setup-2.3.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.0/SnapCut-Setup-2.3.0-win-x64.exe" },
+      { "name": "SnapCut-Portable-2.3.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.0/SnapCut-Portable-2.3.0-win-x64.zip" }
+    ]
+  },
+  {
+    "tag_name": "v2.2.2",
+    "name": "SnapCut 2.2.2",
+    "body": "- 修正设置侧栏的新版本提示。\n- 检测到更新时使用亮色“有新版本”替换原导航文字。\n- 完善更新状态与侧栏边界测试。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.2.2",
+    "published_at": "2026-07-29T13:14:33Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.2/Screenshot-Update.json" },
+      { "name": "SnapCut-Setup-2.2.2-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.2/SnapCut-Setup-2.2.2-win-x64.exe" },
+      { "name": "SnapCut-Portable-2.2.2-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.2/SnapCut-Portable-2.2.2-win-x64.zip" }
+    ]
+  },
+  {
+    "tag_name": "v2.2.1",
+    "name": "SnapCut 2.2.1",
+    "body": "- 修复暂停后继续时接受异常大位移和插入重复内容。\n- 提高返回初始视口后反向扩展的校验要求。\n- 修复周期性代码行往返滚动时被错误拼入、压缩或遗漏。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.2.1",
+    "published_at": "2026-07-29T13:18:29Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.1/Screenshot-Update.json" },
+      { "name": "Screenshot-Setup-2.2.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.1/Screenshot-Setup-2.2.1-win-x64.exe" },
+      { "name": "Screenshot-Portable-2.2.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.1/Screenshot-Portable-2.2.1-win-x64.zip" }
+    ]
+  },
+  {
+    "tag_name": "v2.2.0",
+    "name": "SnapCut 2.2.0",
+    "body": "- 已有矩形、箭头、文字和表情支持直接点击后二次调整。\n- 设置窗口每次回到前台自动检测更新。\n- 修复长截图初始视口接缝、暂停收尾和反向扩展。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.2.0",
+    "published_at": "2026-07-29T08:25:18Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.0/Screenshot-Update.json" },
+      { "name": "Screenshot-Setup-2.2.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.0/Screenshot-Setup-2.2.0-win-x64.exe" },
+      { "name": "Screenshot-Portable-2.2.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.0/Screenshot-Portable-2.2.0-win-x64.zip" }
+    ]
+  },
+  {
+    "tag_name": "v2.1.0",
+    "name": "SnapCut 2.1.0",
+    "body": "- 长截图改为固定节拍的细粒度鼠标滚轮流程。\n- 支持开始、暂停、继续和返回初始位置后反向拼接。\n- 修复错误触顶触底、永久校准和周期性代码行缺失。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.1.0",
+    "published_at": "2026-07-29T03:26:14Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.1.0/Screenshot-Update.json" },
+      { "name": "Screenshot-Setup-2.1.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.1.0/Screenshot-Setup-2.1.0-win-x64.exe" },
+      { "name": "Screenshot-Portable-2.1.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.1.0/Screenshot-Portable-2.1.0-win-x64.zip" }
+    ]
+  }
+]

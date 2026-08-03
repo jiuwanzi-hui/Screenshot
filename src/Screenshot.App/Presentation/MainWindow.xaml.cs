@@ -485,6 +485,12 @@ public partial class MainWindow : Window, IDisposable
         ReleaseHistoryStatusText.Text = result.Message;
         if (!result.IsSuccess || result.Releases.Count == 0)
         {
+            if (ReleaseHistorySelector.ItemsSource is not null)
+            {
+                ReleaseHistoryStatusText.Text += " 已保留上次成功读取的版本列表。";
+                return;
+            }
+
             ReleaseHistorySelector.ItemsSource = null;
             SelectedReleaseDetailsPanel.Visibility = Visibility.Collapsed;
             _selectedRelease = null;
