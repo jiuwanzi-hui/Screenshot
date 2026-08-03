@@ -303,6 +303,16 @@ public sealed class MainWindowLifecycleTests
             Assert.Contains(
                 "修复长截图接缝",
                 Assert.IsType<TextBlock>(window.FindName("SelectedReleaseNotesText")).Text);
+
+            window.UpdateReleaseHistory(new ApplicationReleaseHistoryResult(
+                false,
+                [],
+                "两个在线源暂时不可用。"));
+
+            Assert.Equal(2, selector.Items.Count);
+            Assert.Contains(
+                "已保留上次成功读取的版本列表",
+                Assert.IsType<TextBlock>(window.FindName("ReleaseHistoryStatusText")).Text);
             window.RequestExit();
         });
     }

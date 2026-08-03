@@ -17,6 +17,7 @@ public static class AppMetadata
     public const string DiagnosticsDirectoryName = "Diagnostics";
     public const string HistoryCacheDirectoryName = "HistoryCache";
     public const string UpdatesDirectoryName = "Updates";
+    public const string ReleaseHistoryCacheFileName = "release-history-cache.json";
     public const string TranslationModelsDirectoryName = "TranslationModels";
     public const string StartupRegistrationValueName = "Screenshot.App";
 
@@ -58,6 +59,10 @@ public static class AppMetadata
     public static string UpdatesDirectoryPath => Path.Combine(
         DataDirectoryPath,
         UpdatesDirectoryName);
+
+    public static string ReleaseHistoryCachePath => Path.Combine(
+        UpdatesDirectoryPath,
+        ReleaseHistoryCacheFileName);
 
     public static string TranslationModelsDirectoryPath => Path.Combine(
         AppContext.BaseDirectory,

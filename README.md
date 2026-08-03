@@ -33,12 +33,14 @@ SnapCut（简截）是一款面向 Windows 10/11 的轻量截图工具，取"简
 
 下载最新的 x64 自包含版本。2.3.0 起发布附件统一使用 `SnapCut-Setup-*` 和 `SnapCut-Portable-*`；同时保留旧清单入口，2.1.0 及之后版本仍可在程序内在线更新：
 
-- [安装版 SnapCut Setup 2.6.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.6.0-win-x64.exe)
-- [免安装版 SnapCut Portable 2.6.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.6.0-win-x64.zip)
-- [安装版 SnapCut Setup 2.6.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.6.0/SnapCut-Setup-2.6.0-win-x64.exe)
-- [免安装版 SnapCut Portable 2.6.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.6.0/SnapCut-Portable-2.6.0-win-x64.zip)
+- [安装版 SnapCut Setup 2.6.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.6.1-win-x64.exe)
+- [免安装版 SnapCut Portable 2.6.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.6.1-win-x64.zip)
+- [安装版 SnapCut Setup 2.6.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.6.1/SnapCut-Setup-2.6.1-win-x64.exe)
+- [免安装版 SnapCut Portable 2.6.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.6.1/SnapCut-Portable-2.6.1-win-x64.zip)
 
-免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.6.0 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.6.1 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+
+2.6.1 修复版本历史在 Gitee 和 GitHub 公共 API 同时限流时无法显示的问题。历史列表现在优先读取不消耗 API 配额的静态清单，网络不可用时使用程序内置清单或上次成功缓存；临时刷新失败也不会清空已经显示的版本。安装包和免安装包均内置正式版本清单，已校验版本的更新与回退下载仍使用双源地址和 SHA-256 校验。
 
 2.6.0 在设置窗口新增“打赏支持”页面，内置微信扫码打赏二维码，用于支持 SnapCut 的持续维护、功能升级和 macOS 版本开发。本版本同时正式加入个人非商业许可证声明，许可证会随安装版和免安装版一同分发。
 
@@ -127,12 +129,14 @@ SnapCut is a lightweight capture utility for Windows 10 and 11. It combines regi
 
 Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-*` and `SnapCut-Portable-*` starting with 2.3.0. The legacy manifest endpoint remains available so versions 2.1.0 and later continue to update in-app:
 
-- [SnapCut Setup 2.6.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.6.0-win-x64.exe)
-- [SnapCut Portable 2.6.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.6.0-win-x64.zip)
-- [SnapCut Setup 2.6.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.6.0/SnapCut-Setup-2.6.0-win-x64.exe)
-- [SnapCut Portable 2.6.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.6.0/SnapCut-Portable-2.6.0-win-x64.zip)
+- [SnapCut Setup 2.6.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.6.1-win-x64.exe)
+- [SnapCut Portable 2.6.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.6.1-win-x64.zip)
+- [SnapCut Setup 2.6.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.6.1/SnapCut-Setup-2.6.1-win-x64.exe)
+- [SnapCut Portable 2.6.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.6.1/SnapCut-Portable-2.6.1-win-x64.zip)
 
-Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.6.0 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.6.1 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+
+Version 2.6.1 fixes release history becoming empty when both Gitee and GitHub public APIs are rate-limited. History now prefers a static manifest that consumes no API quota, then falls back to the bundled manifest or the last successful local cache when the network is unavailable. A temporary refresh failure also preserves the list already on screen. Both packages include the formal release manifest, while verified update and rollback downloads retain mirror fallback and SHA-256 validation.
 
 Version 2.6.0 adds a Donate page to Settings with a clearly identified WeChat donation QR code for supporting continued maintenance, feature development, and the planned macOS version. This release also formally includes the personal non-commercial license notice, and packages the license with both installed and portable distributions.
 
