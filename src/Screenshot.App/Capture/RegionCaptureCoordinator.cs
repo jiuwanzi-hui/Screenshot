@@ -117,7 +117,7 @@ public sealed class RegionCaptureCoordinator
         }
         catch (Exception exception)
         {
-            _statusReporter($"无法开始区域录制：{exception.Message}");
+            ReportRecordingStartFailure(exception);
         }
         finally
         {
@@ -136,7 +136,7 @@ public sealed class RegionCaptureCoordinator
         }
         catch (Exception exception)
         {
-            _statusReporter($"无法开始区域录制：{exception.Message}");
+            ReportRecordingStartFailure(exception);
         }
     }
 
@@ -797,7 +797,7 @@ public sealed class RegionCaptureCoordinator
         }
         catch (Exception exception)
         {
-            _statusReporter($"无法开始区域录制：{exception.Message}");
+            ReportRecordingStartFailure(exception);
         }
         finally
         {
@@ -849,6 +849,15 @@ public sealed class RegionCaptureCoordinator
     {
         _statusReporter("正在录屏，不能同时开始另一个录屏任务。");
         _ = VideoRecordingControlWindow.TryShowAlreadyRecordingFeedback();
+    }
+
+    private void ReportRecordingStartFailure(Exception exception)
+    {
+        var rootException = exception.GetBaseException();
+        var detail = string.IsNullOrWhiteSpace(rootException.Message)
+            ? rootException.GetType().Name
+            : rootException.Message.Trim();
+        _statusReporter($"无法开始区域录制：{detail}");
     }
 
     private void SetCaptureInProgress(bool isInProgress)

@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "2.7.0",
+    [string]$Version = "2.7.1",
     [switch]$SkipTrackedManifestUpdate
 )
 
@@ -48,6 +48,13 @@ dotnet publish $appProject `
 
 if ($LASTEXITCODE -ne 0) {
     throw "Screenshot publish failed."
+}
+
+$screenRecorderLibraryPath = Join-Path `
+    $publishDirectory `
+    "ScreenRecorderLib.dll"
+if (-not (Test-Path -LiteralPath $screenRecorderLibraryPath)) {
+    throw "Required recording component was not published: $screenRecorderLibraryPath"
 }
 
 & $innoCompiler "/DAppVersion=$Version" $setupScript
