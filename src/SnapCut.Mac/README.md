@@ -1,44 +1,64 @@
-# SnapCut.Mac — macOS 前端（CLI 原型阶段）
+# SnapCut for macOS
 
-共享 `SnapCut.Core` 拼接内核的 macOS 前端。当前形态是命令行原型，用于在真实
-macOS 抓屏 / 滚轮链路上验收核心算法；后续的菜单栏 App 将复用这里的
-捕获层（`Capture/`）与原生绑定（`Native/`）。
+`SnapCut.Mac` 是独立于 Windows WPF 前端的 macOS 菜单栏应用。它复用
+`SnapCut.Core` 的平台无关拼接内核及现有 CoreGraphics 捕获层，Windows 工程
+`Screenshot.App` 不引用本项目或 Avalonia。
 
-## 构建与运行（在 Mac 上）
+## 当前功能
 
-```bash
-# 任一平台都可编译；运行需要 macOS
-dotnet publish src/SnapCut.Mac -c Release -r osx-arm64 --self-contained
-# Intel 芯片: -r osx-x64
-
-./src/SnapCut.Mac/bin/Release/net8.0/osx-arm64/publish/snapcut displays
-./src/SnapCut.Mac/bin/Release/net8.0/osx-arm64/publish/snapcut capture --out shot.png
-./src/SnapCut.Mac/bin/Release/net8.0/osx-arm64/publish/snapcut scroll --rect 100,100,800,600 --out long.png
-```
+- 菜单栏常驻，单击图标打开设置与截图历史。
+- `⌘⇧A` 区域截图、`⌘⇧S` 长截图，两组快捷键可在设置中修改。
+- 框选前冻结当前桌面底图，框内保持原图、框外使用暗色遮罩。
+- 普通截图自动保存到 `~/Pictures/SnapCut`，支持预览、复制、另存为和
+  `Ctrl + 滚轮` 缩放。
+- 长截图复用 `ScrollCaptureEngine`：框选后手动滚动，使用独立控制窗停止生成
+  或取消；控制窗、设置窗和预览窗均设置为不参与屏幕捕获。
+- 设置页显示屏幕录制/输入监控权限、快捷键、截图后行为和最近截图。
+- 保留 `displays`、`permissions`、`capture`、`scroll` CLI 命令用于诊断。
 
 ## 权限
 
-| 功能 | 所需权限 | 缺失时行为 |
+| 功能 | macOS 权限 | 缺失时行为 |
 | --- | --- | --- |
-| 抓屏（`capture`/`scroll`） | 屏幕录制 | 首次调用触发系统弹窗；拒绝则报错退出 |
-| 滚轮监听（`scroll`） | 输入监控 | 打印警告后继续，滚动方向完全由图像证据决定 |
+| 区域截图、长截图 | 屏幕录制 | 首次调用申请；拒绝后显示具体授权路径 |
+| 全局快捷键、滚轮方向提示 | 输入监控 | 菜单栏仍可用；设置页可重新申请 |
 
-到 系统设置 → 隐私与安全性 中对运行 `snapcut` 的终端（或未来的 App 本体）授权。
+授权位置：系统设置 → 隐私与安全性 → 屏幕录制 / 输入监控。macOS 可能要求
+退出并重新打开 SnapCut 才能应用新权限。
 
-## 技术要点
+## 构建 `.app`
 
-- 全部原生调用是 C ABI（CoreGraphics / CoreFoundation / ImageIO / CGEventTap），
-  纯 P/Invoke，无 Objective-C 运行时依赖，因此 Windows 上也能交叉编译。
-- 抓屏用 `CGDisplayCreateImageForRect`（macOS 15 起标记弃用但仍可用；迁移到
-  ScreenCaptureKit 需要 ObjC 互操作，列为后续项）。HiDPI 显示器返回物理像素
-  （2x 屏上 100pt 宽的区域产出 200px 帧），拼接核心直接工作在物理像素上。
-- 像素统一归一化为 BGRA 后进入 `SnapCut.Core.PixelImage`；保存 PNG 走 ImageIO。
-- 滚动采集引擎按 Windows 版验证过的规则实现：链式顺序拼接、采样背压
-  （积压超容量 1/4 跳拍，位移 ≥ 1/4 视口或 120ms 未采样强制采样）、
-  超容量丢中间帧并合并滚轮位移、无法定位的帧丢像素但位移并入后继帧。
+要求 .NET 8 SDK。Apple Silicon：
 
-## 已知差距（相对 Windows 版 / 待办）
+```powershell
+pwsh ./build-macos.ps1 -Runtime osx-arm64 -Version 0.1.0
+```
 
-- 无 UI：框选、遮罩、预览、编辑、托盘都未实现（等菜单栏 App 阶段）。
-- ScreenCaptureKit 迁移、Retina 混合 DPI 多屏的坐标细节、自然滚动方向的
-  精确判定（当前滚轮方向仅作偏好，判错只损失一次廉价反向探测）。
+Intel：
+
+```powershell
+pwsh ./build-macos.ps1 -Runtime osx-x64 -Version 0.1.0
+```
+
+脚本输出 `artifacts/mac/SnapCut-<version>-<runtime>.app` 和 ZIP。在真实 Mac
+上运行时会用 `chmod` 保留应用宿主的可执行权限，并使用 `ditto` 生成适合分发的
+ZIP。传入 `-SignIdentity "Developer ID Application: ..."` 可执行 hardened
+runtime 签名；正式对外发布前仍需 Apple 公证。
+
+Windows 可以交叉发布两个运行时用于编译检查，但 Windows 生成的 ZIP 不保留
+Unix 可执行位，不能作为正式 macOS 分发包。
+
+## CLI 诊断
+
+```bash
+./snapcut displays
+./snapcut permissions
+./snapcut capture --rect 100,100,800,600 --out shot.png
+./snapcut scroll --rect 100,100,800,600 --out long.png
+```
+
+## 验收边界
+
+自动测试覆盖坐标缩放、快捷键匹配、设置持久化和历史排序；macOS 原生菜单栏、
+权限弹窗、多显示器排列、Retina 混合缩放、剪贴板和实际滚动拼接必须在真实 Mac
+上人工验收。ScreenCaptureKit 迁移、截图标注、OCR/翻译和钉图仍属于后续阶段。

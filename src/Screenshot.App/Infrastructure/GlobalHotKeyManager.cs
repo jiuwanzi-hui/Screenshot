@@ -92,6 +92,8 @@ public sealed class GlobalHotKeyManager : IDisposable
     private const int MouseHoldMovementTolerance = 8;
     private static readonly IntPtr ReplayedSideButtonExtraInfo =
         new(0x534E4150);
+    private static readonly IntPtr ReplayedPrimaryButtonExtraInfo =
+        new(0x534E4151);
     private const uint VirtualKeyShift = 0x10;
     private const uint VirtualKeyControl = 0x11;
     private const uint VirtualKeyAlt = 0x12;
@@ -116,6 +118,7 @@ public sealed class GlobalHotKeyManager : IDisposable
     private readonly Dictionary<uint, PendingMouseHold> _pendingMouseHolds = [];
     private readonly HashSet<uint> _suppressedMouseButtonsUntilUp = [];
     private readonly HashSet<uint> _sideButtonsToReplayUntilUp = [];
+    private readonly HashSet<uint> _primaryButtonsToReplayUntilUp = [];
     private readonly Dictionary<uint, CapturePointerContinuation>
         _capturePointerContinuations = [];
     private IntPtr _keyboardHook;
@@ -127,6 +130,7 @@ public sealed class GlobalHotKeyManager : IDisposable
     private bool _mouseSideButtonsUseLongPress;
     private bool _areMouseShortcutsSuspended;
     private bool _isKeyboardCaptureActive;
+    private int _mouseReplayDepth;
     private bool _disposed;
 
     public GlobalHotKeyManager()
@@ -177,6 +181,8 @@ public sealed class GlobalHotKeyManager : IDisposable
     internal bool IsKeyboardCaptureActive => _isKeyboardCaptureActive;
 
     internal Action<uint>? ReplayMouseSideButtonOverride { get; set; }
+
+    internal Action<uint, bool>? ReplayPrimaryMouseButtonOverride { get; set; }
 
     public TimeSpan MouseLongPressDuration => _mouseLongPressDuration;
 
@@ -300,6 +306,7 @@ public sealed class GlobalHotKeyManager : IDisposable
         _pendingMouseHolds.Clear();
         _suppressedMouseButtonsUntilUp.Clear();
         _sideButtonsToReplayUntilUp.Clear();
+        _primaryButtonsToReplayUntilUp.Clear();
         foreach (var continuation in _capturePointerContinuations.Values)
         {
             continuation.NotifyReleased();
@@ -397,6 +404,7 @@ public sealed class GlobalHotKeyManager : IDisposable
         _registeredBindings.Clear();
         _pendingMouseHolds.Clear();
         _sideButtonsToReplayUntilUp.Clear();
+        _primaryButtonsToReplayUntilUp.Clear();
         _mouseHoldTimer.Stop();
         ClearPreCapturedScreen();
     }
@@ -464,7 +472,9 @@ public sealed class GlobalHotKeyManager : IDisposable
                 lParam);
             var message = wParam.ToInt32();
 
-            if (mouseData.ExtraInfo == ReplayedSideButtonExtraInfo)
+            if (ShouldBypassMouseShortcutProcessing(
+                    mouseData.ExtraInfo,
+                    Volatile.Read(ref _mouseReplayDepth)))
             {
                 return NativeMethods.CallNextHookEx(
                     _mouseHook,
@@ -518,6 +528,10 @@ public sealed class GlobalHotKeyManager : IDisposable
                 _ = _messageSource.Dispatcher.BeginInvoke(
                     () => ReplayMouseSideButton(virtualKey));
             }
+            else if (_primaryButtonsToReplayUntilUp.Remove(virtualKey))
+            {
+                ReplayPrimaryMouseButton(virtualKey, includeButtonUp: true);
+            }
             return true;
         }
 
@@ -567,7 +581,8 @@ public sealed class GlobalHotKeyManager : IDisposable
         {
             var continuation = CreateCapturePointerContinuation(
                 virtualKey,
-                immediateBinding.Action);
+                immediateBinding.Action,
+                point);
             if (continuation is null)
             {
                 _suppressedMouseButtonsUntilUp.Add(virtualKey);
@@ -610,8 +625,10 @@ public sealed class GlobalHotKeyManager : IDisposable
             holdBinding,
             DateTimeOffset.UtcNow,
             point);
+        _suppressedMouseButtonsUntilUp.Add(virtualKey);
+        _primaryButtonsToReplayUntilUp.Add(virtualKey);
         _mouseHoldTimer.Start();
-        return false;
+        return true;
     }
 
     internal bool ProcessMouseButtonInputForTest(
@@ -665,6 +682,13 @@ public sealed class GlobalHotKeyManager : IDisposable
                 Math.Abs(point.Y - pending.StartPoint.Y) > MouseHoldMovementTolerance)
             {
                 _pendingMouseHolds.Remove(virtualKey);
+                if (_primaryButtonsToReplayUntilUp.Remove(virtualKey))
+                {
+                    _suppressedMouseButtonsUntilUp.Remove(virtualKey);
+                    ReplayPrimaryMouseButton(
+                        virtualKey,
+                        includeButtonUp: false);
+                }
             }
         }
 
@@ -691,9 +715,11 @@ public sealed class GlobalHotKeyManager : IDisposable
         {
             _pendingMouseHolds.Remove(virtualKey);
             _sideButtonsToReplayUntilUp.Remove(virtualKey);
+            _primaryButtonsToReplayUntilUp.Remove(virtualKey);
             var continuation = CreateCapturePointerContinuation(
                 virtualKey,
-                pending.Binding.Action);
+                pending.Binding.Action,
+                pending.StartPoint);
             RaiseHotKeyPressed(
                 pending.Binding.Action,
                 CaptureCurrentScreen(pending.Binding.Action),
@@ -757,7 +783,8 @@ public sealed class GlobalHotKeyManager : IDisposable
 
     private CapturePointerContinuation? CreateCapturePointerContinuation(
         uint virtualKey,
-        HotKeyAction action)
+        HotKeyAction action,
+        NativeMethods.NativePoint startPoint)
     {
         var captureButton = GetCapturePointerButton(virtualKey);
         if (!captureButton.HasValue || !OpensCaptureSelection(action))
@@ -765,7 +792,9 @@ public sealed class GlobalHotKeyManager : IDisposable
             return null;
         }
 
-        var continuation = new CapturePointerContinuation(captureButton.Value);
+        var continuation = new CapturePointerContinuation(
+            captureButton.Value,
+            new System.Drawing.Point(startPoint.X, startPoint.Y));
         _capturePointerContinuations[virtualKey] = continuation;
         return continuation;
     }
@@ -773,6 +802,7 @@ public sealed class GlobalHotKeyManager : IDisposable
     private static bool OpensCaptureSelection(HotKeyAction action)
     {
         return action is HotKeyAction.RegionCapture or
+            HotKeyAction.VideoRecording or
             HotKeyAction.RecognizeText or
             HotKeyAction.PinImage or
             HotKeyAction.ScrollCapture;
@@ -826,10 +856,85 @@ public sealed class GlobalHotKeyManager : IDisposable
                 },
             },
         };
-        _ = NativeMethods.SendInput(
-            (uint)inputs.Length,
-            inputs,
-            Marshal.SizeOf<NativeMethods.NativeInput>());
+        SendReplayedMouseInputs(inputs);
+    }
+
+    private void ReplayPrimaryMouseButton(
+        uint virtualKey,
+        bool includeButtonUp)
+    {
+        if (ReplayPrimaryMouseButtonOverride is not null)
+        {
+            ReplayPrimaryMouseButtonOverride(virtualKey, includeButtonUp);
+            return;
+        }
+
+        var (downFlag, upFlag) = virtualKey switch
+        {
+            HotKeyGesture.VirtualKeyMouseLeft =>
+                (NativeMethods.MouseEventLeftDown, NativeMethods.MouseEventLeftUp),
+            HotKeyGesture.VirtualKeyMouseRight =>
+                (NativeMethods.MouseEventRightDown, NativeMethods.MouseEventRightUp),
+            HotKeyGesture.VirtualKeyMouseMiddle =>
+                (NativeMethods.MouseEventMiddleDown, NativeMethods.MouseEventMiddleUp),
+            _ => (0u, 0u),
+        };
+        if (downFlag == 0)
+        {
+            return;
+        }
+
+        var inputs = new NativeMethods.NativeInput[includeButtonUp ? 2 : 1];
+        inputs[0] = CreateReplayedPrimaryMouseInput(downFlag);
+        if (includeButtonUp)
+        {
+            inputs[1] = CreateReplayedPrimaryMouseInput(upFlag);
+        }
+
+        SendReplayedMouseInputs(inputs);
+    }
+
+    internal static bool ShouldBypassMouseShortcutProcessing(
+        IntPtr extraInfo,
+        int replayDepth)
+    {
+        return replayDepth > 0 ||
+            extraInfo == ReplayedSideButtonExtraInfo ||
+            extraInfo == ReplayedPrimaryButtonExtraInfo;
+    }
+
+    private void SendReplayedMouseInputs(
+        NativeMethods.NativeInput[] inputs)
+    {
+        Interlocked.Increment(ref _mouseReplayDepth);
+        try
+        {
+            _ = NativeMethods.SendInput(
+                (uint)inputs.Length,
+                inputs,
+                Marshal.SizeOf<NativeMethods.NativeInput>());
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _mouseReplayDepth);
+        }
+    }
+
+    private static NativeMethods.NativeInput CreateReplayedPrimaryMouseInput(
+        uint flags)
+    {
+        return new NativeMethods.NativeInput
+        {
+            Type = NativeMethods.InputMouse,
+            Data = new NativeMethods.NativeInputUnion
+            {
+                Mouse = new NativeMethods.NativeMouseInput
+                {
+                    Flags = flags,
+                    ExtraInfo = ReplayedPrimaryButtonExtraInfo,
+                },
+            },
+        };
     }
 
     private static uint GetXButtonVirtualKey(uint mouseData)
@@ -1105,6 +1210,12 @@ public sealed class GlobalHotKeyManager : IDisposable
     private static class NativeMethods
     {
         public const uint InputMouse = 0;
+        public const uint MouseEventLeftDown = 0x0002;
+        public const uint MouseEventLeftUp = 0x0004;
+        public const uint MouseEventRightDown = 0x0008;
+        public const uint MouseEventRightUp = 0x0010;
+        public const uint MouseEventMiddleDown = 0x0020;
+        public const uint MouseEventMiddleUp = 0x0040;
         public const uint MouseEventXDown = 0x0080;
         public const uint MouseEventXUp = 0x0100;
 

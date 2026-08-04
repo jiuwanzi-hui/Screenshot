@@ -15,6 +15,7 @@ public static class HotKeyConfiguration
 
         var bindings = new List<HotKeyBinding>();
         AddBinding(bindings, HotKeyAction.RegionCapture, settings.RegionCaptureHotKey);
+        AddBinding(bindings, HotKeyAction.VideoRecording, settings.VideoRecordingHotKey);
         AddBinding(bindings, HotKeyAction.RecognizeText, settings.OcrHotKey);
         AddBinding(bindings, HotKeyAction.PinImage, settings.PinHotKey);
         AddBinding(bindings, HotKeyAction.OpenSettings, settings.OpenSettingsHotKey);
@@ -74,6 +75,7 @@ public static class HotKeyConfiguration
         return action switch
         {
             HotKeyAction.RegionCapture => "区域截图",
+            HotKeyAction.VideoRecording => "视频录制",
             HotKeyAction.ScrollCapture => "长截图",
             HotKeyAction.RecognizeText => "翻译",
             HotKeyAction.PinImage => "钉图",

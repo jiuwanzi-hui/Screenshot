@@ -151,6 +151,7 @@
         <Style TargetType="ComboBoxItem">
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Padding" Value="10,7" />
+            <Setter Property="Background" Value="Transparent" />
             <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="Template">
@@ -159,7 +160,7 @@
                         <Border x:Name="ItemBackground"
                                 Margin="3,1"
                                 Padding="{TemplateBinding Padding}"
-                                Background="Transparent"
+                                Background="{TemplateBinding Background}"
                                 CornerRadius="6">
                             <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                               VerticalAlignment="Center" />

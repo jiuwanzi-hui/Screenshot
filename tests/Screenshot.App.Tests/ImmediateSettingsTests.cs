@@ -22,6 +22,44 @@ public sealed class ImmediateSettingsTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public void GeneralSettingsAreSeparatedIntoScannableGroups()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var settingsStore = new SettingsStore(
+            Path.Combine(_testDirectory, "grouped-settings.json"));
+
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                CreateSettings(),
+                settingsStore,
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+            try
+            {
+                Assert.Equal("保存与外观", GetGroupTitle(
+                    window,
+                    "GeneralAppearanceGroup"));
+                Assert.Equal("窗口与后台", GetGroupTitle(
+                    window,
+                    "GeneralWindowGroup"));
+                Assert.Equal("悬浮截图", GetGroupTitle(
+                    window,
+                    "GeneralFloatingCaptureGroup"));
+                Assert.Equal("截图记录", GetGroupTitle(
+                    window,
+                    "GeneralHistoryGroup"));
+            }
+            finally
+            {
+                window.RequestExit();
+            }
+        });
+    }
+
+    [Fact]
     public void AppliesNotificationIconChangesWithoutASeparateSaveCommand()
     {
         Directory.CreateDirectory(_testDirectory);
@@ -50,6 +88,119 @@ public sealed class ImmediateSettingsTests : IDisposable
 
         Assert.Null(loaded.Warning);
         Assert.False(loaded.Settings.ShowNotificationIcon);
+    }
+
+    [Fact]
+    public void RecordingControlPreferencesAreSavedForTheNextSession()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var settingsPath = Path.Combine(_testDirectory, "recording-settings.json");
+        var settingsStore = new SettingsStore(settingsPath);
+
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                CreateSettings(),
+                settingsStore,
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+            try
+            {
+                window.SaveVideoRecordingPreferences(
+                    new VideoRecordingPreferences(
+                        VideoRecordingCodec.H265,
+                        60,
+                        RecordSystemAudio: false,
+                        RecordMicrophone: true,
+                        ShowKeyboardInput: true,
+                        ShowMouseInput: true));
+            }
+            finally
+            {
+                window.RequestExit();
+            }
+        });
+
+        var loaded = settingsStore.Load();
+        Assert.Null(loaded.Warning);
+        Assert.Equal(VideoRecordingCodec.H265, loaded.Settings.VideoRecordingCodec);
+        Assert.Equal(60, loaded.Settings.VideoRecordingFrameRate);
+        Assert.False(loaded.Settings.RecordSystemAudio);
+        Assert.True(loaded.Settings.RecordMicrophone);
+        Assert.True(loaded.Settings.ShowKeyboardInputInRecording);
+        Assert.True(loaded.Settings.ShowMouseInputInRecording);
+    }
+
+    private static string GetGroupTitle(MainWindow window, string groupName)
+    {
+        var group = Assert.IsType<StackPanel>(window.FindName(groupName));
+        return Assert.IsType<TextBlock>(group.Children[0]).Text;
+    }
+
+    [Fact]
+    public void AppliesFloatingCaptureSettingsImmediately()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var settingsPath = Path.Combine(_testDirectory, "floating-settings.json");
+        var settingsStore = new SettingsStore(settingsPath);
+
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                CreateSettings(),
+                settingsStore,
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+
+            window.Show();
+            var enabled = Assert.IsType<CheckBox>(
+                window.FindName("ShowFloatingCaptureButtonCheckBox"));
+            var clickBehavior = Assert.IsType<ComboBox>(
+                window.FindName("FloatingCaptureClickBehaviorComboBox"));
+            enabled.IsChecked = true;
+            Assert.Equal(7, clickBehavior.Items.Count);
+            clickBehavior.SelectedValue =
+                FloatingCaptureClickBehavior.CaptureAllScreens;
+            window.RequestExit();
+        });
+
+        var loaded = settingsStore.Load();
+        Assert.Null(loaded.Warning);
+        Assert.True(loaded.Settings.ShowFloatingCaptureButton);
+        Assert.Equal(
+            FloatingCaptureClickBehavior.CaptureAllScreens,
+            loaded.Settings.FloatingCaptureClickBehavior);
+    }
+
+    [Fact]
+    public void FloatingCloseRequestCanPersistentlyDisableTheButton()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var settingsPath = Path.Combine(_testDirectory, "floating-close.json");
+        var settingsStore = new SettingsStore(settingsPath);
+
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                CreateSettings() with { ShowFloatingCaptureButton = true },
+                settingsStore,
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+
+            window.Show();
+            window.SetFloatingCaptureButtonEnabled(false);
+            window.RequestExit();
+        });
+
+        var loaded = settingsStore.Load();
+        Assert.Null(loaded.Warning);
+        Assert.False(loaded.Settings.ShowFloatingCaptureButton);
     }
 
     [Fact]
@@ -479,6 +630,51 @@ public sealed class ImmediateSettingsTests : IDisposable
         Assert.Equal("Ctrl+Alt+Shift+F18", loaded.Settings.RegionCaptureHotKey);
         Assert.Equal(initialSettings.PinHotKey, loaded.Settings.PinHotKey);
         Assert.True(settingsSavedCount >= 2);
+    }
+
+    [Fact]
+    public void VideoRecordingShortcutIsVisibleSavedAndRegisteredImmediately()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var settingsPath = Path.Combine(_testDirectory, "settings.json");
+        var settingsStore = new SettingsStore(settingsPath);
+        var initialSettings = CreateSettings();
+        settingsStore.Save(initialSettings);
+
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            Assert.True(hotKeyManager.ApplyAvailable(
+                HotKeyConfiguration.CreateBindings(initialSettings)).IsSuccess);
+            var window = new MainWindow(
+                initialSettings,
+                settingsStore,
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+            window.Show();
+
+            var captureBox = Assert.IsType<HotKeyCaptureBox>(
+                window.FindName("VideoRecordingHotKeyBox"));
+            captureBox.ProcessCapturedVirtualKey(
+                virtualKey: 0x82,
+                HotKeyModifiers.Control |
+                HotKeyModifiers.Alt |
+                HotKeyModifiers.Shift);
+
+            Assert.Contains(
+                hotKeyManager.RegisteredBindings,
+                binding =>
+                    binding.Action == HotKeyAction.VideoRecording &&
+                    binding.Gesture.VirtualKey == 0x82);
+            window.RequestExit();
+        });
+
+        var loaded = settingsStore.Load();
+        Assert.Null(loaded.Warning);
+        Assert.Equal(
+            "Ctrl+Alt+Shift+F19",
+            loaded.Settings.VideoRecordingHotKey);
     }
 
     [Fact]

@@ -21,6 +21,11 @@ Copyright (c) 2016 Google Inc.
 License: Apache License 2.0
 Source: https://github.com/google/cld3
 
+ScreenRecorderLib
+Copyright (c) 2017-2025 Sverre Kristoffer Skodje
+License: MIT
+Source: https://github.com/sskodje/ScreenRecorderLib
+
 Optional offline translation models are not bundled with SnapCut. When the
 user confirms a download, the model files are fetched directly from Mozilla's
 official Firefox Translations model registry:

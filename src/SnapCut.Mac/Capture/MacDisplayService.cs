@@ -1,4 +1,4 @@
-using SnapCut.Mac.Native;
+﻿using SnapCut.Mac.Native;
 
 namespace SnapCut.Mac.Capture;
 

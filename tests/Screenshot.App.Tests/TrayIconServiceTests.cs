@@ -16,6 +16,13 @@ public sealed class TrayIconServiceTests
         Assert.IsAssignableFrom<System.Windows.Forms.ToolStripProfessionalRenderer>(
             menu.Renderer);
         Assert.Contains("TrayMenuRenderer", menu.Renderer.GetType().Name);
+        Assert.Contains("RoundedContextMenuStrip", menu.GetType().Name);
+        Assert.Equal(8, TrayIconService.CornerRadiusForTesting);
+        Assert.NotEqual(IntPtr.Zero, menu.Handle);
+        Assert.NotNull(menu.Region);
+        Assert.Contains(
+            menu.Items.OfType<System.Windows.Forms.ToolStripMenuItem>(),
+            item => item.Text == "录制视频");
         Assert.Equal(
             tray.HoverForegroundForTesting,
             menu.Items.OfType<System.Windows.Forms.ToolStripMenuItem>().First().ForeColor);
@@ -35,6 +42,22 @@ public sealed class TrayIconServiceTests
 
         Assert.NotEqual(darkBackground, menu.BackColor);
         Assert.True(menu.BackColor.GetBrightness() > darkBackground.GetBrightness());
+    }
+
+    [Fact]
+    public void VideoRecordingMenuItemRaisesRequest()
+    {
+        using var tray = new TrayIconService(AppTheme.Light);
+        var requested = false;
+        tray.VideoRecordingRequested += (_, _) => requested = true;
+        var item = Assert.Single(
+            tray.ContextMenuForTesting.Items
+                .OfType<System.Windows.Forms.ToolStripMenuItem>()
+                .Where(candidate => candidate.Text == "录制视频"));
+
+        item.PerformClick();
+
+        Assert.True(requested);
     }
 
     private static double GetContrastRatio(

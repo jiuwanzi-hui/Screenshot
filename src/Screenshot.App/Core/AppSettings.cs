@@ -15,6 +15,31 @@ public enum WindowCloseBehavior
     ExitApplication,
 }
 
+public enum FloatingCaptureClickBehavior
+{
+    CaptureImmediately,
+    ShowSelection,
+    RegionCapture,
+    VideoRecording,
+    ScrollCapture,
+    PinCapture,
+    CaptureAllScreens,
+}
+
+public enum VideoRecordingCodec
+{
+    H264,
+    H265,
+}
+
+public readonly record struct VideoRecordingPreferences(
+    VideoRecordingCodec Codec,
+    int FrameRate,
+    bool RecordSystemAudio,
+    bool RecordMicrophone,
+    bool ShowKeyboardInput = false,
+    bool ShowMouseInput = false);
+
 public enum TranslationMode
 {
     Disabled,
@@ -35,9 +60,29 @@ public sealed record AppSettings
 
     public string SaveDirectory { get; init; } = GetDefaultSaveDirectory();
 
+    public string VideoSaveDirectory { get; init; } = GetDefaultVideoSaveDirectory();
+
+    public bool RecordSystemAudio { get; init; } = true;
+
+    public bool RecordMicrophone { get; init; }
+
+    public VideoRecordingCodec VideoRecordingCodec { get; init; } =
+        VideoRecordingCodec.H264;
+
+    public int VideoRecordingFrameRate { get; init; } = 30;
+
+    public bool ShowKeyboardInputInRecording { get; init; }
+
+    public bool ShowMouseInputInRecording { get; init; }
+
     public bool ShowTaskbarIcon { get; init; } = true;
 
     public bool ShowNotificationIcon { get; init; } = true;
+
+    public bool ShowFloatingCaptureButton { get; init; }
+
+    public FloatingCaptureClickBehavior FloatingCaptureClickBehavior { get; init; } =
+        FloatingCaptureClickBehavior.ShowSelection;
 
     public bool LaunchAtStartup { get; init; }
 
@@ -47,6 +92,8 @@ public sealed record AppSettings
     public AppTheme Theme { get; init; } = AppTheme.System;
 
     public string RegionCaptureHotKey { get; init; } = "Ctrl+Alt+S";
+
+    public string VideoRecordingHotKey { get; init; } = string.Empty;
 
     public string ScrollCaptureHotKey { get; init; } = string.Empty;
 
@@ -135,10 +182,23 @@ public sealed record AppSettings
             CloseBehavior = Enum.IsDefined(CloseBehavior)
                 ? CloseBehavior
                 : defaults.CloseBehavior,
+            FloatingCaptureClickBehavior = Enum.IsDefined(FloatingCaptureClickBehavior)
+                ? FloatingCaptureClickBehavior
+                : defaults.FloatingCaptureClickBehavior,
+            VideoRecordingCodec = Enum.IsDefined(VideoRecordingCodec)
+                ? VideoRecordingCodec
+                : defaults.VideoRecordingCodec,
+            VideoRecordingFrameRate = VideoRecordingFrameRate is 24 or 30 or 60
+                ? VideoRecordingFrameRate
+                : defaults.VideoRecordingFrameRate,
             SaveDirectory = string.IsNullOrWhiteSpace(SaveDirectory)
                 ? defaults.SaveDirectory
                 : SaveDirectory.Trim(),
+            VideoSaveDirectory = string.IsNullOrWhiteSpace(VideoSaveDirectory)
+                ? defaults.VideoSaveDirectory
+                : VideoSaveDirectory.Trim(),
             RegionCaptureHotKey = RegionCaptureHotKey?.Trim() ?? string.Empty,
+            VideoRecordingHotKey = VideoRecordingHotKey?.Trim() ?? string.Empty,
             ScrollCaptureHotKey = ScrollCaptureHotKey?.Trim() ?? string.Empty,
             OcrHotKey = OcrHotKey?.Trim() ?? string.Empty,
             PinHotKey = PinHotKey?.Trim() ?? string.Empty,
@@ -176,5 +236,10 @@ public sealed record AppSettings
     private static string GetDefaultSaveDirectory()
     {
         return AppMetadata.DefaultCaptureDirectory;
+    }
+
+    private static string GetDefaultVideoSaveDirectory()
+    {
+        return AppMetadata.DefaultVideoDirectory;
     }
 }

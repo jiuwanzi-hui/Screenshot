@@ -6,7 +6,9 @@ using System.Windows.Input;
 using System.Windows.Media;
 using Screenshot.App.Capture;
 using Screenshot.App.Editor;
+using Screenshot.App.Infrastructure;
 using Screenshot.App.Text;
+using DrawingRectangle = System.Drawing.Rectangle;
 using WpfButton = System.Windows.Controls.Button;
 using WpfBrushes = System.Windows.Media.Brushes;
 using WpfColor = System.Windows.Media.Color;
@@ -48,7 +50,12 @@ public partial class PinnedImageWindow : Window
         DataContext = _capturedImage;
         TranslateButton.IsEnabled = false;
         ApplyInitialSize();
-        ApplyInitialPlacement();
+        if (_capturedImage.SourceRegion is { IsEmpty: false })
+        {
+            WindowStartupLocation = WindowStartupLocation.Manual;
+        }
+
+        SourceInitialized += OnSourceInitialized;
         Loaded += OnLoaded;
     }
 
@@ -57,6 +64,7 @@ public partial class PinnedImageWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _isClosed = true;
+        SourceInitialized -= OnSourceInitialized;
         Loaded -= OnLoaded;
         _capturedImage.Dispose();
         base.OnClosed(e);
@@ -101,7 +109,14 @@ public partial class PinnedImageWindow : Window
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
+        ApplyInitialPlacement();
         _textRecognitionTask = RecognizeTextAsync();
+    }
+
+    private void OnSourceInitialized(object? sender, EventArgs e)
+    {
+        SourceInitialized -= OnSourceInitialized;
+        ApplyInitialPlacement();
     }
 
     private async Task RecognizeTextAsync()
@@ -402,12 +417,18 @@ public partial class PinnedImageWindow : Window
 
     private void ApplyInitialSize()
     {
-        var workArea = SystemParameters.WorkArea;
-        var dpi = VisualTreeHelper.GetDpi(this);
-        var contentWidth = _capturedImage.Bitmap.Width / dpi.DpiScaleX;
-        var contentHeight = _capturedImage.Bitmap.Height / dpi.DpiScaleY;
-        var maximumWindowWidth = Math.Max(MinWidth, workArea.Width * 0.92);
-        var maximumWindowHeight = Math.Max(MinHeight, workArea.Height * 0.90);
+        var referenceBounds = _capturedImage.SourceRegion is { IsEmpty: false } region
+            ? new DrawingRectangle(region.X, region.Y, region.Width, region.Height)
+            : System.Windows.Forms.Screen.PrimaryScreen?.WorkingArea ??
+              System.Windows.Forms.SystemInformation.VirtualScreen;
+        var workArea = MonitorGeometryService.GetWorkArea(referenceBounds);
+        var dpi = MonitorGeometryService.GetDpiScale(referenceBounds);
+        var workAreaWidth = workArea.Width / dpi.X;
+        var workAreaHeight = workArea.Height / dpi.Y;
+        var contentWidth = _capturedImage.Bitmap.Width / dpi.X;
+        var contentHeight = _capturedImage.Bitmap.Height / dpi.Y;
+        var maximumWindowWidth = Math.Max(MinWidth, workAreaWidth * 0.92);
+        var maximumWindowHeight = Math.Max(MinHeight, workAreaHeight * 0.90);
         var maximumContentWidth = Math.Max(1, maximumWindowWidth - ShadowInset);
         var maximumContentHeight = Math.Max(1, maximumWindowHeight - HeaderAndShadowHeight);
         var scale = Math.Min(
@@ -416,8 +437,8 @@ public partial class PinnedImageWindow : Window
                 maximumContentWidth / Math.Max(1, contentWidth),
                 maximumContentHeight / Math.Max(1, contentHeight)));
 
-        MaxWidth = Math.Max(MinWidth, workArea.Width);
-        MaxHeight = Math.Max(MinHeight, workArea.Height);
+        MaxWidth = Math.Max(MinWidth, workAreaWidth);
+        MaxHeight = Math.Max(MinHeight, workAreaHeight);
         Width = Math.Max(MinWidth, (contentWidth * scale) + ShadowInset);
         Height = Math.Max(MinHeight, (contentHeight * scale) + HeaderAndShadowHeight);
     }
@@ -429,22 +450,39 @@ public partial class PinnedImageWindow : Window
             return;
         }
 
-        var dpi = VisualTreeHelper.GetDpi(this);
-        var virtualScreen = VirtualScreen.GetBounds();
-        var minimumLeft = virtualScreen.X / dpi.DpiScaleX;
-        var minimumTop = virtualScreen.Y / dpi.DpiScaleY;
-        var maximumLeft = minimumLeft +
-                          (virtualScreen.Width / dpi.DpiScaleX) - Width;
-        var maximumTop = minimumTop +
-                         (virtualScreen.Height / dpi.DpiScaleY) - Height;
-        var contentLeftInset = ShadowInset / 2;
-        var contentTopInset = HeaderAndShadowHeight - contentLeftInset;
-        var desiredLeft = (sourceRegion.X / dpi.DpiScaleX) - contentLeftInset;
-        var desiredTop = (sourceRegion.Y / dpi.DpiScaleY) - contentTopInset;
+        if (!MonitorGeometryService.TryGetWindowBounds(this, out var windowBounds))
+        {
+            return;
+        }
 
-        WindowStartupLocation = WindowStartupLocation.Manual;
-        Left = Math.Clamp(desiredLeft, minimumLeft, Math.Max(minimumLeft, maximumLeft));
-        Top = Math.Clamp(desiredTop, minimumTop, Math.Max(minimumTop, maximumTop));
+        var sourceBounds = new DrawingRectangle(
+            sourceRegion.X,
+            sourceRegion.Y,
+            sourceRegion.Width,
+            sourceRegion.Height);
+        var workArea = MonitorGeometryService.GetWorkArea(sourceBounds);
+        var dpi = MonitorGeometryService.GetDpiScale(sourceBounds);
+        var contentLeftInset = (int)Math.Round((ShadowInset / 2) * dpi.X);
+        var contentTopInset = (int)Math.Round(
+            (HeaderAndShadowHeight - (ShadowInset / 2)) * dpi.Y);
+        var maximumLeft = Math.Max(
+            workArea.Left,
+            workArea.Right - windowBounds.Width);
+        var maximumTop = Math.Max(
+            workArea.Top,
+            workArea.Bottom - windowBounds.Height);
+        var desiredLeft = Math.Clamp(
+            sourceRegion.X - contentLeftInset,
+            workArea.Left,
+            maximumLeft);
+        var desiredTop = Math.Clamp(
+            sourceRegion.Y - contentTopInset,
+            workArea.Top,
+            maximumTop);
+        _ = MonitorGeometryService.TryMoveWindow(
+            this,
+            desiredLeft,
+            desiredTop);
     }
 
     private void OnCloseClick(object sender, RoutedEventArgs e)
