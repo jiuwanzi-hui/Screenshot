@@ -15,6 +15,113 @@ namespace Screenshot.App.Tests;
 public sealed class CaptureOverlayWindowTests
 {
     [Fact]
+    public async Task RecordButtonClosesOverlayAndPublishesSelectedRegion()
+    {
+        CaptureOverlayWindow? overlay = null;
+        var started = new TaskCompletionSource<ScreenRegion>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var closed = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var virtualScreen = VirtualScreen.GetBounds();
+        var expected = new ScreenRegion(
+            virtualScreen.X + 40,
+            virtualScreen.Y + 40,
+            Math.Min(320, virtualScreen.Width - 40),
+            Math.Min(200, virtualScreen.Height - 40));
+
+        WpfTestHost.Invoke(() =>
+        {
+            var pinnedImageManager = new PinnedImageManager();
+            overlay = CaptureOverlayWindow.ShowInteractive(
+                new CaptureOverlayOptions
+                {
+                    SaveDirectory = Path.GetTempPath(),
+                    KeepHistory = false,
+                    HistoryLimit = 0,
+                    HistoryService = new CaptureHistoryService(),
+                    PinnedImageManager = pinnedImageManager,
+                    StartOcrAsync = image =>
+                    {
+                        image.Dispose();
+                        return Task.CompletedTask;
+                    },
+                    StartVideoRecordingAsync = region =>
+                    {
+                        started.TrySetResult(region);
+                        return Task.CompletedTask;
+                    },
+                    InitialSelection = expected,
+                    CaptureClosed = () =>
+                    {
+                        pinnedImageManager.Dispose();
+                        closed.TrySetResult();
+                    },
+                });
+
+            var recordButton = Assert.IsType<Button>(
+                overlay.FindName("RecordButton"));
+            Assert.Equal(Visibility.Visible, recordButton.Visibility);
+            recordButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+        });
+
+        Assert.Equal(
+            expected,
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        await closed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        WpfTestHost.Invoke(() => Assert.False(overlay?.IsVisible));
+    }
+
+    [Fact]
+    public void InteractiveOverlayAppliesReusableInitialSelection()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var pinnedImageManager = new PinnedImageManager();
+            var virtualScreen = VirtualScreen.GetBounds();
+            var expected = new ScreenRegion(
+                virtualScreen.X + Math.Min(80, virtualScreen.Width / 4),
+                virtualScreen.Y + Math.Min(70, virtualScreen.Height / 4),
+                Math.Min(360, Math.Max(2, virtualScreen.Width / 3)),
+                Math.Min(240, Math.Max(2, virtualScreen.Height / 3)));
+            var overlay = CaptureOverlayWindow.ShowInteractive(
+                new CaptureOverlayOptions
+                {
+                    SaveDirectory = Path.GetTempPath(),
+                    KeepHistory = false,
+                    HistoryLimit = 0,
+                    HistoryService = new CaptureHistoryService(),
+                    PinnedImageManager = pinnedImageManager,
+                    StartOcrAsync = image =>
+                    {
+                        image.Dispose();
+                        return Task.CompletedTask;
+                    },
+                    InitialSelection = expected,
+                });
+
+            try
+            {
+                var getPhysicalBounds = typeof(CaptureOverlayWindow).GetMethod(
+                    "GetPhysicalSelectionBounds",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.NotNull(getPhysicalBounds);
+                Assert.Equal(
+                    expected,
+                    Assert.IsType<ScreenRegion>(getPhysicalBounds.Invoke(
+                        overlay,
+                        parameters: null)));
+                var toolbar = Assert.IsType<Border>(
+                    overlay.FindName("CaptureToolbar"));
+                Assert.Equal(Visibility.Visible, toolbar.Visibility);
+            }
+            finally
+            {
+                overlay.Close();
+            }
+        });
+    }
+
+    [Fact]
     public async Task TriggerButtonReleaseEndsContinuedSelectionImmediately()
     {
         CaptureOverlayWindow? overlay = null;
@@ -55,6 +162,59 @@ public sealed class CaptureOverlayWindowTests
             Assert.False(Assert.IsType<bool>(selectingField.GetValue(overlay)));
             overlay.Close();
             pinnedImageManager!.Dispose();
+        });
+    }
+
+    [Fact]
+    public void ContinuedSelectionUsesOriginalButtonDownPoint()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var pinnedImageManager = new PinnedImageManager();
+            var virtualScreen = VirtualScreen.GetBounds();
+            var originalPoint = new System.Drawing.Point(
+                virtualScreen.X + Math.Min(137, virtualScreen.Width - 1),
+                virtualScreen.Y + Math.Min(241, virtualScreen.Height - 1));
+            var continuation = new CapturePointerContinuation(
+                CapturePointerButton.Left,
+                originalPoint);
+            var overlay = CaptureOverlayWindow.ShowInteractive(
+                new CaptureOverlayOptions
+                {
+                    SaveDirectory = Path.GetTempPath(),
+                    KeepHistory = false,
+                    HistoryLimit = 0,
+                    HistoryService = new CaptureHistoryService(),
+                    PinnedImageManager = pinnedImageManager,
+                    StartOcrAsync = image =>
+                    {
+                        image.Dispose();
+                        return Task.CompletedTask;
+                    },
+                    InitialPointerContinuation = continuation,
+                });
+
+            try
+            {
+                var surface = Assert.IsType<Grid>(
+                    overlay.FindName("CaptureSurface"));
+                var expected = surface.PointFromScreen(
+                    new Point(originalPoint.X, originalPoint.Y));
+                var selectionStartField = typeof(CaptureOverlayWindow).GetField(
+                    "_selectionStartPoint",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+
+                Assert.NotNull(selectionStartField);
+                var actual = Assert.IsType<Point>(
+                    selectionStartField.GetValue(overlay));
+                Assert.Equal(expected.X, actual.X, precision: 3);
+                Assert.Equal(expected.Y, actual.Y, precision: 3);
+            }
+            finally
+            {
+                overlay.Close();
+                continuation.NotifyReleased();
+            }
         });
     }
 

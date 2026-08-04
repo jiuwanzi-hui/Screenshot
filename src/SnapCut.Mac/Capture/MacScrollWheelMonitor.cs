@@ -1,4 +1,4 @@
-using SnapCut.Core;
+﻿using SnapCut.Core;
 using SnapCut.Mac.Native;
 
 namespace SnapCut.Mac.Capture;
@@ -79,7 +79,11 @@ internal sealed class MacScrollWheelMonitor : IDisposable
             Name = "SnapCut.ScrollWheelTap",
         };
         _runLoopThread.Start();
-        started.Wait(TimeSpan.FromSeconds(2));
+        if (!started.Wait(TimeSpan.FromSeconds(2)))
+        {
+            return false;
+        }
+
         IsRunning = true;
         return true;
     }

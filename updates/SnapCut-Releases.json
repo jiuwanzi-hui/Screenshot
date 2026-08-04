@@ -1,5 +1,19 @@
 [
   {
+    "tag_name": "v2.7.0",
+    "name": "SnapCut 2.7.0",
+    "body": "- 新增区域视频录制：H.264/H.265、24/30/60 FPS、系统声音、麦克风及键盘/鼠标输入提示。\n- 新增可配置悬浮按钮，支持多屏位置记忆、边缘吸附、上次区域、长截图、钉图、录屏和全部屏幕截图。\n- 全部屏幕截图按 Windows 显示器布局一次捕获并组合；完善鼠标快捷键、首次框选、录屏并行截图、托盘和开机启动稳定性。\n- 加入 macOS 菜单栏预览版源码；本次仅发布 Windows x64 安装包和免安装包。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.7.0",
+    "published_at": "2026-08-04T14:44:43+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.7.0/SnapCut-Update.json" },
+      { "name": "SnapCut-Setup-2.7.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.7.0/SnapCut-Setup-2.7.0-win-x64.exe" },
+      { "name": "SnapCut-Portable-2.7.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.7.0/SnapCut-Portable-2.7.0-win-x64.zip" }
+    ]
+  },
+  {
     "tag_name": "v2.6.1",
     "name": "SnapCut 2.6.1",
     "body": "- 修复 Gitee 和 GitHub 公共 API 同时限流时版本历史为空。\n- 新增远程静态清单、程序内置清单和本地缓存多级兜底。\n- 临时刷新失败时保留已显示版本，更新与回退仍校验文件大小和 SHA-256。",

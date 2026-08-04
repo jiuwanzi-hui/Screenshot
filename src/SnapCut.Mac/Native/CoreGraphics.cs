@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace SnapCut.Mac.Native;
 
@@ -63,7 +63,12 @@ internal static partial class CoreGraphics
     public const uint EventTapSession = 1; // kCGSessionEventTap
     public const uint EventTapHeadInsert = 0; // kCGHeadInsertEventTap
     public const uint EventTapOptionListenOnly = 1;
+    public const uint EventKeyDown = 10;
     public const uint EventScrollWheel = 22; // kCGEventScrollWheel
+    public const uint EventTapDisabledByTimeout = 0xFFFFFFFE;
+    public const uint EventTapDisabledByUserInput = 0xFFFFFFFF;
+    public const int KeyboardEventAutorepeat = 8;
+    public const int KeyboardEventKeycode = 9;
     public const int ScrollWheelEventDeltaAxis1 = 11;
     public const int ScrollWheelEventIsContinuous = 88;
     public const int ScrollWheelEventPointDeltaAxis1 = 96;
@@ -163,10 +168,27 @@ internal static partial class CoreGraphics
         int field);
 
     [LibraryImport(Library)]
+    public static partial ulong CGEventGetFlags(IntPtr cgEvent);
+
+    [LibraryImport(Library)]
+    public static partial IntPtr CGEventCreate(IntPtr source);
+
+    [LibraryImport(Library)]
+    public static partial CGPoint CGEventGetLocation(IntPtr cgEvent);
+
+    [LibraryImport(Library)]
     [return: MarshalAs(UnmanagedType.I1)]
     public static partial bool CGPreflightScreenCaptureAccess();
 
     [LibraryImport(Library)]
     [return: MarshalAs(UnmanagedType.I1)]
     public static partial bool CGRequestScreenCaptureAccess();
+
+    [LibraryImport(Library)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static partial bool CGPreflightListenEventAccess();
+
+    [LibraryImport(Library)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static partial bool CGRequestListenEventAccess();
 }

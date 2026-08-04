@@ -1,4 +1,8 @@
-using System.Globalization;
+﻿using System.Globalization;
+using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
+using SnapCut.Mac.App;
 using SnapCut.Core;
 using SnapCut.Mac.Capture;
 using SnapCut.Mac.Native;
@@ -6,14 +10,14 @@ using SnapCut.Mac.Native;
 namespace SnapCut.Mac;
 
 /// <summary>
-/// SnapCut macOS 命令行原型：验证共享拼接核心在 macOS 抓屏/滚轮链路上的行为。
-/// 后续的菜单栏 App 会复用这里的捕获与引擎层。
+/// SnapCut macOS 入口。无参数时启动菜单栏应用，显式命令保留 CLI 诊断能力。
 /// </summary>
 internal static class Program
 {
+    [STAThread]
     private static int Main(string[] args)
     {
-        if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
+        if (args.Length > 0 && args[0] is "-h" or "--help" or "help")
         {
             PrintUsage();
             return 0;
@@ -23,6 +27,13 @@ internal static class Program
         {
             Console.Error.WriteLine("snapcut(Mac 前端)只能在 macOS 上运行。");
             return 1;
+        }
+
+        if (args.Length == 0)
+        {
+            return BuildAvaloniaApp().StartWithClassicDesktopLifetime(
+                args,
+                ShutdownMode.OnExplicitShutdown);
         }
 
         try
@@ -43,6 +54,13 @@ internal static class Program
         }
     }
 
+    public static AppBuilder BuildAvaloniaApp()
+    {
+        return AppBuilder
+            .Configure<MacApplication>()
+            .UsePlatformDetect();
+    }
+
     private static int Unknown(string command)
     {
         Console.Error.WriteLine($"未知命令：{command}");
@@ -54,9 +72,10 @@ internal static class Program
     {
         Console.WriteLine(
             """
-            SnapCut macOS 原型
+            SnapCut macOS
 
             用法:
+              snapcut                                     启动菜单栏应用
               snapcut displays                            列出显示器（点坐标边界、像素尺寸、缩放）
               snapcut permissions                         检查/申请屏幕录制权限
               snapcut capture --rect X,Y,W,H --out a.png  截取全局坐标区域（点）为 PNG

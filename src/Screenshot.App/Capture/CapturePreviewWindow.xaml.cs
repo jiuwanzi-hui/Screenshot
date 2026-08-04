@@ -3,6 +3,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
 using Screenshot.App.Infrastructure;
+using DrawingRectangle = System.Drawing.Rectangle;
 
 namespace Screenshot.App.Capture;
 
@@ -20,6 +21,7 @@ public partial class CapturePreviewWindow : Window
     private bool _resizeWindowToImage;
     private bool _fitUpdatePending;
     private bool _isPanning;
+    private ScreenRegion? _pendingPositionRegion;
     private System.Windows.Point _panStartPoint;
     private double _panStartHorizontalOffset;
     private double _panStartVerticalOffset;
@@ -43,6 +45,7 @@ public partial class CapturePreviewWindow : Window
             WindowPlacementKeys.CapturePreview);
         DataContext = _capturedImage;
         Loaded += OnLoaded;
+        SourceInitialized += OnSourceInitialized;
         PreviewScrollViewer.SizeChanged += OnPreviewViewportSizeChanged;
     }
 
@@ -79,25 +82,15 @@ public partial class CapturePreviewWindow : Window
 
     public void PositionToRightOf(ScreenRegion captureRegion)
     {
-        var virtualScreen = VirtualScreen.GetBounds();
+        _pendingPositionRegion = captureRegion;
         WindowStartupLocation = WindowStartupLocation.Manual;
-        UpdateLayout();
-        var gap = 12d;
-        var preferredX = captureRegion.X + captureRegion.Width + gap;
-        var preferredY = captureRegion.Y + ((captureRegion.Height - ActualHeight) / 2d);
-        Left = Math.Clamp(
-            preferredX,
-            virtualScreen.X + gap,
-            virtualScreen.X + virtualScreen.Width - ActualWidth - gap);
-        Top = Math.Clamp(
-            preferredY,
-            virtualScreen.Y + gap,
-            virtualScreen.Y + virtualScreen.Height - ActualHeight - gap);
+        ApplyPendingPosition();
     }
 
     protected override void OnClosed(EventArgs e)
     {
         EndPanning();
+        SourceInitialized -= OnSourceInitialized;
         _capturedImage.Dispose();
         base.OnClosed(e);
         Core.MemoryFootprint.TrimAfterHeavyOperation();
@@ -105,7 +98,86 @@ public partial class CapturePreviewWindow : Window
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        ApplyPendingPosition();
         QueueFitToWidth();
+    }
+
+    private void OnSourceInitialized(object? sender, EventArgs e)
+    {
+        ApplyPendingPosition();
+    }
+
+    private void ApplyPendingPosition()
+    {
+        if (_pendingPositionRegion is not { } captureRegion ||
+            !MonitorGeometryService.TryGetWindowBounds(this, out var windowBounds))
+        {
+            return;
+        }
+
+        var captureBounds = new DrawingRectangle(
+            captureRegion.X,
+            captureRegion.Y,
+            captureRegion.Width,
+            captureRegion.Height);
+        var workArea = MonitorGeometryService.GetWorkArea(captureBounds);
+        var dpi = MonitorGeometryService.GetDpiScale(captureBounds);
+        var gap = Math.Max(1, (int)Math.Round(12 * dpi.X));
+        var targetBounds = CalculateAdjacentBounds(
+            captureBounds,
+            windowBounds.Size,
+            workArea,
+            gap);
+        if (MonitorGeometryService.TryMoveWindow(
+                this,
+                targetBounds.X,
+                targetBounds.Y))
+        {
+            _pendingPositionRegion = null;
+        }
+    }
+
+    internal static DrawingRectangle CalculateAdjacentBounds(
+        DrawingRectangle captureBounds,
+        System.Drawing.Size windowSize,
+        DrawingRectangle workArea,
+        int gap)
+    {
+        var maximumX = Math.Max(
+            workArea.Left,
+            workArea.Right - windowSize.Width);
+        var maximumY = Math.Max(
+            workArea.Top,
+            workArea.Bottom - windowSize.Height);
+        var centeredY = Math.Clamp(
+            captureBounds.Top + ((captureBounds.Height - windowSize.Height) / 2),
+            workArea.Top,
+            maximumY);
+        var rightX = captureBounds.Right + gap;
+        if (rightX + windowSize.Width <= workArea.Right)
+        {
+            return new DrawingRectangle(
+                rightX,
+                centeredY,
+                windowSize.Width,
+                windowSize.Height);
+        }
+
+        var leftX = captureBounds.Left - gap - windowSize.Width;
+        if (leftX >= workArea.Left)
+        {
+            return new DrawingRectangle(
+                leftX,
+                centeredY,
+                windowSize.Width,
+                windowSize.Height);
+        }
+
+        return new DrawingRectangle(
+            Math.Clamp(rightX, workArea.Left, maximumX),
+            centeredY,
+            windowSize.Width,
+            windowSize.Height);
     }
 
     private void OnPreviewViewportSizeChanged(
@@ -168,9 +240,11 @@ public partial class CapturePreviewWindow : Window
     private void ResizeWindowToImageHeight()
     {
         var imageHeight = _capturedImage.Preview.PixelHeight * _zoom;
+        var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(this);
+        var workArea = MonitorGeometryService.GetWorkArea(this);
         var maximumHeight = Math.Max(
             MinHeight,
-            SystemParameters.WorkArea.Height - 24);
+            (workArea.Height / dpi.DpiScaleY) - 24);
         Height = CalculateAdaptiveWindowHeight(
             ActualHeight,
             PreviewScrollViewer.ActualHeight,

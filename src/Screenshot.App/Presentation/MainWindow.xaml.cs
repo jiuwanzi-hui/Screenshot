@@ -115,6 +115,8 @@ public partial class MainWindow : Window, IDisposable
         RefreshOfflineTranslationModelStatus();
         UpdateThemeSelection(initialSettings.Theme);
         UpdateCloseBehaviorSelection(initialSettings.CloseBehavior);
+        UpdateFloatingCaptureClickBehaviorSelection(
+            initialSettings.FloatingCaptureClickBehavior);
         LoadTranslationApiKey(
             TranslationProviderFactory.ResolveProviderId(
                 initialSettings.TranslationProvider));
@@ -134,6 +136,20 @@ public partial class MainWindow : Window, IDisposable
     public void ApplySettingsPalette(AppTheme theme)
     {
         AppThemeManager.ApplySettingsPalette(Resources, theme);
+    }
+
+    internal void SaveVideoRecordingPreferences(
+        VideoRecordingPreferences preferences)
+    {
+        _settingsViewModel.VideoRecordingCodec = preferences.Codec;
+        _settingsViewModel.VideoRecordingFrameRate = preferences.FrameRate;
+        _settingsViewModel.RecordSystemAudio = preferences.RecordSystemAudio;
+        _settingsViewModel.RecordMicrophone = preferences.RecordMicrophone;
+        _settingsViewModel.ShowKeyboardInputInRecording =
+            preferences.ShowKeyboardInput;
+        _settingsViewModel.ShowMouseInputInRecording =
+            preferences.ShowMouseInput;
+        ApplySettingsImmediately();
     }
 
     public event EventHandler<SettingsSavedEventArgs>? SettingsSaved;
@@ -166,6 +182,24 @@ public partial class MainWindow : Window, IDisposable
     public void ShowStatus(string message)
     {
         _settingsViewModel.SetStatus(message);
+    }
+
+    public void SetFloatingCaptureButtonEnabled(bool enabled)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(
+                () => SetFloatingCaptureButtonEnabled(enabled));
+            return;
+        }
+
+        if (_settingsViewModel.ShowFloatingCaptureButton == enabled)
+        {
+            return;
+        }
+
+        _settingsViewModel.ShowFloatingCaptureButton = enabled;
+        ApplySettingsImmediately();
     }
 
     public void RequestExit()
@@ -259,6 +293,26 @@ public partial class MainWindow : Window, IDisposable
         if (dialog.ShowDialog() == WinForms.DialogResult.OK)
         {
             _settingsViewModel.SaveDirectory = dialog.SelectedPath;
+            ApplySettings();
+        }
+    }
+
+    private void OnBrowseVideoSaveDirectoryClick(object sender, RoutedEventArgs e)
+    {
+        using var dialog = new WinForms.FolderBrowserDialog
+        {
+            Description = "选择视频保存位置",
+            UseDescriptionForTitle = true,
+        };
+
+        if (Directory.Exists(_settingsViewModel.VideoSaveDirectory))
+        {
+            dialog.InitialDirectory = _settingsViewModel.VideoSaveDirectory;
+        }
+
+        if (dialog.ShowDialog() == WinForms.DialogResult.OK)
+        {
+            _settingsViewModel.VideoSaveDirectory = dialog.SelectedPath;
             ApplySettings();
         }
     }
@@ -1138,6 +1192,32 @@ public partial class MainWindow : Window, IDisposable
             closeBehavior == WindowCloseBehavior.ExitApplication;
     }
 
+    private void OnFloatingCaptureClickBehaviorSelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || _isApplyingSettings ||
+            sender is not System.Windows.Controls.ComboBox
+            {
+                SelectedItem: ComboBoxItem
+                {
+                    Tag: FloatingCaptureClickBehavior behavior,
+                },
+            })
+        {
+            return;
+        }
+
+        _settingsViewModel.FloatingCaptureClickBehavior = behavior;
+        ApplySettingsImmediately();
+    }
+
+    private void UpdateFloatingCaptureClickBehaviorSelection(
+        FloatingCaptureClickBehavior behavior)
+    {
+        FloatingCaptureClickBehaviorComboBox.SelectedValue = behavior;
+    }
+
     private void OnSettingEditorLostKeyboardFocus(
         object sender,
         KeyboardFocusChangedEventArgs e)
@@ -1348,6 +1428,9 @@ public partial class MainWindow : Window, IDisposable
             case nameof(SettingsViewModel.RegionCaptureHotKey):
                 _settingsViewModel.RegionCaptureHotKey = e.Gesture;
                 break;
+            case nameof(SettingsViewModel.VideoRecordingHotKey):
+                _settingsViewModel.VideoRecordingHotKey = e.Gesture;
+                break;
             case nameof(SettingsViewModel.ScrollCaptureHotKey):
                 _settingsViewModel.ScrollCaptureHotKey = e.Gesture;
                 break;
@@ -1509,6 +1592,7 @@ public partial class MainWindow : Window, IDisposable
             }
 
             Directory.CreateDirectory(settings.SaveDirectory);
+            Directory.CreateDirectory(settings.VideoSaveDirectory);
 
             var hotKeyRegistration =
                 _globalHotKeyManager.ApplyAvailable(hotKeyBindings);
@@ -1589,6 +1673,9 @@ public partial class MainWindow : Window, IDisposable
             case nameof(SettingsViewModel.RegionCaptureHotKey):
                 _settingsViewModel.RegionCaptureHotKey = _savedSettings.RegionCaptureHotKey;
                 break;
+            case nameof(SettingsViewModel.VideoRecordingHotKey):
+                _settingsViewModel.VideoRecordingHotKey = _savedSettings.VideoRecordingHotKey;
+                break;
             case nameof(SettingsViewModel.ScrollCaptureHotKey):
                 _settingsViewModel.ScrollCaptureHotKey = _savedSettings.ScrollCaptureHotKey;
                 break;
@@ -1610,6 +1697,8 @@ public partial class MainWindow : Window, IDisposable
         {
             nameof(SettingsViewModel.RegionCaptureHotKey) =>
                 HotKeyAction.RegionCapture,
+            nameof(SettingsViewModel.VideoRecordingHotKey) =>
+                HotKeyAction.VideoRecording,
             nameof(SettingsViewModel.ScrollCaptureHotKey) =>
                 HotKeyAction.ScrollCapture,
             nameof(SettingsViewModel.OcrHotKey) =>

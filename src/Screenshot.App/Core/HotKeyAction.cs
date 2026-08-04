@@ -7,4 +7,5 @@ public enum HotKeyAction
     RecognizeText = 3,
     PinImage = 4,
     OpenSettings = 5,
+    VideoRecording = 6,
 }

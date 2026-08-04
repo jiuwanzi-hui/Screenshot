@@ -27,7 +27,18 @@ public sealed class SettingsStoreTests : IDisposable
         {
             LaunchAtStartup = true,
             SaveDirectory = Path.Combine(_testDirectory, "captures"),
+            VideoSaveDirectory = Path.Combine(_testDirectory, "videos"),
+            RecordSystemAudio = false,
+            RecordMicrophone = true,
+            VideoRecordingCodec = VideoRecordingCodec.H265,
+            VideoRecordingFrameRate = 60,
+            VideoRecordingHotKey = "Ctrl+Alt+R",
+            ShowKeyboardInputInRecording = true,
+            ShowMouseInputInRecording = true,
             ShowTaskbarIcon = true,
+            ShowFloatingCaptureButton = true,
+            FloatingCaptureClickBehavior =
+                FloatingCaptureClickBehavior.CaptureAllScreens,
             CloseBehavior = WindowCloseBehavior.ExitApplication,
             MouseLongPressMilliseconds = 1150,
             MouseSideButtonsUseLongPress = true,
@@ -39,10 +50,26 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Null(loadResult.Warning);
         Assert.True(loadResult.Settings.LaunchAtStartup);
         Assert.True(loadResult.Settings.ShowTaskbarIcon);
+        Assert.True(loadResult.Settings.ShowFloatingCaptureButton);
+        Assert.Equal(
+            FloatingCaptureClickBehavior.CaptureAllScreens,
+            loadResult.Settings.FloatingCaptureClickBehavior);
         Assert.Equal(settings.CloseBehavior, loadResult.Settings.CloseBehavior);
         Assert.Equal(1150, loadResult.Settings.MouseLongPressMilliseconds);
         Assert.True(loadResult.Settings.MouseSideButtonsUseLongPress);
         Assert.Equal(Path.GetFullPath(settings.SaveDirectory), loadResult.Settings.SaveDirectory);
+        Assert.Equal(
+            Path.GetFullPath(settings.VideoSaveDirectory),
+            loadResult.Settings.VideoSaveDirectory);
+        Assert.False(loadResult.Settings.RecordSystemAudio);
+        Assert.True(loadResult.Settings.RecordMicrophone);
+        Assert.Equal(
+            VideoRecordingCodec.H265,
+            loadResult.Settings.VideoRecordingCodec);
+        Assert.Equal(60, loadResult.Settings.VideoRecordingFrameRate);
+        Assert.Equal("Ctrl+Alt+R", loadResult.Settings.VideoRecordingHotKey);
+        Assert.True(loadResult.Settings.ShowKeyboardInputInRecording);
+        Assert.True(loadResult.Settings.ShowMouseInputInRecording);
     }
 
     [Fact]
@@ -62,6 +89,14 @@ public sealed class SettingsStoreTests : IDisposable
         var defaults = AppSettings.CreateDefault();
         Assert.True(defaults.ShowTaskbarIcon);
         Assert.True(defaults.ShowNotificationIcon);
+        Assert.False(defaults.ShowFloatingCaptureButton);
+        Assert.True(defaults.RecordSystemAudio);
+        Assert.False(defaults.RecordMicrophone);
+        Assert.Equal(VideoRecordingCodec.H264, defaults.VideoRecordingCodec);
+        Assert.Equal(30, defaults.VideoRecordingFrameRate);
+        Assert.Equal(
+            FloatingCaptureClickBehavior.ShowSelection,
+            defaults.FloatingCaptureClickBehavior);
 
         File.WriteAllText(_settingsPath, "{ \"SettingsVersion\": 1 }");
         var loadResult = new SettingsStore(_settingsPath).Load();
@@ -69,6 +104,14 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Null(loadResult.Warning);
         Assert.True(loadResult.Settings.ShowTaskbarIcon);
         Assert.True(loadResult.Settings.ShowNotificationIcon);
+        Assert.False(loadResult.Settings.ShowFloatingCaptureButton);
+        Assert.True(loadResult.Settings.RecordSystemAudio);
+        Assert.False(loadResult.Settings.RecordMicrophone);
+        Assert.Equal(VideoRecordingCodec.H264, loadResult.Settings.VideoRecordingCodec);
+        Assert.Equal(30, loadResult.Settings.VideoRecordingFrameRate);
+        Assert.Equal(
+            FloatingCaptureClickBehavior.ShowSelection,
+            loadResult.Settings.FloatingCaptureClickBehavior);
     }
 
     public void Dispose()

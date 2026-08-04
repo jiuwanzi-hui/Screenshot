@@ -94,13 +94,23 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 {
     private AppSettings _baseSettings;
     private string _saveDirectory;
+    private string _videoSaveDirectory;
+    private bool _recordSystemAudio;
+    private bool _recordMicrophone;
+    private VideoRecordingCodec _videoRecordingCodec;
+    private int _videoRecordingFrameRate;
+    private bool _showKeyboardInputInRecording;
+    private bool _showMouseInputInRecording;
     private bool _showTaskbarIcon;
     private bool _showNotificationIcon;
+    private bool _showFloatingCaptureButton;
+    private FloatingCaptureClickBehavior _floatingCaptureClickBehavior;
     private bool _launchAtStartup;
     private WindowCloseBehavior _closeBehavior;
     private AppTheme _theme;
     private bool _keepHistory;
     private string _regionCaptureHotKey;
+    private string _videoRecordingHotKey;
     private string _scrollCaptureHotKey;
     private string _ocrHotKey;
     private string _pinHotKey;
@@ -119,13 +129,23 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         _baseSettings = settings;
         _saveDirectory = settings.SaveDirectory;
+        _videoSaveDirectory = settings.VideoSaveDirectory;
+        _recordSystemAudio = settings.RecordSystemAudio;
+        _recordMicrophone = settings.RecordMicrophone;
+        _videoRecordingCodec = settings.VideoRecordingCodec;
+        _videoRecordingFrameRate = settings.VideoRecordingFrameRate;
+        _showKeyboardInputInRecording = settings.ShowKeyboardInputInRecording;
+        _showMouseInputInRecording = settings.ShowMouseInputInRecording;
         _showTaskbarIcon = settings.ShowTaskbarIcon;
         _showNotificationIcon = settings.ShowNotificationIcon;
+        _showFloatingCaptureButton = settings.ShowFloatingCaptureButton;
+        _floatingCaptureClickBehavior = settings.FloatingCaptureClickBehavior;
         _launchAtStartup = settings.LaunchAtStartup;
         _closeBehavior = settings.CloseBehavior;
         _theme = settings.Theme;
         _keepHistory = settings.KeepHistory;
         _regionCaptureHotKey = settings.RegionCaptureHotKey;
+        _videoRecordingHotKey = settings.VideoRecordingHotKey;
         _scrollCaptureHotKey = settings.ScrollCaptureHotKey;
         _ocrHotKey = settings.OcrHotKey;
         _pinHotKey = settings.PinHotKey;
@@ -205,6 +225,48 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _saveDirectory, value);
     }
 
+    public string VideoSaveDirectory
+    {
+        get => _videoSaveDirectory;
+        set => SetProperty(ref _videoSaveDirectory, value);
+    }
+
+    public bool RecordSystemAudio
+    {
+        get => _recordSystemAudio;
+        set => SetProperty(ref _recordSystemAudio, value);
+    }
+
+    public bool RecordMicrophone
+    {
+        get => _recordMicrophone;
+        set => SetProperty(ref _recordMicrophone, value);
+    }
+
+    public VideoRecordingCodec VideoRecordingCodec
+    {
+        get => _videoRecordingCodec;
+        set => SetProperty(ref _videoRecordingCodec, value);
+    }
+
+    public int VideoRecordingFrameRate
+    {
+        get => _videoRecordingFrameRate;
+        set => SetProperty(ref _videoRecordingFrameRate, value);
+    }
+
+    public bool ShowKeyboardInputInRecording
+    {
+        get => _showKeyboardInputInRecording;
+        set => SetProperty(ref _showKeyboardInputInRecording, value);
+    }
+
+    public bool ShowMouseInputInRecording
+    {
+        get => _showMouseInputInRecording;
+        set => SetProperty(ref _showMouseInputInRecording, value);
+    }
+
     public bool ShowTaskbarIcon
     {
         get => _showTaskbarIcon;
@@ -215,6 +277,18 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         get => _showNotificationIcon;
         set => SetProperty(ref _showNotificationIcon, value);
+    }
+
+    public bool ShowFloatingCaptureButton
+    {
+        get => _showFloatingCaptureButton;
+        set => SetProperty(ref _showFloatingCaptureButton, value);
+    }
+
+    public FloatingCaptureClickBehavior FloatingCaptureClickBehavior
+    {
+        get => _floatingCaptureClickBehavior;
+        set => SetProperty(ref _floatingCaptureClickBehavior, value);
     }
 
     public bool LaunchAtStartup
@@ -245,6 +319,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         get => _regionCaptureHotKey;
         set => SetProperty(ref _regionCaptureHotKey, value);
+    }
+
+    public string VideoRecordingHotKey
+    {
+        get => _videoRecordingHotKey;
+        set => SetProperty(ref _videoRecordingHotKey, value);
     }
 
     public string ScrollCaptureHotKey
@@ -330,13 +410,23 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         return _baseSettings with
         {
             SaveDirectory = SaveDirectory,
+            VideoSaveDirectory = VideoSaveDirectory,
+            RecordSystemAudio = RecordSystemAudio,
+            RecordMicrophone = RecordMicrophone,
+            VideoRecordingCodec = VideoRecordingCodec,
+            VideoRecordingFrameRate = VideoRecordingFrameRate,
+            ShowKeyboardInputInRecording = ShowKeyboardInputInRecording,
+            ShowMouseInputInRecording = ShowMouseInputInRecording,
             ShowTaskbarIcon = ShowTaskbarIcon,
             ShowNotificationIcon = ShowNotificationIcon,
+            ShowFloatingCaptureButton = ShowFloatingCaptureButton,
+            FloatingCaptureClickBehavior = FloatingCaptureClickBehavior,
             LaunchAtStartup = LaunchAtStartup,
             CloseBehavior = CloseBehavior,
             Theme = Theme,
             KeepHistory = KeepHistory,
             RegionCaptureHotKey = RegionCaptureHotKey,
+            VideoRecordingHotKey = VideoRecordingHotKey,
             ScrollCaptureHotKey = ScrollCaptureHotKey,
             OcrHotKey = OcrHotKey,
             PinHotKey = PinHotKey,
@@ -360,13 +450,23 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         _baseSettings = settings;
         SaveDirectory = settings.SaveDirectory;
+        VideoSaveDirectory = settings.VideoSaveDirectory;
+        RecordSystemAudio = settings.RecordSystemAudio;
+        RecordMicrophone = settings.RecordMicrophone;
+        VideoRecordingCodec = settings.VideoRecordingCodec;
+        VideoRecordingFrameRate = settings.VideoRecordingFrameRate;
+        ShowKeyboardInputInRecording = settings.ShowKeyboardInputInRecording;
+        ShowMouseInputInRecording = settings.ShowMouseInputInRecording;
         ShowTaskbarIcon = settings.ShowTaskbarIcon;
         ShowNotificationIcon = settings.ShowNotificationIcon;
+        ShowFloatingCaptureButton = settings.ShowFloatingCaptureButton;
+        FloatingCaptureClickBehavior = settings.FloatingCaptureClickBehavior;
         LaunchAtStartup = settings.LaunchAtStartup;
         CloseBehavior = settings.CloseBehavior;
         Theme = settings.Theme;
         KeepHistory = settings.KeepHistory;
         RegionCaptureHotKey = settings.RegionCaptureHotKey;
+        VideoRecordingHotKey = settings.VideoRecordingHotKey;
         ScrollCaptureHotKey = settings.ScrollCaptureHotKey;
         OcrHotKey = settings.OcrHotKey;
         PinHotKey = settings.PinHotKey;

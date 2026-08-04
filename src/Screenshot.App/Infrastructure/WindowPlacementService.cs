@@ -16,6 +16,7 @@ internal static class WindowPlacementKeys
     public const string OcrResult = "ocrResult";
     public const string CaptureHistory = "captureHistory";
     public const string CapturePreview = "capturePreview";
+    public const string FloatingCapture = "floatingCapture";
 }
 
 internal sealed record WindowPlacementRecord(
@@ -198,6 +199,16 @@ public static class WindowPlacementService
 
     public static bool Track(Window window, string key)
     {
+        return Track(window, key, restoreSize: true);
+    }
+
+    public static bool TrackPosition(Window window, string key)
+    {
+        return Track(window, key, restoreSize: false);
+    }
+
+    private static bool Track(Window window, string key, bool restoreSize)
+    {
         ArgumentNullException.ThrowIfNull(window);
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
 
@@ -213,8 +224,72 @@ public static class WindowPlacementService
         }
 
         var hasSavedPlacement = store.TryGet(key, out _);
-        new WindowPlacementRegistration(window, key, store).Attach();
+        new WindowPlacementRegistration(window, key, store, restoreSize).Attach();
         return hasSavedPlacement;
+    }
+
+    private static bool TryRestorePosition(
+        Window window,
+        WindowPlacementRecord storedPlacement)
+    {
+        try
+        {
+            var handle = new WindowInteropHelper(window).Handle;
+            if (handle == IntPtr.Zero || !GetWindowRect(handle, out var currentBounds))
+            {
+                return false;
+            }
+
+            var storedBounds = new NativeRect(
+                storedPlacement.Left,
+                storedPlacement.Top,
+                storedPlacement.Left + currentBounds.Width,
+                storedPlacement.Top + currentBounds.Height);
+            var monitor = MonitorFromRect(ref storedBounds, MonitorDefaultToNearest);
+            if (monitor == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            var monitorInfo = new NativeMonitorInfo
+            {
+                Size = Marshal.SizeOf<NativeMonitorInfo>(),
+            };
+            if (!GetMonitorInfo(monitor, ref monitorInfo))
+            {
+                return false;
+            }
+
+            var left = Math.Clamp(
+                storedPlacement.Left,
+                monitorInfo.WorkArea.Left,
+                Math.Max(
+                    monitorInfo.WorkArea.Left,
+                    monitorInfo.WorkArea.Right - currentBounds.Width));
+            var top = Math.Clamp(
+                storedPlacement.Top,
+                monitorInfo.WorkArea.Top,
+                Math.Max(
+                    monitorInfo.WorkArea.Top,
+                    monitorInfo.WorkArea.Bottom - currentBounds.Height));
+            return SetWindowPos(
+                handle,
+                IntPtr.Zero,
+                left,
+                top,
+                0,
+                0,
+                SetWindowPositionNoSize |
+                SetWindowPositionNoZOrder |
+                SetWindowPositionNoActivate);
+        }
+        catch (Exception exception) when (
+            exception is DllNotFoundException
+                or EntryPointNotFoundException
+                or ExternalException)
+        {
+            return false;
+        }
     }
 
     internal static WindowPlacementRecord ConstrainToWorkArea(
@@ -361,6 +436,7 @@ public static class WindowPlacementService
         private readonly Window _window;
         private readonly string _key;
         private readonly WindowPlacementStore _store;
+        private readonly bool _restoreSize;
         private readonly DispatcherTimer _saveTimer;
         private bool _sourceInitialized;
         private bool _restoring;
@@ -369,11 +445,13 @@ public static class WindowPlacementService
         public WindowPlacementRegistration(
             Window window,
             string key,
-            WindowPlacementStore store)
+            WindowPlacementStore store,
+            bool restoreSize)
         {
             _window = window;
             _key = key;
             _store = store;
+            _restoreSize = restoreSize;
             _saveTimer = new DispatcherTimer(
                 TimeSpan.FromMilliseconds(400),
                 DispatcherPriority.Background,
@@ -404,7 +482,9 @@ public static class WindowPlacementService
             _restoring = true;
             try
             {
-                _ = TryRestore(_window, placement);
+                _ = _restoreSize
+                    ? TryRestore(_window, placement)
+                    : TryRestorePosition(_window, placement);
             }
             finally
             {
@@ -534,6 +614,27 @@ public static class WindowPlacementService
     private static extern bool SetWindowPlacement(
         IntPtr window,
         ref NativeWindowPlacement placement);
+
+    private const uint SetWindowPositionNoSize = 0x0001;
+    private const uint SetWindowPositionNoZOrder = 0x0004;
+    private const uint SetWindowPositionNoActivate = 0x0010;
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(
+        IntPtr window,
+        out NativeRect rectangle);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(
+        IntPtr window,
+        IntPtr insertAfter,
+        int x,
+        int y,
+        int width,
+        int height,
+        uint flags);
 
     [DllImport("user32.dll")]
     private static extern IntPtr MonitorFromRect(

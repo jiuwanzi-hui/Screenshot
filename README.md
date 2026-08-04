@@ -7,6 +7,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/jiuwanzi-hui/Screenshot?style=flat-square)](https://github.com/jiuwanzi-hui/Screenshot/issues)
 [![GitHub stars](https://img.shields.io/github/stars/jiuwanzi-hui/Screenshot?style=flat-square)](https://github.com/jiuwanzi-hui/Screenshot/stargazers)
 [![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows11)](https://www.microsoft.com/windows)
+[![macOS preview](https://img.shields.io/badge/macOS-preview-7657FF?style=flat-square&logo=apple)](src/SnapCut.Mac/README.md)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
 [![License: Personal Non-Commercial](https://img.shields.io/badge/license-personal%20non--commercial-D94B64?style=flat-square)](LICENSE)
 [![Gitee mirror](https://img.shields.io/badge/Gitee-国内镜像-C71D23?style=flat-square&logo=gitee)](https://gitee.com/wwangyunhui/screenshot)
@@ -15,7 +16,7 @@
 
 ## 简体中文
 
-SnapCut（简截）是一款面向 Windows 10/11 的轻量截图工具，取"简洁"与"直截了当"之意。它把区域截图、长截图、标注、OCR、钉图和可选翻译放在同一条紧凑工作流中，并优先在本机完成处理。
+SnapCut（简截）是一款以 Windows 10/11 正式版为主的轻量截图工具，取"简洁"与"直截了当"之意。它把区域截图、区域视频录制、长截图、标注、OCR、钉图和可选翻译放在同一条紧凑工作流中，并优先在本机完成处理。macOS 菜单栏预览版已进入源码，当前支持区域截图、长截图、全局快捷键、预览、复制、保存和截图历史。
 
 > **许可声明：本项目不是 OSI 定义的开源软件。** 源代码仅授权自然人用于个人、非商业的学习、运行和修改；未经版权所有者书面许可，禁止任何商业、盈利、企业内部业务用途，以及安装包、可执行文件或其他二进制版本的再分发。为个人学习或向本项目贡献而建立的非商业源码分支，必须保留完整许可证和版权声明。详见 [LICENSE](LICENSE)。第三方组件仍适用各自的原许可证。
 
@@ -24,6 +25,8 @@ SnapCut（简截）是一款面向 Windows 10/11 的轻量截图工具，取"简
 - **菜单、下拉框和悬浮提示也能截到**：快捷键触发时先冻结当前桌面画面，尽量保留右键菜单、通知区域菜单、下拉列表、悬浮提示等容易因失去焦点而消失的临时界面，再进入框选和编辑。
 - **截图后直接调整和编辑**：鼠标悬停到其他软件时可自动吸附整个窗口，单击直接选取，也可继续拖动自由框选；移动选区时底图保持固定，框内明亮、框外变暗。编辑后仍可用八个控制点扩展或缩小选区，边缘不会越过已有标注；已经放置的矩形、箭头、文字和表情可直接点击选中，再调整位置、大小、端点或边角，无需重新选择工具；并提供画笔、马赛克、颜色、线宽、撤销和重做。
 - **受控长截图**：普通截图框选后点击工具栏的 `↕` 图标；单击选区可匀速向下采集，等待开始时双击则可先向上采集。程序发送固定节拍的细粒度鼠标滚轮消息，鼠标指针可自由移动且不会被锁定。单击暂停会先停稳并补齐最后视口，再允许继续；第一方向内双击会停稳后快速返回初始位置且不重复写入，随后自动向相反方向匀速拼接。到达真实边界后只停止滚动并保留当前结果，等待用户编辑、确认或取消；实时预览持续显示完整结果。
+- **区域视频录制**：普通截图框选后点击摄像机图标，冻结截图和遮罩立即关闭，真实桌面保持可点击、可播放和可操作；独立控制条支持开始、暂停、继续、结束和计时，控制条会从捕获中排除，选区提示框绘制在录制区域之外。可选择 H.264/H.265、24/30/60 FPS、系统声音、麦克风，以及不显示/显示鼠标/显示键盘/同时显示键盘鼠标，设置会自动记住；视频保存位置可在常规设置中单独指定。录屏期间仍可使用 SnapCut 截图，再次启动录屏会明确提示正在录制。当前区域录制要求选区位于同一块显示器内。
+- **悬浮按钮与多屏截图**：可开启只显示 SnapCut 图标的悬浮按钮，拖到任意显示器边缘会自动吸附、部分隐藏并降低透明度，鼠标移入后完整展开；位置在退出、重启和更新后继续保留。单击动作可配置为上次区域直接截图、显示上次选区、区域截图、视频录制、长截图、钉图或全部屏幕截图，悬浮菜单也可直接打开常用功能。全部屏幕截图会一次捕获 Windows 虚拟桌面，按“显示设置”中的物理排列组合所有屏幕，以白色填充空缺位置并绘制细分界线。
 - **本地 OCR 与图片文字选择**：使用 Windows 本地 OCR 引擎，图片不需要上传；识别后可直接在截图、OCR 结果窗口和钉图上拖选文字并通过原生 Unicode 剪贴板复制，译文覆盖完成后同样可以选择和复制，识别语言取决于系统已安装的语言包。
 - **在线或完全离线的多语言翻译**：翻译快捷键可在框选后自动完成 OCR 与翻译；设置页直接显示在线大模型与本机 Bergamot 模型的优先顺序、真实可用状态和悬停原因，用户可上下调整，上一项失败时自动使用下一项。在线接口可选择 OpenAI、DeepSeek、通义千问、Claude、Gemini、Grok 等内置厂商或自定义兼容地址，并自动验证 API、模型列表和当前模型。翻译会自动识别截图文字的源语言；离线模型使用本机 CLD3 检测语言，并支持 Mozilla 当前模型清单里的多语言互译。离线下载会显示流量、安装占用、磁盘余量和实际目录，断流时自动重试；模型文件被移动或删除后，设置页回到前台会立即重新核验。文件保存在 `SnapCut.exe` 旁的 `TranslationModels`，安装版或免安装版更新都会保留该目录。API Key 使用当前用户 DPAPI 加密保存；翻译结果可切换原文/译文并覆盖到最终图片。
 - **高效的日常操作**：支持全局快捷键、系统托盘、截图历史、钉图、开机启动和完整的深浅色主题；设置、编辑截图、OCR 结果、截图历史和图片查看窗口会分别记住上次的位置、大小及最大化状态，显示器变化后会自动把窗口拉回可操作区域。设置窗口每次从小窗、通知区域或快捷键重新显示到前台时都会检测更新，有新版本会在“版本更新”入口显示提示，并发检测 Gitee 国内源和 GitHub 国际源，自动采用可用更新源，下载失败时切换备用源。“版本更新”页同时显示各正式版本的发布时间与更新内容，可选择 2.0.0 及之后的已校验版本进行更新或回退；更早版本因程序改名只提供发布页手动安装。安装版和免安装版覆盖时都会保留 `ScreenshotData`。首次运行默认同时显示任务栏图标和通知区域图标，避免用户找不到程序入口。
@@ -33,12 +36,14 @@ SnapCut（简截）是一款面向 Windows 10/11 的轻量截图工具，取"简
 
 下载最新的 x64 自包含版本。2.3.0 起发布附件统一使用 `SnapCut-Setup-*` 和 `SnapCut-Portable-*`；同时保留旧清单入口，2.1.0 及之后版本仍可在程序内在线更新：
 
-- [安装版 SnapCut Setup 2.6.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.6.1-win-x64.exe)
-- [免安装版 SnapCut Portable 2.6.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.6.1-win-x64.zip)
-- [安装版 SnapCut Setup 2.6.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.6.1/SnapCut-Setup-2.6.1-win-x64.exe)
-- [免安装版 SnapCut Portable 2.6.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.6.1/SnapCut-Portable-2.6.1-win-x64.zip)
+- [安装版 SnapCut Setup 2.7.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.7.0-win-x64.exe)
+- [免安装版 SnapCut Portable 2.7.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.7.0-win-x64.zip)
+- [安装版 SnapCut Setup 2.7.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.0/SnapCut-Setup-2.7.0-win-x64.exe)
+- [免安装版 SnapCut Portable 2.7.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.0/SnapCut-Portable-2.7.0-win-x64.zip)
 
-免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.6.1 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.7.0 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+
+2.7.0 新增区域视频录制，可配置 H.264/H.265、24/30/60 FPS、系统声音、麦克风和键盘/鼠标输入提示，并提供独立快捷键、通知区域及悬浮菜单入口；录屏控制条保持低遮挡，录制完成显示保存提示，录屏期间仍可正常截图。新增可配置悬浮按钮，支持记忆多屏位置、边缘吸附、低透明度收起、上次区域截图、区域截图、录屏、长截图、钉图和全部屏幕截图；全部屏幕截图按 Windows 显示器坐标一次捕获并组合所有屏幕。鼠标快捷键完善修饰键、侧键和可配置长按直接框选，同时避免 `Ctrl+左键` 多选冲突及首次截图穿透。窗口位置、托盘菜单、开机启动和多屏恢复逻辑进一步加固。macOS 菜单栏预览版源码加入区域截图、长截图、全局快捷键、预览、历史和权限引导，但尚不发布未签名二进制。
 
 2.6.1 修复版本历史在 Gitee 和 GitHub 公共 API 同时限流时无法显示的问题。历史列表现在优先读取不消耗 API 配额的静态清单，网络不可用时使用程序内置清单或上次成功缓存；临时刷新失败也不会清空已经显示的版本。安装包和免安装包均内置正式版本清单，已校验版本的更新与回退下载仍使用双源地址和 SHA-256 校验。
 
@@ -81,6 +86,7 @@ SnapCut（简截）是一款面向 Windows 10/11 的轻量截图工具，取"简
 | 功能 | 快捷键 |
 | --- | --- |
 | 区域截图 | `Ctrl+Alt+S` |
+| 视频录制 | 未设置 |
 | 翻译 | `Ctrl+Alt+O` |
 | 钉图 | `Ctrl+Alt+P` |
 | 打开设置 | `Ctrl+Alt+,` |
@@ -107,11 +113,26 @@ winget install --id JRSoftware.InnoSetup --exact
 
 安装包和免安装包使用 `SnapCut-` 前缀。构建脚本同时生成主清单 `SnapCut-Update.json` 与兼容入口 `Screenshot-Update.json`，四个文件都输出到 `installer/dist/`，两份清单还会同步到 `updates/` 供 Gitee 固定地址读取。发布时四个文件需要同时上传到 GitHub 与 Gitee 的同版本 Release；两份清单都指向同一套 `SnapCut-` 安装包，不会重复上传大文件。项目架构见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)，实现进度见 [PLAN.md](PLAN.md)。
 
+### macOS 预览版
+
+macOS 端与 Windows WPF 前端完全隔离，复用平台无关的长截图拼接核心。无参数启动
+`snapcut` 后会驻留菜单栏，默认使用 `⌘⇧A` 区域截图、`⌘⇧S` 长截图；设置页可修改
+快捷键、申请屏幕录制/输入监控权限并打开最近截图。构建 `.app`：
+
+```powershell
+pwsh ./build-macos.ps1 -Runtime osx-arm64 -Version 0.1.0
+# Intel Mac 使用 -Runtime osx-x64
+```
+
+具体功能、权限、签名和真实 Mac 验收边界见
+[SnapCut.Mac 说明](src/SnapCut.Mac/README.md)。当前仓库尚未提供经过签名和 Apple
+公证的 macOS 正式下载包。
+
 ---
 
 ## English
 
-SnapCut is a lightweight capture utility for Windows 10 and 11. It combines region capture, scrolling capture, annotation, OCR, pinned images, and optional translation in one compact workflow while keeping processing local whenever possible.
+SnapCut is primarily a lightweight Windows 10/11 capture utility. It combines region capture, scrolling capture, annotation, OCR, pinned images, and optional translation in one compact workflow while keeping processing local whenever possible. A source-level macOS menu bar preview now provides region capture, scrolling capture, global hotkeys, preview, clipboard/save actions, and capture history.
 
 > **License notice: this project is not open-source software as defined by the OSI.** The source is licensed to individuals solely for personal, non-commercial study, use, and modification. Commercial use, revenue-generating use, internal business use, and redistribution of installers, executables, or other binary builds require prior written permission from the copyright holder. Non-commercial source forks created for personal study or contributing to this project must retain the complete license and copyright notice. See [LICENSE](LICENSE). Third-party components remain under their respective licenses.
 
@@ -120,6 +141,8 @@ SnapCut is a lightweight capture utility for Windows 10 and 11. It combines regi
 - **Capture menus, drop-downs, and tooltips**: the hotkey freezes the visible desktop before focus-sensitive UI can close, preserving transient surfaces such as context menus, notification-area menus, drop-down lists, and hover tooltips for selection and editing.
 - **Adjust and edit before finishing**: hover over another application to snap to its full window and click to select it, or drag to make a free-form selection. The desktop stays fixed while the selection moves, with a bright interior and dimmed exterior. After annotating, all eight handles remain available while protected bounds prevent existing ink from being cropped. Existing rectangles, arrows, text, and emoji can be clicked directly and then moved or resized, including arrow endpoints and rectangle corners, without reselecting a tool. Freehand drawing, mosaic, colors, stroke widths, undo, and redo remain available.
 - **Controlled scrolling capture**: make a normal region selection, click the `↕` toolbar icon, then click inside the region to scroll downward slowly; double-click before starting to capture upward first. SnapCut sends fine-grained wheel messages at a fixed cadence without locking the pointer. Click to pause or resume; double-click during the first leg to settle, return quickly to the initial viewport without rewriting pixels, then continue in the opposite direction. At a real boundary scrolling stops while the current result remains available for editing, confirmation, or cancellation. The live preview always shows the complete result.
+- **Region video recording**: after selecting a normal capture region, click the camera icon to dismiss the frozen screenshot and dimming overlay, leaving the live desktop fully interactive. A separate controller provides start, pause, resume, stop, and elapsed time; the controller is excluded from capture and the region frame is drawn outside the recorded pixels. Choose H.264/H.265, 24/30/60 FPS, system audio, microphone, and no input overlay/mouse/keyboard/both; preferences are retained. The video directory is configurable separately. Screenshots remain available while recording, and attempting to start another recording shows an explicit notice. The current recorder requires a region contained by one display.
+- **Floating button and multi-display capture**: an optional icon-only floating button docks to any monitor edge, partially hides at low opacity, expands on hover, and retains its position across restarts and updates. Its click action can repeat the last region immediately, reopen that selection, start a region capture, record video, capture a scrolling page, pin an image, or capture every display. All-display capture takes one virtual-desktop snapshot, preserves the Windows display arrangement, fills unused layout gaps with white, and draws subtle display boundaries.
 - **Local OCR with selectable image text**: uses the Windows OCR engine without uploading images, then overlays selectable text directly on captures, OCR result windows, and pinned images, copying it through the native Unicode clipboard. Translated overlays are selectable and copyable as well. Available languages depend on installed Windows language packs.
 - **Online or fully offline multilingual translation**: the translation hotkey runs local OCR and translation immediately after region selection. Settings show a sortable priority, live available/unavailable badges, and hover reasons for online and local Bergamot providers. Online configuration includes custom endpoints plus built-in OpenAI, DeepSeek, Qwen, Claude, Gemini, Grok, and other vendor definitions, with automatic endpoint and model validation. Source languages are detected automatically; offline translation uses local CLD3 and Mozilla Bergamot models for multilingual routes. Downloads show transfer size, installed footprint, free space, and destination, retry interrupted transfers, and are revalidated whenever Settings returns to the foreground. Models stay in `TranslationModels` beside `SnapCut.exe` and survive installed or portable updates. API keys are protected by per-user Windows DPAPI, and translated overlays remain reversible and selectable.
 - **Fast daily workflow**: configurable global hotkeys, system tray controls, capture history, pinned images, startup behavior, and complete light/dark themes. Settings, image editors, OCR results, capture history, and image viewers each remember their last position, size, and maximized state; if the monitor layout changes, windows are brought back into a reachable work area. Whenever Settings returns to the foreground from the compact window, notification area, or hotkey, it checks for updates and highlights the Update entry when a newer release exists. Gitee and GitHub provide mirrored update sources with automatic download fallback. The Update page also lists formal releases with publication times and release notes; verified packages from 2.0.0 onward can be selected for an update or rollback, while older renamed builds link to manual installation. Installed and portable replacements preserve `ScreenshotData`. New installations show both taskbar and notification-area icons by default so the application remains easy to find.
@@ -129,12 +152,14 @@ SnapCut is a lightweight capture utility for Windows 10 and 11. It combines regi
 
 Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-*` and `SnapCut-Portable-*` starting with 2.3.0. The legacy manifest endpoint remains available so versions 2.1.0 and later continue to update in-app:
 
-- [SnapCut Setup 2.6.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.6.1-win-x64.exe)
-- [SnapCut Portable 2.6.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.6.1-win-x64.zip)
-- [SnapCut Setup 2.6.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.6.1/SnapCut-Setup-2.6.1-win-x64.exe)
-- [SnapCut Portable 2.6.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.6.1/SnapCut-Portable-2.6.1-win-x64.zip)
+- [SnapCut Setup 2.7.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.7.0-win-x64.exe)
+- [SnapCut Portable 2.7.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.7.0-win-x64.zip)
+- [SnapCut Setup 2.7.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.0/SnapCut-Setup-2.7.0-win-x64.exe)
+- [SnapCut Portable 2.7.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.0/SnapCut-Portable-2.7.0-win-x64.zip)
 
-Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.6.1 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.7.0 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+
+Version 2.7.0 adds configurable region video recording with H.264/H.265, 24/30/60 FPS, system audio, microphone, keyboard/mouse input overlays, and dedicated hotkey, tray, and floating-menu entry points. Recording controls stay unobtrusive, completion is reported, and screenshots remain available during a recording. The new configurable floating button remembers its multi-monitor position, docks and partially hides at screen edges, and can repeat the last region or launch capture, recording, scrolling capture, pinning, and all-display capture. All-display capture preserves the Windows monitor arrangement in one composed image. Mouse shortcuts gain modifier/side-button holds and direct-drag selection while preserving normal `Ctrl+click` multi-selection and preventing first-capture click-through. Window placement, tray menus, startup registration, and display-change recovery are hardened. A source-level macOS menu-bar preview adds region and scrolling capture, hotkeys, preview, history, and permission guidance; no unsigned macOS binary is published yet.
 
 Version 2.6.1 fixes release history becoming empty when both Gitee and GitHub public APIs are rate-limited. History now prefers a static manifest that consumes no API quota, then falls back to the bundled manifest or the last successful local cache when the network is unavailable. A temporary refresh failure also preserves the list already on screen. Both packages include the formal release manifest, while verified update and rollback downloads retain mirror fallback and SHA-256 validation.
 
@@ -202,3 +227,14 @@ winget install --id JRSoftware.InnoSetup --exact
 ```
 
 Installer and portable assets use the `SnapCut-` prefix. The build script also creates the primary `SnapCut-Update.json` manifest and the legacy `Screenshot-Update.json` endpoint. All four files are written to `installer/dist/`, and both manifests are copied to `updates/` for stable Gitee raw URLs. Upload all four files to the matching GitHub and Gitee releases; both manifests reference the same `SnapCut-` packages, so large binaries are not duplicated. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the architecture and [PLAN.md](PLAN.md) for implementation status.
+
+### macOS preview
+
+The macOS frontend is isolated from the Windows WPF application and reuses the platform-neutral scrolling-capture core. Running `snapcut` without arguments starts the menu bar app. Defaults are `⌘⇧A` for region capture and `⌘⇧S` for scrolling capture; Settings manages hotkeys, screen-recording/input-monitoring permissions, and recent captures.
+
+```powershell
+pwsh ./build-macos.ps1 -Runtime osx-arm64 -Version 0.1.0
+# Use -Runtime osx-x64 for Intel Macs.
+```
+
+See [SnapCut.Mac](src/SnapCut.Mac/README.md) for permissions, signing, packaging, and real-Mac validation requirements. No signed or Apple-notarized macOS binary is published yet.

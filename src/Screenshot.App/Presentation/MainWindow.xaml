@@ -124,6 +124,27 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="GeneralGroupTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource AppTextPrimaryBrush}" />
+        </Style>
+        <Style x:Key="GeneralGroupDescription" TargetType="TextBlock">
+            <Setter Property="Margin" Value="0,4,0,0" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{DynamicResource AppTextSecondaryBrush}" />
+        </Style>
+        <Style x:Key="GeneralFieldLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource AppTextPrimaryBrush}" />
+        </Style>
+        <Style x:Key="GeneralGroupSeparator" TargetType="Border">
+            <Setter Property="Height" Value="1" />
+            <Setter Property="Margin" Value="0,24,0,22" />
+            <Setter Property="Background" Value="{DynamicResource AppSeparatorBrush}" />
+            <Setter Property="Opacity" Value="0.82" />
+        </Style>
         <Style x:Key="MouseDurationSlider" TargetType="Slider">
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Height" Value="28" />
@@ -455,14 +476,7 @@
                           Grid.Row="0"
                           Grid.RowSpan="2"
                           VerticalScrollBarVisibility="Auto">
-              <Grid Margin="0,0,16,0">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-
+              <StackPanel Margin="0,0,16,24">
                 <StackPanel>
                     <TextBlock FontSize="22"
                                FontWeight="SemiBold"
@@ -471,14 +485,18 @@
                     <TextBlock Margin="0,7,0,0"
                                FontSize="13"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
-                               Text="保存位置和运行方式" />
+                               Text="保存、外观和运行方式" />
                 </StackPanel>
 
-                <StackPanel Grid.Row="1"
+                <StackPanel x:Name="GeneralAppearanceGroup"
                             Margin="0,28,0,0">
-                    <TextBlock FontSize="14"
-                               FontWeight="SemiBold"
-                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                    <TextBlock Style="{StaticResource GeneralGroupTitle}"
+                               Text="保存与外观" />
+                    <TextBlock Style="{StaticResource GeneralGroupDescription}"
+                               Text="截图、视频文件与界面显示" />
+
+                    <TextBlock Margin="0,17,0,0"
+                               Style="{StaticResource GeneralFieldLabel}"
                                Text="截图保存位置" />
                     <Grid Margin="0,9,0,0">
                         <Grid.ColumnDefinitions>
@@ -500,10 +518,31 @@
                                 ToolTip="选择截图保存目录" />
                     </Grid>
 
+                    <TextBlock Margin="0,15,0,0"
+                               Style="{StaticResource GeneralFieldLabel}"
+                               Text="视频保存位置" />
+                    <Grid Margin="0,9,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox Height="34"
+                                 Padding="10,3"
+                                 VerticalContentAlignment="Center"
+                                 BorderBrush="{DynamicResource AppBorderBrush}"
+                                 LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
+                                 TextChanged="OnTextSettingChanged"
+                                 Text="{Binding VideoSaveDirectory, UpdateSourceTrigger=PropertyChanged}" />
+                        <Button Grid.Column="1"
+                                Margin="10,0,0,0"
+                                Click="OnBrowseVideoSaveDirectoryClick"
+                                Content="浏览"
+                                Style="{StaticResource SecondaryButton}"
+                                ToolTip="选择视频保存目录" />
+                    </Grid>
+
                     <StackPanel Margin="0,18,0,0">
-                        <TextBlock FontSize="14"
-                                   FontWeight="SemiBold"
-                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                        <TextBlock Style="{StaticResource GeneralFieldLabel}"
                                    Text="界面主题" />
                         <StackPanel Margin="0,9,0,0" Orientation="Horizontal">
                             <RadioButton x:Name="SystemThemeOption"
@@ -528,14 +567,16 @@
                     </StackPanel>
                 </StackPanel>
 
-                <Separator Grid.Row="2"
-                           Margin="0,27,0,18"
-                           Background="{DynamicResource AppSeparatorBrush}" />
+                <Border Style="{StaticResource GeneralGroupSeparator}" />
 
-                <StackPanel Grid.Row="3">
-                    <TextBlock FontSize="14"
-                               FontWeight="SemiBold"
-                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                <StackPanel x:Name="GeneralWindowGroup">
+                    <TextBlock Style="{StaticResource GeneralGroupTitle}"
+                               Text="窗口与后台" />
+                    <TextBlock Style="{StaticResource GeneralGroupDescription}"
+                               Text="关闭方式、系统入口与开机启动" />
+
+                    <TextBlock Margin="0,17,0,0"
+                               Style="{StaticResource GeneralFieldLabel}"
                                Text="点击关闭按钮时" />
                     <StackPanel Margin="0,9,0,8" Orientation="Horizontal">
                         <RadioButton x:Name="MinimizeOnCloseOption"
@@ -553,6 +594,7 @@
                     </StackPanel>
                     <CheckBox x:Name="ShowTaskbarIconCheckBox"
                               MinHeight="30"
+                              Margin="0,3,0,0"
                               FontSize="14"
                               Foreground="{DynamicResource AppTextPrimaryBrush}"
                               IsChecked="{Binding ShowTaskbarIcon}"
@@ -561,7 +603,7 @@
                               Content="在任务栏中显示窗口图标" />
                     <CheckBox x:Name="ShowNotificationIconCheckBox"
                               MinHeight="30"
-                              Margin="0,12,0,0"
+                              Margin="0,8,0,0"
                               FontSize="14"
                               Foreground="{DynamicResource AppTextPrimaryBrush}"
                               IsChecked="{Binding ShowNotificationIcon}"
@@ -569,24 +611,89 @@
                               Unchecked="OnImmediateSettingChanged"
                               Content="显示通知区域图标" />
                     <CheckBox MinHeight="30"
-                              Margin="0,12,0,0"
+                              Margin="0,8,0,0"
                               FontSize="14"
                               Foreground="{DynamicResource AppTextPrimaryBrush}"
                               IsChecked="{Binding LaunchAtStartup}"
                               Checked="OnImmediateSettingChanged"
                               Unchecked="OnImmediateSettingChanged"
                               Content="开机时启动 SnapCut" />
+                </StackPanel>
+
+                <Border Style="{StaticResource GeneralGroupSeparator}" />
+
+                <StackPanel x:Name="GeneralFloatingCaptureGroup">
+                    <TextBlock Style="{StaticResource GeneralGroupTitle}"
+                               Text="悬浮截图" />
+                    <TextBlock Style="{StaticResource GeneralGroupDescription}"
+                               Text="桌面悬浮按钮及单击行为" />
+
+                    <CheckBox x:Name="ShowFloatingCaptureButtonCheckBox"
+                              MinHeight="30"
+                              Margin="0,14,0,0"
+                              FontSize="14"
+                              Foreground="{DynamicResource AppTextPrimaryBrush}"
+                              IsChecked="{Binding ShowFloatingCaptureButton}"
+                              Checked="OnImmediateSettingChanged"
+                              Unchecked="OnImmediateSettingChanged"
+                              Content="显示截图悬浮按钮" />
+                    <StackPanel Margin="26,7,0,0"
+                                IsEnabled="{Binding ShowFloatingCaptureButton}">
+                        <TextBlock FontSize="13"
+                                   Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                   Text="单击悬浮按钮时" />
+                        <ComboBox x:Name="FloatingCaptureClickBehaviorComboBox"
+                                  Width="238"
+                                  Height="34"
+                                  Margin="0,7,0,0"
+                                  HorizontalAlignment="Left"
+                                  Padding="9,2"
+                                  FontSize="13"
+                                  SelectedValuePath="Tag"
+                                  SelectionChanged="OnFloatingCaptureClickBehaviorSelectionChanged"
+                                  ToolTip="选择单击悬浮按钮时执行的功能">
+                            <ComboBox.Resources>
+                                <Style BasedOn="{StaticResource {x:Type ComboBoxItem}}"
+                                       TargetType="ComboBoxItem">
+                                    <Setter Property="Background"
+                                            Value="{DynamicResource AppPanelBackgroundBrush}" />
+                                </Style>
+                            </ComboBox.Resources>
+                            <ComboBoxItem Content="上次区域直接截图"
+                                          Tag="{x:Static core:FloatingCaptureClickBehavior.CaptureImmediately}" />
+                            <ComboBoxItem Content="显示上次截图区域"
+                                          Tag="{x:Static core:FloatingCaptureClickBehavior.ShowSelection}" />
+                            <ComboBoxItem Content="区域截图"
+                                          Tag="{x:Static core:FloatingCaptureClickBehavior.RegionCapture}" />
+                            <ComboBoxItem Content="视频录制"
+                                          Tag="{x:Static core:FloatingCaptureClickBehavior.VideoRecording}" />
+                            <ComboBoxItem Content="长截图"
+                                          Tag="{x:Static core:FloatingCaptureClickBehavior.ScrollCapture}" />
+                            <ComboBoxItem Content="钉图"
+                                          Tag="{x:Static core:FloatingCaptureClickBehavior.PinCapture}" />
+                            <ComboBoxItem Content="全部屏幕截图"
+                                          Tag="{x:Static core:FloatingCaptureClickBehavior.CaptureAllScreens}" />
+                        </ComboBox>
+                    </StackPanel>
+                </StackPanel>
+
+                <Border Style="{StaticResource GeneralGroupSeparator}" />
+
+                <StackPanel x:Name="GeneralHistoryGroup">
+                    <TextBlock Style="{StaticResource GeneralGroupTitle}"
+                               Text="截图记录" />
+                    <TextBlock Style="{StaticResource GeneralGroupDescription}"
+                               Text="本次运行的历史保留方式" />
                     <CheckBox MinHeight="30"
-                              Margin="0,12,0,0"
+                              Margin="0,14,0,0"
                               FontSize="14"
                               Foreground="{DynamicResource AppTextPrimaryBrush}"
                               IsChecked="{Binding KeepHistory}"
                               Checked="OnImmediateSettingChanged"
                               Unchecked="OnImmediateSettingChanged"
                               Content="保留本次运行的截图历史" />
-
                 </StackPanel>
-              </Grid>
+              </StackPanel>
             </ScrollViewer>
 
             <ScrollViewer x:Name="HotKeySettingsPanel"
@@ -643,6 +750,49 @@
                                     Style="{StaticResource SecondaryButton}"
                                     Tag="RegionCaptureHotKeyBox"
                                     ToolTip="不设置区域截图快捷键">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,17,0,0">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="视频录制" />
+                        <Grid Margin="0,8,16,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <local:HotKeyCaptureBox x:Name="VideoRecordingHotKeyBox"
+                                                    Height="34"
+                                                    Padding="10,3"
+                                                    BorderBrush="{DynamicResource AppBorderBrush}"
+                                                    GotKeyboardFocus="OnHotKeyCaptureGotKeyboardFocus"
+                                                    HotKeyCaptured="OnHotKeyCaptured"
+                                                    HotKeyCaptureCanceled="OnHotKeyCaptureCanceled"
+                                                    LostKeyboardFocus="OnHotKeyCaptureLostKeyboardFocus"
+                                                    Tag="VideoRecordingHotKey"
+                                                    Text="{Binding VideoRecordingHotKey}"
+                                                    TextAlignment="Center"
+                                                    ToolTip="单击后按下键盘或鼠标按键" />
+                            <Button Grid.Column="1"
+                                    Width="68"
+                                    Margin="8,0,0,0"
+                                    Click="OnBeginHotKeyEditClick"
+                                    Content="修改"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="VideoRecordingHotKeyBox"
+                                    ToolTip="修改视频录制快捷键" />
+                            <Button Grid.Column="2"
+                                    Width="34"
+                                    Margin="6,0,0,0"
+                                    Click="OnClearHotKeyClick"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="VideoRecordingHotKeyBox"
+                                    ToolTip="不设置视频录制快捷键">
                                 <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
                             </Button>
                         </Grid>
