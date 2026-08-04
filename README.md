@@ -36,12 +36,14 @@ SnapCut（简截）是一款以 Windows 10/11 正式版为主的轻量截图工�
 
 下载最新的 x64 自包含版本。2.3.0 起发布附件统一使用 `SnapCut-Setup-*` 和 `SnapCut-Portable-*`；同时保留旧清单入口，2.1.0 及之后版本仍可在程序内在线更新：
 
-- [安装版 SnapCut Setup 2.7.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.7.0-win-x64.exe)
-- [免安装版 SnapCut Portable 2.7.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.7.0-win-x64.zip)
-- [安装版 SnapCut Setup 2.7.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.0/SnapCut-Setup-2.7.0-win-x64.exe)
-- [免安装版 SnapCut Portable 2.7.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.0/SnapCut-Portable-2.7.0-win-x64.zip)
+- [安装版 SnapCut Setup 2.7.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.7.1-win-x64.exe)
+- [免安装版 SnapCut Portable 2.7.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.7.1-win-x64.zip)
+- [安装版 SnapCut Setup 2.7.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.1/SnapCut-Setup-2.7.1-win-x64.exe)
+- [免安装版 SnapCut Portable 2.7.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.1/SnapCut-Portable-2.7.1-win-x64.zip)
 
-免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.7.0 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.7.1 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+
+2.7.1 修复 2.7.0 单文件正式包内嵌的 C++/CLI 录屏组件在部分环境无法加载、导致区域录制无法启动的问题。录屏组件现在作为独立文件随程序一同分发且无需用户额外安装，构建流程会在生成下载包前强制检查该文件；区域录制异常没有系统消息时也会显示具体异常类型，便于诊断。
 
 2.7.0 新增区域视频录制，可配置 H.264/H.265、24/30/60 FPS、系统声音、麦克风和键盘/鼠标输入提示，并提供独立快捷键、通知区域及悬浮菜单入口；录屏控制条保持低遮挡，录制完成显示保存提示，录屏期间仍可正常截图。新增可配置悬浮按钮，支持记忆多屏位置、边缘吸附、低透明度收起、上次区域截图、区域截图、录屏、长截图、钉图和全部屏幕截图；全部屏幕截图按 Windows 显示器坐标一次捕获并组合所有屏幕。鼠标快捷键完善修饰键、侧键和可配置长按直接框选，同时避免 `Ctrl+左键` 多选冲突及首次截图穿透。窗口位置、托盘菜单、开机启动和多屏恢复逻辑进一步加固。macOS 菜单栏预览版源码加入区域截图、长截图、全局快捷键、预览、历史和权限引导，但尚不发布未签名二进制。
 
@@ -152,12 +154,14 @@ SnapCut is primarily a lightweight Windows 10/11 capture utility. It combines re
 
 Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-*` and `SnapCut-Portable-*` starting with 2.3.0. The legacy manifest endpoint remains available so versions 2.1.0 and later continue to update in-app:
 
-- [SnapCut Setup 2.7.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.7.0-win-x64.exe)
-- [SnapCut Portable 2.7.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.7.0-win-x64.zip)
-- [SnapCut Setup 2.7.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.0/SnapCut-Setup-2.7.0-win-x64.exe)
-- [SnapCut Portable 2.7.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.0/SnapCut-Portable-2.7.0-win-x64.zip)
+- [SnapCut Setup 2.7.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.7.1-win-x64.exe)
+- [SnapCut Portable 2.7.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.7.1-win-x64.zip)
+- [SnapCut Setup 2.7.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.1/SnapCut-Setup-2.7.1-win-x64.exe)
+- [SnapCut Portable 2.7.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.1/SnapCut-Portable-2.7.1-win-x64.zip)
 
-Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.7.0 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.7.1 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+
+Version 2.7.1 fixes the embedded C++/CLI recording component failing to load from the 2.7.0 single-file packages on some systems, which prevented region recording from starting. The component now ships as a side-by-side file with SnapCut and requires no separate user installation; packaging fails early if it is absent. Recording startup failures also report the concrete exception type when Windows provides no message.
 
 Version 2.7.0 adds configurable region video recording with H.264/H.265, 24/30/60 FPS, system audio, microphone, keyboard/mouse input overlays, and dedicated hotkey, tray, and floating-menu entry points. Recording controls stay unobtrusive, completion is reported, and screenshots remain available during a recording. The new configurable floating button remembers its multi-monitor position, docks and partially hides at screen edges, and can repeat the last region or launch capture, recording, scrolling capture, pinning, and all-display capture. All-display capture preserves the Windows monitor arrangement in one composed image. Mouse shortcuts gain modifier/side-button holds and direct-drag selection while preserving normal `Ctrl+click` multi-selection and preventing first-capture click-through. Window placement, tray menus, startup registration, and display-change recovery are hardened. A source-level macOS menu-bar preview adds region and scrolling capture, hotkeys, preview, history, and permission guidance; no unsigned macOS binary is published yet.
 
