@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using SnapCut.Core;
 using SnapCut.Mac.Native;
 

@@ -14,6 +14,7 @@ public static class AppMetadata
     public const string LegacyInstalledDataDirectoryName = "Screenshot";
     public const string InstalledMarkerFileName = "installed.marker";
     public const string CapturesDirectoryName = "Captures";
+    public const string VideosDirectoryName = "Videos";
     public const string DiagnosticsDirectoryName = "Diagnostics";
     public const string HistoryCacheDirectoryName = "HistoryCache";
     public const string UpdatesDirectoryName = "Updates";
@@ -47,6 +48,10 @@ public static class AppMetadata
     public static string DefaultCaptureDirectory => Path.Combine(
         DataDirectoryPath,
         CapturesDirectoryName);
+
+    public static string DefaultVideoDirectory => Path.Combine(
+        DataDirectoryPath,
+        VideosDirectoryName);
 
     public static string DiagnosticsDirectoryPath => Path.Combine(
         DataDirectoryPath,

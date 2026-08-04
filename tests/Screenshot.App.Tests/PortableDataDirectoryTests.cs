@@ -22,6 +22,9 @@ public sealed class PortableDataDirectoryTests
             Path.Combine(expectedDataDirectory, AppMetadata.CapturesDirectoryName),
             AppSettings.CreateDefault().SaveDirectory);
         Assert.Equal(
+            Path.Combine(expectedDataDirectory, AppMetadata.VideosDirectoryName),
+            AppSettings.CreateDefault().VideoSaveDirectory);
+        Assert.Equal(
             Path.Combine(expectedDataDirectory, AppMetadata.DiagnosticsDirectoryName),
             AppMetadata.DiagnosticsDirectoryPath);
     }

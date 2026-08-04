@@ -125,6 +125,54 @@ public sealed class HotKeyConfigurationTests
     }
 
     [Fact]
+    public void RegistersVideoRecordingShortcut()
+    {
+        var settings = AppSettings.CreateDefault() with
+        {
+            VideoRecordingHotKey = "Ctrl+Alt+R",
+        };
+
+        var bindings = HotKeyConfiguration.CreateBindings(settings);
+
+        Assert.Contains(
+            bindings,
+            binding => binding.Action == HotKeyAction.VideoRecording &&
+                       binding.Gesture.ToString() == "Ctrl+Alt+R");
+    }
+
+    [Fact]
+    public void EmptyVideoRecordingShortcutIsNotRegistered()
+    {
+        var settings = AppSettings.CreateDefault() with
+        {
+            VideoRecordingHotKey = "   ",
+        };
+
+        var normalized = settings.Normalize();
+        var bindings = HotKeyConfiguration.CreateBindings(normalized);
+
+        Assert.Equal(string.Empty, normalized.VideoRecordingHotKey);
+        Assert.DoesNotContain(
+            bindings,
+            binding => binding.Action == HotKeyAction.VideoRecording);
+    }
+
+    [Fact]
+    public void RejectsVideoRecordingShortcutUsedByAnotherAction()
+    {
+        var settings = AppSettings.CreateDefault() with
+        {
+            VideoRecordingHotKey = "Ctrl+Alt+S",
+        };
+
+        var validation = HotKeyConfiguration.Validate(
+            HotKeyConfiguration.CreateBindings(settings));
+
+        Assert.False(validation.IsValid);
+        Assert.Contains("重复", validation.ErrorMessage);
+    }
+
+    [Fact]
     public void LegacyOcrSettingRegistersTheTranslationAction()
     {
         var settings = AppSettings.CreateDefault() with

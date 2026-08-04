@@ -8,6 +8,17 @@ namespace Screenshot.App.Tests;
 public sealed class GlobalHotKeyManagerTests
 {
     [Fact]
+    public void MouseReplayDepthBypassesShortcutProcessingWithoutDriverMarker()
+    {
+        Assert.True(GlobalHotKeyManager.ShouldBypassMouseShortcutProcessing(
+            IntPtr.Zero,
+            replayDepth: 1));
+        Assert.False(GlobalHotKeyManager.ShouldBypassMouseShortcutProcessing(
+            IntPtr.Zero,
+            replayDepth: 0));
+    }
+
+    [Fact]
     public void PreCapturesBeforeAltCanDismissTransientUi()
     {
         var modifiers = HotKeyModifiers.Control | HotKeyModifiers.Alt;
@@ -361,7 +372,7 @@ public sealed class GlobalHotKeyManagerTests
                 triggeredCount++;
             };
 
-            Assert.False(manager.ProcessMouseButtonInputForTest(
+            Assert.True(manager.ProcessMouseButtonInputForTest(
                 HotKeyGesture.VirtualKeyMouseLeft,
                 isButtonDown: true));
             manager.ProcessPendingMouseHolds(
@@ -374,15 +385,120 @@ public sealed class GlobalHotKeyManagerTests
     }
 
     [Fact]
+    public void MouseHoldContinuationKeepsOriginalButtonDownPoint()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var manager = new GlobalHotKeyManager();
+            manager.ConfigureMouseLongPress(600);
+            Assert.True(manager.Apply(
+            [
+                new HotKeyBinding(
+                    HotKeyAction.RegionCapture,
+                    new HotKeyGesture(
+                        HotKeyModifiers.None,
+                        HotKeyGesture.VirtualKeyMouseLeft)),
+            ]).IsSuccess);
+            CapturePointerContinuation? continuation = null;
+            manager.HotKeyPressed += (_, eventArgs) =>
+                continuation = eventArgs.CapturePointerContinuation;
+
+            Assert.True(manager.ProcessMouseButtonInputForTest(
+                HotKeyGesture.VirtualKeyMouseLeft,
+                isButtonDown: true,
+                x: 137,
+                y: 241));
+            manager.ProcessPendingMouseHolds(
+                DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1));
+
+            Assert.NotNull(continuation);
+            Assert.Equal(
+                new System.Drawing.Point(137, 241),
+                continuation.StartScreenPoint);
+        });
+    }
+
+    [Fact]
+    public void VideoRecordingMouseHoldKeepsOriginalButtonDownPoint()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var manager = new GlobalHotKeyManager();
+            manager.ConfigureMouseLongPress(600);
+            Assert.True(manager.Apply(
+            [
+                new HotKeyBinding(
+                    HotKeyAction.VideoRecording,
+                    new HotKeyGesture(
+                        HotKeyModifiers.None,
+                        HotKeyGesture.VirtualKeyMouseLeft)),
+            ]).IsSuccess);
+            CapturePointerContinuation? continuation = null;
+            manager.HotKeyPressed += (_, eventArgs) =>
+                continuation = eventArgs.CapturePointerContinuation;
+
+            Assert.True(manager.ProcessMouseButtonInputForTest(
+                HotKeyGesture.VirtualKeyMouseLeft,
+                isButtonDown: true,
+                x: 211,
+                y: 307));
+            manager.ProcessPendingMouseHolds(
+                DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1));
+
+            Assert.NotNull(continuation);
+            Assert.Equal(
+                new System.Drawing.Point(211, 307),
+                continuation.StartScreenPoint);
+        });
+    }
+
+    [Fact]
+    public void ModifiedMouseHoldContinuationKeepsButtonDownPoint()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var manager = new GlobalHotKeyManager();
+            Assert.True(manager.Apply(
+            [
+                new HotKeyBinding(
+                    HotKeyAction.RegionCapture,
+                    new HotKeyGesture(
+                        HotKeyModifiers.Control,
+                        HotKeyGesture.VirtualKeyMouseRight)),
+            ]).IsSuccess);
+            CapturePointerContinuation? continuation = null;
+            manager.HotKeyPressed += (_, eventArgs) =>
+                continuation = eventArgs.CapturePointerContinuation;
+
+            Assert.True(manager.ProcessMouseButtonInputForTest(
+                HotKeyGesture.VirtualKeyMouseRight,
+                isButtonDown: true,
+                x: 319,
+                y: 427,
+                modifiers: HotKeyModifiers.Control));
+            manager.ProcessPendingMouseHolds(
+                DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1));
+
+            Assert.NotNull(continuation);
+            Assert.Equal(
+                new System.Drawing.Point(319, 427),
+                continuation.StartScreenPoint);
+        });
+    }
+
+    [Fact]
     public void MouseCaptureShortcutPassesHeldButtonAndReleasesMouseUp()
     {
         GlobalHotKeyManager? manager = null;
         CapturePointerButton? heldButton = null;
+        var replayedClickCount = 0;
         using var triggered = new ManualResetEventSlim();
         using var released = new ManualResetEventSlim();
         WpfTestHost.Invoke(() =>
         {
             manager = new GlobalHotKeyManager();
+            manager.ReplayPrimaryMouseButtonOverride = (_, _) =>
+                replayedClickCount++;
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -403,7 +519,7 @@ public sealed class GlobalHotKeyManagerTests
                 triggered.Set();
             };
 
-            Assert.False(manager.ProcessMouseButtonInputForTest(
+            Assert.True(manager.ProcessMouseButtonInputForTest(
                 HotKeyGesture.VirtualKeyMouseRight,
                 isButtonDown: true,
                 modifiers: HotKeyModifiers.Control));
@@ -416,7 +532,7 @@ public sealed class GlobalHotKeyManagerTests
         {
             Assert.Equal(CapturePointerButton.Right, heldButton);
             manager!.SetMouseShortcutsSuspended(true);
-            Assert.False(manager!.ProcessMouseButtonInputForTest(
+            Assert.True(manager!.ProcessMouseButtonInputForTest(
                 HotKeyGesture.VirtualKeyMouseRight,
                 isButtonDown: false,
                 modifiers: HotKeyModifiers.Control));
@@ -424,6 +540,7 @@ public sealed class GlobalHotKeyManagerTests
         Assert.True(released.Wait(TimeSpan.FromSeconds(2)));
         WpfTestHost.Invoke(() =>
         {
+            Assert.Equal(0, replayedClickCount);
             manager!.SetMouseShortcutsSuspended(false);
             manager!.Dispose();
         });
@@ -464,7 +581,7 @@ public sealed class GlobalHotKeyManagerTests
             Assert.Equal(0, triggeredCount);
 
             manager.SetMouseShortcutsSuspended(false);
-            Assert.False(manager.ProcessMouseButtonInputForTest(
+            Assert.True(manager.ProcessMouseButtonInputForTest(
                 HotKeyGesture.VirtualKeyMouseLeft,
                 isButtonDown: true,
                 modifiers: HotKeyModifiers.Control));
@@ -476,7 +593,7 @@ public sealed class GlobalHotKeyManagerTests
         WpfTestHost.Invoke(() =>
         {
             Assert.Equal(1, triggeredCount);
-            Assert.False(manager!.ProcessMouseButtonInputForTest(
+            Assert.True(manager!.ProcessMouseButtonInputForTest(
                 HotKeyGesture.VirtualKeyMouseLeft,
                 isButtonDown: false,
                 modifiers: HotKeyModifiers.Control));
@@ -499,13 +616,16 @@ public sealed class GlobalHotKeyManagerTests
                         HotKeyGesture.VirtualKeyMouseLeft)),
             ]).IsSuccess);
             var triggered = false;
+            var replayedClick = false;
+            manager.ReplayPrimaryMouseButtonOverride = (_, includeButtonUp) =>
+                replayedClick = includeButtonUp;
             manager.HotKeyPressed += (_, _) => triggered = true;
 
-            Assert.False(manager.ProcessMouseButtonInputForTest(
+            Assert.True(manager.ProcessMouseButtonInputForTest(
                 HotKeyGesture.VirtualKeyMouseLeft,
                 isButtonDown: true,
                 modifiers: HotKeyModifiers.Control));
-            Assert.False(manager.ProcessMouseButtonInputForTest(
+            Assert.True(manager.ProcessMouseButtonInputForTest(
                 HotKeyGesture.VirtualKeyMouseLeft,
                 isButtonDown: false,
                 modifiers: HotKeyModifiers.Control));
@@ -513,6 +633,7 @@ public sealed class GlobalHotKeyManagerTests
                 DateTimeOffset.UtcNow + TimeSpan.FromSeconds(2));
 
             Assert.False(triggered);
+            Assert.True(replayedClick);
         });
     }
 
@@ -531,9 +652,12 @@ public sealed class GlobalHotKeyManagerTests
                         HotKeyGesture.VirtualKeyMouseLeft)),
             ]).IsSuccess);
             var triggered = false;
+            var replayedDown = false;
+            manager.ReplayPrimaryMouseButtonOverride = (_, includeButtonUp) =>
+                replayedDown = !includeButtonUp;
             manager.HotKeyPressed += (_, _) => triggered = true;
 
-            Assert.False(manager.ProcessMouseButtonInputForTest(
+            Assert.True(manager.ProcessMouseButtonInputForTest(
                 HotKeyGesture.VirtualKeyMouseLeft,
                 isButtonDown: true,
                 x: 100,
@@ -542,8 +666,15 @@ public sealed class GlobalHotKeyManagerTests
             manager.ProcessMouseMoveForTest(x: 120, y: 100);
             manager.ProcessPendingMouseHolds(
                 DateTimeOffset.UtcNow + TimeSpan.FromSeconds(2));
+            Assert.False(manager.ProcessMouseButtonInputForTest(
+                HotKeyGesture.VirtualKeyMouseLeft,
+                isButtonDown: false,
+                x: 120,
+                y: 100,
+                modifiers: HotKeyModifiers.Control));
 
             Assert.False(triggered);
+            Assert.True(replayedDown);
         });
     }
 

@@ -5,14 +5,30 @@
     <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>SnapCut.Mac</RootNamespace>
     <AssemblyName>snapcut</AssemblyName>
+    <Version>0.1.0</Version>
     <RuntimeIdentifiers>osx-x64;osx-arm64</RuntimeIdentifiers>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <Description>SnapCut macOS frontend (CLI prototype) over the shared stitching core.</Description>
+    <Description>SnapCut macOS menu bar application over the shared stitching core.</Description>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\SnapCut.Core\SnapCut.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.8" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.8" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="..\Screenshot.App\Assets\Screenshot.png"
+                      Link="Assets\Screenshot.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SnapCut.Mac.Tests" />
   </ItemGroup>
 
 </Project>

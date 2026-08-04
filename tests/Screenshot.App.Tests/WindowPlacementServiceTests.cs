@@ -154,6 +154,65 @@ public sealed class WindowPlacementServiceTests : IDisposable
         });
     }
 
+    [Fact]
+    public void PositionOnlyTrackingRestoresFloatingLocationAndKeepsCurrentSize()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var path = Path.Combine(_testDirectory, "floating-position.json");
+
+        WpfTestHost.Invoke(() =>
+        {
+            var workArea = SystemParameters.WorkArea;
+            var expectedLeft = workArea.Left + 36;
+            var expectedTop = workArea.Top + 42;
+            WindowPlacementService.Initialize(path);
+
+            try
+            {
+                var first = new Window
+                {
+                    Width = 52,
+                    Height = 52,
+                    ResizeMode = ResizeMode.NoResize,
+                    WindowStyle = WindowStyle.None,
+                    WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = expectedLeft,
+                    Top = expectedTop,
+                };
+                Assert.False(WindowPlacementService.TrackPosition(
+                    first,
+                    WindowPlacementKeys.FloatingCapture));
+                first.Show();
+                first.UpdateLayout();
+                first.Close();
+
+                var restored = new Window
+                {
+                    Width = 40,
+                    Height = 40,
+                    ResizeMode = ResizeMode.NoResize,
+                    WindowStyle = WindowStyle.None,
+                    WindowStartupLocation = WindowStartupLocation.Manual,
+                };
+                Assert.True(WindowPlacementService.TrackPosition(
+                    restored,
+                    WindowPlacementKeys.FloatingCapture));
+                restored.Show();
+                restored.UpdateLayout();
+
+                Assert.InRange(restored.Left, expectedLeft - 2, expectedLeft + 2);
+                Assert.InRange(restored.Top, expectedTop - 2, expectedTop + 2);
+                Assert.InRange(restored.ActualWidth, 39, 41);
+                Assert.InRange(restored.ActualHeight, 39, 41);
+                restored.Close();
+            }
+            finally
+            {
+                WindowPlacementService.ResetForTests();
+            }
+        });
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_testDirectory))

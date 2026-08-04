@@ -17,6 +17,7 @@ using WpfMouseEventArgs = System.Windows.Input.MouseEventArgs;
 using WpfPoint = System.Windows.Point;
 using WinForms = System.Windows.Forms;
 using DrawingColor = System.Drawing.Color;
+using DrawingPoint = System.Drawing.Point;
 
 namespace Screenshot.App.Capture;
 
@@ -31,12 +32,17 @@ public sealed class CapturePointerContinuation
     private readonly TaskCompletionSource _released = new(
         TaskCreationOptions.RunContinuationsAsynchronously);
 
-    internal CapturePointerContinuation(CapturePointerButton button)
+    internal CapturePointerContinuation(
+        CapturePointerButton button,
+        DrawingPoint? startScreenPoint = null)
     {
         Button = button;
+        StartScreenPoint = startScreenPoint;
     }
 
     public CapturePointerButton Button { get; }
+
+    internal DrawingPoint? StartScreenPoint { get; }
 
     internal Task WaitForReleaseAsync() => _released.Task;
 
@@ -69,6 +75,12 @@ public sealed class CaptureOverlayOptions
     public CapturePointerContinuation? InitialPointerContinuation { get; init; }
 
     public Func<ScreenRegion, Task>? StartScrollCaptureAsync { get; init; }
+
+    public Func<ScreenRegion, Task>? StartVideoRecordingAsync { get; init; }
+
+    public ScreenRegion? InitialSelection { get; init; }
+
+    public Action<ScreenRegion>? CaptureCompleted { get; init; }
 
     public Action? CaptureClosed { get; init; }
 }
@@ -159,6 +171,9 @@ public partial class CaptureOverlayWindow : Window
         ScrollCaptureButton.Visibility = options?.StartScrollCaptureAsync is null
             ? Visibility.Collapsed
             : Visibility.Visible;
+        RecordButton.Visibility = options?.StartVideoRecordingAsync is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         InlineEditorCanvas.HistoryChanged += OnInlineEditorHistoryChanged;
 
         _virtualScreenBounds = VirtualScreen.GetBounds();
@@ -223,6 +238,12 @@ public partial class CaptureOverlayWindow : Window
             options,
             initialScreenSnapshot: initialScreenSnapshot);
         overlay.Show();
+        if (options.InitialSelection is { } initialSelection)
+        {
+            overlay.UpdateLayout();
+            _ = overlay.ApplyInitialInteractiveSelectionAsync(initialSelection);
+        }
+
         return overlay;
     }
 
@@ -479,13 +500,18 @@ public partial class CaptureOverlayWindow : Window
             return;
         }
 
-        var cursorPosition = WinForms.Cursor.Position;
+        var cursorPosition = _initialPointerContinuation.StartScreenPoint ??
+            WinForms.Cursor.Position;
         var startPoint = CaptureSurface.PointFromScreen(
             new WpfPoint(cursorPosition.X, cursorPosition.Y));
         BeginPointerSelection(
             startPoint,
             _initialPointerContinuation.Button,
             allowWindowSnap: false);
+        var currentCursorPosition = WinForms.Cursor.Position;
+        var currentPoint = CaptureSurface.PointFromScreen(
+            new WpfPoint(currentCursorPosition.X, currentCursorPosition.Y));
+        UpdateSelectionBounds(new Rect(_selectionStartPoint, currentPoint));
         _continuedSelectionReleaseTask = CompleteSelectionWhenTriggerButtonIsReleasedAsync(
             _initialPointerContinuation);
     }
@@ -868,8 +894,10 @@ public partial class CaptureOverlayWindow : Window
 
         try
         {
+            var completedRegion = GetPhysicalSelectionBounds();
             using var image = await CaptureCurrentResultAsync(restoreOverlay: false);
             _ = CaptureFileService.SaveAsPng(image, _options.SaveDirectory);
+            _options.CaptureCompleted?.Invoke(completedRegion);
         }
         catch
         {
@@ -903,6 +931,32 @@ public partial class CaptureOverlayWindow : Window
         catch
         {
             // The coordinator reports scroll-capture failures in the settings window.
+        }
+    }
+
+    private async void OnRecordClick(object sender, RoutedEventArgs e)
+    {
+        if (_options?.StartVideoRecordingAsync is null ||
+            _isCompleted ||
+            _isActionInProgress ||
+            !HasValidSelection())
+        {
+            return;
+        }
+
+        var selection = GetPhysicalSelectionBounds();
+        _isActionInProgress = true;
+        CaptureToolbar.IsEnabled = false;
+        var startVideoRecordingAsync = _options.StartVideoRecordingAsync;
+        CompleteSelection(result: null);
+
+        try
+        {
+            await startVideoRecordingAsync(selection);
+        }
+        catch
+        {
+            // The coordinator surfaces recording failures through app status.
         }
     }
 
@@ -1508,6 +1562,7 @@ public partial class CaptureOverlayWindow : Window
         {
             if (_options is not null)
             {
+                var completedRegion = GetPhysicalSelectionBounds();
                 using var image = await CaptureCurrentResultAsync(restoreOverlay: false);
                 await ClipboardImageService.SetImageAsync(image.Preview);
 
@@ -1515,6 +1570,8 @@ public partial class CaptureOverlayWindow : Window
                 {
                     _ = _options.HistoryService.Add(image, _options.HistoryLimit);
                 }
+
+                _options.CaptureCompleted?.Invoke(completedRegion);
             }
 
             CompleteSelection(result: null);
@@ -2101,12 +2158,38 @@ public partial class CaptureOverlayWindow : Window
         PrepareScrollCaptureSelection();
     }
 
+    private async Task ApplyInitialInteractiveSelectionAsync(ScreenRegion selection)
+    {
+        if (_options is null || _isScrollCaptureSelection || _isCompleted)
+        {
+            return;
+        }
+
+        var topLeft = CaptureSurface.PointFromScreen(
+            new WpfPoint(selection.X, selection.Y));
+        var bottomRight = CaptureSurface.PointFromScreen(
+            new WpfPoint(
+                selection.X + selection.Width,
+                selection.Y + selection.Height));
+        UpdateSelectionBounds(new Rect(topLeft, bottomRight));
+        if (!HasValidSelection())
+        {
+            ClearSelection();
+            return;
+        }
+
+        SelectionRectangle.Visibility = Visibility.Visible;
+        ShowSelectionControls();
+        await EnterInlineEditorForCompletedSelectionAsync();
+    }
+
     private void PrepareScrollCaptureSelection()
     {
         ShowSelectionControls();
         CaptureShade.Visibility = Visibility.Collapsed;
         SetSelectionMaskVisibility(Visibility.Visible);
         SaveButton.Visibility = Visibility.Collapsed;
+        RecordButton.Visibility = Visibility.Collapsed;
         ScrollCaptureButton.Visibility = Visibility.Collapsed;
         OcrButton.Visibility = Visibility.Collapsed;
         PinButton.Visibility = Visibility.Collapsed;

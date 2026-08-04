@@ -17,7 +17,11 @@ public sealed class RegionCaptureCoordinator
     private readonly HttpClient _httpClient;
     private readonly Action<string> _statusReporter;
     private readonly Action<bool>? _mouseShortcutSuppressionChanged;
+    private readonly Action<VideoRecordingPreferences>?
+        _videoRecordingPreferencesChanged;
     private bool _isCaptureInProgress;
+    private bool _isRecordingInProgress;
+    private ScreenRegion? _lastOrdinaryCaptureRegion;
 
     public RegionCaptureCoordinator(
         Func<AppSettings> settingsProvider,
@@ -26,7 +30,8 @@ public sealed class RegionCaptureCoordinator
         ITranslationCredentialStore translationCredentialStore,
         HttpClient httpClient,
         Action<string> statusReporter,
-        Action<bool>? mouseShortcutSuppressionChanged = null)
+        Action<bool>? mouseShortcutSuppressionChanged = null,
+        Action<VideoRecordingPreferences>? videoRecordingPreferencesChanged = null)
     {
         ArgumentNullException.ThrowIfNull(settingsProvider);
         ArgumentNullException.ThrowIfNull(historyService);
@@ -42,6 +47,7 @@ public sealed class RegionCaptureCoordinator
         _httpClient = httpClient;
         _statusReporter = statusReporter;
         _mouseShortcutSuppressionChanged = mouseShortcutSuppressionChanged;
+        _videoRecordingPreferencesChanged = videoRecordingPreferencesChanged;
     }
 
     public Task RequestCaptureAsync(
@@ -51,8 +57,10 @@ public sealed class RegionCaptureCoordinator
         return RequestInteractiveCaptureAsync(
             recognizeTextAfterSelection: false,
             translateTextAfterSelection: false,
+            trackOrdinaryCaptureRegion: true,
             initialScreenSnapshot,
-            pointerContinuation);
+            pointerContinuation,
+            initialSelection: null);
     }
 
     public Task RequestOcrCaptureAsync(
@@ -62,8 +70,10 @@ public sealed class RegionCaptureCoordinator
         return RequestInteractiveCaptureAsync(
             recognizeTextAfterSelection: true,
             translateTextAfterSelection: false,
+            trackOrdinaryCaptureRegion: false,
             initialScreenSnapshot,
-            pointerContinuation);
+            pointerContinuation,
+            initialSelection: null);
     }
 
     public Task RequestTranslationCaptureAsync(
@@ -73,26 +83,204 @@ public sealed class RegionCaptureCoordinator
         return RequestInteractiveCaptureAsync(
             recognizeTextAfterSelection: false,
             translateTextAfterSelection: true,
+            trackOrdinaryCaptureRegion: false,
             initialScreenSnapshot,
-            pointerContinuation);
+            pointerContinuation,
+            initialSelection: null);
     }
 
-    private Task RequestInteractiveCaptureAsync(
+    public event Action<bool>? CaptureStateChanged;
+
+    internal bool IsRecordingInProgress => _isRecordingInProgress;
+
+    public async Task RequestVideoRecordingAsync(
+        CapturePointerContinuation? pointerContinuation = null)
+    {
+        if (_isRecordingInProgress)
+        {
+            ReportRecordingAlreadyInProgress();
+            return;
+        }
+
+        if (_isCaptureInProgress)
+        {
+            return;
+        }
+
+        ScreenRegion? selection = null;
+        SetCaptureInProgress(true);
+        try
+        {
+            await WaitForCaptureChromeToHideAsync();
+            selection = await CaptureOverlayWindow.SelectAsync(
+                pointerContinuation);
+        }
+        catch (Exception exception)
+        {
+            _statusReporter($"无法开始区域录制：{exception.Message}");
+        }
+        finally
+        {
+            SetCaptureInProgress(false);
+            Core.MemoryFootprint.TrimAfterHeavyOperation();
+        }
+
+        if (selection is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await RunVideoRecordingSessionAsync(selection.Value);
+        }
+        catch (Exception exception)
+        {
+            _statusReporter($"无法开始区域录制：{exception.Message}");
+        }
+    }
+
+    public async Task RequestFloatingCaptureAsync(
+        FloatingCaptureClickBehavior behavior)
+    {
+        switch (behavior)
+        {
+            case FloatingCaptureClickBehavior.RegionCapture:
+                await RequestCaptureAsync();
+                return;
+            case FloatingCaptureClickBehavior.VideoRecording:
+                await RequestVideoRecordingAsync();
+                return;
+            case FloatingCaptureClickBehavior.ScrollCapture:
+                await RequestScrollCaptureAsync();
+                return;
+            case FloatingCaptureClickBehavior.PinCapture:
+                await RequestPinCaptureAsync();
+                return;
+            case FloatingCaptureClickBehavior.CaptureAllScreens:
+                await RequestAllScreensCaptureAsync();
+                return;
+        }
+
+        var region = TryGetReusableRegion(
+            _lastOrdinaryCaptureRegion,
+            VirtualScreen.GetBounds());
+        if (region is null)
+        {
+            await RequestCaptureAsync();
+            return;
+        }
+
+        if (behavior == FloatingCaptureClickBehavior.ShowSelection)
+        {
+            await RequestInteractiveCaptureAsync(
+                recognizeTextAfterSelection: false,
+                translateTextAfterSelection: false,
+                trackOrdinaryCaptureRegion: true,
+                initialScreenSnapshot: null,
+                pointerContinuation: null,
+                initialSelection: region.Value);
+            return;
+        }
+
+        await CaptureImmediatelyAsync(
+            region.Value,
+            trackOrdinaryCaptureRegion: true,
+            showFeedbackOnEveryScreen: false);
+    }
+
+    public Task RequestAllScreensCaptureAsync()
+    {
+        return CaptureImmediatelyAsync(
+            VirtualScreen.GetBounds(),
+            trackOrdinaryCaptureRegion: false,
+            showFeedbackOnEveryScreen: true,
+            captureFactory: ScreenCaptureService.CaptureAllScreens);
+    }
+
+    internal static ScreenRegion? TryGetReusableRegion(
+        ScreenRegion? candidate,
+        ScreenRegion virtualScreen)
+    {
+        if (candidate is not ScreenRegion region ||
+            region.IsEmpty ||
+            virtualScreen.IsEmpty)
+        {
+            return null;
+        }
+
+        return ScreenRegion.Intersect(region, virtualScreen) == region
+            ? region
+            : null;
+    }
+
+    private async Task CaptureImmediatelyAsync(
+        ScreenRegion region,
+        bool trackOrdinaryCaptureRegion,
+        bool showFeedbackOnEveryScreen,
+        Func<CapturedImage>? captureFactory = null)
+    {
+        if (_isCaptureInProgress)
+        {
+            return;
+        }
+
+        SetCaptureInProgress(true);
+        try
+        {
+            await WaitForCaptureChromeToHideAsync();
+            var settings = _settingsProvider();
+            using var image = captureFactory?.Invoke() ??
+                ScreenCaptureService.Capture(region);
+            await ClipboardImageService.SetImageAsync(image.Preview);
+            _ = _historyService.Add(
+                image,
+                Math.Max(1, settings.HistoryLimit));
+            if (trackOrdinaryCaptureRegion)
+            {
+                _lastOrdinaryCaptureRegion = region;
+            }
+
+            if (showFeedbackOnEveryScreen)
+            {
+                await Task.WhenAll(System.Windows.Forms.Screen.AllScreens.Select(
+                    screen => CaptureFeedbackWindow.ShowAsync(new ScreenRegion(
+                        screen.Bounds.X,
+                        screen.Bounds.Y,
+                        screen.Bounds.Width,
+                        screen.Bounds.Height))));
+            }
+            else
+            {
+                await CaptureFeedbackWindow.ShowAsync(region);
+            }
+        }
+        finally
+        {
+            SetCaptureInProgress(false);
+            Core.MemoryFootprint.TrimAfterHeavyOperation();
+        }
+    }
+
+    private async Task RequestInteractiveCaptureAsync(
         bool recognizeTextAfterSelection,
         bool translateTextAfterSelection,
+        bool trackOrdinaryCaptureRegion,
         CapturedImage? initialScreenSnapshot,
-        CapturePointerContinuation? pointerContinuation)
+        CapturePointerContinuation? pointerContinuation,
+        ScreenRegion? initialSelection)
     {
         if (_isCaptureInProgress)
         {
             initialScreenSnapshot?.Dispose();
-            return Task.CompletedTask;
+            return;
         }
 
         SetCaptureInProgress(true);
-        var settings = _settingsProvider();
         try
         {
+            await WaitForCaptureChromeToHideAsync();
+            var settings = _settingsProvider();
             CaptureOverlayWindow.ShowInteractive(
                 new CaptureOverlayOptions
                 {
@@ -108,6 +296,11 @@ public sealed class RegionCaptureCoordinator
                     TranslateTextAfterSelection = translateTextAfterSelection,
                     InitialPointerContinuation = pointerContinuation,
                     StartScrollCaptureAsync = RequestScrollCaptureFromSelectionAsync,
+                    StartVideoRecordingAsync = RequestVideoRecordingFromSelectionAsync,
+                    InitialSelection = initialSelection,
+                    CaptureCompleted = trackOrdinaryCaptureRegion
+                        ? region => _lastOrdinaryCaptureRegion = region
+                        : null,
                     CaptureClosed = OnInteractiveCaptureClosed,
                 },
                 initialScreenSnapshot);
@@ -119,7 +312,6 @@ public sealed class RegionCaptureCoordinator
             throw;
         }
 
-        return Task.CompletedTask;
     }
 
     public async Task RequestPinCaptureAsync(
@@ -134,6 +326,7 @@ public sealed class RegionCaptureCoordinator
 
         try
         {
+            await WaitForCaptureChromeToHideAsync();
             var selection = await CaptureOverlayWindow.SelectAsync(
                 pointerContinuation);
 
@@ -211,6 +404,7 @@ public sealed class RegionCaptureCoordinator
 
         try
         {
+            await WaitForCaptureChromeToHideAsync();
             // Scroll target is resolved under the selection when scrolling starts.
             var scrollSelection = initialSelection is null
                 ? await CaptureOverlayWindow.SelectForScrollCaptureAsync(
@@ -593,6 +787,70 @@ public sealed class RegionCaptureCoordinator
         window.Show();
     }
 
+    private async Task RequestVideoRecordingFromSelectionAsync(
+        ScreenRegion selection)
+    {
+        SetCaptureInProgress(false);
+        try
+        {
+            await RunVideoRecordingSessionAsync(selection);
+        }
+        catch (Exception exception)
+        {
+            _statusReporter($"无法开始区域录制：{exception.Message}");
+        }
+        finally
+        {
+            Core.MemoryFootprint.TrimAfterHeavyOperation();
+        }
+    }
+
+    private async Task RunVideoRecordingSessionAsync(ScreenRegion selection)
+    {
+        if (_isRecordingInProgress)
+        {
+            ReportRecordingAlreadyInProgress();
+            return;
+        }
+
+        _isRecordingInProgress = true;
+        try
+        {
+            // Give DWM one composition pass to remove the frozen screenshot
+            // before exposing the live desktop and recording controls.
+            await WaitForCaptureChromeToHideAsync();
+            var settings = _settingsProvider();
+            var result = await VideoRecordingControlWindow.ShowSessionAsync(
+                selection,
+                settings.VideoSaveDirectory,
+                settings.RecordSystemAudio,
+                settings.RecordMicrophone,
+                settings.VideoRecordingCodec,
+                settings.VideoRecordingFrameRate,
+                settings.ShowKeyboardInputInRecording,
+                settings.ShowMouseInputInRecording,
+                _videoRecordingPreferencesChanged);
+            if (result.IsSuccess)
+            {
+                _statusReporter($"视频已保存：{result.FilePath}");
+            }
+            else if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
+            {
+                _statusReporter($"视频录制失败：{result.ErrorMessage}");
+            }
+        }
+        finally
+        {
+            _isRecordingInProgress = false;
+        }
+    }
+
+    private void ReportRecordingAlreadyInProgress()
+    {
+        _statusReporter("正在录屏，不能同时开始另一个录屏任务。");
+        _ = VideoRecordingControlWindow.TryShowAlreadyRecordingFeedback();
+    }
+
     private void SetCaptureInProgress(bool isInProgress)
     {
         if (_isCaptureInProgress == isInProgress)
@@ -602,6 +860,16 @@ public sealed class RegionCaptureCoordinator
 
         _isCaptureInProgress = isInProgress;
         _mouseShortcutSuppressionChanged?.Invoke(isInProgress);
+        CaptureStateChanged?.Invoke(isInProgress);
+    }
+
+    private static async Task WaitForCaptureChromeToHideAsync()
+    {
+        await Dispatcher.Yield(DispatcherPriority.Render);
+        // Layered popups are composed by DWM after WPF has rendered the hide.
+        // Match the overlay's own capture delay so neither the floating button
+        // nor its menu is frozen into the desktop snapshot.
+        await Task.Delay(80);
     }
 
     private static void UpdateProgress(

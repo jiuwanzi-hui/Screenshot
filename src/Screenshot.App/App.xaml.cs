@@ -19,12 +19,14 @@ public partial class App : System.Windows.Application, IDisposable
     private RegionCaptureCoordinator? _regionCaptureCoordinator;
     private CaptureHistoryService? _captureHistoryService;
     private CaptureHistoryWindow? _captureHistoryWindow;
+    private FloatingCaptureWindow? _floatingCaptureWindow;
     private PinnedImageManager? _pinnedImageManager;
     private HttpClient? _translationHttpClient;
     private AppThemeManager? _themeManager;
     private SingleInstanceCoordinator? _singleInstanceCoordinator;
     private AppSettings _currentSettings = AppSettings.CreateDefault();
     private bool _isShuttingDown;
+    private bool _isCaptureInProgress;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -111,7 +113,9 @@ public partial class App : System.Windows.Application, IDisposable
             credentialStore,
             _translationHttpClient,
             message => _mainWindow?.ShowStatus(message),
-            suspended => _hotKeyManager.SetMouseShortcutsSuspended(suspended));
+            suspended => _hotKeyManager.SetMouseShortcutsSuspended(suspended),
+            preferences => _mainWindow?.SaveVideoRecordingPreferences(preferences));
+        _regionCaptureCoordinator.CaptureStateChanged += OnCaptureStateChanged;
 
         if (dataMigrationResult.Warning is not null)
         {
@@ -139,9 +143,11 @@ public partial class App : System.Windows.Application, IDisposable
         _trayIconService.OpenSettingsRequested += OnOpenSettingsRequested;
         _trayIconService.RegionCaptureRequested += OnRegionCaptureRequested;
         _trayIconService.ScrollCaptureRequested += OnScrollCaptureRequested;
+        _trayIconService.VideoRecordingRequested += OnVideoRecordingRequested;
         _trayIconService.HistoryRequested += OnHistoryRequested;
         _trayIconService.ExitRequested += OnExitRequested;
         _trayIconService.SetVisible(_currentSettings.ShowNotificationIcon);
+        UpdateFloatingCaptureWindow();
 
         if (!startInBackground || isFirstRun || hotKeyWarning is not null)
         {
@@ -196,6 +202,12 @@ public partial class App : System.Windows.Application, IDisposable
 
     public void Dispose()
     {
+        DisposeFloatingCaptureWindow();
+        if (_regionCaptureCoordinator is not null)
+        {
+            _regionCaptureCoordinator.CaptureStateChanged -= OnCaptureStateChanged;
+            _regionCaptureCoordinator = null;
+        }
         DisposeTrayIconService();
         DisposeHotKeyManager();
         DisposePinnedImageManager();
@@ -246,6 +258,11 @@ public partial class App : System.Windows.Application, IDisposable
         _ = Dispatcher.BeginInvoke(RequestScrollCapture);
     }
 
+    private void OnVideoRecordingRequested(object? sender, EventArgs e)
+    {
+        _ = Dispatcher.BeginInvoke(() => _ = RequestVideoRecordingAsync());
+    }
+
     private void OnHistoryRequested(object? sender, EventArgs e)
     {
         _ = Dispatcher.BeginInvoke(ShowCaptureHistory);
@@ -256,12 +273,180 @@ public partial class App : System.Windows.Application, IDisposable
         _currentSettings = e.Settings;
         _themeManager?.Apply(e.Settings.Theme);
         _trayIconService?.SetVisible(e.Settings.ShowNotificationIcon);
+        UpdateFloatingCaptureWindow();
     }
 
     private void OnThemeChanged(object? sender, AppTheme theme)
     {
         _mainWindow?.ApplySettingsPalette(theme);
         _trayIconService?.ApplyTheme(theme);
+    }
+
+    private void UpdateFloatingCaptureWindow()
+    {
+        if (!_currentSettings.ShowFloatingCaptureButton)
+        {
+            DisposeFloatingCaptureWindow();
+            return;
+        }
+
+        if (_floatingCaptureWindow is not null)
+        {
+            if (!_isCaptureInProgress && !_floatingCaptureWindow.IsVisible)
+            {
+                _floatingCaptureWindow.Show();
+            }
+
+            return;
+        }
+
+        var window = new FloatingCaptureWindow();
+        window.RepeatCaptureRequested += OnFloatingRepeatCaptureRequested;
+        window.RegionCaptureRequested += OnFloatingRegionCaptureRequested;
+        window.ScrollCaptureRequested += OnFloatingScrollCaptureRequested;
+        window.VideoRecordingRequested += OnFloatingVideoRecordingRequested;
+        window.PinCaptureRequested += OnFloatingPinCaptureRequested;
+        window.AllScreensCaptureRequested += OnFloatingAllScreensCaptureRequested;
+        window.HistoryRequested += OnFloatingHistoryRequested;
+        window.CloseRequested += OnFloatingCloseRequested;
+        window.Closed += OnFloatingCaptureWindowClosed;
+        _floatingCaptureWindow = window;
+        window.Show();
+        if (_isCaptureInProgress)
+        {
+            window.SetCaptureInProgress(true);
+        }
+    }
+
+    private void DisposeFloatingCaptureWindow()
+    {
+        var window = _floatingCaptureWindow;
+        if (window is null)
+        {
+            return;
+        }
+
+        _floatingCaptureWindow = null;
+        window.RepeatCaptureRequested -= OnFloatingRepeatCaptureRequested;
+        window.RegionCaptureRequested -= OnFloatingRegionCaptureRequested;
+        window.ScrollCaptureRequested -= OnFloatingScrollCaptureRequested;
+        window.VideoRecordingRequested -= OnFloatingVideoRecordingRequested;
+        window.PinCaptureRequested -= OnFloatingPinCaptureRequested;
+        window.AllScreensCaptureRequested -= OnFloatingAllScreensCaptureRequested;
+        window.HistoryRequested -= OnFloatingHistoryRequested;
+        window.CloseRequested -= OnFloatingCloseRequested;
+        window.Closed -= OnFloatingCaptureWindowClosed;
+        window.Close();
+    }
+
+    private void OnFloatingCaptureWindowClosed(object? sender, EventArgs e)
+    {
+        if (ReferenceEquals(sender, _floatingCaptureWindow))
+        {
+            _floatingCaptureWindow = null;
+        }
+    }
+
+    private void OnCaptureStateChanged(bool isInProgress)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(
+                () => OnCaptureStateChanged(isInProgress));
+            return;
+        }
+
+        _isCaptureInProgress = isInProgress;
+        VideoRecordingControlWindow.SetCaptureInteractionActive(isInProgress);
+        _floatingCaptureWindow?.SetCaptureInProgress(isInProgress);
+    }
+
+    private void OnFloatingRepeatCaptureRequested(object? sender, EventArgs e)
+    {
+        _ = RequestFloatingCaptureAsync();
+    }
+
+    private void OnFloatingRegionCaptureRequested(object? sender, EventArgs e)
+    {
+        RequestRegionCapture();
+    }
+
+    private void OnFloatingScrollCaptureRequested(object? sender, EventArgs e)
+    {
+        RequestScrollCapture(pointerContinuation: null);
+    }
+
+    private void OnFloatingVideoRecordingRequested(object? sender, EventArgs e)
+    {
+        _ = RequestVideoRecordingAsync();
+    }
+
+    private void OnFloatingPinCaptureRequested(object? sender, EventArgs e)
+    {
+        RequestPinCapture(pointerContinuation: null);
+    }
+
+    private void OnFloatingAllScreensCaptureRequested(object? sender, EventArgs e)
+    {
+        _ = RequestAllScreensCaptureAsync();
+    }
+
+    private void OnFloatingHistoryRequested(object? sender, EventArgs e)
+    {
+        ShowCaptureHistory();
+    }
+
+    private void OnFloatingCloseRequested(object? sender, EventArgs e)
+    {
+        _mainWindow?.SetFloatingCaptureButtonEnabled(false);
+    }
+
+    private async Task RequestFloatingCaptureAsync()
+    {
+        try
+        {
+            if (_regionCaptureCoordinator is not null)
+            {
+                await _regionCaptureCoordinator.RequestFloatingCaptureAsync(
+                    _currentSettings.FloatingCaptureClickBehavior);
+            }
+        }
+        catch (Exception)
+        {
+            _mainWindow?.ShowStatus("悬浮按钮功能执行失败，请重试。");
+        }
+    }
+
+    private async Task RequestAllScreensCaptureAsync()
+    {
+        try
+        {
+            if (_regionCaptureCoordinator is not null)
+            {
+                await _regionCaptureCoordinator.RequestAllScreensCaptureAsync();
+            }
+        }
+        catch (Exception)
+        {
+            _mainWindow?.ShowStatus("全部屏幕截图失败，请重试。");
+        }
+    }
+
+    private async Task RequestVideoRecordingAsync(
+        CapturePointerContinuation? pointerContinuation = null)
+    {
+        try
+        {
+            if (_regionCaptureCoordinator is not null)
+            {
+                await _regionCaptureCoordinator.RequestVideoRecordingAsync(
+                    pointerContinuation);
+            }
+        }
+        catch (Exception)
+        {
+            _mainWindow?.ShowStatus("无法开始区域录制，请重试。");
+        }
     }
 
     private void OnHotKeyPressed(object? sender, HotKeyPressedEventArgs e)
@@ -274,13 +459,13 @@ public partial class App : System.Windows.Application, IDisposable
         if (e.Action == HotKeyAction.RegionCapture)
         {
             RequestRegionCapture(
-                e.DetachPreCapturedScreen(),
+                DetachUsablePreCapturedScreen(e),
                 e.CapturePointerContinuation);
         }
         else if (e.Action == HotKeyAction.RecognizeText)
         {
             RequestTranslationCapture(
-                e.DetachPreCapturedScreen(),
+                DetachUsablePreCapturedScreen(e),
                 e.CapturePointerContinuation);
         }
         else if (e.Action == HotKeyAction.PinImage)
@@ -291,10 +476,27 @@ public partial class App : System.Windows.Application, IDisposable
         {
             RequestScrollCapture(e.CapturePointerContinuation);
         }
+        else if (e.Action == HotKeyAction.VideoRecording)
+        {
+            _ = RequestVideoRecordingAsync(e.CapturePointerContinuation);
+        }
         else if (e.Action == HotKeyAction.OpenSettings)
         {
             _ = Dispatcher.BeginInvoke(ShowMainWindow);
         }
+    }
+
+    private CapturedImage? DetachUsablePreCapturedScreen(
+        HotKeyPressedEventArgs eventArgs)
+    {
+        var snapshot = eventArgs.DetachPreCapturedScreen();
+        if (_regionCaptureCoordinator?.IsRecordingInProgress != true)
+        {
+            return snapshot;
+        }
+
+        snapshot?.Dispose();
+        return null;
     }
 
     private void ShowMainWindow()
@@ -529,6 +731,7 @@ public partial class App : System.Windows.Application, IDisposable
         _trayIconService.OpenSettingsRequested -= OnOpenSettingsRequested;
         _trayIconService.RegionCaptureRequested -= OnRegionCaptureRequested;
         _trayIconService.ScrollCaptureRequested -= OnScrollCaptureRequested;
+        _trayIconService.VideoRecordingRequested -= OnVideoRecordingRequested;
         _trayIconService.HistoryRequested -= OnHistoryRequested;
         _trayIconService.ExitRequested -= OnExitRequested;
         _trayIconService.Dispose();
