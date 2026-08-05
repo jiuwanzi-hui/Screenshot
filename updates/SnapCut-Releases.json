@@ -1,5 +1,19 @@
 [
   {
+    "tag_name": "v2.8.1",
+    "name": "SnapCut 2.8.1",
+    "body": "- 支持将 F1-F24 设为不带修饰键的单键快捷键。\n- 修复截图翻译中英文未翻译、字符图标误识别为数字、中文或产品标识被错误覆盖的问题。\n- 优化 OCR 文字框与逐行译文的对应关系。\n- 离线翻译未产生有效译文时自动回退到下一翻译方式，不再把原文返回误判为成功。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.8.1",
+    "published_at": "2026-08-05T18:30:00+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.1/SnapCut-Update.json" },
+      { "name": "SnapCut-Setup-2.8.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.1/SnapCut-Setup-2.8.1-win-x64.exe" },
+      { "name": "SnapCut-Portable-2.8.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.1/SnapCut-Portable-2.8.1-win-x64.zip" }
+    ]
+  },
+  {
     "tag_name": "v2.8.0",
     "name": "SnapCut 2.8.0",
     "body": "- 新增截图与录屏统一历史查看、视频重命名/排序/定位、长图裁剪和多套独立主题。\n- 框选后支持 Ctrl+C 直接复制；OCR 文字可跨行选择，标注可选中后按 Delete 删除。\n- 内容识别改为按需运行：仅二维码轻量自动检测，文字 OCR 与表格复制由用户触发；完善高质量 OCR 与本地大模型的断点下载、校验、超时和回退。\n- 优化 OCR/翻译布局、取消响应和自适应线程预算，降低不同配置电脑上的卡顿与 CPU 峰值。\n- 长截图等待用户单击向下或双击向上后再受控滚动，不再使用物理滚轮采集。\n- 安装版和免安装版均自包含 .NET、录屏组件及所需 Visual C++ x64 运行库，无需额外下载运行环境。",

@@ -258,6 +258,85 @@ public sealed class ContentRecognitionServiceTests
             TranslationPresentationLayout.NormalizeTranslatedText(input));
     }
 
+    [Theory]
+    [InlineData("Connect", "连接", true)]
+    [InlineData("Channel", "频道", true)]
+    [InlineData("类别", "类别", false)]
+    [InlineData("IDC Flare", "IDC Flare", false)]
+    [InlineData("8", "八", false)]
+    [InlineData("GI", "地理标志", false)]
+    [InlineData("旦", "65E5", false)]
+    [InlineData("  开发调优  ", "开发调优", false)]
+    [InlineData("开 发 调 优", "开发调优", false)]
+    public void TranslationOverlayOnlyReplacesActuallyTranslatedLines(
+        string source,
+        string translated,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            TranslationPresentationLayout.HasMeaningfulTranslation(
+                source,
+                translated));
+    }
+
+    [Theory]
+    [InlineData("Connect", "@ 连接", "连接")]
+    [InlineData("More...", "8 更多...", "更多...")]
+    [InlineData("dailyExercise", "· 每日练习", "每日练习")]
+    [InlineData("Version 8", "版本 8", "版本 8")]
+    public void TranslationPresentationRemovesUnexpectedLeadingArtifacts(
+        string source,
+        string translated,
+        string expected)
+    {
+        Assert.Equal(
+            expected,
+            TranslationPresentationLayout.NormalizeTranslatedText(
+                source,
+                translated));
+    }
+
+    [Fact]
+    public void TranslationPresentationUsesWordBoundsInsteadOfNearbyIcons()
+    {
+        var tightened = TranslationPresentationLayout.TightenToWordBounds(
+        [
+            new OcrTextRegion("cattiLearning", 8, 19, 118, 22),
+            new OcrTextRegion("More...", 209, 195, 93, 31),
+        ],
+        [
+            new OcrWordRegion("cattiLearning", 40, 19, 86, 22),
+            new OcrWordRegion("8", 174, 199, 31, 23),
+            new OcrWordRegion("More...", 226, 195, 76, 31),
+        ]);
+
+        Assert.Equal(new OcrTextRegion("cattiLearning", 40, 19, 86, 22), tightened[0]);
+        Assert.Equal(new OcrTextRegion("More...", 226, 195, 76, 31), tightened[1]);
+    }
+
+    [Fact]
+    public void TranslationPresentationSeparatesIconTextMergedIntoTheSameOcrLine()
+    {
+        var tightened = TranslationPresentationLayout.TightenToWordBounds(
+        [
+            new OcrTextRegion("8 More...", 174, 195, 128, 31),
+            new OcrTextRegion("旦 文档共建", 181, 534, 131, 34),
+        ],
+        [
+            new OcrWordRegion("8", 174, 199, 31, 23),
+            new OcrWordRegion("More...", 226, 195, 76, 31),
+            new OcrWordRegion("旦", 181, 537, 20, 29),
+            new OcrWordRegion("文", 220, 534, 24, 34),
+            new OcrWordRegion("档", 244, 534, 22, 34),
+            new OcrWordRegion("共", 266, 534, 22, 34),
+            new OcrWordRegion("建", 288, 534, 24, 34),
+        ]);
+
+        Assert.Equal(new OcrTextRegion("More...", 226, 195, 76, 31), tightened[0]);
+        Assert.Equal(new OcrTextRegion("文档共建", 220, 534, 92, 34), tightened[1]);
+    }
+
     [Fact]
     public void SelectableOcrWordSupportsContinuousCharactersAndReverseSelection()
     {

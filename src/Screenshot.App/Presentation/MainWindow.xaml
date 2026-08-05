@@ -908,7 +908,7 @@
                                FontSize="13"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
                                TextWrapping="Wrap"
-                               Text="支持键盘组合、单独 PrintScreen / 小键盘数字键和鼠标键；左/中/右键（含修饰键组合）需长按触发，短按和拖动保持原操作" />
+                               Text="支持键盘组合、单独 F1-F24 / PrintScreen / 小键盘数字键和鼠标键；左/中/右键（含修饰键组合）需长按触发，短按和拖动保持原操作" />
 
                     <StackPanel Margin="0,25,0,0">
                         <TextBlock FontSize="14"

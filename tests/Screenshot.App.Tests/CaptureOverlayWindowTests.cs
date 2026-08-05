@@ -1182,6 +1182,124 @@ public sealed class CaptureOverlayWindowTests
     }
 
     [Fact]
+    public async Task TranslationKeepsOcrRowsSeparateAndDoesNotCoverUnchangedChinese()
+    {
+        CaptureOverlayWindow? overlay = null;
+        Task? enterEditorTask = null;
+        var translationCompleted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        string[]? requestedSegments = null;
+
+        try
+        {
+            WpfTestHost.Invoke(() =>
+            {
+                var pinnedImageManager = new PinnedImageManager();
+                overlay = CaptureOverlayWindow.ShowInteractive(new CaptureOverlayOptions
+                {
+                    SaveDirectory = Path.GetTempPath(),
+                    KeepHistory = false,
+                    HistoryLimit = 0,
+                    HistoryService = new CaptureHistoryService(),
+                    PinnedImageManager = pinnedImageManager,
+                    StartOcrAsync = image =>
+                    {
+                        image.Dispose();
+                        return Task.CompletedTask;
+                    },
+                    RecognizeTextAsync = _ => Task.FromResult(
+                        new OcrRecognitionResult(
+                            true,
+                            "Connect\nChannel\n类别\n开发调优",
+                            ErrorMessage: null)
+                        {
+                            Regions =
+                            [
+                                new OcrTextRegion("Connect", 20, 12, 80, 20),
+                                new OcrTextRegion("Channel", 20, 40, 82, 20),
+                                new OcrTextRegion("类别", 20, 68, 44, 20),
+                                new OcrTextRegion("开发调优", 20, 96, 88, 20),
+                            ],
+                        }),
+                    TranslateTextAsync = recognition =>
+                    {
+                        requestedSegments = recognition.Regions
+                            .Select(region => region.Text)
+                            .ToArray();
+                        translationCompleted.TrySetResult();
+                        return Task.FromResult(new TranslationSegmentsResult(
+                            true,
+                            ["连接", "频道", "类别", "开发调优"],
+                            ErrorMessage: null));
+                    },
+                    CaptureClosed = pinnedImageManager.Dispose,
+                });
+                overlay.UpdateLayout();
+
+                var updateMethod = typeof(CaptureOverlayWindow).GetMethod(
+                    "UpdateSelectionBounds",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var enterEditorMethod = typeof(CaptureOverlayWindow).GetMethod(
+                    "EnterInlineEditorAsync",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.NotNull(updateMethod);
+                Assert.NotNull(enterEditorMethod);
+                updateMethod.Invoke(overlay, [new Rect(30, 30, 180, 150)]);
+                enterEditorTask = Assert.IsAssignableFrom<Task>(
+                    enterEditorMethod.Invoke(overlay, null));
+            });
+
+            await Assert.IsAssignableFrom<Task>(enterEditorTask)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+
+            WpfTestHost.Invoke(() =>
+            {
+                var button = Assert.IsType<Button>(
+                    overlay?.FindName("TranslateButton"));
+                button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+            });
+
+            await translationCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            WpfTestHost.Invoke(() =>
+            {
+                Assert.Equal(
+                    ["Connect", "Channel", "类别", "开发调优"],
+                    requestedSegments);
+
+                var editor = Assert.IsType<ImageEditorCanvas>(
+                    overlay?.FindName("InlineEditorCanvas"));
+                var translatedBorders = editor.Children
+                    .OfType<Border>()
+                    .ToArray();
+                Assert.Equal(2, translatedBorders.Length);
+                Assert.Equal(
+                    ["连接", "频道"],
+                    translatedBorders
+                        .Select(border => Assert.IsType<TextBlock>(border.Child).Text)
+                        .ToArray());
+
+                var textOverlay = Assert.IsType<Canvas>(
+                    overlay?.FindName("OcrTextOverlay"));
+                var translatedText = Assert.Single(
+                    textOverlay.Children.OfType<SelectableOcrTextOverlay>());
+                translatedText.SelectAllText();
+                Assert.Equal(
+                    string.Join(
+                        Environment.NewLine,
+                        "连接",
+                        "频道",
+                        "类别",
+                        "开发调优"),
+                    translatedText.SelectedText);
+            });
+        }
+        finally
+        {
+            WpfTestHost.Invoke(() => overlay?.Close());
+        }
+    }
+
+    [Fact]
     public async Task CompletedSelectionRunsTextRecognitionOnlyOnRequest()
     {
         CaptureOverlayWindow? overlay = null;
