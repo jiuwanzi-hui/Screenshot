@@ -140,7 +140,7 @@ public partial class ScrollCaptureProgressWindow : Window
         (StatusText.Text, InstructionText.Text) = state switch
         {
             ControlledScrollCaptureState.WaitingToStart =>
-                ("滚动截图 · 等待开始", "单击向下；双击向上；右键取消"),
+                ("滚动截图 · 等待选择方向", "单击向下；双击向上；右键取消"),
             ControlledScrollCaptureState.ScrollingDown =>
                 ("正在匀速向下滚动", "单击暂停；双击自动停稳后返回"),
             ControlledScrollCaptureState.PreparingPauseDown =>

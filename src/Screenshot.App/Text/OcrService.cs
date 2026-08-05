@@ -61,10 +61,77 @@ public static class OcrService
             var result = await engine.RecognizeAsync(softwareBitmap).AsTask(cancellationToken);
             var scaleX = (double)ocrBitmap.Width / capturedImage.Bitmap.Width;
             var scaleY = (double)ocrBitmap.Height / capturedImage.Bitmap.Height;
+            var recognition = BuildRecognitionResult(result, scaleX, scaleY);
+
+            var englishLanguage = OcrEngine.AvailableRecognizerLanguages
+                .FirstOrDefault(candidate => candidate.LanguageTag.StartsWith(
+                    "en",
+                    StringComparison.OrdinalIgnoreCase));
+            if (!languageTag.StartsWith("en", StringComparison.OrdinalIgnoreCase) &&
+                englishLanguage is not null &&
+                ShouldPreferEnglishLanguage(recognition.Text))
+            {
+                var englishEngine = OcrEngine.TryCreateFromLanguage(englishLanguage);
+                if (englishEngine is not null)
+                {
+                    var englishResult = await englishEngine
+                        .RecognizeAsync(softwareBitmap)
+                        .AsTask(cancellationToken);
+                    var englishRecognition = BuildRecognitionResult(
+                        englishResult,
+                        scaleX,
+                        scaleY);
+                    if (englishRecognition.Regions.Count > 0)
+                    {
+                        recognition = englishRecognition;
+                    }
+                }
+            }
+
+            return recognition;
+        }
+        catch (OperationCanceledException)
+        {
+            return OcrRecognitionResult.Failure("文字识别已取消。");
+        }
+        catch (Exception)
+        {
+            return OcrRecognitionResult.Failure("文字识别失败，请检查语言包后重试。");
+        }
+    }
+
+    internal static bool ShouldPreferEnglishLanguage(string text)
+    {
+        var letterCount = 0;
+        var latinLetterCount = 0;
+        foreach (var character in text)
+        {
+            if (!char.IsLetter(character))
+            {
+                continue;
+            }
+
+            letterCount++;
+            if (character is >= 'A' and <= 'Z' or >= 'a' and <= 'z')
+            {
+                latinLetterCount++;
+            }
+        }
+
+        return latinLetterCount >= 8 &&
+               latinLetterCount >= letterCount * 0.7;
+    }
+
+    private static OcrRecognitionResult BuildRecognitionResult(
+        OcrResult result,
+        double scaleX,
+        double scaleY)
+    {
             var text = string.Join(
                 Environment.NewLine,
                 result.Lines.Select(line => line.Text));
             var regions = new List<OcrTextRegion>();
+            var words = new List<OcrWordRegion>();
 
             foreach (var line in result.Lines)
             {
@@ -84,22 +151,29 @@ public static class OcrService
                     left / scaleX,
                     top / scaleY,
                     (right - left) / scaleX,
-                    (bottom - top) / scaleY));
+                    (bottom - top) / scaleY)
+                {
+                    EstimatedFontSize = Math.Clamp(
+                        ((bottom - top) / scaleY) / 1.12,
+                        8,
+                        64),
+                });
+
+                words.AddRange(line.Words
+                    .Where(word => !string.IsNullOrWhiteSpace(word.Text))
+                    .Select(word => new OcrWordRegion(
+                        word.Text,
+                        word.BoundingRect.X / scaleX,
+                        word.BoundingRect.Y / scaleY,
+                        word.BoundingRect.Width / scaleX,
+                        word.BoundingRect.Height / scaleY)));
             }
 
-            return new OcrRecognitionResult(true, text, ErrorMessage: null)
-            {
-                Regions = regions,
-            };
-        }
-        catch (OperationCanceledException)
+        return new OcrRecognitionResult(true, text, ErrorMessage: null)
         {
-            return OcrRecognitionResult.Failure("文字识别已取消。");
-        }
-        catch (Exception)
-        {
-            return OcrRecognitionResult.Failure("文字识别失败，请检查语言包后重试。");
-        }
+            Regions = regions,
+            Words = words,
+        };
     }
 
     private static Bitmap PrepareBitmap(Bitmap source)

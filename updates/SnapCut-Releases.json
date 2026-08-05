@@ -1,5 +1,19 @@
 [
   {
+    "tag_name": "v2.8.0",
+    "name": "SnapCut 2.8.0",
+    "body": "- 新增截图与录屏统一历史查看、视频重命名/排序/定位、长图裁剪和多套独立主题。\n- 框选后支持 Ctrl+C 直接复制；OCR 文字可跨行选择，标注可选中后按 Delete 删除。\n- 内容识别改为按需运行：仅二维码轻量自动检测，文字 OCR 与表格复制由用户触发；完善高质量 OCR 与本地大模型的断点下载、校验、超时和回退。\n- 优化 OCR/翻译布局、取消响应和自适应线程预算，降低不同配置电脑上的卡顿与 CPU 峰值。\n- 长截图等待用户单击向下或双击向上后再受控滚动，不再使用物理滚轮采集。\n- 安装版和免安装版均自包含 .NET、录屏组件及所需 Visual C++ x64 运行库，无需额外下载运行环境。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.8.0",
+    "published_at": "2026-08-05T15:00:00+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.0/SnapCut-Update.json" },
+      { "name": "SnapCut-Setup-2.8.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.0/SnapCut-Setup-2.8.0-win-x64.exe" },
+      { "name": "SnapCut-Portable-2.8.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.0/SnapCut-Portable-2.8.0-win-x64.zip" }
+    ]
+  },
+  {
     "tag_name": "v2.7.1",
     "name": "SnapCut 2.7.1",
     "body": "- 修复 2.7.0 单文件正式包内嵌的 C++/CLI 录屏组件在部分环境无法加载、导致区域录制无法启动的问题。\n- 录屏组件改为独立文件随程序分发，无需用户额外安装；构建时强制校验组件是否进入发布包。\n- 区域录制异常没有系统消息时显示具体异常类型，便于后续诊断。",

@@ -33,11 +33,32 @@ public sealed class CaptureHistoryService
         {
             var evicted = Items[^1];
             Items.RemoveAt(Items.Count - 1);
-            DeleteCacheFile(evicted.TakeImagePath());
+            DeleteCacheFile(evicted.MarkRemoved());
         }
 
         BeginOffload(item, fullImage);
         return item;
+    }
+
+    public bool Remove(CaptureHistoryItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+
+        if (!Items.Remove(item))
+        {
+            return false;
+        }
+
+        DeleteCacheFile(item.MarkRemoved());
+        return true;
+    }
+
+    public void Clear()
+    {
+        foreach (var item in Items.ToArray())
+        {
+            _ = Remove(item);
+        }
     }
 
     /// <summary>
@@ -90,7 +111,10 @@ public sealed class CaptureHistoryService
                     encoder.Save(stream);
                 }
 
-                item.CompleteOffload(imagePath);
+                if (!item.CompleteOffload(imagePath))
+                {
+                    File.Delete(imagePath);
+                }
             }
             catch (IOException)
             {

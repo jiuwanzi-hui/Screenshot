@@ -1,0 +1,154 @@
+<Window x:Class="Screenshot.App.Editor.ImageCropWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="裁剪图片"
+        Width="860"
+        Height="680"
+        MinWidth="620"
+        MinHeight="500"
+        Background="{DynamicResource AppWindowBackgroundBrush}"
+        FontFamily="Microsoft YaHei UI"
+        WindowStartupLocation="CenterOwner">
+    <Window.Resources>
+        <Style x:Key="CropSlider" TargetType="Slider">
+            <Setter Property="Height" Value="28" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Border Height="3"
+                                    Background="{DynamicResource ImageEditorSliderTrackBrush}"
+                                    CornerRadius="1.5" />
+                            <Track x:Name="PART_Track"
+                                   Height="14"
+                                   VerticalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                                  IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="3"
+                                                        VerticalAlignment="Center"
+                                                        Background="{DynamicResource AppAccentBrush}"
+                                                        CornerRadius="1.5" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                                  IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="14"
+                                           Height="14"
+                                           Background="{DynamicResource AppAccentBrush}"
+                                           BorderBrush="{DynamicResource ImageEditorSliderThumbBorderBrush}"
+                                           BorderThickness="2"
+                                           Cursor="Hand">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse Fill="{TemplateBinding Background}"
+                                                         Stroke="{TemplateBinding BorderBrush}"
+                                                         StrokeThickness="{TemplateBinding BorderThickness}" />
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="18"
+          TextElement.Foreground="{DynamicResource AppControlForegroundBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <DockPanel Margin="0,0,0,12">
+            <TextBlock FontSize="20"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource AppTextPrimaryBrush}"
+                       Text="裁剪四边" />
+            <TextBlock x:Name="CropSizeText"
+                       DockPanel.Dock="Right"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource AppTextSecondaryBrush}" />
+        </DockPanel>
+
+        <Border Grid.Row="1"
+                Padding="10"
+                Background="{DynamicResource AppPanelBackgroundBrush}"
+                BorderBrush="{DynamicResource AppBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="8">
+            <ScrollViewer x:Name="CropPreviewScrollViewer"
+                          Background="Transparent"
+                          CanContentScroll="False"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+                <Image x:Name="CropPreviewImage"
+                       HorizontalAlignment="Stretch"
+                       VerticalAlignment="Top"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       Stretch="Uniform" />
+            </ScrollViewer>
+        </Border>
+
+        <Grid Grid.Row="2" Margin="0,14,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="62" />
+                <ColumnDefinition Width="18" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="62" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="34" />
+                <RowDefinition Height="34" />
+            </Grid.RowDefinitions>
+
+            <TextBlock VerticalAlignment="Center" Text="上" />
+            <Slider x:Name="TopCropSlider" Grid.Column="1" Margin="10,0" Style="{StaticResource CropSlider}" ValueChanged="OnCropValueChanged" />
+            <TextBlock x:Name="TopCropText" Grid.Column="2" VerticalAlignment="Center" TextAlignment="Right" />
+            <TextBlock Grid.Column="4" VerticalAlignment="Center" Text="右" />
+            <Slider x:Name="RightCropSlider" Grid.Column="5" Margin="10,0" Style="{StaticResource CropSlider}" ValueChanged="OnCropValueChanged" />
+            <TextBlock x:Name="RightCropText" Grid.Column="6" VerticalAlignment="Center" TextAlignment="Right" />
+
+            <TextBlock Grid.Row="1" VerticalAlignment="Center" Text="下" />
+            <Slider x:Name="BottomCropSlider" Grid.Row="1" Grid.Column="1" Margin="10,0" Style="{StaticResource CropSlider}" ValueChanged="OnCropValueChanged" />
+            <TextBlock x:Name="BottomCropText" Grid.Row="1" Grid.Column="2" VerticalAlignment="Center" TextAlignment="Right" />
+            <TextBlock Grid.Row="1" Grid.Column="4" VerticalAlignment="Center" Text="左" />
+            <Slider x:Name="LeftCropSlider" Grid.Row="1" Grid.Column="5" Margin="10,0" Style="{StaticResource CropSlider}" ValueChanged="OnCropValueChanged" />
+            <TextBlock x:Name="LeftCropText" Grid.Row="1" Grid.Column="6" VerticalAlignment="Center" TextAlignment="Right" />
+        </Grid>
+
+        <StackPanel Grid.Row="3" HorizontalAlignment="Right" Orientation="Horizontal">
+            <Button Width="76" Height="34" Margin="0,0,8,0" Click="OnResetClick" Content="重置" />
+            <Button Width="76" Height="34" Margin="0,0,8,0" Click="OnCancelClick" Content="取消" />
+            <Button Width="88"
+                    Height="34"
+                    Background="{DynamicResource AppAccentBrush}"
+                    BorderBrush="{DynamicResource AppAccentBrush}"
+                    Click="OnConfirmClick"
+                    Content="应用裁剪"
+                    Foreground="#FFFFFF" />
+        </StackPanel>
+    </Grid>
+</Window>

@@ -4,9 +4,16 @@ namespace Screenshot.App.Core;
 
 public enum AppTheme
 {
+    // Legacy values remain readable so existing settings migrate cleanly.
     System,
     Light,
     Dark,
+    AuroraMist,
+    CoralSky,
+    GinkgoPaper,
+    ForestNight,
+    ObsidianGold,
+    NeonDeep,
 }
 
 public enum WindowCloseBehavior
@@ -54,9 +61,28 @@ public enum TranslationProviderKind
     Offline,
 }
 
+public enum OfflineTranslationQuality
+{
+    High,
+    Ultra,
+    Fast,
+}
+
+public enum OcrEngineMode
+{
+    Windows,
+    PaddleOcrV6,
+}
+
+public enum OfflineTranslationEngine
+{
+    Mozilla,
+    QwenLargeModel,
+}
+
 public sealed record AppSettings
 {
-    public int SettingsVersion { get; init; } = 3;
+    public int SettingsVersion { get; init; } = 5;
 
     public string SaveDirectory { get; init; } = GetDefaultSaveDirectory();
 
@@ -89,7 +115,7 @@ public sealed record AppSettings
     public WindowCloseBehavior CloseBehavior { get; init; } =
         WindowCloseBehavior.MinimizeToBackground;
 
-    public AppTheme Theme { get; init; } = AppTheme.System;
+    public AppTheme Theme { get; init; } = AppTheme.AuroraMist;
 
     public string RegionCaptureHotKey { get; init; } = "Ctrl+Alt+S";
 
@@ -117,6 +143,8 @@ public sealed record AppSettings
 
     public string OcrLanguageTag { get; init; } = "zh-Hans";
 
+    public OcrEngineMode OcrEngine { get; init; } = OcrEngineMode.Windows;
+
     public string TranslationProvider { get; init; } = "OpenAICompatible";
 
     public string TranslationEndpoint { get; init; } = string.Empty;
@@ -133,6 +161,12 @@ public sealed record AppSettings
         TranslationProviderKind.Online,
         TranslationProviderKind.Offline,
     ];
+
+    public OfflineTranslationQuality OfflineTranslationQuality { get; init; } =
+        OfflineTranslationQuality.High;
+
+    public OfflineTranslationEngine OfflineTranslationEngine { get; init; } =
+        OfflineTranslationEngine.Mozilla;
 
     public bool KeepHistory { get; init; }
 
@@ -178,7 +212,8 @@ public sealed record AppSettings
 
         return this with
         {
-            SettingsVersion = Math.Max(SettingsVersion, 3),
+            SettingsVersion = Math.Max(SettingsVersion, 5),
+            Theme = NormalizeTheme(Theme),
             CloseBehavior = Enum.IsDefined(CloseBehavior)
                 ? CloseBehavior
                 : defaults.CloseBehavior,
@@ -218,6 +253,9 @@ public sealed record AppSettings
             OcrLanguageTag = string.IsNullOrWhiteSpace(OcrLanguageTag)
                 ? defaults.OcrLanguageTag
                 : OcrLanguageTag.Trim(),
+            OcrEngine = Enum.IsDefined(OcrEngine)
+                ? OcrEngine
+                : defaults.OcrEngine,
             TranslationProvider = TranslationProvider?.Trim() ?? string.Empty,
             TranslationEndpoint = TranslationEndpoint?.Trim() ?? string.Empty,
             TranslationTargetLanguage = string.IsNullOrWhiteSpace(TranslationTargetLanguage)
@@ -228,8 +266,30 @@ public sealed record AppSettings
                 : TranslationModel.Trim(),
             TranslationMode = TranslationMode.Automatic,
             TranslationProviderPriority = translationProviderPriority.ToArray(),
+            OfflineTranslationQuality = Enum.IsDefined(OfflineTranslationQuality)
+                ? OfflineTranslationQuality
+                : defaults.OfflineTranslationQuality,
+            OfflineTranslationEngine = Enum.IsDefined(OfflineTranslationEngine)
+                ? OfflineTranslationEngine
+                : defaults.OfflineTranslationEngine,
             SendTextToOnlineTranslation = true,
             HistoryLimit = Math.Clamp(HistoryLimit, 0, 100),
+        };
+    }
+
+    internal static AppTheme NormalizeTheme(AppTheme theme)
+    {
+        return theme switch
+        {
+            AppTheme.System or AppTheme.Light => AppTheme.AuroraMist,
+            AppTheme.Dark => AppTheme.ForestNight,
+            AppTheme.AuroraMist or
+            AppTheme.CoralSky or
+            AppTheme.GinkgoPaper or
+            AppTheme.ForestNight or
+            AppTheme.ObsidianGold or
+            AppTheme.NeonDeep => theme,
+            _ => AppTheme.AuroraMist,
         };
     }
 

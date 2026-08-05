@@ -17,7 +17,7 @@ namespace Screenshot.App.Editor;
 
 public partial class ImageEditorWindow : Window
 {
-    private readonly CapturedImage _capturedImage;
+    private CapturedImage _capturedImage;
     private readonly string _saveDirectory;
     private EditorTool _selectedTool = EditorTool.Rectangle;
     private WpfColor _selectedColor = WpfColor.FromRgb(46, 175, 165);
@@ -35,9 +35,11 @@ public partial class ImageEditorWindow : Window
         _saveDirectory = saveDirectory;
 
         InitializeComponent();
+        ApplyThemedContextMenu(ShapeToolButton.ContextMenu);
         WindowPlacementService.Track(this, WindowPlacementKeys.ImageEditor);
         PopulateEmojiPalette();
         EditorCanvas.HistoryChanged += OnEditorHistoryChanged;
+        EditorCanvas.AnnotationSelectionChanged += OnAnnotationSelectionChanged;
 
         EditorCanvas.Visibility = Visibility.Hidden;
         StatusText.Text = "正在准备编辑画布...";
@@ -49,6 +51,7 @@ public partial class ImageEditorWindow : Window
         _isClosed = true;
         Loaded -= OnEditorLoaded;
         EditorCanvas.HistoryChanged -= OnEditorHistoryChanged;
+        EditorCanvas.AnnotationSelectionChanged -= OnAnnotationSelectionChanged;
         _capturedImage.Dispose();
         base.OnClosed(e);
         Core.MemoryFootprint.TrimAfterHeavyOperation();
@@ -92,6 +95,70 @@ public partial class ImageEditorWindow : Window
     private void OnEditorHistoryChanged(object? sender, EventArgs e)
     {
         UpdateUndoRedoAvailability();
+    }
+
+    private void OnAnnotationSelectionChanged(object? sender, EventArgs e)
+    {
+        StatusText.Text = EditorCanvas.HasSelectedAnnotation
+            ? "已选中标注：可拖动或缩放，按 Delete 删除。"
+            : "可以开始编辑。";
+    }
+
+    private void OnShapeMenuArrowMouseDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (ShapeToolButton.ContextMenu is not { } menu)
+        {
+            return;
+        }
+
+        menu.PlacementTarget = ShapeToolButton;
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private static void ApplyThemedContextMenu(ContextMenu menu)
+    {
+        if (System.Windows.Application.Current?.TryFindResource(
+                "ThemedContextMenuStyle") is Style menuStyle)
+        {
+            menu.Style = menuStyle;
+        }
+
+        if (System.Windows.Application.Current?.TryFindResource(
+                "ThemedMenuItemStyle") is not Style itemStyle)
+        {
+            return;
+        }
+
+        foreach (var item in menu.Items.OfType<MenuItem>())
+        {
+            item.Style = itemStyle;
+        }
+    }
+
+    private void OnShapeMenuItemClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string toolName } ||
+            !Enum.TryParse<EditorTool>(toolName, out var tool) ||
+            tool is not (EditorTool.Rectangle or EditorTool.Ellipse))
+        {
+            return;
+        }
+
+        ShapeToolButton.Tag = toolName;
+        ShapeToolIcon.Text = tool == EditorTool.Ellipse ? "○" : "□";
+        ShapeToolLabel.Text = tool == EditorTool.Ellipse ? "椭圆" : "矩形";
+        ShapeToolButton.ToolTip = $"{ShapeToolLabel.Text}标注";
+        ShapeToolButton.IsChecked = true;
+        _selectedTool = tool;
+        UpdateStrokeWidthText();
+        if (_isInitialized)
+        {
+            EditorCanvas.SelectTool(tool);
+            EditorCanvas.Focus();
+        }
     }
 
     private void OnToolSelected(object sender, RoutedEventArgs e)
@@ -253,6 +320,54 @@ public partial class ImageEditorWindow : Window
             return;
         }
         EditorCanvas.Redo();
+    }
+
+    private void OnCropClick(object sender, RoutedEventArgs e)
+    {
+        if (!_isInitialized)
+        {
+            StatusText.Text = "编辑画布仍在准备中。";
+            return;
+        }
+
+        try
+        {
+            var renderedImage = EditorCanvas.RenderEditedImage();
+            var cropWindow = new ImageCropWindow(renderedImage)
+            {
+                Owner = this,
+            };
+            if (cropWindow.ShowDialog() != true || cropWindow.CroppedImage is null)
+            {
+                return;
+            }
+
+            if (cropWindow.CroppedImage.PixelWidth == renderedImage.PixelWidth &&
+                cropWindow.CroppedImage.PixelHeight == renderedImage.PixelHeight)
+            {
+                StatusText.Text = "四边均未裁剪，图片保持不变。";
+                return;
+            }
+
+            var replacement = CapturedImage.FromBitmapSource(
+                cropWindow.CroppedImage);
+            var previous = _capturedImage;
+            _capturedImage = replacement;
+            (_displayWidth, _displayHeight) = GetWidthFilledDisplaySize(
+                replacement.Preview.PixelWidth,
+                replacement.Preview.PixelHeight);
+            EditorCanvas.Initialize(replacement, _displayWidth, _displayHeight);
+            EditorCanvas.SelectTool(_selectedTool);
+            UpdateEditorViewportSize();
+            previous.Dispose();
+            StatusText.Text =
+                $"已裁剪为 {replacement.Preview.PixelWidth} x " +
+                $"{replacement.Preview.PixelHeight}，可继续编辑。";
+        }
+        catch
+        {
+            StatusText.Text = "裁剪失败，请减小图片尺寸后重试。";
+        }
     }
 
     private void OnTopmostClick(object sender, RoutedEventArgs e)

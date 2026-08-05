@@ -6,6 +6,33 @@ namespace Screenshot.App.Tests;
 public sealed class ScrollCaptureProgressWindowTests
 {
     [Fact]
+    public void WaitingStateRequiresAClickToChooseTheScrollDirection()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var window = new ScrollCaptureProgressWindow();
+            try
+            {
+                window.QueueInteractionState(
+                    ControlledScrollCaptureState.WaitingToStart);
+
+                var status = Assert.IsType<System.Windows.Controls.TextBlock>(
+                    window.FindName("StatusText"));
+                var instruction = Assert.IsType<System.Windows.Controls.TextBlock>(
+                    window.FindName("InstructionText"));
+                Assert.Contains("等待选择方向", status.Text);
+                Assert.Equal("单击向下；双击向上；右键取消", instruction.Text);
+                Assert.Null(typeof(ScrollCaptureWheelMonitor).GetMethod(
+                    "StartControlledCapture"));
+            }
+            finally
+            {
+                window.CloseFromCoordinator();
+            }
+        });
+    }
+
+    [Fact]
     public void RightClickCancelsOnlyAfterTheButtonIsReleased()
     {
         WpfTestHost.Invoke(() =>

@@ -14,6 +14,59 @@ namespace Screenshot.App.Tests;
 public sealed class ImageEditorCanvasTests
 {
     [Fact]
+    public void EllipseCanBeSelectedDeletedAndRestoredByUndo()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var bitmap = new Bitmap(100, 80, PixelFormat.Format32bppPArgb);
+            using var image = new CapturedImage((Bitmap)bitmap.Clone());
+            var editor = new ImageEditorCanvas();
+            editor.Initialize(image, displayWidth: 100, displayHeight: 80);
+            var documentField = typeof(ImageEditorCanvas).GetField(
+                "_document",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var selectedField = typeof(ImageEditorCanvas).GetField(
+                "_selectedAnnotationIndex",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var rebuildMethod = typeof(ImageEditorCanvas).GetMethod(
+                "RebuildCanvas",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var hitTestMethod = typeof(ImageEditorCanvas).GetMethod(
+                "HitTestAnnotation",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(documentField);
+            Assert.NotNull(selectedField);
+            Assert.NotNull(rebuildMethod);
+            Assert.NotNull(hitTestMethod);
+            var document = Assert.IsType<EditorDocument>(documentField.GetValue(editor));
+            document.Add(new EllipseAnnotation(
+                new System.Windows.Rect(10, 10, 60, 40),
+                System.Windows.Media.Colors.Red,
+                4));
+            rebuildMethod.Invoke(editor, null);
+
+            Assert.Contains(editor.Children.Cast<System.Windows.UIElement>(), child =>
+                child is System.Windows.Shapes.Ellipse ellipse &&
+                ellipse.Width == 60 && ellipse.Height == 40);
+            Assert.Equal(-1, Assert.IsType<int>(hitTestMethod.Invoke(
+                editor,
+                [new WpfPoint(40, 30)])));
+            Assert.Equal(0, Assert.IsType<int>(hitTestMethod.Invoke(
+                editor,
+                [new WpfPoint(10, 30)])));
+
+            selectedField.SetValue(editor, 0);
+            Assert.True(editor.HasSelectedAnnotation);
+            Assert.True(editor.DeleteSelectedAnnotation());
+            Assert.False(editor.HasSelectedAnnotation);
+            Assert.Null(editor.GetAnnotationBounds());
+
+            editor.Undo();
+            Assert.NotNull(editor.GetAnnotationBounds());
+        });
+    }
+
+    [Fact]
     public void ReframeKeepsAnnotationsAndOffsetsThemForTheNewCaptureOrigin()
     {
         WpfTestHost.Invoke(() =>
@@ -118,6 +171,39 @@ public sealed class ImageEditorCanvasTests
     }
 
     [Fact]
+    public void RenderingDoesNotRearrangeTheVisibleEditorCanvas()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var bitmap = new Bitmap(80, 60, PixelFormat.Format32bppPArgb);
+            using var image = new CapturedImage((Bitmap)bitmap.Clone());
+            var parent = new System.Windows.Controls.Canvas
+            {
+                Width = 500,
+                Height = 400,
+            };
+            var editor = new ImageEditorCanvas();
+            editor.Initialize(image, displayWidth: 160, displayHeight: 120);
+            System.Windows.Controls.Canvas.SetLeft(editor, 137);
+            System.Windows.Controls.Canvas.SetTop(editor, 91);
+            parent.Children.Add(editor);
+            parent.Measure(new System.Windows.Size(500, 400));
+            parent.Arrange(new System.Windows.Rect(0, 0, 500, 400));
+            var offsetBefore = System.Windows.Media.VisualTreeHelper.GetOffset(editor);
+            var transformBefore = editor.RenderTransform;
+            var renderSizeBefore = editor.RenderSize;
+
+            var rendered = editor.RenderEditedImage();
+
+            Assert.Equal(80, rendered.PixelWidth);
+            Assert.Equal(60, rendered.PixelHeight);
+            Assert.Equal(offsetBefore, System.Windows.Media.VisualTreeHelper.GetOffset(editor));
+            Assert.Same(transformBefore, editor.RenderTransform);
+            Assert.Equal(renderSizeBefore, editor.RenderSize);
+        });
+    }
+
+    [Fact]
     public void ZoomChangesDisplayExtentWithoutChangingOutputPixels()
     {
         WpfTestHost.Invoke(() =>
@@ -166,14 +252,21 @@ public sealed class ImageEditorCanvasTests
             var editor = new ImageEditorCanvas();
             editor.Initialize(image, displayWidth: 64, displayHeight: 64);
             var baseline = editor.RenderEditedImage();
-            var addMosaic = typeof(ImageEditorCanvas).GetMethod(
-                "AddMosaicVisual",
+            var documentField = typeof(ImageEditorCanvas).GetField(
+                "_document",
                 BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(addMosaic);
-            addMosaic.Invoke(editor, [new MosaicAnnotation(
+            var rebuildMethod = typeof(ImageEditorCanvas).GetMethod(
+                "RebuildCanvas",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(documentField);
+            Assert.NotNull(rebuildMethod);
+            var document = Assert.IsType<EditorDocument>(
+                documentField.GetValue(editor));
+            document.Add(new MosaicAnnotation(
                 [new WpfPoint(10, 10), new WpfPoint(54, 54)],
                 StrokeWidth: 14,
-                BlockSize: 6)]);
+                BlockSize: 6));
+            rebuildMethod.Invoke(editor, null);
             var rendered = editor.RenderEditedImage();
 
             var stride = rendered.PixelWidth * 4;
@@ -411,13 +504,14 @@ public sealed class ImageEditorCanvasTests
             var foreground = Assert.IsType<System.Windows.Media.SolidColorBrush>(
                 translatedText.Foreground);
             Assert.True(background.Color.R < 80);
+            Assert.Equal(byte.MaxValue, background.Color.A);
             Assert.True(foreground.Color.R > 220);
             Assert.InRange(
                 translatedText.FontSize,
                 TranslationTextLayout.MinimumFontSize,
                 12);
-            Assert.Equal(System.Windows.TextWrapping.Wrap, translatedText.TextWrapping);
-            Assert.Equal(System.Windows.TextTrimming.CharacterEllipsis, translatedText.TextTrimming);
+            Assert.Equal(System.Windows.TextWrapping.NoWrap, translatedText.TextWrapping);
+            Assert.Equal(System.Windows.TextTrimming.None, translatedText.TextTrimming);
             Assert.True(overlays[0].ClipToBounds);
             Assert.Equal(16, overlays[0].Height);
 

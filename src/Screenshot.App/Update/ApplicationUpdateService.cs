@@ -254,6 +254,7 @@ public sealed class ApplicationUpdateService : IDisposable
         CancellationToken cancellationToken = default)
     {
         var failures = new List<string>();
+        var staticCandidates = new List<ReleaseHistoryCandidate>();
         foreach (var source in _sources.Where(source =>
                      source.StaticReleaseHistoryUri is not null))
         {
@@ -262,17 +263,14 @@ public sealed class ApplicationUpdateService : IDisposable
                 var releaseItems = await ReadReleaseHistoryItemsAsync(
                     source.StaticReleaseHistoryUri!,
                     cancellationToken);
-                var releases = await CreateReleaseInfosAsync(
-                    source,
-                    releaseItems,
-                    cancellationToken);
-                if (releases.Count > 0)
+                if (HasFormalRelease(releaseItems))
                 {
-                    TrySaveReleaseHistoryCache(source.Mirror, releaseItems);
-                    return new ApplicationReleaseHistoryResult(
-                        true,
-                        releases,
-                        $"已从 {GetMirrorName(source.Mirror)}加载 {releases.Count} 个正式版本。");
+                    staticCandidates.Add(new ReleaseHistoryCandidate(
+                        $"{GetMirrorName(source.Mirror)}静态清单",
+                        source,
+                        releaseItems,
+                        SaveToCache: true));
+                    continue;
                 }
 
                 failures.Add($"{GetMirrorName(source.Mirror)}静态清单：没有可显示的正式版本");
@@ -288,10 +286,30 @@ public sealed class ApplicationUpdateService : IDisposable
             }
         }
 
-        var localResult = await TryReadBestLocalReleaseHistoryAsync(cancellationToken);
-        if (localResult is not null)
+        staticCandidates.AddRange(await ReadLocalReleaseHistoryCandidatesAsync(cancellationToken));
+        foreach (var candidate in OrderReleaseHistoryCandidates(staticCandidates))
         {
-            return localResult;
+            var releases = await CreateReleaseInfosAsync(
+                candidate.Source,
+                candidate.Releases,
+                cancellationToken);
+            if (releases.Count == 0)
+            {
+                continue;
+            }
+
+            if (candidate.SaveToCache)
+            {
+                TrySaveReleaseHistoryCache(candidate.Source.Mirror, candidate.Releases);
+            }
+
+            var sourceNote = candidate.SaveToCache
+                ? string.Empty
+                : " 在线静态清单暂不可用或版本较旧。";
+            return new ApplicationReleaseHistoryResult(
+                true,
+                releases,
+                $"已从 {candidate.Name}加载 {releases.Count} 个正式版本。{sourceNote}");
         }
 
         foreach (var source in _sources)
@@ -438,14 +456,20 @@ public sealed class ApplicationUpdateService : IDisposable
             .ToArray();
     }
 
-    private async Task<ApplicationReleaseHistoryResult?> TryReadBestLocalReleaseHistoryAsync(
+    private async Task<IReadOnlyList<ReleaseHistoryCandidate>> ReadLocalReleaseHistoryCandidatesAsync(
         CancellationToken cancellationToken)
     {
-        var candidates = new List<(string Name, ReleaseHistoryCacheFile Cache)>();
+        var candidates = new List<ReleaseHistoryCandidate>();
         var cached = TryReadReleaseHistoryCache();
         if (cached is not null)
         {
-            candidates.Add(("本地缓存", cached));
+            var source = _sources.FirstOrDefault(source => source.Mirror == cached.Mirror) ??
+                _sources[0];
+            candidates.Add(new ReleaseHistoryCandidate(
+                "本地缓存",
+                source,
+                cached.Releases,
+                SaveToCache: false));
         }
 
         if (!string.IsNullOrWhiteSpace(_bundledReleaseHistoryPath) &&
@@ -458,14 +482,14 @@ public sealed class ApplicationUpdateService : IDisposable
                     stream,
                     ManifestJsonOptions,
                     cancellationToken) ?? [];
-                candidates.Add((
+                var source = _sources.FirstOrDefault(source =>
+                        source.Mirror == ApplicationUpdateMirror.GitHub) ??
+                    _sources[0];
+                candidates.Add(new ReleaseHistoryCandidate(
                     "程序内置清单",
-                    new ReleaseHistoryCacheFile
-                    {
-                        Mirror = ApplicationUpdateMirror.GitHub,
-                        SavedAt = DateTimeOffset.MinValue,
-                        Releases = items,
-                    }));
+                    source,
+                    items,
+                    SaveToCache: false));
             }
             catch (Exception exception) when (
                 exception is IOException or UnauthorizedAccessException or JsonException)
@@ -473,32 +497,40 @@ public sealed class ApplicationUpdateService : IDisposable
             }
         }
 
-        foreach (var candidate in candidates
-                     .Where(candidate => candidate.Cache.Releases.Count > 0)
-                     .OrderByDescending(candidate => candidate.Cache.Releases
-                         .Select(item => ParseReleaseVersion(item.TagName))
-                         .Where(version => version is not null)
-                         .Select(version => ComparableVersion(version!))
-                         .DefaultIfEmpty(new Version(0, 0, 0))
-                         .Max()))
-        {
-            var source = _sources.FirstOrDefault(source =>
-                    source.Mirror == candidate.Cache.Mirror) ??
-                _sources[0];
-            var releases = await CreateReleaseInfosAsync(
-                source,
-                candidate.Cache.Releases,
-                cancellationToken);
-            if (releases.Count > 0)
-            {
-                return new ApplicationReleaseHistoryResult(
-                    true,
-                    releases,
-                    $"已从{candidate.Name}加载 {releases.Count} 个正式版本。在线清单暂不可用。");
-            }
-        }
+        return candidates;
+    }
 
-        return null;
+    private static IEnumerable<ReleaseHistoryCandidate> OrderReleaseHistoryCandidates(
+        IEnumerable<ReleaseHistoryCandidate> candidates)
+    {
+        return candidates
+            .Where(candidate => HasFormalRelease(candidate.Releases))
+            .OrderByDescending(candidate => GetLatestFormalReleaseVersion(candidate.Releases))
+            .ThenByDescending(candidate => GetFormalReleaseCount(candidate.Releases));
+    }
+
+    private static bool HasFormalRelease(IReadOnlyList<ReleaseApiItem> releases)
+    {
+        return GetFormalReleaseCount(releases) > 0;
+    }
+
+    private static int GetFormalReleaseCount(IReadOnlyList<ReleaseApiItem> releases)
+    {
+        return releases.Count(item =>
+            !item.IsDraft &&
+            !item.IsPrerelease &&
+            ParseReleaseVersion(item.TagName) is not null);
+    }
+
+    private static Version GetLatestFormalReleaseVersion(IReadOnlyList<ReleaseApiItem> releases)
+    {
+        return releases
+            .Where(item => !item.IsDraft && !item.IsPrerelease)
+            .Select(item => ParseReleaseVersion(item.TagName))
+            .Where(version => version is not null)
+            .Select(version => ComparableVersion(version!))
+            .OrderByDescending(version => version)
+            .FirstOrDefault() ?? new Version(0, 0, 0);
     }
 
     private ReleaseHistoryCacheFile? TryReadReleaseHistoryCache()
@@ -1146,6 +1178,12 @@ public sealed class ApplicationUpdateService : IDisposable
 
         public List<ReleaseApiItem> Releases { get; init; } = [];
     }
+
+    private sealed record ReleaseHistoryCandidate(
+        string Name,
+        UpdateSource Source,
+        IReadOnlyList<ReleaseApiItem> Releases,
+        bool SaveToCache);
 
     private sealed record UpdateSource(
         ApplicationUpdateMirror Mirror,

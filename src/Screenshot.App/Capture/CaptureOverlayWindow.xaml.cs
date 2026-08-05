@@ -68,6 +68,9 @@ public sealed class CaptureOverlayOptions
     public Func<OcrRecognitionResult, Task<TranslationSegmentsResult>>?
         TranslateTextAsync { get; init; }
 
+    public Func<CapturedImage, CancellationToken, Task<ContentRecognitionResult>>?
+        RecognizeFormulaAsync { get; init; }
+
     public bool RecognizeTextAfterSelection { get; init; }
 
     public bool TranslateTextAfterSelection { get; init; }
@@ -85,7 +88,7 @@ public sealed class CaptureOverlayOptions
     public Action? CaptureClosed { get; init; }
 }
 
-public partial class CaptureOverlayWindow : Window
+public partial class CaptureOverlayWindow : Window, IDisposable
 {
     private const int TopmostWindow = -1;
     private const int ExtendedWindowStyleIndex = -20;
@@ -111,6 +114,7 @@ public partial class CaptureOverlayWindow : Window
     private readonly TaskCompletionSource<ScrollCaptureSelection?>?
         _scrollCaptureSelectionCompletionSource;
     private readonly DispatcherTimer _windowSnapTimer;
+    private readonly CancellationTokenSource _lifetimeCancellationSource = new();
     private WpfPoint _selectionStartPoint;
     private WpfPoint _dragStartPoint;
     private Rect _dragStartBounds;
@@ -127,6 +131,7 @@ public partial class CaptureOverlayWindow : Window
     private bool _isActionInProgress;
     private bool _isEditorInitializing;
     private bool _isOcrInitializing;
+    private bool _isQrInitializing;
     private bool _isTranslationInitializing;
     private bool _completeAfterRightButtonUp;
     private bool _cancelScrollCaptureAfterRightButtonUp;
@@ -135,14 +140,21 @@ public partial class CaptureOverlayWindow : Window
     private IntPtr _windowHandle;
     private bool _isCompleted;
     private OcrRecognitionResult? _inlineOcrResult;
+    private ContentRecognitionResult? _inlineQrResult;
+    private ContentRecognitionResult? _inlineTableResult;
+    private ContentRecognitionResult? _inlineFormulaResult;
     private IReadOnlyList<OcrTextRegion>? _inlineTranslatedTextRegions;
     private IReadOnlyList<TranslatedTextAnnotationRegion>?
         _inlineTranslatedAnnotationRegions;
     private bool _isShowingTranslatedText;
+    private bool _isUnifiedRecognitionVisible;
+    private int _automaticRecognitionGeneration;
+    private int _selectionMessageGeneration;
     private bool _lastObservedTranslationOverlayExists;
     private bool _isScrollCaptureSelectionPublished;
     private bool _isScrollCaptureSelectionLocked;
     private bool _isScrollCaptureTemporarilyHidden;
+    private bool _isDisposed;
     private WeakReference<ScrollCaptureSelection>?
         _publishedScrollCaptureSelection;
     private HwndSource? _windowSource;
@@ -162,6 +174,7 @@ public partial class CaptureOverlayWindow : Window
                 TaskCreationOptions.RunContinuationsAsynchronously)
             : null;
         InitializeComponent();
+        ApplyThemedContextMenu(InlineShapeToolButton.ContextMenu);
         PopulateInlineEmojiPalette();
         _windowSnapTimer = new DispatcherTimer
         {
@@ -175,6 +188,8 @@ public partial class CaptureOverlayWindow : Window
             ? Visibility.Collapsed
             : Visibility.Visible;
         InlineEditorCanvas.HistoryChanged += OnInlineEditorHistoryChanged;
+        InlineEditorCanvas.AnnotationSelectionChanged +=
+            OnInlineAnnotationSelectionChanged;
 
         _virtualScreenBounds = VirtualScreen.GetBounds();
         try
@@ -249,6 +264,7 @@ public partial class CaptureOverlayWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _lifetimeCancellationSource.Cancel();
         _isSelecting = false;
         _continuedSelectionButton = null;
         ReleaseOverlayMouseCapture();
@@ -261,6 +277,8 @@ public partial class CaptureOverlayWindow : Window
         }
 
         InlineEditorCanvas.HistoryChanged -= OnInlineEditorHistoryChanged;
+        InlineEditorCanvas.AnnotationSelectionChanged -=
+            OnInlineAnnotationSelectionChanged;
         _inlineEditorImage?.Dispose();
         _inlineEditorImage = null;
         FrozenScreenImage.Source = null;
@@ -278,6 +296,19 @@ public partial class CaptureOverlayWindow : Window
         _options?.CaptureClosed?.Invoke();
 
         base.OnClosed(e);
+        Dispose();
+    }
+
+    public void Dispose()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
+        _lifetimeCancellationSource.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -321,6 +352,16 @@ public partial class CaptureOverlayWindow : Window
                 CompleteSelection(result: null);
             }
 
+            e.Handled = true;
+        }
+        else if (e.Key == Key.C &&
+                 Keyboard.Modifiers.HasFlag(ModifierKeys.Control) &&
+                 HasValidSelection())
+        {
+            // A selectable OCR/translation text box handles Ctrl+C during
+            // PreviewKeyDown. Reaching the capture surface means there is no
+            // text selection to preserve, so Ctrl+C confirms the image.
+            ConfirmCurrentSelection();
             e.Handled = true;
         }
         else if (e.Key == Key.Enter && HasValidSelection())
@@ -370,10 +411,11 @@ public partial class CaptureOverlayWindow : Window
             return;
         }
 
-        if (OcrTextOverlay.Visibility == Visibility.Visible)
+        if (OcrTextOverlay.Visibility == Visibility.Visible ||
+            ContentRecognitionOverlay.Visibility == Visibility.Visible)
         {
-            OcrTextOverlay.Visibility = Visibility.Collapsed;
-            CaptureStatusText.Text = "已隐藏可选择文字层。";
+            HideUnifiedRecognitionResults();
+            CaptureStatusText.Text = "已隐藏内容识别结果。";
             CaptureStatusText.Visibility = Visibility.Visible;
             e.Handled = true;
             return;
@@ -659,6 +701,11 @@ public partial class CaptureOverlayWindow : Window
     private async Task EnterInlineEditorForCompletedSelectionAsync()
     {
         await EnterInlineEditorAsync();
+        if (!InlineEditorCanvas.HasImage || _isCompleted)
+        {
+            return;
+        }
+
         if (_options?.TranslateTextAfterSelection == true &&
             _options.RecognizeTextAsync is not null &&
             _options.TranslateTextAsync is not null &&
@@ -666,14 +713,12 @@ public partial class CaptureOverlayWindow : Window
             !_isCompleted)
         {
             await TranslateInlineTextAsync();
+            return;
         }
-        else if (_options?.RecognizeTextAfterSelection == true &&
-            _options.RecognizeTextAsync is not null &&
-            InlineEditorCanvas.HasImage &&
-            !_isCompleted)
-        {
-            await RecognizeInlineTextAsync(_options.RecognizeTextAsync);
-        }
+
+        _ = RecognizeLocalInlineContentAsync(
+            _automaticRecognitionGeneration,
+            delayMilliseconds: 0);
     }
 
     private void OnWindowSnapTimerTick(object? sender, EventArgs e)
@@ -1143,6 +1188,12 @@ public partial class CaptureOverlayWindow : Window
         if (previousSelection.HasValue)
         {
             await RefreshInlineEditorForSelectionAsync(previousSelection.Value);
+            if (InlineEditorCanvas.HasImage && !_isCompleted)
+            {
+                _ = RecognizeLocalInlineContentAsync(
+                    _automaticRecognitionGeneration,
+                    delayMilliseconds: 350);
+            }
         }
     }
 
@@ -1153,56 +1204,140 @@ public partial class CaptureOverlayWindow : Window
         await CompleteSelectionAdjustmentAsync();
     }
 
-    private async void OnOcrClick(object sender, RoutedEventArgs e)
+    private async Task RecognizeLocalInlineContentAsync(
+        int expectedGeneration,
+        int delayMilliseconds)
     {
-        if (_options is null)
+        if (delayMilliseconds > 0)
+        {
+            try
+            {
+                await Task.Delay(
+                    delayMilliseconds,
+                    _lifetimeCancellationSource.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+
+        if (_options is null ||
+            expectedGeneration != _automaticRecognitionGeneration ||
+            _isQrInitializing ||
+            _isActionInProgress ||
+            !HasValidSelection())
         {
             return;
         }
 
-        if (OcrTextOverlay.Visibility == Visibility.Visible)
-        {
-            OcrTextOverlay.Visibility = Visibility.Collapsed;
-            CaptureStatusText.Text = "已隐藏可选择文字层。";
-            CaptureStatusText.Visibility = Visibility.Visible;
-            InlineEditorCanvas.Focus();
-            return;
-        }
+        _isQrInitializing = true;
 
-        if (_inlineOcrResult is { IsSuccess: true, Regions.Count: > 0 })
-        {
-            ShowInlineOcrText(_inlineOcrResult);
-            return;
-        }
-
-        if (_options.RecognizeTextAsync is not null)
-        {
-            await RecognizeInlineTextAsync(_options.RecognizeTextAsync);
-            return;
-        }
-
-        if (!BeginAction())
-        {
-            return;
-        }
-
-        CapturedImage? image = null;
         try
         {
-            image = await CaptureCurrentResultAsync(restoreOverlay: false);
-            var ocrTask = _options.StartOcrAsync(image);
-            image = null;
-            CompleteSelection(result: null);
-            await ocrTask;
+            // Automatic recognition must not render the live editor canvas.
+            // RenderEditedImage temporarily rearranges that visual at native
+            // pixel size and can expose a one-frame flash near the origin.
+            using var image = _inlineEditorImage?.Clone() ??
+                await CaptureCurrentSelectionAsync(restoreOverlay: true);
+            using var qrImage = image.Clone();
+            var qrTask = Task.Run(
+                () => QrCodeRecognitionService.Recognize(qrImage),
+                _lifetimeCancellationSource.Token);
+            await qrTask.WaitAsync(_lifetimeCancellationSource.Token);
+            if (expectedGeneration != _automaticRecognitionGeneration ||
+                _isCompleted)
+            {
+                return;
+            }
+
+            _inlineQrResult = await qrTask;
+            _isUnifiedRecognitionVisible = _inlineQrResult.IsSuccess;
+            ShowAutomaticRecognitionResults();
+        }
+        catch (OperationCanceledException) when (_isCompleted)
+        {
+            return;
         }
         catch
         {
+            _inlineQrResult = null;
+            _isUnifiedRecognitionVisible = false;
+            RebuildContentRecognitionOverlay();
         }
         finally
         {
-            image?.Dispose();
-            CompleteSelection(result: null);
+            _isQrInitializing = false;
         }
+    }
+
+    private void ShowAutomaticRecognitionResults()
+    {
+        _isUnifiedRecognitionVisible = _inlineQrResult?.IsSuccess == true;
+        OcrTextOverlay.Visibility = Visibility.Collapsed;
+        RebuildContentRecognitionOverlay();
+    }
+
+    private void HideUnifiedRecognitionResults()
+    {
+        _isUnifiedRecognitionVisible = false;
+        OcrTextOverlay.Visibility = Visibility.Collapsed;
+        ContentRecognitionOverlay.Visibility = Visibility.Collapsed;
+    }
+
+    private int ShowSelectionMessage(string message)
+    {
+        var generation = ++_selectionMessageGeneration;
+        SelectionMessageText.Text = message;
+        SelectionMessageToast.Visibility = Visibility.Visible;
+        SelectionMessageToast.UpdateLayout();
+        PositionSelectionMessageToast();
+        return generation;
+    }
+
+    private async Task ShowSelectionMessageForAsync(
+        string message,
+        int durationMilliseconds)
+    {
+        var generation = ShowSelectionMessage(message);
+        try
+        {
+            await Task.Delay(
+                durationMilliseconds,
+                _lifetimeCancellationSource.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (generation == _selectionMessageGeneration)
+        {
+            SelectionMessageToast.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void PositionSelectionMessageToast()
+    {
+        if (!HasValidSelection() ||
+            SelectionMessageToast.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        var bounds = GetSelectionBounds();
+        var width = Math.Max(
+            SelectionMessageToast.MinWidth,
+            SelectionMessageToast.ActualWidth);
+        var height = Math.Max(40, SelectionMessageToast.ActualHeight);
+        var maximumX = Math.Max(8, CaptureSurface.ActualWidth - width - 8);
+        var maximumY = Math.Max(8, CaptureSurface.ActualHeight - height - 8);
+        Canvas.SetLeft(
+            SelectionMessageToast,
+            Math.Clamp(bounds.X + ((bounds.Width - width) / 2), 8, maximumX));
+        Canvas.SetTop(
+            SelectionMessageToast,
+            Math.Clamp(bounds.Y + ((bounds.Height - height) / 2), 8, maximumY));
     }
 
     private async Task RecognizeInlineTextAsync(
@@ -1249,6 +1384,125 @@ public partial class CaptureOverlayWindow : Window
             if (!_isCompleted)
             {
                 CaptureToolbar.IsEnabled = true;
+            }
+        }
+    }
+
+    private async void OnOcrClick(object sender, RoutedEventArgs e)
+    {
+        if (_inlineOcrResult is { IsSuccess: true, Regions.Count: > 0 } cached)
+        {
+            ShowInlineOcrText(cached);
+            return;
+        }
+
+        if (_isOcrInitializing)
+        {
+            CaptureStatusText.Text = "正在后台分析当前选区，完成后再点击“文”即可选择文字。";
+            CaptureStatusText.Visibility = Visibility.Visible;
+            return;
+        }
+
+        if (_options?.RecognizeTextAsync is { } recognizeTextAsync)
+        {
+            await RecognizeInlineTextAsync(recognizeTextAsync);
+        }
+    }
+
+    private void OnOcrMenuArrowMouseDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (OcrButton.ContextMenu is not { } menu)
+        {
+            return;
+        }
+
+        menu.PlacementTarget = OcrButton;
+        menu.Placement = PlacementMode.Bottom;
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private async void OnCopyTableMenuItemClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_options?.RecognizeTextAsync is null ||
+            _isOcrInitializing ||
+            _isActionInProgress ||
+            !HasValidSelection())
+        {
+            return;
+        }
+
+        _isOcrInitializing = true;
+        CaptureToolbar.IsEnabled = false;
+        ShowSelectionMessage("正在识别表格...");
+        try
+        {
+            using var image = _inlineEditorImage?.Clone() ??
+                await CaptureCurrentSelectionAsync(restoreOverlay: true);
+            var recognition = _inlineOcrResult;
+            if (recognition is not { IsSuccess: true, Words.Count: > 0 })
+            {
+                recognition = await _options.RecognizeTextAsync(image);
+                _inlineOcrResult = recognition;
+            }
+
+            if (!recognition.IsSuccess)
+            {
+                await ShowSelectionMessageForAsync(
+                    recognition.ErrorMessage ?? "表格识别失败。",
+                    1500);
+                return;
+            }
+
+            var table = TableRecognitionService.BuildTsv(
+                recognition,
+                image.Bitmap);
+            _inlineTableResult = table;
+            if (!table.IsSuccess)
+            {
+                await ShowSelectionMessageForAsync(
+                    "当前选区未识别到表格",
+                    1500);
+                return;
+            }
+
+            try
+            {
+                await ClipboardTextService.SetTextAsync(table.Content);
+            }
+            catch
+            {
+                await ShowSelectionMessageForAsync(
+                    "表格复制失败，请稍后重试",
+                    1500);
+                return;
+            }
+
+            await ShowSelectionMessageForAsync(
+                "表格已识别并复制",
+                900);
+            CompleteSelection(result: null);
+        }
+        catch (OperationCanceledException) when (_isCompleted || _isDisposed)
+        {
+        }
+        catch
+        {
+            await ShowSelectionMessageForAsync(
+                "表格识别失败，请重新尝试",
+                1500);
+        }
+        finally
+        {
+            _isOcrInitializing = false;
+            if (!_isCompleted)
+            {
+                CaptureToolbar.IsEnabled = true;
+                InlineEditorCanvas.Focus();
             }
         }
     }
@@ -1320,9 +1574,19 @@ public partial class CaptureOverlayWindow : Window
                 return;
             }
 
+            var translationRegions = TranslationPresentationLayout.GroupParagraphs(
+                recognition.Regions);
+            var translationInput = recognition with
+            {
+                Text = string.Join(
+                    Environment.NewLine,
+                    translationRegions.Select(region => region.Text)),
+                Regions = translationRegions,
+            };
             CaptureStatusText.Text = "文字识别完成，正在等待翻译结果...";
             var translationTimer = System.Diagnostics.Stopwatch.StartNew();
-            var translation = await _options.TranslateTextAsync(recognition);
+            var translation = await _options.TranslateTextAsync(translationInput)
+                .WaitAsync(_lifetimeCancellationSource.Token);
             translationTimer.Stop();
             if (!translation.IsSuccess)
             {
@@ -1331,35 +1595,44 @@ public partial class CaptureOverlayWindow : Window
                 return;
             }
 
-            if (translation.Segments.Count != recognition.Regions.Count)
+            if (translation.Segments.Count != translationRegions.Count)
             {
                 CaptureStatusText.Text = "翻译服务返回的分段结果不完整。";
                 return;
             }
 
-            _inlineTranslatedAnnotationRegions = recognition.Regions
+            var normalizedTranslations = translation.Segments
+                .Select(TranslationPresentationLayout.NormalizeTranslatedText)
+                .ToArray();
+            _inlineTranslatedAnnotationRegions = translationRegions
                 .Select((region, index) => new TranslatedTextAnnotationRegion(
                      new Rect(
-                         Math.Max(0, region.X),
+                         Math.Max(0, region.X - 3),
                          Math.Max(0, region.Y - 2),
-                         Math.Max(12, region.Width),
-                         Math.Max(22, region.Height + 10)),
-                     translation.Segments[index],
-                     Math.Max(10, region.Height * 0.78)))
+                         Math.Max(20, region.Width + 6),
+                         Math.Max(24, region.Height + 4)),
+                     normalizedTranslations[index],
+                     Math.Clamp(
+                         region.EstimatedFontSize > 0
+                             ? region.EstimatedFontSize
+                             : region.Height / 1.12,
+                         TranslationTextLayout.MinimumFontSize,
+                         32)))
                 .ToArray();
-            _inlineTranslatedTextRegions = recognition.Regions
-                .Select((region, index) => new OcrTextRegion(
-                    translation.Segments[index],
-                    region.X,
-                    Math.Max(0, region.Y - 2),
-                    region.Width,
-                    Math.Max(22, region.Height + 10)))
+            _inlineTranslatedTextRegions = _inlineTranslatedAnnotationRegions
+                .SelectMany(region => TranslationTextLayout
+                    .LayoutParagraph(region)
+                    .Lines)
                 .ToArray();
             InlineEditorCanvas.AddTranslationOverlay(
                 _inlineTranslatedAnnotationRegions);
             SetInlineTranslationVisibility(isVisible: true);
             CaptureStatusText.Text +=
                 $" 翻译耗时 {translationTimer.Elapsed.TotalSeconds:F1} 秒。";
+        }
+        catch (OperationCanceledException) when (_isCompleted)
+        {
+            return;
         }
         catch
         {
@@ -1433,51 +1706,48 @@ public partial class CaptureOverlayWindow : Window
         OcrTextOverlay.Width = selectionBounds.Width;
         OcrTextOverlay.Height = selectionBounds.Height;
 
-        foreach (var region in regions)
+        var orderedRegions = regions
+            .Where(region => !string.IsNullOrEmpty(region.Text))
+            .OrderBy(region => region.Y)
+            .ThenBy(region => region.X)
+            .ToArray();
+        if (orderedRegions.Length == 0)
         {
-            var textWidth = Math.Max(12, region.Width * scaleX + 2);
-            var textHeight = Math.Max(16, region.Height * scaleY + 2);
-            var preferredFontSize = Math.Max(
-                10,
-                region.Height * scaleY * 0.78);
-            var fontSize = isTranslation
-                ? TranslationTextLayout.FitFontSize(
-                    region.Text,
-                    Math.Max(8, textWidth - 4),
-                    Math.Max(8, textHeight - 2),
-                    preferredFontSize)
-                : preferredFontSize;
-            var textBox = new System.Windows.Controls.TextBox
-            {
-                Text = region.Text,
-                Width = textWidth,
-                Height = textHeight,
-                Padding = new Thickness(0),
-                Background = WpfBrushes.Transparent,
-                BorderThickness = new Thickness(0),
-                Cursor = System.Windows.Input.Cursors.IBeam,
-                FontFamily = new System.Windows.Media.FontFamily("Microsoft YaHei UI"),
-                FontSize = fontSize,
-                Foreground = WpfBrushes.Transparent,
-                IsReadOnly = true,
-                SelectionBrush = new WpfSolidColorBrush(
-                    WpfColor.FromArgb(120, 46, 175, 165)),
-                SelectionTextBrush = WpfBrushes.Transparent,
-                TextWrapping = isTranslation
-                    ? TextWrapping.Wrap
-                    : TextWrapping.NoWrap,
-            };
-            textBox.PreviewKeyDown += OnSelectableTextPreviewKeyDown;
-            Canvas.SetLeft(textBox, region.X * scaleX);
-            Canvas.SetTop(textBox, region.Y * scaleY);
-            OcrTextOverlay.Children.Add(textBox);
+            OcrTextOverlay.Visibility = Visibility.Collapsed;
+            return;
         }
+
+        var accentColor =
+            (System.Windows.Application.Current?.TryFindResource("AppAccentBrush") as
+                WpfSolidColorBrush)?.Color ?? WpfColor.FromRgb(46, 175, 165);
+        var selectableWords = !isTranslation &&
+            _inlineOcrResult is { Words.Count: > 0 } recognition
+            ? recognition.Words
+            : orderedRegions.Select(region => new OcrWordRegion(
+                region.Text,
+                region.X,
+                region.Y,
+                region.Width,
+                region.Height)).ToArray();
+        var textOverlay = new SelectableOcrTextOverlay(
+            selectableWords,
+            scaleX,
+            scaleY,
+            accentColor)
+        {
+            Width = selectionBounds.Width,
+            Height = selectionBounds.Height,
+        };
+        textOverlay.PreviewKeyDown += OnSelectableTextPreviewKeyDown;
+        Canvas.SetLeft(textOverlay, 0);
+        Canvas.SetTop(textOverlay, 0);
+        OcrTextOverlay.Children.Add(textOverlay);
 
         _isShowingTranslatedText = isTranslation;
         OcrTextOverlay.Visibility = Visibility.Visible;
         CaptureStatusText.Text = isTranslation
             ? "译文已覆盖到截图；可直接拖选译文并按 Ctrl+C 复制，复制和保存会包含译文。"
-            : "可直接拖选图片文字并按 Ctrl+C 复制；再次点击识字可隐藏文字层。";
+            : "拖选文字后按 Ctrl+C 复制文字；未选中文字时 Ctrl+C 复制截图。";
         CaptureStatusText.Visibility = Visibility.Visible;
     }
 
@@ -1487,8 +1757,8 @@ public partial class CaptureOverlayWindow : Window
     {
         if (e.Key != Key.C ||
             !Keyboard.Modifiers.HasFlag(ModifierKeys.Control) ||
-            sender is not System.Windows.Controls.TextBox textBox ||
-            string.IsNullOrEmpty(textBox.SelectedText))
+            sender is not SelectableOcrTextOverlay textOverlay ||
+            string.IsNullOrEmpty(textOverlay.SelectedText))
         {
             return;
         }
@@ -1496,7 +1766,8 @@ public partial class CaptureOverlayWindow : Window
         e.Handled = true;
         try
         {
-            await ClipboardTextService.SetTextAsync(textBox.SelectedText);
+            await ClipboardTextService.SetTextAsync(
+                textOverlay.SelectedText);
             CaptureStatusText.Text = _isShowingTranslatedText
                 ? "已复制所选译文，可在 Win+V 中查看。"
                 : "已复制所选识别文字，可在 Win+V 中查看。";
@@ -1511,14 +1782,237 @@ public partial class CaptureOverlayWindow : Window
 
     private void ClearInlineOcrText()
     {
+        _automaticRecognitionGeneration++;
+        _selectionMessageGeneration++;
         _inlineOcrResult = null;
+        _inlineQrResult = null;
+        _inlineTableResult = null;
+        _inlineFormulaResult = null;
         _inlineTranslatedTextRegions = null;
         _inlineTranslatedAnnotationRegions = null;
         _isShowingTranslatedText = false;
+        _isUnifiedRecognitionVisible = false;
         TranslateButtonText.Text = "译";
         TranslateButton.ToolTip = "识别并翻译，覆盖到截图";
         OcrTextOverlay.Children.Clear();
         OcrTextOverlay.Visibility = Visibility.Collapsed;
+        ContentRecognitionOverlay.Children.Clear();
+        ContentRecognitionOverlay.Visibility = Visibility.Collapsed;
+        SelectionMessageToast.Visibility = Visibility.Collapsed;
+    }
+
+    private void RebuildContentRecognitionOverlay()
+    {
+        ContentRecognitionOverlay.Children.Clear();
+        if (!_isUnifiedRecognitionVisible || _inlineEditorImage is null)
+        {
+            ContentRecognitionOverlay.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var selectionBounds = GetSelectionBounds();
+        Canvas.SetLeft(ContentRecognitionOverlay, selectionBounds.X);
+        Canvas.SetTop(ContentRecognitionOverlay, selectionBounds.Y);
+        ContentRecognitionOverlay.Width = selectionBounds.Width;
+        ContentRecognitionOverlay.Height = selectionBounds.Height;
+
+        var resultButtons = new StackPanel
+        {
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+        };
+        if (_inlineFormulaResult?.IsSuccess == true)
+        {
+            resultButtons.Children.Add(CreateRecognitionResultButton(
+                "公式",
+                _inlineFormulaResult,
+                "查看并复制 LaTeX",
+                copyDirectly: false));
+        }
+        if (resultButtons.Children.Count > 0)
+        {
+            Canvas.SetLeft(resultButtons, 8);
+            Canvas.SetTop(resultButtons, 8);
+            ContentRecognitionOverlay.Children.Add(resultButtons);
+        }
+
+        if (_inlineQrResult is { IsSuccess: true, Region: { } region } qrResult)
+        {
+            const double markerSize = 22;
+            var scaleX = selectionBounds.Width /
+                         Math.Max(1, _inlineEditorImage.Preview.PixelWidth);
+            var scaleY = selectionBounds.Height /
+                         Math.Max(1, _inlineEditorImage.Preview.PixelHeight);
+            var marker = new System.Windows.Controls.Button
+            {
+                Width = markerSize,
+                Height = markerSize,
+                Padding = new Thickness(0),
+                BorderThickness = new Thickness(2),
+                Tag = qrResult,
+                ToolTip = CreateQrCodeToolTip(qrResult.Content),
+            };
+            ToolTipService.SetInitialShowDelay(marker, 100);
+            ToolTipService.SetShowDuration(marker, 60000);
+            marker.SetResourceReference(
+                System.Windows.Controls.Control.BackgroundProperty,
+                "AppAccentBrush");
+            marker.SetResourceReference(
+                System.Windows.Controls.Control.BorderBrushProperty,
+                "AppPanelBackgroundBrush");
+            marker.Effect = new System.Windows.Media.Effects.DropShadowEffect
+            {
+                BlurRadius = 8,
+                Direction = 0,
+                Opacity = 0.5,
+                ShadowDepth = 0,
+                Color = WpfColor.FromRgb(0, 20, 24),
+            };
+            marker.Click += OnQrMarkerClick;
+            Canvas.SetLeft(
+                marker,
+                Math.Clamp(
+                    (region.CenterX * scaleX) - (markerSize / 2),
+                    0,
+                    Math.Max(0, selectionBounds.Width - markerSize)));
+            Canvas.SetTop(
+                marker,
+                Math.Clamp(
+                    (region.CenterY * scaleY) - (markerSize / 2),
+                    0,
+                    Math.Max(0, selectionBounds.Height - markerSize)));
+            ContentRecognitionOverlay.Children.Add(marker);
+        }
+
+        ContentRecognitionOverlay.Visibility =
+            ContentRecognitionOverlay.Children.Count > 0
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+    }
+
+    private System.Windows.Controls.Button CreateRecognitionResultButton(
+        string label,
+        ContentRecognitionResult result,
+        string toolTip,
+        bool copyDirectly)
+    {
+        var button = new System.Windows.Controls.Button
+        {
+            MinWidth = 52,
+            Height = 28,
+            Margin = new Thickness(0, 0, 6, 0),
+            Padding = new Thickness(10, 3, 10, 3),
+            Content = label,
+            FontSize = 12,
+            FontWeight = FontWeights.SemiBold,
+            Tag = result,
+            ToolTip = toolTip,
+        };
+        button.SetResourceReference(
+            System.Windows.Controls.Control.BackgroundProperty,
+            "AppPanelBackgroundBrush");
+        button.SetResourceReference(
+            System.Windows.Controls.Control.BorderBrushProperty,
+            "AppAccentBrush");
+        button.SetResourceReference(
+            System.Windows.Controls.Control.ForegroundProperty,
+            "AppControlForegroundBrush");
+        button.Click += copyDirectly
+            ? OnTableResultButtonClick
+            : OnRecognitionResultButtonClick;
+        return button;
+    }
+
+    private async void OnTableResultButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button
+            {
+                Tag: ContentRecognitionResult { IsSuccess: true } result,
+            })
+        {
+            return;
+        }
+
+        try
+        {
+            await ClipboardTextService.SetTextAsync(result.Content);
+            CompleteSelection(result: null);
+            return;
+        }
+        catch
+        {
+            CaptureStatusText.Text = "表格复制失败，剪贴板可能正被其他程序使用。";
+        }
+
+        CaptureStatusText.Visibility = Visibility.Visible;
+        InlineEditorCanvas.Focus();
+    }
+
+    private static StackPanel CreateQrCodeToolTip(string content)
+    {
+        var panel = new StackPanel
+        {
+            MaxWidth = 280,
+        };
+        panel.Children.Add(new TextBlock
+        {
+            Text = "二维码",
+            FontWeight = FontWeights.SemiBold,
+            Margin = new Thickness(0, 0, 0, 5),
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = content,
+            MaxWidth = 260,
+            TextWrapping = TextWrapping.Wrap,
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = "单击圆点复制",
+            Margin = new Thickness(0, 6, 0, 0),
+            FontSize = 11,
+            Opacity = 0.65,
+        });
+        return panel;
+    }
+
+    private async void OnQrMarkerClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button
+            {
+                Tag: ContentRecognitionResult { IsSuccess: true } result,
+            })
+        {
+            return;
+        }
+
+        try
+        {
+            await ClipboardTextService.SetTextAsync(result.Content);
+            CaptureStatusText.Text = "已复制二维码内容。";
+        }
+        catch
+        {
+            CaptureStatusText.Text = "二维码内容复制失败，请重试。";
+        }
+        CaptureStatusText.Visibility = Visibility.Visible;
+    }
+
+    private void OnRecognitionResultButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button
+            {
+                Tag: ContentRecognitionResult result,
+            })
+        {
+            return;
+        }
+
+        var window = new ContentRecognitionWindow(result)
+        {
+            Owner = this,
+            Topmost = true,
+        };
+        _ = window.ShowDialog();
     }
 
     private async void OnPinClick(object sender, RoutedEventArgs e)
@@ -1620,6 +2114,77 @@ public partial class CaptureOverlayWindow : Window
             InlineEditorCanvas.SelectTool(tool);
             InlineEditorCanvas.Focus();
         }
+    }
+
+    private void OnInlineShapeMenuArrowMouseDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (InlineShapeToolButton.ContextMenu is not { } menu)
+        {
+            return;
+        }
+
+        menu.PlacementTarget = InlineShapeToolButton;
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private static void ApplyThemedContextMenu(
+        System.Windows.Controls.ContextMenu menu)
+    {
+        if (System.Windows.Application.Current?.TryFindResource(
+                "ThemedContextMenuStyle") is Style menuStyle)
+        {
+            menu.Style = menuStyle;
+        }
+
+        if (System.Windows.Application.Current?.TryFindResource(
+                "ThemedMenuItemStyle") is not Style itemStyle)
+        {
+            return;
+        }
+
+        foreach (var item in menu.Items.OfType<System.Windows.Controls.MenuItem>())
+        {
+            item.Style = itemStyle;
+        }
+    }
+
+    private void OnInlineShapeMenuItemClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.MenuItem { Tag: string toolName } ||
+            !Enum.TryParse<EditorTool>(toolName, out var tool) ||
+            tool is not (EditorTool.Rectangle or EditorTool.Ellipse))
+        {
+            return;
+        }
+
+        InlineShapeToolButton.Tag = toolName;
+        InlineShapeToolIcon.Data = (System.Windows.Media.Geometry)FindResource(
+            tool == EditorTool.Ellipse
+                ? "EllipseIconGeometry"
+                : "RectangleIconGeometry");
+        InlineShapeToolButton.ToolTip = tool == EditorTool.Ellipse
+            ? "椭圆"
+            : "矩形";
+        InlineShapeToolButton.IsChecked = true;
+        _selectedInlineTool = tool;
+        OcrTextOverlay.Visibility = Visibility.Collapsed;
+        UpdateInlineStrokeWidthText(InlineStrokeWidthSlider?.Value ?? 3);
+        if (InlineEditorCanvas.HasImage)
+        {
+            InlineEditorCanvas.SelectTool(tool);
+            InlineEditorCanvas.Focus();
+        }
+    }
+
+    private void OnInlineAnnotationSelectionChanged(object? sender, EventArgs e)
+    {
+        CaptureStatusText.Text = InlineEditorCanvas.HasSelectedAnnotation
+            ? "已选中标注：可拖动或缩放，按 Delete 删除。"
+            : "可继续编辑当前截图。";
+        CaptureStatusText.Visibility = Visibility.Visible;
     }
 
     private void OnInlineEmojiClick(object sender, RoutedEventArgs e)
@@ -1891,8 +2456,14 @@ public partial class CaptureOverlayWindow : Window
                 Canvas.SetTop(OcrTextOverlay, bounds.Y);
                 OcrTextOverlay.Width = bounds.Width;
                 OcrTextOverlay.Height = bounds.Height;
+                Canvas.SetLeft(ContentRecognitionOverlay, bounds.X);
+                Canvas.SetTop(ContentRecognitionOverlay, bounds.Y);
+                ContentRecognitionOverlay.Width = bounds.Width;
+                ContentRecognitionOverlay.Height = bounds.Height;
             }
         }
+
+        PositionSelectionMessageToast();
 
         if (_isScrollCaptureSelectionPublished &&
             !_isScrollCaptureSelectionLocked &&
@@ -2191,7 +2762,6 @@ public partial class CaptureOverlayWindow : Window
         SaveButton.Visibility = Visibility.Collapsed;
         RecordButton.Visibility = Visibility.Collapsed;
         ScrollCaptureButton.Visibility = Visibility.Collapsed;
-        OcrButton.Visibility = Visibility.Collapsed;
         PinButton.Visibility = Visibility.Collapsed;
         ConfirmButton.Visibility = Visibility.Collapsed;
         CancelButton.Visibility = Visibility.Collapsed;

@@ -9,7 +9,7 @@
     <AssemblyName>SnapCut</AssemblyName>
     <RootNamespace>Screenshot.App</RootNamespace>
     <ApplicationIcon>Assets\Screenshot.ico</ApplicationIcon>
-    <Version>2.7.1</Version>
+    <Version>2.8.0</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Authors>九万字 (jiuwanzi-hui)</Authors>
     <Copyright>Copyright © 2026 九万字 (jiuwanzi-hui). All rights reserved.</Copyright>
@@ -40,6 +40,10 @@
   <ItemGroup>
     <PackageReference Include="BergamotTranslatorSharp" Version="0.5.1" />
     <PackageReference Include="Panlingo.LanguageIdentification.CLD3" Version="0.8.0" />
+    <PackageReference Include="RapidOcrNet"
+                      Version="3.0.0"
+                      ExcludeAssets="build" />
+    <PackageReference Include="ZXing.Net" Version="0.16.10" />
     <PackageReference Include="ScreenRecorderLib"
                       Version="6.6.0"
                       ExcludeAssets="build;compile"

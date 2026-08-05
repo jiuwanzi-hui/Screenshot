@@ -42,6 +42,20 @@ public sealed class HotKeyCaptureBoxTests
         Assert.Equal(string.Empty, gesture);
     }
 
+    [Theory]
+    [InlineData(Key.PrintScreen, "PrintScreen")]
+    [InlineData(Key.NumPad3, "Numpad3")]
+    public void CapturesDedicatedKeysWithoutAModifier(Key key, string expected)
+    {
+        var formatted = HotKeyCaptureBox.TryFormatGesture(
+            key,
+            ModifierKeys.None,
+            out var gesture);
+
+        Assert.True(formatted);
+        Assert.Equal(expected, gesture);
+    }
+
     [Fact]
     public void FormatsPunctuationKeysUsedByCommonShortcutConfigurations()
     {

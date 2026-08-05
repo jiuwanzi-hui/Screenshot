@@ -1,0 +1,82 @@
+<Window x:Class="Screenshot.App.Text.ContentRecognitionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="内容识别"
+        Width="620"
+        Height="390"
+        MinWidth="420"
+        MinHeight="260"
+        AllowsTransparency="True"
+        Background="Transparent"
+        FontFamily="Microsoft YaHei UI"
+        ResizeMode="CanResizeWithGrip"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        WindowStyle="None">
+    <Border Margin="12"
+            Padding="18"
+            Background="{DynamicResource AppPanelBackgroundBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="12">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="24"
+                              Direction="270"
+                              Opacity="0.36"
+                              ShadowDepth="8"
+                              Color="#001014" />
+        </Border.Effect>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid MouseLeftButtonDown="OnTitleMouseLeftButtonDown">
+                <TextBlock x:Name="TitleText"
+                           VerticalAlignment="Center"
+                           FontSize="19"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource AppControlForegroundBrush}" />
+                <Button Width="32"
+                        Height="32"
+                        HorizontalAlignment="Right"
+                        Click="OnCloseClick"
+                        Content="×"
+                        FontSize="20"
+                        ToolTip="关闭" />
+            </Grid>
+
+            <TextBox x:Name="ResultTextBox"
+                     Grid.Row="1"
+                     Margin="0,16,0,14"
+                     Padding="12"
+                     AcceptsReturn="True"
+                     AcceptsTab="True"
+                     Background="{DynamicResource AppInputBackgroundBrush}"
+                     BorderBrush="{DynamicResource AppBorderBrush}"
+                     BorderThickness="1"
+                     FontFamily="Cascadia Mono, Microsoft YaHei UI"
+                     FontSize="14"
+                     IsReadOnly="True"
+                     TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto"
+                     HorizontalScrollBarVisibility="Auto" />
+
+            <DockPanel Grid.Row="2" LastChildFill="True">
+                <Button DockPanel.Dock="Right"
+                        MinWidth="108"
+                        Height="36"
+                        Click="OnCopyClick"
+                        Content="复制内容"
+                        ToolTip="复制全部识别内容" />
+                <TextBlock x:Name="StatusText"
+                           Margin="0,0,14,0"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource AppTextSecondaryBrush}"
+                           TextTrimming="CharacterEllipsis" />
+            </DockPanel>
+        </Grid>
+    </Border>
+</Window>

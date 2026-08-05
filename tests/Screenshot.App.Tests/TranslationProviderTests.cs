@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using Screenshot.App.Core;
 using Screenshot.App.Text;
 
@@ -76,6 +77,8 @@ public sealed class TranslationProviderTests
         Assert.Contains("hello", handler.RequestBody);
         Assert.Contains("world", handler.RequestBody);
         Assert.Contains("translations", handler.RequestBody);
+        Assert.Contains("same screenshot or document", handler.RequestBody);
+        Assert.Contains("never mix in untranslated source-language", handler.RequestBody);
     }
 
     [Fact]
@@ -119,6 +122,29 @@ public sealed class TranslationProviderTests
     }
 
     [Fact]
+    public async Task RetriesIndividualSegmentsWhenBatchResultIsIncomplete()
+    {
+        var handler = new IncompleteBatchFallbackHandler();
+        using var client = new HttpClient(handler);
+        var provider = new OpenAiCompatibleTranslationProvider(
+            "https://translation.example/v1/chat/completions",
+            "test-key",
+            client);
+
+        var result = await provider.TranslateSegmentsAsync(
+            ["hello", "world", "常规设置"],
+            "auto",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(["你好", "世界", "常规设置"], result.Segments);
+        Assert.Equal(3, handler.RequestCount);
+        Assert.DoesNotContain(
+            handler.SentContents,
+            content => content.Contains("常规设置", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task AutomaticallyDetectsTheSourceInsteadOfUsingTheOcrLanguage()
     {
         var handler = new RecordingHandler(
@@ -138,6 +164,48 @@ public sealed class TranslationProviderTests
         Assert.Equal("服务暂时不可用", result.Text);
         Assert.Contains("Detect the source language automatically", handler.RequestBody);
         Assert.DoesNotContain("Source language: zh-Hans", handler.RequestBody);
+    }
+
+    [Fact]
+    public async Task DoesNotSendChineseTextForChineseTranslation()
+    {
+        var handler = new RecordingHandler(
+            """{"choices":[{"message":{"content":"不应调用"}}]}""");
+        using var client = new HttpClient(handler);
+        var provider = new OpenAiCompatibleTranslationProvider(
+            "https://translation.example/v1/chat/completions",
+            "test-key",
+            client);
+
+        var result = await provider.TranslateSegmentsAsync(
+            ["常规设置", "截图保存位置"],
+            "auto",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(["常规设置", "截图保存位置"], result.Segments);
+        Assert.Empty(handler.RequestBody);
+    }
+
+    [Fact]
+    public async Task PreservesTargetLanguageSegmentsInMixedTranslation()
+    {
+        var handler = new RecordingHandler(
+            """{"choices":[{"message":{"content":"{\"translations\":[{\"id\":0,\"text\":\"保存位置\"}]}"}}]}""");
+        using var client = new HttpClient(handler);
+        var provider = new OpenAiCompatibleTranslationProvider(
+            "https://translation.example/v1/chat/completions",
+            "test-key",
+            client);
+
+        var result = await provider.TranslateSegmentsAsync(
+            ["常规设置", "Save location"],
+            "auto",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(["常规设置", "保存位置"], result.Segments);
+        Assert.DoesNotContain("常规设置", handler.RequestBody);
     }
 
     [Fact]
@@ -312,6 +380,57 @@ public sealed class TranslationProviderTests
     }
 
     [Fact]
+    public async Task OrderedProviderFallsBackWhenEnglishTranslationStillContainsChinese()
+    {
+        var first = new StubTranslationProvider(
+            "OfflineBergamot",
+            segmentResult: new TranslationSegmentsResult(
+                true,
+                ["Repair Cut Window", "横纵滚动条 The lower-right white box disappears"],
+                null));
+        var second = new StubTranslationProvider(
+            "OpenAICompatible",
+            segmentResult: new TranslationSegmentsResult(
+                true,
+                ["Crop window fixes", "The lower-right white box disappears with the scrollbars"],
+                null));
+        var provider = new OrderedTranslationProvider([first, second]);
+
+        var result = await provider.TranslateSegmentsAsync(
+            ["已修复裁剪窗口", "横纵滚动条交叉产生的右下角白框同步消失"],
+            "auto",
+            "en");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal("Crop window fixes", result.Segments[0]);
+        Assert.Equal(1, first.SegmentCallCount);
+        Assert.Equal(1, second.SegmentCallCount);
+    }
+
+    [Fact]
+    public async Task OrderedProviderTimesOutAStuckProviderWithoutBlockingTheCaller()
+    {
+        var first = new NeverCompletingTranslationProvider("OfflineBergamot");
+        var second = new StubTranslationProvider(
+            "OpenAICompatible",
+            segmentResult: new TranslationSegmentsResult(true, ["translated"], null));
+        var provider = new OrderedTranslationProvider(
+            [first, second],
+            offlineTimeout: TimeSpan.FromMilliseconds(80),
+            onlineTimeout: TimeSpan.FromSeconds(1));
+
+        var result = await provider.TranslateSegmentsAsync(
+            ["source"],
+            "auto",
+            "en");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(["translated"], result.Segments);
+        Assert.True(first.WasCancelled);
+        Assert.Equal(1, second.SegmentCallCount);
+    }
+
+    [Fact]
     public async Task OrderedProviderStopsAfterTheFirstSuccessfulTranslation()
     {
         var first = new StubTranslationProvider(
@@ -476,6 +595,51 @@ public sealed class TranslationProviderTests
         }
     }
 
+    private sealed class IncompleteBatchFallbackHandler : HttpMessageHandler
+    {
+        private int _requestCount;
+
+        public int RequestCount => _requestCount;
+
+        public List<string> SentContents { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var requestBody = request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+            lock (SentContents)
+            {
+                SentContents.Add(requestBody);
+            }
+
+            Interlocked.Increment(ref _requestCount);
+            var responseText = requestBody.Contains(
+                "\\\"segments\\\"",
+                StringComparison.Ordinal)
+                ? "{\"translations\":[{\"id\":0,\"text\":\"你好\"}]}"
+                : requestBody.Contains("hello", StringComparison.Ordinal)
+                    ? "你好"
+                    : "世界";
+            var responseBody = JsonSerializer.Serialize(new
+            {
+                choices = new[]
+                {
+                    new { message = new { content = responseText } },
+                },
+            });
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    responseBody,
+                    Encoding.UTF8,
+                    "application/json"),
+            };
+        }
+    }
+
     private sealed class StubTranslationProvider : ITranslationProvider
     {
         private readonly Func<CancellationToken, TranslationResult> _textHandler;
@@ -519,6 +683,56 @@ public sealed class TranslationProviderTests
         {
             SegmentCallCount++;
             return Task.FromResult(_segmentHandler(cancellationToken));
+        }
+    }
+
+    private sealed class NeverCompletingTranslationProvider(string id)
+        : ITranslationProvider
+    {
+        public string Id { get; } = id;
+
+        public bool WasCancelled { get; private set; }
+
+        public Task<TranslationResult> TranslateAsync(
+            string text,
+            string sourceLanguage,
+            string targetLanguage,
+            CancellationToken cancellationToken = default)
+        {
+            return WaitForCancellationAsync(cancellationToken);
+        }
+
+        public async Task<TranslationSegmentsResult> TranslateSegmentsAsync(
+            IReadOnlyList<string> segments,
+            string sourceLanguage,
+            string targetLanguage,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return TranslationSegmentsResult.Failure("不应完成");
+            }
+            catch (OperationCanceledException)
+            {
+                WasCancelled = true;
+                throw;
+            }
+        }
+
+        private async Task<TranslationResult> WaitForCancellationAsync(
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                return TranslationResult.Failure("不应完成");
+            }
+            catch (OperationCanceledException)
+            {
+                WasCancelled = true;
+                throw;
+            }
         }
     }
 

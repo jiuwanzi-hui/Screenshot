@@ -15,6 +15,7 @@ public sealed class CaptureHistoryItem
     private readonly object _imageSync = new();
     private BitmapSource? _pendingImage;
     private string? _imagePath;
+    private bool _isRemoved;
 
     public CaptureHistoryItem(
         BitmapSource thumbnail,
@@ -55,25 +56,33 @@ public sealed class CaptureHistoryItem
     }
 
     /// <summary>
-    /// Swaps the retained full image for its on-disk copy. Called from the
-    /// background offload once the PNG is fully written.
+    /// Swaps the retained full image for its on-disk copy. Returns false when
+    /// the entry was removed while the background PNG encode was running.
     /// </summary>
-    internal void CompleteOffload(string imagePath)
+    internal bool CompleteOffload(string imagePath)
     {
         lock (_imageSync)
         {
+            if (_isRemoved)
+            {
+                return false;
+            }
+
             _imagePath = imagePath;
             _pendingImage = null;
+            return true;
         }
     }
 
     /// <summary>
     /// Detaches the cache file from the entry so eviction can delete it.
     /// </summary>
-    internal string? TakeImagePath()
+    internal string? MarkRemoved()
     {
         lock (_imageSync)
         {
+            _isRemoved = true;
+            _pendingImage = null;
             var path = _imagePath;
             _imagePath = null;
             return path;
@@ -87,6 +96,11 @@ public sealed class CaptureHistoryItem
 
         lock (_imageSync)
         {
+            if (_isRemoved)
+            {
+                throw new InvalidOperationException("这张历史截图已被删除。");
+            }
+
             pendingImage = _pendingImage;
             imagePath = _imagePath;
         }

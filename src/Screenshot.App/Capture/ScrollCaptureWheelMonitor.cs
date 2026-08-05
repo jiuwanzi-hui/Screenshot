@@ -74,7 +74,7 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
         {
             throw new Win32Exception(
                 Marshal.GetLastWin32Error(),
-                "无法监听选区内的鼠标滚轮。");
+                "无法监听长截图控制输入。");
         }
 
     }

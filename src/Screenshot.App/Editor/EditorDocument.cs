@@ -53,6 +53,19 @@ public sealed class EditorDocument
         _redoStack.Clear();
     }
 
+    public void RemoveAt(int index)
+    {
+        if ((uint)index >= (uint)_annotations.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(index));
+        }
+
+        var command = new RemoveAnnotationCommand(index, _annotations[index]);
+        command.Execute(_annotations);
+        _undoStack.Push(command);
+        _redoStack.Clear();
+    }
+
     public void Undo()
     {
         if (_undoStack.TryPop(out var command))
@@ -88,6 +101,21 @@ public sealed class EditorDocument
         }
 
         _redoStack.Clear();
+    }
+}
+
+file sealed class RemoveAnnotationCommand(
+    int index,
+    EditorAnnotation annotation) : IEditorCommand
+{
+    public void Execute(IList<EditorAnnotation> annotations)
+    {
+        annotations.RemoveAt(index);
+    }
+
+    public void Undo(IList<EditorAnnotation> annotations)
+    {
+        annotations.Insert(index, annotation);
     }
 }
 

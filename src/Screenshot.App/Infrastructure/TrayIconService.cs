@@ -12,7 +12,7 @@ public sealed class TrayIconService : IDisposable
     private readonly ToolStripItem[] _menuItems;
     private bool _disposed;
 
-    public TrayIconService(AppTheme theme = AppTheme.System)
+    public TrayIconService(AppTheme theme = AppTheme.AuroraMist)
     {
         var regionCaptureItem = new ToolStripMenuItem("区域截图");
         regionCaptureItem.Click += OnRegionCaptureClicked;
@@ -26,7 +26,7 @@ public sealed class TrayIconService : IDisposable
         var openSettingsItem = new ToolStripMenuItem("打开设置");
         openSettingsItem.Click += OnOpenSettingsClicked;
 
-        var historyItem = new ToolStripMenuItem("截图历史");
+        var historyItem = new ToolStripMenuItem("历史查看");
         historyItem.Click += OnHistoryClicked;
 
         var exitItem = new ToolStripMenuItem("退出");
@@ -111,11 +111,11 @@ public sealed class TrayIconService : IDisposable
     public void ApplyTheme(AppTheme theme)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var isDark = theme != AppTheme.Light;
-        var background = ColorTranslator.FromHtml(isDark ? "#19292E" : "#F4FBFA");
-        var foreground = ColorTranslator.FromHtml(isDark ? "#DDF2EF" : "#26464B");
-        var accentMuted = ColorTranslator.FromHtml(isDark ? "#2E6762" : "#BFE8E2");
-        var border = ColorTranslator.FromHtml(isDark ? "#6B8784" : "#8EB9B7");
+        var colors = AppThemeManager.GetChromeColors(theme);
+        var background = ColorTranslator.FromHtml(colors.Background);
+        var foreground = ColorTranslator.FromHtml(colors.Foreground);
+        var accentMuted = ColorTranslator.FromHtml(colors.Selection);
+        var border = ColorTranslator.FromHtml(colors.Border);
 
         _contextMenu.BackColor = background;
         _contextMenu.ForeColor = foreground;

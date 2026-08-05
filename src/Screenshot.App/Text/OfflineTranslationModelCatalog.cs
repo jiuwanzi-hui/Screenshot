@@ -1,3 +1,5 @@
+using Screenshot.App.Core;
+
 namespace Screenshot.App.Text;
 
 internal sealed record OfflineTranslationModelFile(
@@ -17,7 +19,7 @@ internal sealed record OfflineTranslationDirection(
 
 internal static class OfflineTranslationModelCatalog
 {
-    private const string CommonConfiguration =
+    private static readonly string CommonConfiguration =
         "beam-size: 1\n" +
         "normalize: 1.0\n" +
         "word-penalty: 0\n" +
@@ -26,7 +28,7 @@ internal static class OfflineTranslationModelCatalog
         "workspace: 128\n" +
         "max-length-factor: 2.0\n" +
         "skip-cost: true\n" +
-        "cpu-threads: 0\n" +
+        $"cpu-threads: {HeavyWorkloadBudget.CpuThreadCount}\n" +
         "quiet: true\n" +
         "quiet-translation: true\n" +
         "gemm-precision: int8shiftAlphaAll\n";
@@ -47,5 +49,34 @@ internal static class OfflineTranslationModelCatalog
                $"- {targetVocabFileName}\n" +
                shortlist +
                CommonConfiguration;
+    }
+
+    internal static string ApplyQuality(
+        string configuration,
+        OfflineTranslationQuality quality)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(configuration);
+        var beamSize = quality switch
+        {
+            OfflineTranslationQuality.Fast => 1,
+            OfflineTranslationQuality.High => 4,
+            OfflineTranslationQuality.Ultra => 8,
+            _ => 4,
+        };
+        return System.Text.RegularExpressions.Regex.Replace(
+            configuration,
+            "(?m)^beam-size:\\s*\\d+\\s*$",
+            $"beam-size: {beamSize}");
+    }
+
+    internal static string GetQualityDisplayName(OfflineTranslationQuality quality)
+    {
+        return quality switch
+        {
+            OfflineTranslationQuality.Fast => "快速",
+            OfflineTranslationQuality.High => "高质量",
+            OfflineTranslationQuality.Ultra => "超高质量",
+            _ => "高质量",
+        };
     }
 }

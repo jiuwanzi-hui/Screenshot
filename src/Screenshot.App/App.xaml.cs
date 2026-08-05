@@ -273,6 +273,9 @@ public partial class App : System.Windows.Application, IDisposable
         _currentSettings = e.Settings;
         _themeManager?.Apply(e.Settings.Theme);
         _trayIconService?.SetVisible(e.Settings.ShowNotificationIcon);
+        _captureHistoryWindow?.UpdateDirectories(
+            e.Settings.SaveDirectory,
+            e.Settings.VideoSaveDirectory);
         UpdateFloatingCaptureWindow();
     }
 
@@ -517,12 +520,16 @@ public partial class App : System.Windows.Application, IDisposable
             {
                 _captureHistoryWindow = new CaptureHistoryWindow(
                     _captureHistoryService,
-                    _currentSettings.SaveDirectory);
+                    _currentSettings.SaveDirectory,
+                    _currentSettings.VideoSaveDirectory);
                 _captureHistoryWindow.Closed += OnCaptureHistoryWindowClosed;
                 _captureHistoryWindow.Show();
                 return;
             }
 
+            _captureHistoryWindow.UpdateDirectories(
+                _currentSettings.SaveDirectory,
+                _currentSettings.VideoSaveDirectory);
             _captureHistoryWindow.Show();
             _captureHistoryWindow.Activate();
         }
@@ -534,7 +541,7 @@ public partial class App : System.Windows.Application, IDisposable
                 _captureHistoryWindow = null;
             }
 
-            _mainWindow?.ShowStatus($"无法打开截图历史：{exception.Message}");
+            _mainWindow?.ShowStatus($"无法打开历史查看：{exception.Message}");
         }
     }
 
@@ -652,9 +659,9 @@ public partial class App : System.Windows.Application, IDisposable
     {
         try
         {
-            return await OcrService.RecognizeAsync(
+            return await OcrProviderFactory.RecognizeAsync(
                 image,
-                _currentSettings.OcrLanguageTag);
+                _currentSettings);
         }
         catch (Exception)
         {
