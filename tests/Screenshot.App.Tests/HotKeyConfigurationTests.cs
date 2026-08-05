@@ -73,6 +73,9 @@ public sealed class HotKeyConfigurationTests
     }
 
     [Theory]
+    [InlineData("F1", 0x70u)]
+    [InlineData("F12", 0x7Bu)]
+    [InlineData("F24", 0x87u)]
     [InlineData("PrintScreen", 0x2Cu)]
     [InlineData("Numpad0", 0x60u)]
     [InlineData("Numpad7", 0x67u)]
@@ -90,6 +93,24 @@ public sealed class HotKeyConfigurationTests
         Assert.Equal(expectedVirtualKey, gesture.VirtualKey);
         Assert.Equal(configured, gesture.ToString());
         Assert.False(gesture.IsSystemReserved(out _));
+    }
+
+    [Fact]
+    public void RegistersAStandaloneFunctionKeyShortcut()
+    {
+        var settings = AppSettings.CreateDefault() with
+        {
+            RegionCaptureHotKey = "F2",
+        };
+
+        var bindings = HotKeyConfiguration.CreateBindings(settings);
+        var validation = HotKeyConfiguration.Validate(bindings);
+
+        Assert.Contains(
+            bindings,
+            binding => binding.Action == HotKeyAction.RegionCapture &&
+                       binding.Gesture == new HotKeyGesture(HotKeyModifiers.None, 0x71));
+        Assert.True(validation.IsValid, validation.ErrorMessage);
     }
 
     [Fact]

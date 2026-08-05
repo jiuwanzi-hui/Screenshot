@@ -34,7 +34,9 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
     private const uint VirtualKeyDelete = 0x2E;
     private const uint VirtualKeyNumpad0 = 0x60;
     private const uint VirtualKeyNumpad9 = 0x69;
+    private const uint VirtualKeyF1 = 0x70;
     private const uint VirtualKeyF4 = 0x73;
+    private const uint VirtualKeyF24 = 0x87;
     private const uint VirtualKeySemicolon = 0xBA;
     private const uint VirtualKeyPlus = 0xBB;
     private const uint VirtualKeyComma = 0xBC;
@@ -73,7 +75,7 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
 
         if (tokens.Length < 2)
         {
-            errorMessage = "普通键盘按键需要修饰键；PrintScreen、小键盘数字键和鼠标键可单独使用。";
+            errorMessage = "普通键盘按键需要修饰键；F1-F24、PrintScreen、小键盘数字键和鼠标键可单独使用。";
             return false;
         }
 
@@ -160,6 +162,7 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
     public static bool AllowsStandaloneKeyboardShortcut(uint virtualKey)
     {
         return virtualKey == VirtualKeyPrintScreen ||
+               virtualKey is >= VirtualKeyF1 and <= VirtualKeyF24 ||
                virtualKey is >= VirtualKeyNumpad0 and <= VirtualKeyNumpad9;
     }
 

@@ -1522,9 +1522,18 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return;
         }
 
-        if (_inlineTranslatedTextRegions is { Count: > 0 } &&
-            _inlineTranslatedAnnotationRegions is { Count: > 0 })
+        if (_inlineTranslatedTextRegions is not null &&
+            _inlineTranslatedAnnotationRegions is not null)
         {
+            if (_inlineTranslatedTextRegions.Count == 0 ||
+                _inlineTranslatedAnnotationRegions.Count == 0)
+            {
+                CaptureStatusText.Text =
+                    "识别文字已经是目标语言，没有需要覆盖的译文。";
+                CaptureStatusText.Visibility = Visibility.Visible;
+                return;
+            }
+
             if (!InlineEditorCanvas.HasTranslationOverlay)
             {
                 InlineEditorCanvas.AddTranslationOverlay(
@@ -1574,8 +1583,15 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 return;
             }
 
-            var translationRegions = TranslationPresentationLayout.GroupParagraphs(
-                recognition.Regions);
+            // Keep the OCR line geometry intact. Merging nearby rows makes
+            // menus and lists look like one paragraph, so translated text is
+            // wrapped into unrelated rows and no longer matches the image.
+            var translationRegions = TranslationPresentationLayout
+                .TightenToWordBounds(recognition.Regions, recognition.Words)
+                .Where(region => !string.IsNullOrWhiteSpace(region.Text))
+                .OrderBy(region => region.Y)
+                .ThenBy(region => region.X)
+                .ToArray();
             var translationInput = recognition with
             {
                 Text = string.Join(
@@ -1595,34 +1611,59 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 return;
             }
 
-            if (translation.Segments.Count != translationRegions.Count)
+            if (translation.Segments.Count != translationRegions.Length)
             {
                 CaptureStatusText.Text = "翻译服务返回的分段结果不完整。";
                 return;
             }
 
             var normalizedTranslations = translation.Segments
-                .Select(TranslationPresentationLayout.NormalizeTranslatedText)
+                .Select((text, index) => TranslationPresentationLayout
+                    .NormalizeTranslatedText(
+                        translationRegions[index].Text,
+                        text))
                 .ToArray();
-            _inlineTranslatedAnnotationRegions = translationRegions
-                .Select((region, index) => new TranslatedTextAnnotationRegion(
+            var translatedLines = translationRegions
+                .Select((region, index) => new
+                {
+                    Region = region,
+                    Text = normalizedTranslations[index],
+                    HasTranslation = TranslationPresentationLayout
+                        .HasMeaningfulTranslation(
+                            region.Text,
+                            normalizedTranslations[index]),
+                })
+                .ToArray();
+            _inlineTranslatedAnnotationRegions = translatedLines
+                .Where(item => item.HasTranslation)
+                .Select(item => new TranslatedTextAnnotationRegion(
                      new Rect(
-                         Math.Max(0, region.X - 3),
-                         Math.Max(0, region.Y - 2),
-                         Math.Max(20, region.Width + 6),
-                         Math.Max(24, region.Height + 4)),
-                     normalizedTranslations[index],
+                         Math.Max(0, item.Region.X - 3),
+                         Math.Max(0, item.Region.Y - 2),
+                         Math.Max(20, item.Region.Width + 6),
+                         Math.Max(24, item.Region.Height + 4)),
+                     item.Text,
                      Math.Clamp(
-                         region.EstimatedFontSize > 0
-                             ? region.EstimatedFontSize
-                             : region.Height / 1.12,
+                         item.Region.EstimatedFontSize > 0
+                             ? item.Region.EstimatedFontSize
+                             : item.Region.Height / 1.12,
                          TranslationTextLayout.MinimumFontSize,
                          32)))
                 .ToArray();
-            _inlineTranslatedTextRegions = _inlineTranslatedAnnotationRegions
-                .SelectMany(region => TranslationTextLayout
-                    .LayoutParagraph(region)
-                    .Lines)
+            if (_inlineTranslatedAnnotationRegions.Count == 0)
+            {
+                _inlineTranslatedTextRegions = translationRegions;
+                CaptureStatusText.Text = "识别文字已经是目标语言，没有需要覆盖的译文。";
+                return;
+            }
+
+            var annotationIndex = 0;
+            _inlineTranslatedTextRegions = translatedLines
+                .SelectMany(line => line.HasTranslation
+                    ? TranslationTextLayout.LayoutParagraph(
+                            _inlineTranslatedAnnotationRegions[annotationIndex++])
+                        .Lines
+                    : [line.Region])
                 .ToArray();
             InlineEditorCanvas.AddTranslationOverlay(
                 _inlineTranslatedAnnotationRegions);

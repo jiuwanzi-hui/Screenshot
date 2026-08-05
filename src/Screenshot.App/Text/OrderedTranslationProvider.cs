@@ -57,7 +57,12 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                     sourceLanguage,
                     targetLanguage,
                     cancellationToken);
-                if (result.IsSuccess && !ContainsUntranslatedHanText(
+                if (result.IsSuccess &&
+                    HasMeaningfulTranslation(
+                        [text],
+                        [result.Text],
+                        targetLanguage) &&
+                    !ContainsUntranslatedHanText(
                         [text],
                         [result.Text],
                         targetLanguage))
@@ -68,7 +73,10 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                 errors.Add(FormatError(
                     provider,
                     result.IsSuccess
-                        ? "译文仍包含未翻译的中文"
+                        ? GetInvalidTranslationMessage(
+                            [text],
+                            [result.Text],
+                            targetLanguage)
                         : result.ErrorMessage));
             }
             catch (OperationCanceledException) when (
@@ -103,7 +111,12 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                     sourceLanguage,
                     targetLanguage,
                     cancellationToken);
-                if (result.IsSuccess && !ContainsUntranslatedHanText(
+                if (result.IsSuccess &&
+                    HasMeaningfulTranslation(
+                        segments,
+                        result.Segments,
+                        targetLanguage) &&
+                    !ContainsUntranslatedHanText(
                         segments,
                         result.Segments,
                         targetLanguage))
@@ -114,7 +127,10 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                 errors.Add(FormatError(
                     provider,
                     result.IsSuccess
-                        ? "译文仍包含未翻译的中文"
+                        ? GetInvalidTranslationMessage(
+                            segments,
+                            result.Segments,
+                            targetLanguage)
                         : result.ErrorMessage));
             }
             catch (OperationCanceledException) when (
@@ -245,6 +261,53 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         }
 
         return translatedSegments.Any(segment => segment.Count(IsHanCharacter) >= 2);
+    }
+
+    internal static bool HasMeaningfulTranslation(
+        IReadOnlyList<string> sourceSegments,
+        IReadOnlyList<string> translatedSegments,
+        string targetLanguage)
+    {
+        var needsTranslation = sourceSegments
+            .Select((segment, index) => (Segment: segment, Index: index))
+            .Where(item => !TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(
+                item.Segment,
+                targetLanguage))
+            .ToArray();
+
+        if (needsTranslation.Length == 0)
+        {
+            return true;
+        }
+
+        return needsTranslation.Any(item =>
+            item.Index < translatedSegments.Count &&
+            !AreEquivalent(item.Segment, translatedSegments[item.Index]));
+    }
+
+    private static string GetInvalidTranslationMessage(
+        IReadOnlyList<string> sourceSegments,
+        IReadOnlyList<string> translatedSegments,
+        string targetLanguage)
+    {
+        return ContainsUntranslatedHanText(
+            sourceSegments,
+            translatedSegments,
+            targetLanguage)
+            ? "译文仍包含未翻译的中文"
+            : "未产生有效译文";
+    }
+
+    private static bool AreEquivalent(string source, string translated)
+    {
+        static string Normalize(string value) => string.Concat(
+            value.Where(char.IsLetterOrDigit)
+                .Select(char.ToUpperInvariant));
+
+        return string.Equals(
+            Normalize(source),
+            Normalize(translated),
+            StringComparison.Ordinal);
     }
 
     private static bool IsHanCharacter(char value)

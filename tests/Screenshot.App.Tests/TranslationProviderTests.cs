@@ -209,6 +209,57 @@ public sealed class TranslationProviderTests
     }
 
     [Fact]
+    public async Task PreservesSingleTargetGlyphsAndShortUppercaseIdentifiers()
+    {
+        var handler = new RecordingHandler(
+            """{"choices":[{"message":{"content":"{\"translations\":[{\"id\":0,\"text\":\"连接\"}]}"}}]}""");
+        using var client = new HttpClient(handler);
+        var provider = new OpenAiCompatibleTranslationProvider(
+            "https://translation.example/v1/chat/completions",
+            "test-key",
+            client);
+
+        var result = await provider.TranslateSegmentsAsync(
+            ["旦", "GI", "V", "Connect"],
+            "auto",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(["旦", "GI", "V", "连接"], result.Segments);
+        Assert.DoesNotContain("旦", handler.RequestBody);
+        Assert.DoesNotContain("GI", handler.RequestBody);
+        Assert.DoesNotContain("\"V\"", handler.RequestBody);
+    }
+
+    [Fact]
+    public async Task PreservesMixedChineseIdentifierRowsForChineseTarget()
+    {
+        var handler = new RecordingHandler(
+            """{"choices":[{"message":{"content":"{\"translations\":[{\"id\":0,\"text\":\"连接\"}]}"}}]}""");
+        using var client = new HttpClient(handler);
+        var provider = new OpenAiCompatibleTranslationProvider(
+            "https://translation.example/v1/chat/completions",
+            "test-key",
+            client);
+
+        var result = await provider.TranslateSegmentsAsync(
+            [
+                "MySQL+PG_TD安装说明文档",
+                "Ubuntu+Debian密码重置",
+                "Connect",
+            ],
+            "auto",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(
+            ["MySQL+PG_TD安装说明文档", "Ubuntu+Debian密码重置", "连接"],
+            result.Segments);
+        Assert.DoesNotContain("MySQL", handler.RequestBody);
+        Assert.DoesNotContain("Ubuntu", handler.RequestBody);
+    }
+
+    [Fact]
     public async Task RejectsAnUnchangedBatchAsNotTranslated()
     {
         var handler = new RecordingHandler(
@@ -377,6 +428,106 @@ public sealed class TranslationProviderTests
         Assert.Equal(["你好", "世界"], result.Segments);
         Assert.Equal(1, first.SegmentCallCount);
         Assert.Equal(1, second.SegmentCallCount);
+    }
+
+    [Fact]
+    public async Task OrderedProviderFallsBackWhenSegmentsAreReturnedUnchanged()
+    {
+        var first = new StubTranslationProvider(
+            "LocalLargeModel",
+            segmentResult: new TranslationSegmentsResult(
+                true,
+                ["Connect", "Channel"],
+                null));
+        var second = new StubTranslationProvider(
+            "OpenAICompatible",
+            segmentResult: new TranslationSegmentsResult(
+                true,
+                ["连接", "频道"],
+                null));
+        var provider = new OrderedTranslationProvider([first, second]);
+
+        var result = await provider.TranslateSegmentsAsync(
+            ["Connect", "Channel"],
+            "auto",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(["连接", "频道"], result.Segments);
+        Assert.Equal(1, first.SegmentCallCount);
+        Assert.Equal(1, second.SegmentCallCount);
+    }
+
+    [Fact]
+    public async Task OrderedProviderFallsBackWhenSingleTextIsReturnedUnchanged()
+    {
+        var first = new StubTranslationProvider(
+            "LocalLargeModel",
+            textResult: new TranslationResult(true, "Connect.", null));
+        var second = new StubTranslationProvider(
+            "OpenAICompatible",
+            textResult: new TranslationResult(true, "连接", null));
+        var provider = new OrderedTranslationProvider([first, second]);
+
+        var result = await provider.TranslateAsync(
+            "Connect",
+            "auto",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal("连接", result.Text);
+        Assert.Equal(1, first.TextCallCount);
+        Assert.Equal(1, second.TextCallCount);
+    }
+
+    [Fact]
+    public async Task OrderedProviderAcceptsUnchangedTextAlreadyInTargetLanguage()
+    {
+        var first = new StubTranslationProvider(
+            "First",
+            textResult: new TranslationResult(true, "已经是中文", null));
+        var second = new StubTranslationProvider(
+            "Second",
+            textResult: new TranslationResult(true, "不应调用", null));
+        var provider = new OrderedTranslationProvider([first, second]);
+
+        var result = await provider.TranslateAsync(
+            "已经是中文",
+            "auto",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal("已经是中文", result.Text);
+        Assert.Equal(1, first.TextCallCount);
+        Assert.Equal(0, second.TextCallCount);
+    }
+
+    [Fact]
+    public async Task OrderedProviderAcceptsPartialTranslationWithUnchangedProductName()
+    {
+        var first = new StubTranslationProvider(
+            "First",
+            segmentResult: new TranslationSegmentsResult(
+                true,
+                ["连接", "IDC Flare"],
+                null));
+        var second = new StubTranslationProvider(
+            "Second",
+            segmentResult: new TranslationSegmentsResult(
+                true,
+                ["不应调用", "不应调用"],
+                null));
+        var provider = new OrderedTranslationProvider([first, second]);
+
+        var result = await provider.TranslateSegmentsAsync(
+            ["Connect", "IDC Flare"],
+            "auto",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(["连接", "IDC Flare"], result.Segments);
+        Assert.Equal(1, first.SegmentCallCount);
+        Assert.Equal(0, second.SegmentCallCount);
     }
 
     [Fact]

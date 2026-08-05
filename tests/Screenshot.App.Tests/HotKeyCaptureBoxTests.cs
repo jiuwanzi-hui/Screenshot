@@ -43,6 +43,9 @@ public sealed class HotKeyCaptureBoxTests
     }
 
     [Theory]
+    [InlineData(Key.F1, "F1")]
+    [InlineData(Key.F12, "F12")]
+    [InlineData(Key.F24, "F24")]
     [InlineData(Key.PrintScreen, "PrintScreen")]
     [InlineData(Key.NumPad3, "Numpad3")]
     public void CapturesDedicatedKeysWithoutAModifier(Key key, string expected)

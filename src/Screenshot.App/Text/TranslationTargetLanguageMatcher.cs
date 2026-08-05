@@ -24,19 +24,27 @@ internal static class TranslationTargetLanguageMatcher
             return true;
         }
 
+        if (IsShortAsciiIdentifier(text))
+        {
+            return true;
+        }
+
         if (target == "zh")
         {
             var han = text.Count(IsHanCharacter);
             var kana = text.Count(character =>
                 character is >= '\u3040' and <= '\u30ff');
-            return han >= 2 && kana == 0 && han >= letters * 0.5;
+            // A mixed Chinese/Latin UI label is already usable Chinese. Sending
+            // the whole row to a model often corrupts identifiers such as
+            // MySQL+PG_TD or Ubuntu+Debian while needlessly redrawing the Han text.
+            return han >= 1 && kana == 0;
         }
 
         if (target == "en")
         {
             var latin = text.Count(character =>
                 character is >= 'A' and <= 'Z' or >= 'a' and <= 'z');
-            return latin >= 4 && latin >= letters * 0.8;
+            return latin >= 1 && latin >= letters * 0.8;
         }
 
         var detection = Cld3OfflineLanguageDetector.Shared.Detect(text);
@@ -50,4 +58,11 @@ internal static class TranslationTargetLanguageMatcher
         value is >= '\u3400' and <= '\u4dbf' or
             >= '\u4e00' and <= '\u9fff' or
             >= '\uf900' and <= '\ufaff';
+
+    private static bool IsShortAsciiIdentifier(string text)
+    {
+        var letters = text.Where(char.IsLetter).ToArray();
+        return letters.Length is >= 1 and <= 3 &&
+               letters.All(character => character is >= 'A' and <= 'Z');
+    }
 }
