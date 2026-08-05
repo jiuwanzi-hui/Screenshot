@@ -51,6 +51,23 @@ public sealed class OcrServiceTests
             region => region.Text.Contains("OCR", StringComparison.OrdinalIgnoreCase) &&
                       region.Width > 0 &&
                       region.Height > 0);
+        Assert.Contains(
+            result.Words,
+            word => word.Text.Contains("OCR", StringComparison.OrdinalIgnoreCase) &&
+                    word.Width > 0 &&
+                    word.Height > 0);
+    }
+
+    [Theory]
+    [InlineData("This is an English paragraph.", true)]
+    [InlineData("快捷键 Ctrl+C", false)]
+    [InlineData("短句 test", false)]
+    [InlineData("网络 global network settings", true)]
+    public void DetectsWhenEnglishOcrShouldReviewTheSelectedLanguage(
+        string text,
+        bool expected)
+    {
+        Assert.Equal(expected, OcrService.ShouldPreferEnglishLanguage(text));
     }
 
     private static CapturedImage CreateTextImage(string text)

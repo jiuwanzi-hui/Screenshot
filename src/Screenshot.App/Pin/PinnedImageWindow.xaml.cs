@@ -230,10 +230,13 @@ public partial class PinnedImageWindow : Window
             _translatedRegions = recognition.Regions
                 .Select((region, index) => new OcrTextRegion(
                     translation.Segments[index],
-                    region.X,
-                    Math.Max(0, region.Y - 2),
-                    region.Width,
-                    Math.Max(18, region.Height + 6)))
+                    Math.Max(0, region.X - 4),
+                    Math.Max(0, region.Y - 3),
+                    Math.Max(20, region.Width + 8),
+                    Math.Max(24, region.Height + 12))
+                {
+                    EstimatedFontSize = region.EstimatedFontSize,
+                })
                 .ToArray();
             ShowTranslatedText();
         }
@@ -327,7 +330,7 @@ public partial class PinnedImageWindow : Window
                     ? new Thickness(2, 0, 2, 0)
                     : new Thickness(0),
                 Background = _isShowingTranslation
-                    ? new SolidColorBrush(WpfColor.FromArgb(224, 15, 23, 26))
+                    ? new SolidColorBrush(WpfColor.FromRgb(15, 23, 26))
                     : WpfBrushes.Transparent,
                 BorderThickness = new Thickness(0),
                 Cursor = WpfCursors.IBeam,

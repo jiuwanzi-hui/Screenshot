@@ -42,6 +42,9 @@ public sealed class SettingsStoreTests : IDisposable
             CloseBehavior = WindowCloseBehavior.ExitApplication,
             MouseLongPressMilliseconds = 1150,
             MouseSideButtonsUseLongPress = true,
+            OcrEngine = OcrEngineMode.PaddleOcrV6,
+            OfflineTranslationQuality = OfflineTranslationQuality.Ultra,
+            OfflineTranslationEngine = OfflineTranslationEngine.QwenLargeModel,
         };
 
         store.Save(settings);
@@ -57,6 +60,7 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(settings.CloseBehavior, loadResult.Settings.CloseBehavior);
         Assert.Equal(1150, loadResult.Settings.MouseLongPressMilliseconds);
         Assert.True(loadResult.Settings.MouseSideButtonsUseLongPress);
+        Assert.Equal(OcrEngineMode.PaddleOcrV6, loadResult.Settings.OcrEngine);
         Assert.Equal(Path.GetFullPath(settings.SaveDirectory), loadResult.Settings.SaveDirectory);
         Assert.Equal(
             Path.GetFullPath(settings.VideoSaveDirectory),
@@ -70,6 +74,12 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal("Ctrl+Alt+R", loadResult.Settings.VideoRecordingHotKey);
         Assert.True(loadResult.Settings.ShowKeyboardInputInRecording);
         Assert.True(loadResult.Settings.ShowMouseInputInRecording);
+        Assert.Equal(
+            OfflineTranslationQuality.Ultra,
+            loadResult.Settings.OfflineTranslationQuality);
+        Assert.Equal(
+            OfflineTranslationEngine.QwenLargeModel,
+            loadResult.Settings.OfflineTranslationEngine);
     }
 
     [Fact]
@@ -81,6 +91,30 @@ public sealed class SettingsStoreTests : IDisposable
 
         Assert.NotNull(loadResult.Warning);
         Assert.Equal(AppSettings.CreateDefault().RegionCaptureHotKey, loadResult.Settings.RegionCaptureHotKey);
+    }
+
+    [Fact]
+    public void MigratesLegacyThemeAndDropsAccentColorWhenSaved()
+    {
+        File.WriteAllText(
+            _settingsPath,
+            """
+            {
+              "settingsVersion": 3,
+              "theme": "Dark",
+              "accentColor": "#8A5BD6"
+            }
+            """);
+        var store = new SettingsStore(_settingsPath);
+
+        var loaded = store.Load();
+
+        Assert.Null(loaded.Warning);
+        Assert.Equal(AppTheme.ForestNight, loaded.Settings.Theme);
+        store.Save(loaded.Settings);
+        var savedJson = File.ReadAllText(_settingsPath);
+        Assert.DoesNotContain("accentColor", savedJson, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ForestNight", savedJson, StringComparison.Ordinal);
     }
 
     [Fact]

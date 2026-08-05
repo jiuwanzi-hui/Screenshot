@@ -106,7 +106,8 @@ public sealed class OfflineTranslationModelManager : IDisposable
 
     internal IReadOnlyList<string>? GetInstalledRoute(
         string sourceLanguage,
-        string targetLanguage)
+        string targetLanguage,
+        OfflineTranslationQuality quality = OfflineTranslationQuality.High)
     {
         var sourceCode = TranslationLanguageCatalog.NormalizeOfflineCode(
             sourceLanguage);
@@ -127,7 +128,7 @@ public sealed class OfflineTranslationModelManager : IDisposable
                      sourceCode,
                      targetCode))
         {
-            var path = GetConfigurationPath(directionId);
+            var path = GetConfigurationPath(directionId, quality);
             if (path is null)
             {
                 return null;
@@ -139,7 +140,9 @@ public sealed class OfflineTranslationModelManager : IDisposable
         return paths;
     }
 
-    internal string? GetConfigurationPath(string directionId)
+    internal string? GetConfigurationPath(
+        string directionId,
+        OfflineTranslationQuality quality = OfflineTranslationQuality.Fast)
     {
         if (!IsSafeDirectionId(directionId))
         {
@@ -151,9 +154,35 @@ public sealed class OfflineTranslationModelManager : IDisposable
         var configurationPath = Path.Combine(
             directionDirectory,
             ConfigurationFileName);
-        return File.Exists(markerPath) && File.Exists(configurationPath)
-            ? configurationPath
-            : null;
+        if (!File.Exists(markerPath) || !File.Exists(configurationPath))
+        {
+            return null;
+        }
+
+        if (quality == OfflineTranslationQuality.Fast)
+        {
+            return configurationPath;
+        }
+
+        var qualityName = quality == OfflineTranslationQuality.Ultra
+            ? "ultra"
+            : "high";
+        var qualityPath = Path.Combine(
+            directionDirectory,
+            $"config-{qualityName}.yml");
+        var configuration = OfflineTranslationModelCatalog.ApplyQuality(
+            File.ReadAllText(configurationPath),
+            quality);
+        if (!File.Exists(qualityPath) ||
+            !string.Equals(
+                File.ReadAllText(qualityPath),
+                configuration,
+                StringComparison.Ordinal))
+        {
+            File.WriteAllText(qualityPath, configuration);
+        }
+
+        return qualityPath;
     }
 
     internal async Task<OfflineTranslationInstallationResult> InstallAsync(

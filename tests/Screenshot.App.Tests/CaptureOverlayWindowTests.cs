@@ -357,6 +357,16 @@ public sealed class CaptureOverlayWindowTests
                 Assert.NotNull(overlay.FindName("BottomRightResizeThumb"));
                 Assert.NotNull(overlay.FindName("CaptureToolbar"));
                 Assert.NotNull(overlay.FindName("TranslateButton"));
+                var shapeButton = Assert.IsType<System.Windows.Controls.RadioButton>(
+                    overlay.FindName("InlineShapeToolButton"));
+                Assert.Equal(2, shapeButton.ContextMenu.Items.Count);
+                var ocrButton = Assert.IsType<Button>(
+                    overlay.FindName("OcrButton"));
+                var tableMenuItem = Assert.IsType<MenuItem>(
+                    Assert.Single(ocrButton.ContextMenu.Items));
+                Assert.Equal("表格复制", tableMenuItem.Header);
+                Assert.NotNull(overlay.FindName("ContentRecognitionOverlay"));
+                Assert.NotNull(overlay.FindName("SelectionMessageToast"));
                 var frozenScreen = Assert.IsType<System.Windows.Controls.Image>(
                     overlay.FindName("FrozenScreenImage"));
                 Assert.False(frozenScreen.IsHitTestVisible);
@@ -603,6 +613,11 @@ public sealed class CaptureOverlayWindowTests
             });
 
             Assert.Null(overlay.FindName("CopyButton"));
+            var confirmButton = Assert.IsType<Button>(
+                overlay.FindName("ConfirmButton"));
+            Assert.Equal(
+                "完成并复制到剪贴板（Ctrl+C）",
+                confirmButton.ToolTip);
             overlay.Close();
             pinnedImageManager.Dispose();
         });
@@ -912,12 +927,13 @@ public sealed class CaptureOverlayWindowTests
                 Func<CapturedImage, Task<OcrRecognitionResult>> recognize = _ =>
                     Task.FromResult(new OcrRecognitionResult(
                         true,
-                        "可选择文字",
+                        "第一行\r\n第二行",
                         ErrorMessage: null)
                     {
                         Regions =
                         [
-                            new OcrTextRegion("可选择文字", 12, 18, 90, 24),
+                            new OcrTextRegion("第一行", 12, 18, 90, 24),
+                            new OcrTextRegion("第二行", 72, 48, 90, 24),
                         ],
                     });
                 recognizeTask = Assert.IsAssignableFrom<Task>(
@@ -931,13 +947,24 @@ public sealed class CaptureOverlayWindowTests
             {
                 var textOverlay = Assert.IsType<Canvas>(
                     overlay?.FindName("OcrTextOverlay"));
-                var textBox = Assert.Single(textOverlay.Children.OfType<TextBox>());
-                textBox.SelectAll();
+                var textBox = Assert.Single(
+                    textOverlay.Children.OfType<SelectableOcrTextOverlay>());
+                var editor = Assert.IsType<ImageEditorCanvas>(
+                    overlay?.FindName("InlineEditorCanvas"));
+                textBox.SelectAllText();
 
                 Assert.Equal(Visibility.Visible, textOverlay.Visibility);
                 Assert.True(Panel.GetZIndex(textOverlay) > 80);
-                Assert.True(textBox.IsReadOnly);
-                Assert.Equal("可选择文字", textBox.SelectedText);
+                Assert.True(textBox.Focusable);
+                var segmentBounds = textBox.SegmentBounds;
+                Assert.Equal(2, segmentBounds.Count);
+                Assert.Equal(
+                    60 * textOverlay.Width / editor.Width,
+                    segmentBounds[1].Left - segmentBounds[0].Left,
+                    precision: 3);
+                Assert.Equal(
+                    $"第一行{Environment.NewLine}第二行",
+                    textBox.SelectedText);
             });
         }
         finally
@@ -1092,10 +1119,10 @@ public sealed class CaptureOverlayWindowTests
                 var selectableTranslation = Assert.IsType<Canvas>(
                     overlay?.FindName("OcrTextOverlay"));
                 var translatedTextBox = Assert.Single(
-                    selectableTranslation.Children.OfType<TextBox>());
+                    selectableTranslation.Children.OfType<SelectableOcrTextOverlay>());
                 Assert.Equal(Visibility.Visible, selectableTranslation.Visibility);
-                Assert.Equal("你好", translatedTextBox.Text);
-                Assert.True(translatedTextBox.IsReadOnly);
+                translatedTextBox.SelectAllText();
+                Assert.Equal("你好", translatedTextBox.SelectedText);
                 Assert.Equal(
                     "原",
                     Assert.IsType<TextBlock>(
@@ -1105,17 +1132,19 @@ public sealed class CaptureOverlayWindowTests
                     overlay?.FindName("TranslateButton"));
                 button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 Assert.False(editor.IsTranslationOverlayVisible);
+                var originalTextBox = Assert.Single(
+                    selectableTranslation.Children.OfType<SelectableOcrTextOverlay>());
+                originalTextBox.SelectAllText();
                 Assert.Equal(
                     "hello",
-                    Assert.Single(selectableTranslation.Children
-                        .OfType<TextBox>()).Text);
+                    originalTextBox.SelectedText);
 
                 button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
                 Assert.True(editor.IsTranslationOverlayVisible);
                 Assert.Equal(
                     "你好",
-                    Assert.Single(selectableTranslation.Children
-                        .OfType<TextBox>()).Text);
+                    GetSelectedText(Assert.Single(selectableTranslation.Children
+                        .OfType<SelectableOcrTextOverlay>())));
                 Assert.Equal(1, translationRequestCount);
 
                 editor.Undo();
@@ -1130,8 +1159,8 @@ public sealed class CaptureOverlayWindowTests
                 Assert.True(editor.IsTranslationOverlayVisible);
                 Assert.Equal(
                     "你好",
-                    Assert.Single(selectableTranslation.Children
-                        .OfType<TextBox>()).Text);
+                    GetSelectedText(Assert.Single(selectableTranslation.Children
+                        .OfType<SelectableOcrTextOverlay>())));
                 Assert.Equal(
                     "原",
                     Assert.IsType<TextBlock>(
@@ -1153,11 +1182,12 @@ public sealed class CaptureOverlayWindowTests
     }
 
     [Fact]
-    public async Task OcrShortcutModeRecognizesInsideTheCaptureInsteadOfOpeningAResultWindow()
+    public async Task CompletedSelectionRunsTextRecognitionOnlyOnRequest()
     {
         CaptureOverlayWindow? overlay = null;
         Task? enterAndRecognizeTask = null;
         var legacyOcrStarted = false;
+        var textRecognitionRequestCount = 0;
 
         try
         {
@@ -1177,15 +1207,18 @@ public sealed class CaptureOverlayWindowTests
                         image.Dispose();
                         return Task.CompletedTask;
                     },
-                    RecognizeTextAfterSelection = true,
-                    RecognizeTextAsync = _ => Task.FromResult(
+                    RecognizeTextAsync = _ =>
+                    {
+                        textRecognitionRequestCount++;
+                        return Task.FromResult(
                         new OcrRecognitionResult(true, "快捷键识别", ErrorMessage: null)
                         {
                             Regions =
                             [
                                 new OcrTextRegion("快捷键识别", 10, 12, 90, 24),
                             ],
-                        }),
+                        });
+                    },
                     CaptureClosed = pinnedImageManager.Dispose,
                 });
                 overlay.UpdateLayout();
@@ -1212,12 +1245,27 @@ public sealed class CaptureOverlayWindowTests
                     overlay?.FindName("InlineEditorCanvas"));
                 var textOverlay = Assert.IsType<Canvas>(
                     overlay?.FindName("OcrTextOverlay"));
-                var selectableText = Assert.Single(
-                    textOverlay.Children.OfType<TextBox>());
+                var statusText = Assert.IsType<TextBlock>(
+                    overlay?.FindName("CaptureStatusText"));
 
                 Assert.True(editor.HasImage);
+                Assert.Equal(Visibility.Collapsed, textOverlay.Visibility);
+                Assert.Equal(Visibility.Collapsed, statusText.Visibility);
+                Assert.Equal(0, textRecognitionRequestCount);
+                Assert.Empty(
+                    textOverlay.Children.OfType<SelectableOcrTextOverlay>());
+
+                var ocrButton = Assert.IsType<Button>(
+                    overlay?.FindName("OcrButton"));
+                ocrButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                overlay?.UpdateLayout();
+                var selectableText = Assert.Single(
+                    textOverlay.Children.OfType<SelectableOcrTextOverlay>());
+                selectableText.SelectAllText();
+
                 Assert.Equal(Visibility.Visible, textOverlay.Visibility);
-                Assert.Equal("快捷键识别", selectableText.Text);
+                Assert.Equal("快捷键识别", selectableText.SelectedText);
+                Assert.Equal(1, textRecognitionRequestCount);
                 Assert.False(legacyOcrStarted);
             });
         }
@@ -1295,11 +1343,12 @@ public sealed class CaptureOverlayWindowTests
                 var textOverlay = Assert.IsType<Canvas>(
                     overlay?.FindName("OcrTextOverlay"));
                 var translatedText = Assert.Single(
-                    textOverlay.Children.OfType<TextBox>());
+                    textOverlay.Children.OfType<SelectableOcrTextOverlay>());
+                translatedText.SelectAllText();
 
                 Assert.True(editor.HasTranslationOverlay);
                 Assert.True(editor.IsTranslationOverlayVisible);
-                Assert.Equal("你好", translatedText.Text);
+                Assert.Equal("你好", translatedText.SelectedText);
                 Assert.Equal(1, translationRequestCount);
                 Assert.Equal(
                     "原",
@@ -1763,5 +1812,11 @@ public sealed class CaptureOverlayWindowTests
         public static extern bool GetWindowDisplayAffinity(
             IntPtr windowHandle,
             out uint affinity);
+    }
+
+    private static string GetSelectedText(SelectableOcrTextOverlay textOverlay)
+    {
+        textOverlay.SelectAllText();
+        return textOverlay.SelectedText;
     }
 }

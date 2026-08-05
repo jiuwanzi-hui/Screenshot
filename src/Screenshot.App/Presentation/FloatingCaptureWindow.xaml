@@ -226,7 +226,7 @@
                             Opacity="0.72" />
                     <Button x:Name="HistoryMenuButton"
                             Click="OnHistoryClick"
-                            Content="截图历史"
+                            Content="历史查看"
                             Style="{StaticResource FloatingMenuButton}" />
                 </StackPanel>
             </Border>

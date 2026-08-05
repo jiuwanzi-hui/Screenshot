@@ -235,6 +235,8 @@ public sealed class ImmediateSettingsTests : IDisposable
                 window.FindName("TranslationTargetLanguageComboBox"));
             var model = Assert.IsType<ComboBox>(
                 window.FindName("TranslationModelComboBox"));
+            var offlineQuality = Assert.IsType<ComboBox>(
+                window.FindName("OfflineTranslationQualityComboBox"));
             Assert.IsType<Button>(
                 window.FindName("FetchTranslationModelsButton"));
 
@@ -249,8 +251,12 @@ public sealed class ImmediateSettingsTests : IDisposable
             Assert.True(targetLanguage.Items.Count >= 5);
             Assert.True(model.IsEditable);
             Assert.Equal("deepseek-v4-flash", model.Text);
+            Assert.Equal(
+                OfflineTranslationQuality.High,
+                offlineQuality.SelectedValue);
 
             targetLanguage.SelectedValue = "en";
+            offlineQuality.SelectedValue = OfflineTranslationQuality.Ultra;
             window.RequestExit();
         });
 
@@ -258,6 +264,9 @@ public sealed class ImmediateSettingsTests : IDisposable
         Assert.Null(loaded.Warning);
         Assert.Equal("en", loaded.Settings.TranslationTargetLanguage);
         Assert.Equal("deepseek-v4-flash", loaded.Settings.TranslationModel);
+        Assert.Equal(
+            OfflineTranslationQuality.Ultra,
+            loaded.Settings.OfflineTranslationQuality);
     }
 
     [Fact]
@@ -567,7 +576,7 @@ public sealed class ImmediateSettingsTests : IDisposable
         var settingsStore = new SettingsStore(settingsPath);
         var initialSettings = CreateSettings() with
         {
-            Theme = AppTheme.Dark,
+            Theme = AppTheme.ForestNight,
         };
         var settingsSavedCount = 0;
 
@@ -597,13 +606,15 @@ public sealed class ImmediateSettingsTests : IDisposable
 
             window.Show();
             var lightTheme = Assert.IsType<RadioButton>(
-                window.FindName("LightThemeOption"));
+                window.FindName("AuroraMistThemeOption"));
             lightTheme.IsChecked = true;
             var background = Assert.IsType<LinearGradientBrush>(
                 window.Resources["AppWindowBackgroundBrush"]);
             Assert.Equal(
-                Color.FromRgb(0xF7, 0xF7, 0xFC),
+                Color.FromRgb(0xF7, 0xF8, 0xFB),
                 background.GradientStops[0].Color);
+            Assert.Null(window.FindName("CustomAccentButton"));
+            Assert.NotNull(window.FindName("NeonDeepThemeOption"));
 
             var regionCapture = Assert.IsType<HotKeyCaptureBox>(
                 window.FindName("RegionCaptureHotKeyBox"));
@@ -626,7 +637,7 @@ public sealed class ImmediateSettingsTests : IDisposable
 
         var loaded = settingsStore.Load();
         Assert.Null(loaded.Warning);
-        Assert.Equal(AppTheme.Light, loaded.Settings.Theme);
+        Assert.Equal(AppTheme.AuroraMist, loaded.Settings.Theme);
         Assert.Equal("Ctrl+Alt+Shift+F18", loaded.Settings.RegionCaptureHotKey);
         Assert.Equal(initialSettings.PinHotKey, loaded.Settings.PinHotKey);
         Assert.True(settingsSavedCount >= 2);
@@ -751,6 +762,18 @@ public sealed class ImmediateSettingsTests : IDisposable
             PinHotKey = "Ctrl+Alt+Shift+F16",
             OpenSettingsHotKey = "Ctrl+Alt+Shift+F17",
         };
+    }
+
+    [Fact]
+    public async Task FolderPickerWorkRunsOnADedicatedStaThread()
+    {
+        var callerThreadId = Environment.CurrentManagedThreadId;
+        var result = await MainWindow.RunOnStaThreadAsync(() =>
+            (ThreadId: Environment.CurrentManagedThreadId,
+             Apartment: Thread.CurrentThread.GetApartmentState()));
+
+        Assert.NotEqual(callerThreadId, result.ThreadId);
+        Assert.Equal(ApartmentState.STA, result.Apartment);
     }
 
     private sealed class FakeStartupRegistrationService : IStartupRegistrationService

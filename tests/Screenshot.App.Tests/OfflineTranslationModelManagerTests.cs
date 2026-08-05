@@ -260,7 +260,7 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
 
         Assert.Equal(TranslationMode.Automatic, settings.TranslationMode);
         Assert.True(settings.SendTextToOnlineTranslation);
-        Assert.Equal(3, settings.SettingsVersion);
+        Assert.Equal(5, settings.SettingsVersion);
         Assert.Equal(
             [TranslationProviderKind.Online, TranslationProviderKind.Offline],
             settings.TranslationProviderPriority);
@@ -280,6 +280,28 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
             TranslationLanguageCatalog.BuildRoute("en-US", "fr-FR"));
         Assert.True(
             TranslationLanguageCatalog.OfflineTargetLanguages.Count >= 53);
+    }
+
+    [Theory]
+    [InlineData(OfflineTranslationQuality.Fast, "beam-size: 1")]
+    [InlineData(OfflineTranslationQuality.High, "beam-size: 4")]
+    [InlineData(OfflineTranslationQuality.Ultra, "beam-size: 8")]
+    public void OfflineQualityProducesTheExpectedBeamSearchConfiguration(
+        OfflineTranslationQuality quality,
+        string expectedBeamSize)
+    {
+        var configuration = OfflineTranslationModelCatalog.CreateConfiguration(
+            "model.bin",
+            "source.spm",
+            "target.spm",
+            null);
+
+        var adjusted = OfflineTranslationModelCatalog.ApplyQuality(
+            configuration,
+            quality);
+
+        Assert.Contains(expectedBeamSize, adjusted);
+        Assert.Equal(1, adjusted.Split(expectedBeamSize).Length - 1);
     }
 
     [Fact]

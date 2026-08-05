@@ -49,7 +49,7 @@
                            Margin="0,3,0,0"
                            FontSize="11"
                            Foreground="#B8DDD9"
-                           Text="单击截取区域开始；右键取消"
+                           Text="单击向下；双击向上；右键取消"
                            TextTrimming="CharacterEllipsis" />
             </StackPanel>
 

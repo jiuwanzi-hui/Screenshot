@@ -224,6 +224,36 @@ public sealed class ApplicationUpdateServiceTests
     }
 
     [Fact]
+    public async Task UsesNewestStaticMirrorWhenGiteeHistoryLagsBehindGitHub()
+    {
+        var directory = CreateTemporaryDirectory();
+        var handler = new DivergedStaticReleaseHistoryHandler(
+            CreateSingleReleaseHistoryJson("2.7.0", "SnapCut"),
+            CreateSingleReleaseHistoryJson("2.7.1", "SnapCut"));
+        try
+        {
+            using var client = new HttpClient(handler);
+            using var service = new ApplicationUpdateService(
+                client,
+                updatesDirectory: directory,
+                releaseHistoryCachePath: Path.Combine(directory, "release-history-cache.json"),
+                bundledReleaseHistoryPath: Path.Combine(directory, "missing.json"));
+
+            var result = await service.GetReleaseHistoryAsync();
+
+            Assert.True(result.IsSuccess, result.Message);
+            Assert.Single(result.Releases);
+            Assert.Equal(new Version(2, 7, 1), result.Releases[0].Version);
+            Assert.Contains("GitHub", result.Message);
+            Assert.Equal(2, handler.StaticHistoryRequestCount);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task UsesCachedHistoryWithoutRequestingTheRateLimitedListAgain()
     {
         var directory = CreateTemporaryDirectory();
@@ -608,6 +638,39 @@ public sealed class ApplicationUpdateServiceTests
                 RequestMessage = request,
             };
             return Task.FromResult(response);
+        }
+    }
+
+    private sealed class DivergedStaticReleaseHistoryHandler(
+        string giteeHistoryJson,
+        string githubHistoryJson) : HttpMessageHandler
+    {
+        public int StaticHistoryRequestCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var uri = request.RequestUri!;
+            if (!uri.AbsolutePath.EndsWith(
+                    "/updates/SnapCut-Releases.json",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)
+                {
+                    RequestMessage = request,
+                });
+            }
+
+            StaticHistoryRequestCount++;
+            var content = string.Equals(uri.Host, "gitee.com", StringComparison.OrdinalIgnoreCase)
+                ? giteeHistoryJson
+                : githubHistoryJson;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(content, Encoding.UTF8, "application/json"),
+                RequestMessage = request,
+            });
         }
     }
 

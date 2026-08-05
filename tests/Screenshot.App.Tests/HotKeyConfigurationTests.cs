@@ -72,6 +72,26 @@ public sealed class HotKeyConfigurationTests
             () => HotKeyConfiguration.CreateBindings(settings));
     }
 
+    [Theory]
+    [InlineData("PrintScreen", 0x2Cu)]
+    [InlineData("Numpad0", 0x60u)]
+    [InlineData("Numpad7", 0x67u)]
+    public void AllowsDedicatedKeyboardKeysWithoutAModifier(
+        string configured,
+        uint expectedVirtualKey)
+    {
+        var parsed = HotKeyGesture.TryParse(
+            configured,
+            out var gesture,
+            out var errorMessage);
+
+        Assert.True(parsed, errorMessage);
+        Assert.Equal(HotKeyModifiers.None, gesture.Modifiers);
+        Assert.Equal(expectedVirtualKey, gesture.VirtualKey);
+        Assert.Equal(configured, gesture.ToString());
+        Assert.False(gesture.IsSystemReserved(out _));
+    }
+
     [Fact]
     public void OmitsEmptyShortcutsFromRegistration()
     {

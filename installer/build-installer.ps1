@@ -1,5 +1,5 @@
 param(
-    [string]$Version = "2.7.1",
+    [string]$Version = "2.8.0",
     [switch]$SkipTrackedManifestUpdate
 )
 
@@ -50,11 +50,92 @@ if ($LASTEXITCODE -ne 0) {
     throw "Screenshot publish failed."
 }
 
+foreach ($linkerFileName in @(
+    "onnxruntime.lib",
+    "onnxruntime_providers_shared.lib"
+)) {
+    $linkerFilePath = Join-Path $publishDirectory $linkerFileName
+    if (Test-Path -LiteralPath $linkerFilePath) {
+        Remove-Item -LiteralPath $linkerFilePath -Force
+    }
+}
+
 $screenRecorderLibraryPath = Join-Path `
     $publishDirectory `
     "ScreenRecorderLib.dll"
 if (-not (Test-Path -LiteralPath $screenRecorderLibraryPath)) {
     throw "Required recording component was not published: $screenRecorderLibraryPath"
+}
+
+# ScreenRecorderLib is a C++/CLI component. Ship the native Visual C++ runtime
+# beside it so recording also works on clean Windows installations that do not
+# already have the machine-wide redistributable installed.
+$visualCppRuntimeFileNames = @(
+    "concrt140.dll",
+    "msvcp140.dll",
+    "msvcp140_1.dll",
+    "vcruntime140.dll",
+    "vcruntime140_1.dll"
+)
+$visualCppRuntimeCandidates = @()
+if (-not [string]::IsNullOrWhiteSpace($env:VCToolsRedistDir)) {
+    $visualCppRuntimeCandidates += Get-ChildItem `
+        -Path (Join-Path $env:VCToolsRedistDir "x64") `
+        -Directory `
+        -Filter "Microsoft.VC*.CRT" `
+        -ErrorAction SilentlyContinue
+}
+
+$visualStudioRoot = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio"
+if (Test-Path -LiteralPath $visualStudioRoot) {
+    $visualCppRuntimeCandidates += Get-ChildItem `
+        -Path $visualStudioRoot `
+        -Directory `
+        -Filter "Microsoft.VC*.CRT" `
+        -Recurse `
+        -ErrorAction SilentlyContinue |
+        Where-Object { $_.Parent.Name -eq "x64" }
+}
+
+$systemRuntimeDirectory = [Environment]::GetFolderPath(
+    [Environment+SpecialFolder]::System)
+$visualCppRuntimeCandidates += Get-Item `
+    -LiteralPath $systemRuntimeDirectory `
+    -ErrorAction SilentlyContinue
+$visualCppRuntimeDirectory = $visualCppRuntimeCandidates |
+    Where-Object {
+        $candidate = $_.FullName
+        -not ($visualCppRuntimeFileNames | Where-Object {
+            -not (Test-Path -LiteralPath (Join-Path $candidate $_))
+        })
+    } |
+    Sort-Object LastWriteTimeUtc -Descending |
+    Select-Object -First 1
+
+if (-not $visualCppRuntimeDirectory) {
+    throw "The x64 Visual C++ runtime required by ScreenRecorderLib was not found."
+}
+
+foreach ($runtimeFileName in $visualCppRuntimeFileNames) {
+    Copy-Item `
+        -LiteralPath (Join-Path $visualCppRuntimeDirectory.FullName $runtimeFileName) `
+        -Destination (Join-Path $publishDirectory $runtimeFileName) `
+        -Force
+}
+
+$requiredPublishFiles = @(
+    "SnapCut.exe",
+    "ScreenRecorderLib.dll",
+    "LICENSE.txt",
+    "THIRD-PARTY-NOTICES.txt",
+    "SnapCut-Releases.json"
+) + $visualCppRuntimeFileNames
+foreach ($requiredFileName in $requiredPublishFiles) {
+    $requiredFilePath = Join-Path $publishDirectory $requiredFileName
+    if (-not (Test-Path -LiteralPath $requiredFilePath) -or
+        (Get-Item -LiteralPath $requiredFilePath).Length -le 0) {
+        throw "Required publish file is missing or empty: $requiredFilePath"
+    }
 }
 
 & $innoCompiler "/DAppVersion=$Version" $setupScript

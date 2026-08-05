@@ -8,7 +8,7 @@ public sealed class TrayIconServiceTests
     [Fact]
     public void ContextMenuUsesApplicationThemeColorsAndComfortableSpacing()
     {
-        using var tray = new TrayIconService(AppTheme.Dark);
+        using var tray = new TrayIconService(AppTheme.ObsidianGold);
         var menu = tray.ContextMenuForTesting;
         var darkBackground = menu.BackColor;
 
@@ -23,6 +23,9 @@ public sealed class TrayIconServiceTests
         Assert.Contains(
             menu.Items.OfType<System.Windows.Forms.ToolStripMenuItem>(),
             item => item.Text == "录制视频");
+        Assert.Contains(
+            menu.Items.OfType<System.Windows.Forms.ToolStripMenuItem>(),
+            item => item.Text == "历史查看");
         Assert.Equal(
             tray.HoverForegroundForTesting,
             menu.Items.OfType<System.Windows.Forms.ToolStripMenuItem>().First().ForeColor);
@@ -38,7 +41,7 @@ public sealed class TrayIconServiceTests
                 .OfType<System.Windows.Forms.ToolStripMenuItem>(),
             item => Assert.True(item.Padding.Top >= 6));
 
-        tray.ApplyTheme(AppTheme.Light);
+        tray.ApplyTheme(AppTheme.CoralSky);
 
         Assert.NotEqual(darkBackground, menu.BackColor);
         Assert.True(menu.BackColor.GetBrightness() > darkBackground.GetBrightness());
@@ -47,7 +50,7 @@ public sealed class TrayIconServiceTests
     [Fact]
     public void VideoRecordingMenuItemRaisesRequest()
     {
-        using var tray = new TrayIconService(AppTheme.Light);
+        using var tray = new TrayIconService(AppTheme.AuroraMist);
         var requested = false;
         tray.VideoRecordingRequested += (_, _) => requested = true;
         var item = Assert.Single(

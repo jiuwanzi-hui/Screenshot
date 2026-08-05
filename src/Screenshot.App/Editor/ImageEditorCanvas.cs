@@ -14,6 +14,7 @@ using WpfMouseEventArgs = System.Windows.Input.MouseEventArgs;
 using WpfPen = System.Windows.Media.Pen;
 using WpfPoint = System.Windows.Point;
 using WpfRectangle = System.Windows.Shapes.Rectangle;
+using WpfEllipse = System.Windows.Shapes.Ellipse;
 using WpfSize = System.Windows.Size;
 using WpfTextBox = System.Windows.Controls.TextBox;
 
@@ -53,11 +54,17 @@ public sealed class ImageEditorCanvas : Canvas
 
     public event EventHandler? HistoryChanged;
 
+    public event EventHandler? AnnotationSelectionChanged;
+
     public bool HasImage => _capturedImage is not null;
 
     public bool CanUndo => _document.CanUndo;
 
     public bool CanRedo => _document.CanRedo;
+
+    public bool HasSelectedAnnotation =>
+        _selectedAnnotationIndex >= 0 &&
+        _selectedAnnotationIndex < _document.Annotations.Count;
 
     public bool HasTranslationOverlay =>
         _document.Annotations.Any(annotation =>
@@ -167,10 +174,15 @@ public sealed class ImageEditorCanvas : Canvas
         }
 
         _selectedTool = tool;
+        var hadSelection = HasSelectedAnnotation;
         _selectedAnnotationIndex = -1;
         _activeAnnotationHandle = -1;
         RebuildCanvas();
         UpdateInteractionCursor(new WpfPoint(-1, -1));
+        if (hadSelection)
+        {
+            AnnotationSelectionChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     public void SelectColor(WpfColor color)
@@ -227,6 +239,7 @@ public sealed class ImageEditorCanvas : Canvas
     public void Undo()
     {
         CommitPendingText();
+        ClearAnnotationSelection();
         _document.Undo();
         RebuildCanvas();
         RaiseHistoryChanged();
@@ -235,6 +248,7 @@ public sealed class ImageEditorCanvas : Canvas
     public void Redo()
     {
         CommitPendingText();
+        ClearAnnotationSelection();
         _document.Redo();
         RebuildCanvas();
         RaiseHistoryChanged();
@@ -256,6 +270,42 @@ public sealed class ImageEditorCanvas : Canvas
         Undo();
         Focus();
         return true;
+    }
+
+    public bool DeleteSelectedAnnotation()
+    {
+        if (!HasSelectedAnnotation)
+        {
+            return false;
+        }
+
+        if (_isEditingAnnotation)
+        {
+            CommitAnnotationEdit();
+        }
+
+        _document.RemoveAt(_selectedAnnotationIndex);
+        _selectedAnnotationIndex = -1;
+        _activeAnnotationHandle = -1;
+        RebuildCanvas();
+        AnnotationSelectionChanged?.Invoke(this, EventArgs.Empty);
+        RaiseHistoryChanged();
+        Focus();
+        return true;
+    }
+
+    private void ClearAnnotationSelection()
+    {
+        if (!HasSelectedAnnotation)
+        {
+            return;
+        }
+
+        _selectedAnnotationIndex = -1;
+        _activeAnnotationHandle = -1;
+        _isEditingAnnotation = false;
+        _annotationEditOriginal = null;
+        AnnotationSelectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public void CommitPendingText()
@@ -336,35 +386,36 @@ public sealed class ImageEditorCanvas : Canvas
         }
 
         CommitPendingText();
-        var displayTransform = RenderTransform;
-        var hadSelectionAdorner = _selectedAnnotationIndex >= 0;
-        RenderTransform = Transform.Identity;
+        var renderer = new ImageEditorCanvas
+        {
+            _capturedImage = _capturedImage,
+            _document = _document,
+            _isTranslationOverlayVisible = _isTranslationOverlayVisible,
+            Width = _capturedImage.Preview.PixelWidth,
+            Height = _capturedImage.Preview.PixelHeight,
+            RenderTransform = Transform.Identity,
+        };
 
         try
         {
-            if (hadSelectionAdorner)
-            {
-                RebuildCanvasCore(includeSelection: false);
-            }
-            Measure(new WpfSize(Width, Height));
-            Arrange(new Rect(0, 0, Width, Height));
+            renderer.RebuildCanvasCore(includeSelection: false);
+            renderer.Measure(new WpfSize(renderer.Width, renderer.Height));
+            renderer.Arrange(new Rect(0, 0, renderer.Width, renderer.Height));
             var renderedImage = new RenderTargetBitmap(
                 _capturedImage.Preview.PixelWidth,
                 _capturedImage.Preview.PixelHeight,
                 96,
                 96,
                 PixelFormats.Pbgra32);
-            renderedImage.Render(this);
+            renderedImage.Render(renderer);
             renderedImage.Freeze();
             return renderedImage;
         }
         finally
         {
-            RenderTransform = displayTransform;
-            if (hadSelectionAdorner)
-            {
-                RebuildCanvas();
-            }
+            renderer.Children.Clear();
+            renderer._capturedImage = null;
+            renderer._document = new EditorDocument();
         }
     }
 
@@ -376,6 +427,8 @@ public sealed class ImageEditorCanvas : Canvas
         {
             return;
         }
+
+        Focus();
 
         CommitPendingText();
         var point = ClampPoint(e.GetPosition(this));
@@ -447,6 +500,9 @@ public sealed class ImageEditorCanvas : Canvas
             case EditorTool.Rectangle:
                 UpdateRectanglePreview((WpfRectangle)_drawingPreview, point);
                 break;
+            case EditorTool.Ellipse:
+                UpdateEllipsePreview((WpfEllipse)_drawingPreview, point);
+                break;
             case EditorTool.Arrow:
                 UpdateArrowPreview((Polygon)_drawingPreview, point);
                 break;
@@ -455,6 +511,17 @@ public sealed class ImageEditorCanvas : Canvas
                 UpdateBrushPreview((Polyline)_drawingPreview, point);
                 break;
         }
+    }
+
+    protected override void OnKeyDown(WpfKeyEventArgs e)
+    {
+        if (e.Key == Key.Delete && DeleteSelectedAnnotation())
+        {
+            e.Handled = true;
+            return;
+        }
+
+        base.OnKeyDown(e);
     }
 
     protected override void OnMouseLeftButtonUp(MouseButtonEventArgs e)
@@ -495,15 +562,17 @@ public sealed class ImageEditorCanvas : Canvas
         var hitIndex = HitTestAnnotation(point);
         if (hitIndex < 0)
         {
-            var hadSelection = _selectedAnnotationIndex >= 0;
+            var hadSelection = HasSelectedAnnotation;
             _selectedAnnotationIndex = -1;
             if (hadSelection)
             {
                 RebuildCanvas();
+                AnnotationSelectionChanged?.Invoke(this, EventArgs.Empty);
             }
             return false;
         }
 
+        var selectionChanged = _selectedAnnotationIndex != hitIndex;
         _selectedAnnotationIndex = hitIndex;
         var annotation = _document.Annotations[hitIndex];
         _activeAnnotationHandle = GetAnnotationHandle(annotation, point);
@@ -513,6 +582,10 @@ public sealed class ImageEditorCanvas : Canvas
         CaptureMouse();
         RebuildCanvas();
         UpdateInteractionCursor(point);
+        if (selectionChanged)
+        {
+            AnnotationSelectionChanged?.Invoke(this, EventArgs.Empty);
+        }
         return true;
     }
 
@@ -536,6 +609,17 @@ public sealed class ImageEditorCanvas : Canvas
                         rectangle.Bounds.Size)
                     : ResizeRectangle(
                         rectangle.Bounds,
+                        _activeAnnotationHandle,
+                        point),
+            },
+            EllipseAnnotation ellipse => ellipse with
+            {
+                Bounds = _activeAnnotationHandle < 0
+                    ? new Rect(
+                        ellipse.Bounds.TopLeft + delta,
+                        ellipse.Bounds.Size)
+                    : ResizeRectangle(
+                        ellipse.Bounds,
                         _activeAnnotationHandle,
                         point),
             },
@@ -638,6 +722,7 @@ public sealed class ImageEditorCanvas : Canvas
             var annotation = _document.Annotations[index];
             if (annotation is not (
                 RectangleAnnotation or
+                EllipseAnnotation or
                 ArrowAnnotation or
                 TextAnnotation or
                 EmojiAnnotation))
@@ -664,6 +749,10 @@ public sealed class ImageEditorCanvas : Canvas
                 rectangle.Bounds,
                 point,
                 Math.Max(3, (rectangle.StrokeWidth / 2) + 2)),
+            EllipseAnnotation ellipse => IsEllipseBorderHit(
+                ellipse.Bounds,
+                point,
+                Math.Max(3, (ellipse.StrokeWidth / 2) + 2)),
             ArrowAnnotation arrow => DistanceToSegment(
                 point,
                 arrow.Start,
@@ -676,6 +765,27 @@ public sealed class ImageEditorCanvas : Canvas
                 3).Contains(point),
             _ => false,
         };
+    }
+
+    private static bool IsEllipseBorderHit(
+        Rect bounds,
+        WpfPoint point,
+        double tolerance)
+    {
+        if (bounds.IsEmpty || bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return false;
+        }
+
+        var centerX = bounds.Left + (bounds.Width / 2);
+        var centerY = bounds.Top + (bounds.Height / 2);
+        var radiusX = bounds.Width / 2;
+        var radiusY = bounds.Height / 2;
+        var normalized = Math.Sqrt(
+            Math.Pow((point.X - centerX) / radiusX, 2) +
+            Math.Pow((point.Y - centerY) / radiusY, 2));
+        var normalizedTolerance = tolerance / Math.Max(1, Math.Min(radiusX, radiusY));
+        return Math.Abs(normalized - 1) <= normalizedTolerance;
     }
 
     private static bool IsRectangleBorderHit(
@@ -757,7 +867,7 @@ public sealed class ImageEditorCanvas : Canvas
     {
         return annotation switch
         {
-            RectangleAnnotation => handle switch
+            RectangleAnnotation or EllipseAnnotation => handle switch
             {
                 0 or 4 => WpfCursors.SizeNWSE,
                 2 or 6 => WpfCursors.SizeNESW,
@@ -778,6 +888,8 @@ public sealed class ImageEditorCanvas : Canvas
         {
             RectangleAnnotation rectangle => GetRectangleHandlePoints(
                 rectangle.Bounds),
+            EllipseAnnotation ellipse => GetRectangleHandlePoints(
+                ellipse.Bounds),
             ArrowAnnotation arrow => [arrow.Start, arrow.End],
             TextAnnotation text =>
             [
@@ -927,6 +1039,12 @@ public sealed class ImageEditorCanvas : Canvas
                 StrokeThickness = _strokeWidth,
                 Fill = WpfBrushes.Transparent,
             },
+            EditorTool.Ellipse => new WpfEllipse
+            {
+                Stroke = new SolidColorBrush(_selectedColor),
+                StrokeThickness = _strokeWidth,
+                Fill = WpfBrushes.Transparent,
+            },
             EditorTool.Arrow => new Polygon
             {
                 Fill = new SolidColorBrush(_selectedColor),
@@ -984,6 +1102,17 @@ public sealed class ImageEditorCanvas : Canvas
         rectangle.Height = bounds.Height;
     }
 
+    private void UpdateEllipsePreview(
+        WpfEllipse ellipse,
+        WpfPoint currentPoint)
+    {
+        var bounds = CreateBounds(_drawingStartPoint, currentPoint);
+        SetLeft(ellipse, bounds.X);
+        SetTop(ellipse, bounds.Y);
+        ellipse.Width = bounds.Width;
+        ellipse.Height = bounds.Height;
+    }
+
     private void UpdateArrowPreview(Polygon polygon, WpfPoint currentPoint)
     {
         polygon.Points = CreateTaperedArrowPoints(
@@ -1008,6 +1137,7 @@ public sealed class ImageEditorCanvas : Canvas
         EditorAnnotation? annotation = _selectedTool switch
         {
             EditorTool.Rectangle => CreateRectangleAnnotation(endPoint),
+            EditorTool.Ellipse => CreateEllipseAnnotation(endPoint),
             EditorTool.Arrow => CreateArrowAnnotation(endPoint),
             EditorTool.Brush => CreateBrushAnnotation(),
             EditorTool.Mosaic => CreateMosaicAnnotation(),
@@ -1031,6 +1161,14 @@ public sealed class ImageEditorCanvas : Canvas
         var bounds = CreateBounds(_drawingStartPoint, endPoint);
         return bounds.Width >= 2 && bounds.Height >= 2
             ? new RectangleAnnotation(bounds, _selectedColor, _strokeWidth)
+            : null;
+    }
+
+    private EllipseAnnotation? CreateEllipseAnnotation(WpfPoint endPoint)
+    {
+        var bounds = CreateBounds(_drawingStartPoint, endPoint);
+        return bounds.Width >= 2 && bounds.Height >= 2
+            ? new EllipseAnnotation(bounds, _selectedColor, _strokeWidth)
             : null;
     }
 
@@ -1187,6 +1325,9 @@ public sealed class ImageEditorCanvas : Canvas
             RectangleAnnotation rectangle => Inflate(
                 rectangle.Bounds,
                 (rectangle.StrokeWidth / 2) + 1),
+            EllipseAnnotation ellipse => Inflate(
+                ellipse.Bounds,
+                (ellipse.StrokeWidth / 2) + 1),
             ArrowAnnotation arrow => BoundsFromPoints(
                 [arrow.Start, arrow.End],
                 Math.Max(10, arrow.StrokeWidth * 4) + arrow.StrokeWidth),
@@ -1259,6 +1400,10 @@ public sealed class ImageEditorCanvas : Canvas
             {
                 Bounds = new Rect(rectangle.Bounds.TopLeft + offset, rectangle.Bounds.Size),
             },
+            EllipseAnnotation ellipse => ellipse with
+            {
+                Bounds = new Rect(ellipse.Bounds.TopLeft + offset, ellipse.Bounds.Size),
+            },
             ArrowAnnotation arrow => arrow with
             {
                 Start = arrow.Start + offset,
@@ -1310,6 +1455,9 @@ public sealed class ImageEditorCanvas : Canvas
             case RectangleAnnotation rectangle:
                 AddRectangleVisual(rectangle);
                 break;
+            case EllipseAnnotation ellipse:
+                AddEllipseVisual(ellipse);
+                break;
             case ArrowAnnotation arrow:
                 AddArrowVisual(arrow);
                 break;
@@ -1345,6 +1493,22 @@ public sealed class ImageEditorCanvas : Canvas
         SetLeft(rectangle, annotation.Bounds.X);
         SetTop(rectangle, annotation.Bounds.Y);
         Children.Add(rectangle);
+    }
+
+    private void AddEllipseVisual(EllipseAnnotation annotation)
+    {
+        var ellipse = new WpfEllipse
+        {
+            Width = annotation.Bounds.Width,
+            Height = annotation.Bounds.Height,
+            Stroke = new SolidColorBrush(annotation.StrokeColor),
+            StrokeThickness = annotation.StrokeWidth,
+            Fill = WpfBrushes.Transparent,
+            IsHitTestVisible = false,
+        };
+        SetLeft(ellipse, annotation.Bounds.X);
+        SetTop(ellipse, annotation.Bounds.Y);
+        Children.Add(ellipse);
     }
 
     private void AddArrowVisual(ArrowAnnotation annotation)
@@ -1464,26 +1628,24 @@ public sealed class ImageEditorCanvas : Canvas
         foreach (var region in annotation.Regions)
         {
             var palette = GetTranslationPalette(region.Bounds);
-            var contentWidth = Math.Max(8, region.Bounds.Width - 6);
-            var contentHeight = Math.Max(8, region.Bounds.Height - 2);
-            var fittedFontSize = TranslationTextLayout.FitFontSize(
-                region.Text,
-                contentWidth,
-                contentHeight,
-                region.FontSize);
+            var contentWidth = Math.Max(8, region.Bounds.Width - 8);
+            var contentHeight = Math.Max(8, region.Bounds.Height - 6);
+            var layout = TranslationTextLayout.LayoutParagraph(region);
             var text = new TextBlock
             {
-                Text = region.Text,
+                Text = string.Join(
+                    Environment.NewLine,
+                    layout.Lines.Select(line => line.Text)),
                 FontFamily = new System.Windows.Media.FontFamily(
                     "Microsoft YaHei UI"),
-                FontSize = fittedFontSize,
-                FontWeight = FontWeights.SemiBold,
+                FontSize = layout.FontSize,
+                FontWeight = FontWeights.Normal,
                 Foreground = new SolidColorBrush(palette.Foreground),
                 Width = contentWidth,
                 Height = contentHeight,
-                TextWrapping = TextWrapping.Wrap,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                LineHeight = fittedFontSize * 1.12,
+                TextWrapping = TextWrapping.NoWrap,
+                TextTrimming = TextTrimming.None,
+                LineHeight = layout.LineHeight,
                 LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
                 ClipToBounds = true,
                 IsHitTestVisible = false,
@@ -1492,7 +1654,7 @@ public sealed class ImageEditorCanvas : Canvas
             {
                 Width = Math.Max(12, region.Bounds.Width),
                 Height = Math.Max(12, region.Bounds.Height),
-                Padding = new Thickness(3, 1, 3, 1),
+                Padding = new Thickness(4, 3, 4, 3),
                 Background = new SolidColorBrush(palette.Background),
                 CornerRadius = new CornerRadius(2),
                 ClipToBounds = true,
@@ -1511,7 +1673,7 @@ public sealed class ImageEditorCanvas : Canvas
         if (_capturedImage is null)
         {
             return (
-                WpfColor.FromArgb(246, 35, 42, 46),
+                WpfColor.FromRgb(35, 42, 46),
                 WpfColor.FromRgb(248, 251, 251));
         }
 
@@ -1547,7 +1709,7 @@ public sealed class ImageEditorCanvas : Canvas
         if (samples == 0)
         {
             return (
-                WpfColor.FromArgb(246, 35, 42, 46),
+                WpfColor.FromRgb(35, 42, 46),
                 WpfColor.FromRgb(248, 251, 251));
         }
 
@@ -1561,8 +1723,7 @@ public sealed class ImageEditorCanvas : Canvas
         if (luminance < 145)
         {
             return (
-                WpfColor.FromArgb(
-                    246,
+                WpfColor.FromRgb(
                     (byte)(averageRed * 0.82),
                     (byte)(averageGreen * 0.82),
                     (byte)(averageBlue * 0.82)),
@@ -1570,8 +1731,7 @@ public sealed class ImageEditorCanvas : Canvas
         }
 
         return (
-            WpfColor.FromArgb(
-                246,
+            WpfColor.FromRgb(
                 (byte)Math.Min(255, averageRed + 12),
                 (byte)Math.Min(255, averageGreen + 12),
                 (byte)Math.Min(255, averageBlue + 12)),

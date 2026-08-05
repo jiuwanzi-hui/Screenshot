@@ -292,6 +292,7 @@ public sealed class RegionCaptureCoordinator
                     StartOcrAsync = ShowOcrResultAndCompleteCaptureAsync,
                     RecognizeTextAsync = RecognizeTextAsync,
                     TranslateTextAsync = TranslateTextAsync,
+                    RecognizeFormulaAsync = RecognizeFormulaAsync,
                     RecognizeTextAfterSelection = recognizeTextAfterSelection,
                     TranslateTextAfterSelection = translateTextAfterSelection,
                     InitialPointerContinuation = pointerContinuation,
@@ -372,9 +373,9 @@ public sealed class RegionCaptureCoordinator
 
     private Task<OcrRecognitionResult> RecognizeTextAsync(CapturedImage image)
     {
-        return OcrService.RecognizeAsync(
+        return OcrProviderFactory.RecognizeAsync(
             image,
-            _settingsProvider().OcrLanguageTag);
+            _settingsProvider());
     }
 
     private Task<TranslationSegmentsResult> TranslateTextAsync(
@@ -389,6 +390,18 @@ public sealed class RegionCaptureCoordinator
             recognition.Regions.Select(region => region.Text).ToArray(),
             "auto",
             settings.TranslationTargetLanguage);
+    }
+
+    private Task<ContentRecognitionResult> RecognizeFormulaAsync(
+        CapturedImage image,
+        CancellationToken cancellationToken)
+    {
+        return FormulaRecognitionService.RecognizeAsync(
+            image,
+            _settingsProvider(),
+            _translationCredentialStore,
+            _httpClient,
+            cancellationToken);
     }
 
     private async Task RequestScrollCaptureAsync(
@@ -776,9 +789,9 @@ public sealed class RegionCaptureCoordinator
     private async Task ShowOcrResultAsync(CapturedImage capturedImage)
     {
         var settings = _settingsProvider();
-        var result = await OcrService.RecognizeAsync(
+        var result = await OcrProviderFactory.RecognizeAsync(
             capturedImage,
-            settings.OcrLanguageTag);
+            settings);
         var window = new OcrResultWindow(
             result,
             _settingsProvider,

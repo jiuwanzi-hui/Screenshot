@@ -169,7 +169,9 @@ public sealed class HotKeyCaptureBox : WpfTextBox
             modifiers |= HotKeyModifiers.Windows;
         }
 
-        if (modifiers == HotKeyModifiers.None || !TryGetVirtualKey(key, out var virtualKey))
+        if (!TryGetVirtualKey(key, out var virtualKey) ||
+            (modifiers == HotKeyModifiers.None &&
+             !HotKeyGesture.AllowsStandaloneKeyboardShortcut(virtualKey)))
         {
             return false;
         }
@@ -209,7 +211,9 @@ public sealed class HotKeyCaptureBox : WpfTextBox
     {
         var virtualKey = capturedGesture.VirtualKey;
         var modifiers = capturedGesture.Modifiers;
-        if ((modifiers == HotKeyModifiers.None && !capturedGesture.IsMouseButton) ||
+        if ((modifiers == HotKeyModifiers.None &&
+             !capturedGesture.IsMouseButton &&
+             !HotKeyGesture.AllowsStandaloneKeyboardShortcut(virtualKey)) ||
             IsModifierVirtualKey(virtualKey))
         {
             gesture = string.Empty;
@@ -257,6 +261,12 @@ public sealed class HotKeyCaptureBox : WpfTextBox
         if (key is >= Key.D0 and <= Key.D9)
         {
             virtualKey = (uint)('0' + (key - Key.D0));
+            return true;
+        }
+
+        if (key is >= Key.NumPad0 and <= Key.NumPad9)
+        {
+            virtualKey = (uint)(0x60 + (key - Key.NumPad0));
             return true;
         }
 

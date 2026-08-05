@@ -118,10 +118,13 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private int _mouseLongPressMilliseconds;
     private bool _mouseSideButtonsUseLongPress;
     private string _ocrLanguageTag;
+    private OcrEngineMode _ocrEngine;
     private string _translationProvider;
     private string _translationEndpoint;
     private string _translationTargetLanguage;
     private string _translationModel;
+    private OfflineTranslationQuality _offlineTranslationQuality;
+    private OfflineTranslationEngine _offlineTranslationEngine;
     private string _translationApiKey = string.Empty;
     private string _statusMessage = string.Empty;
 
@@ -153,6 +156,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _mouseLongPressMilliseconds = settings.MouseLongPressMilliseconds;
         _mouseSideButtonsUseLongPress = settings.MouseSideButtonsUseLongPress;
         _ocrLanguageTag = settings.OcrLanguageTag;
+        _ocrEngine = settings.OcrEngine;
         _translationProvider = TranslationProviderFactory.ResolveProviderId(
             settings.TranslationProvider);
         _translationEndpoint = settings.TranslationEndpoint;
@@ -167,6 +171,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _translationModel = TranslationProviderFactory.NormalizeModel(
             settings.TranslationEndpoint,
             settings.TranslationModel);
+        _offlineTranslationQuality = settings.OfflineTranslationQuality;
+        _offlineTranslationEngine = settings.OfflineTranslationEngine;
         SetTranslationProviderPriority(
             settings.ResolveTranslationProviderPriority());
         OcrLanguageOptions = CreateOcrLanguageOptions(settings.OcrLanguageTag);
@@ -182,6 +188,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public IReadOnlyList<SettingOption> OcrLanguageOptions { get; }
+
+    public IReadOnlyList<SettingOption> OcrEngineOptions { get; } =
+    [
+        new(nameof(OcrEngineMode.Windows), "Windows 系统识别（默认）"),
+        new(nameof(OcrEngineMode.PaddleOcrV6), "PP-OCRv6 高质量识别"),
+    ];
 
     public IReadOnlyList<SettingOption> TranslationProviderOptions { get; } =
         TranslationProviderFactory.ProviderDefinitions
@@ -209,6 +221,19 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
                 language.Tag,
                 $"{language.DisplayName}（{language.Tag}）"))
             .ToArray();
+
+    public IReadOnlyList<SettingOption> OfflineTranslationQualityOptions { get; } =
+    [
+        new(nameof(OfflineTranslationQuality.Fast), "快速 · 最低延迟"),
+        new(nameof(OfflineTranslationQuality.High), "高质量 · 推荐"),
+        new(nameof(OfflineTranslationQuality.Ultra), "超高质量 · 更慢"),
+    ];
+
+    public IReadOnlyList<SettingOption> OfflineTranslationEngineOptions { get; } =
+    [
+        new(nameof(OfflineTranslationEngine.Mozilla), "Mozilla 轻量翻译（默认）"),
+        new(nameof(OfflineTranslationEngine.QwenLargeModel), "Qwen 本机翻译大模型"),
+    ];
 
     public ObservableCollection<string> TranslationModelOptions { get; } = new(
     [
@@ -369,6 +394,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _ocrLanguageTag, value);
     }
 
+    public OcrEngineMode OcrEngine
+    {
+        get => _ocrEngine;
+        set => SetProperty(ref _ocrEngine, value);
+    }
+
     public string TranslationProvider
     {
         get => _translationProvider;
@@ -391,6 +422,18 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         get => _translationModel;
         set => SetProperty(ref _translationModel, value);
+    }
+
+    public OfflineTranslationQuality OfflineTranslationQuality
+    {
+        get => _offlineTranslationQuality;
+        set => SetProperty(ref _offlineTranslationQuality, value);
+    }
+
+    public OfflineTranslationEngine OfflineTranslationEngine
+    {
+        get => _offlineTranslationEngine;
+        set => SetProperty(ref _offlineTranslationEngine, value);
     }
 
     public string TranslationApiKey
@@ -434,6 +477,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             MouseLongPressMilliseconds = MouseLongPressMilliseconds,
             MouseSideButtonsUseLongPress = MouseSideButtonsUseLongPress,
             OcrLanguageTag = OcrLanguageTag,
+            OcrEngine = OcrEngine,
             TranslationMode = TranslationMode.Automatic,
             SendTextToOnlineTranslation = true,
             TranslationProviderPriority = TranslationPriorityItems
@@ -443,6 +487,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             TranslationEndpoint = TranslationEndpoint,
             TranslationTargetLanguage = TranslationTargetLanguage,
             TranslationModel = TranslationModel,
+            OfflineTranslationQuality = OfflineTranslationQuality,
+            OfflineTranslationEngine = OfflineTranslationEngine,
         };
     }
 
@@ -474,6 +520,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         MouseLongPressMilliseconds = settings.MouseLongPressMilliseconds;
         MouseSideButtonsUseLongPress = settings.MouseSideButtonsUseLongPress;
         OcrLanguageTag = settings.OcrLanguageTag;
+        OcrEngine = settings.OcrEngine;
         SetTranslationProviderPriority(
             settings.ResolveTranslationProviderPriority());
         TranslationProvider = TranslationProviderFactory.ResolveProviderId(
@@ -483,6 +530,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         TranslationModel = TranslationProviderFactory.NormalizeModel(
             settings.TranslationEndpoint,
             settings.TranslationModel);
+        OfflineTranslationQuality = settings.OfflineTranslationQuality;
+        OfflineTranslationEngine = settings.OfflineTranslationEngine;
     }
 
     public void SetStatus(string message)
