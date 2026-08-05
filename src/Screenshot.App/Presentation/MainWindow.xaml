@@ -124,6 +124,70 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="ThemeCardButton" TargetType="RadioButton">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="MinHeight" Value="76" />
+            <Setter Property="Margin" Value="0,0,10,10" />
+            <Setter Property="Padding" Value="10" />
+            <Setter Property="Background" Value="{DynamicResource AppPanelBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid>
+                            <Border x:Name="ThemeCardSurface"
+                                    Padding="{TemplateBinding Padding}"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="8">
+                                <ContentPresenter VerticalAlignment="Center" />
+                            </Border>
+                            <Border x:Name="ThemeSelectedBadge"
+                                    Width="20"
+                                    Height="20"
+                                    Margin="0,7,7,0"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    Background="{DynamicResource AppAccentBrush}"
+                                    CornerRadius="10"
+                                    Visibility="Collapsed">
+                                <TextBlock HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           FontFamily="Segoe MDL2 Assets"
+                                           FontSize="10"
+                                           Foreground="#FFFFFF"
+                                           Text="&#xE73E;" />
+                            </Border>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ThemeCardSurface"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource AppAccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="ThemeCardSurface"
+                                        Property="Background"
+                                        Value="{DynamicResource AppAccentMutedBrush}" />
+                                <Setter TargetName="ThemeCardSurface"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource AppAccentBrush}" />
+                                <Setter TargetName="ThemeCardSurface"
+                                        Property="BorderThickness"
+                                        Value="2" />
+                                <Setter TargetName="ThemeSelectedBadge"
+                                        Property="Visibility"
+                                        Value="Visible" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="GeneralGroupTitle" TargetType="TextBlock">
             <Setter Property="FontSize" Value="15" />
             <Setter Property="FontWeight" Value="SemiBold" />
@@ -386,7 +450,7 @@
                                        Margin="10,0,0,0"
                                        LineHeight="24"
                                        LineStackingStrategy="BlockLineHeight"
-                                       Text="文字识别"
+                                       Text="内容识别"
                                        VerticalAlignment="Center" />
                         </Grid>
                     </ListBoxItem>
@@ -510,7 +574,8 @@
                                  LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
                                  TextChanged="OnTextSettingChanged"
                                  Text="{Binding SaveDirectory, UpdateSourceTrigger=PropertyChanged}" />
-                        <Button Grid.Column="1"
+                        <Button x:Name="BrowseSaveDirectoryButton"
+                                Grid.Column="1"
                                 Margin="10,0,0,0"
                                 Click="OnBrowseSaveDirectoryClick"
                                 Content="浏览"
@@ -533,7 +598,8 @@
                                  LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
                                  TextChanged="OnTextSettingChanged"
                                  Text="{Binding VideoSaveDirectory, UpdateSourceTrigger=PropertyChanged}" />
-                        <Button Grid.Column="1"
+                        <Button x:Name="BrowseVideoSaveDirectoryButton"
+                                Grid.Column="1"
                                 Margin="10,0,0,0"
                                 Click="OnBrowseVideoSaveDirectoryClick"
                                 Content="浏览"
@@ -544,26 +610,158 @@
                     <StackPanel Margin="0,18,0,0">
                         <TextBlock Style="{StaticResource GeneralFieldLabel}"
                                    Text="界面主题" />
-                        <StackPanel Margin="0,9,0,0" Orientation="Horizontal">
-                            <RadioButton x:Name="SystemThemeOption"
+                        <UniformGrid Margin="0,10,-10,0" Columns="2">
+                            <RadioButton x:Name="AuroraMistThemeOption"
                                          Checked="OnThemeOptionChecked"
-                                         Content="跟随系统"
                                          GroupName="AppTheme"
-                                         Style="{StaticResource ThemeOptionButton}"
-                                         Tag="{x:Static core:AppTheme.System}" />
-                            <RadioButton x:Name="LightThemeOption"
+                                         Style="{StaticResource ThemeCardButton}"
+                                         Tag="{x:Static core:AppTheme.AuroraMist}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="48" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="38" Height="50" CornerRadius="6">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                <GradientStop Color="#F7F8FB" Offset="0" />
+                                                <GradientStop Color="#DDE6F2" Offset="0.55" />
+                                                <GradientStop Color="#7E91D5" Offset="1" />
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock FontWeight="SemiBold" Text="极光晨雾" />
+                                        <TextBlock Margin="0,5,0,0" FontSize="11" Opacity="0.68" Text="浅色 · 雾白与靛蓝" />
+                                    </StackPanel>
+                                </Grid>
+                            </RadioButton>
+                            <RadioButton x:Name="CoralSkyThemeOption"
                                          Checked="OnThemeOptionChecked"
-                                         Content="浅色"
                                          GroupName="AppTheme"
-                                         Style="{StaticResource ThemeOptionButton}"
-                                         Tag="{x:Static core:AppTheme.Light}" />
-                            <RadioButton x:Name="DarkThemeOption"
+                                         Style="{StaticResource ThemeCardButton}"
+                                         Tag="{x:Static core:AppTheme.CoralSky}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="48" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="38" Height="50" CornerRadius="6">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                <GradientStop Color="#F7D8D4" Offset="0" />
+                                                <GradientStop Color="#F6ECE5" Offset="0.5" />
+                                                <GradientStop Color="#BFDCE6" Offset="1" />
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock FontWeight="SemiBold" Text="珊瑚晴空" />
+                                        <TextBlock Margin="0,5,0,0" FontSize="11" Opacity="0.68" Text="浅色 · 珊瑚与天青" />
+                                    </StackPanel>
+                                </Grid>
+                            </RadioButton>
+                            <RadioButton x:Name="GinkgoPaperThemeOption"
                                          Checked="OnThemeOptionChecked"
-                                         Content="深色"
                                          GroupName="AppTheme"
-                                         Style="{StaticResource ThemeOptionButton}"
-                                         Tag="{x:Static core:AppTheme.Dark}" />
-                        </StackPanel>
+                                         Style="{StaticResource ThemeCardButton}"
+                                         Tag="{x:Static core:AppTheme.GinkgoPaper}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="48" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="38" Height="50" CornerRadius="6">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                <GradientStop Color="#FAFAF7" Offset="0" />
+                                                <GradientStop Color="#ECE9DF" Offset="0.55" />
+                                                <GradientStop Color="#D3AF5B" Offset="1" />
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock FontWeight="SemiBold" Text="银杏纸白" />
+                                        <TextBlock Margin="0,5,0,0" FontSize="11" Opacity="0.68" Text="浅色 · 纸白与银杏" />
+                                    </StackPanel>
+                                </Grid>
+                            </RadioButton>
+                            <RadioButton x:Name="ForestNightThemeOption"
+                                         Checked="OnThemeOptionChecked"
+                                         GroupName="AppTheme"
+                                         Style="{StaticResource ThemeCardButton}"
+                                         Tag="{x:Static core:AppTheme.ForestNight}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="48" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="38" Height="50" CornerRadius="6">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                <GradientStop Color="#15181C" Offset="0" />
+                                                <GradientStop Color="#2A3138" Offset="0.58" />
+                                                <GradientStop Color="#4E8B74" Offset="1" />
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock FontWeight="SemiBold" Text="松林夜雨" />
+                                        <TextBlock Margin="0,5,0,0" FontSize="11" Opacity="0.68" Text="深色 · 石墨与松绿" />
+                                    </StackPanel>
+                                </Grid>
+                            </RadioButton>
+                            <RadioButton x:Name="ObsidianGoldThemeOption"
+                                         Checked="OnThemeOptionChecked"
+                                         GroupName="AppTheme"
+                                         Style="{StaticResource ThemeCardButton}"
+                                         Tag="{x:Static core:AppTheme.ObsidianGold}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="48" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="38" Height="50" CornerRadius="6">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                <GradientStop Color="#141516" Offset="0" />
+                                                <GradientStop Color="#303234" Offset="0.6" />
+                                                <GradientStop Color="#D3A343" Offset="1" />
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock FontWeight="SemiBold" Text="熔金曜石" />
+                                        <TextBlock Margin="0,5,0,0" FontSize="11" Opacity="0.68" Text="深色 · 曜石与暖金" />
+                                    </StackPanel>
+                                </Grid>
+                            </RadioButton>
+                            <RadioButton x:Name="NeonDeepThemeOption"
+                                         Checked="OnThemeOptionChecked"
+                                         GroupName="AppTheme"
+                                         Style="{StaticResource ThemeCardButton}"
+                                         Tag="{x:Static core:AppTheme.NeonDeep}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="48" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="38" Height="50" CornerRadius="6">
+                                        <Border.Background>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                <GradientStop Color="#10151E" Offset="0" />
+                                                <GradientStop Color="#263247" Offset="0.58" />
+                                                <GradientStop Color="#D65E76" Offset="1" />
+                                            </LinearGradientBrush>
+                                        </Border.Background>
+                                    </Border>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock FontWeight="SemiBold" Text="霓虹深海" />
+                                        <TextBlock Margin="0,5,0,0" FontSize="11" Opacity="0.68" Text="深色 · 深海与玫红" />
+                                    </StackPanel>
+                                </Grid>
+                            </RadioButton>
+                        </UniformGrid>
                     </StackPanel>
                 </StackPanel>
 
@@ -710,7 +908,7 @@
                                FontSize="13"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
                                TextWrapping="Wrap"
-                               Text="支持键盘组合和鼠标键；左/中/右键（含修饰键组合）需长按触发，短按和拖动保持原操作" />
+                               Text="支持键盘组合、单独 PrintScreen / 小键盘数字键和鼠标键；左/中/右键（含修饰键组合）需长按触发，短按和拖动保持原操作" />
 
                     <StackPanel Margin="0,25,0,0">
                         <TextBlock FontSize="14"
@@ -971,33 +1169,40 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <Grid x:Name="OcrSettingsPanel"
-                  Grid.Row="0"
-                  Grid.RowSpan="2"
-                  Visibility="Collapsed">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-
-                <StackPanel>
+            <ScrollViewer x:Name="OcrSettingsPanel"
+                          Grid.Row="0"
+                          Grid.RowSpan="2"
+                          VerticalScrollBarVisibility="Auto"
+                          Visibility="Collapsed">
+                <StackPanel Margin="0,0,16,0">
                     <TextBlock FontSize="22"
                                FontWeight="SemiBold"
                                Foreground="{DynamicResource AppTextPrimaryBrush}"
-                               Text="文字识别" />
+                               Text="内容识别" />
                     <TextBlock Margin="0,7,0,0"
                                FontSize="13"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
-                               Text="使用 Windows 已安装的 OCR 语言包" />
-                </StackPanel>
+                               TextWrapping="Wrap"
+                               Text="框选完成后自动在本机识别文字、二维码和表格；默认使用 Windows，也可下载更准确的多语言模型" />
 
-                <StackPanel Grid.Row="1"
-                            Margin="0,28,0,0">
                     <TextBlock FontSize="14"
+                               Margin="0,28,0,0"
                                FontWeight="SemiBold"
                                Foreground="{DynamicResource AppTextPrimaryBrush}"
-                               Text="识别语言" />
+                               Text="识别引擎" />
+                    <ComboBox x:Name="OcrEngineComboBox"
+                              Margin="0,9,0,0"
+                              DisplayMemberPath="Label"
+                              ItemsSource="{Binding OcrEngineOptions}"
+                              SelectedValue="{Binding OcrEngine, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              SelectedValuePath="Value"
+                              SelectionChanged="OnImmediateSettingChanged" />
+
+                    <TextBlock Margin="0,18,0,0"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="Windows 识别语言" />
                     <ComboBox x:Name="OcrLanguageComboBox"
                               Margin="0,9,0,0"
                               DisplayMemberPath="Label"
@@ -1006,8 +1211,58 @@
                               SelectedValuePath="Value"
                               SelectionChanged="OnImmediateSettingChanged"
                               ToolTip="仅显示 Windows 当前可用的 OCR 语言包" />
+
+                    <Border Margin="0,22,0,8"
+                            Padding="16"
+                            Background="{DynamicResource AppPanelBackgroundBrush}"
+                            BorderBrush="{DynamicResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8">
+                        <StackPanel>
+                            <TextBlock FontSize="15"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                       Text="PP-OCRv6 Small · 高质量多语言识别" />
+                            <TextBlock Margin="0,6,0,0"
+                                       Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                       TextWrapping="Wrap"
+                                       Text="对中文、英文、混合文字及表格截图更准确，并返回字符级位置。完全本机运行，不上传截图。" />
+                            <TextBlock x:Name="HighQualityOcrModelStatusText"
+                                       Margin="0,10,0,0"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource AppAccentBrush}"
+                                       TextWrapping="Wrap" />
+                            <TextBlock x:Name="HighQualityOcrModelPathText"
+                                       Margin="0,5,0,0"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                       TextWrapping="Wrap" />
+                            <ProgressBar x:Name="HighQualityOcrDownloadProgressBar"
+                                         Height="6"
+                                         Margin="0,13,0,0"
+                                         Maximum="100"
+                                         Visibility="Collapsed" />
+                            <TextBlock x:Name="HighQualityOcrDownloadProgressText"
+                                       Margin="0,5,0,0"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                       Visibility="Collapsed" />
+                            <StackPanel Margin="0,14,0,0"
+                                        Orientation="Horizontal">
+                                <Button x:Name="DownloadHighQualityOcrModelButton"
+                                        MinWidth="116"
+                                        Padding="14,5"
+                                        Click="OnDownloadHighQualityOcrModelClick"
+                                        Content="下载识别模型" />
+                                <Button Margin="8,0,0,0"
+                                        Padding="14,5"
+                                        Click="OnOpenHighQualityOcrModelDirectoryClick"
+                                        Content="打开目录" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
-            </Grid>
+            </ScrollViewer>
 
             <ScrollViewer x:Name="TranslationSettingsPanel"
                           Grid.Row="0"
@@ -1023,6 +1278,20 @@
                                FontSize="13"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
                                Text="可以使用在线大模型，也可以下载安装后完全离线翻译" />
+
+                    <TextBlock Margin="0,22,0,0"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="本机离线翻译引擎" />
+                    <ComboBox x:Name="OfflineTranslationEngineComboBox"
+                              Margin="0,8,0,0"
+                              DisplayMemberPath="Label"
+                              ItemsSource="{Binding OfflineTranslationEngineOptions}"
+                              PreviewMouseWheel="OnTranslationSettingPreviewMouseWheel"
+                              SelectedValue="{Binding OfflineTranslationEngine, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              SelectedValuePath="Value"
+                              SelectionChanged="OnImmediateSettingChanged" />
 
                     <StackPanel x:Name="TranslationPriorityPanel"
                                 Margin="0,24,0,0">
@@ -1327,6 +1596,23 @@
                                            Foreground="{DynamicResource AppTextSecondaryBrush}"
                                            Text="源语言由本地语言检测器自动识别。下载当前目标语言包后，可把全部受支持源语言翻译成目标语言；非英语语言之间自动经 English 中转。"
                                            TextWrapping="Wrap" />
+                                <TextBlock Margin="0,12,0,0"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                           Text="翻译精度" />
+                                <ComboBox x:Name="OfflineTranslationQualityComboBox"
+                                          Margin="0,7,0,0"
+                                          DisplayMemberPath="Label"
+                                          ItemsSource="{Binding OfflineTranslationQualityOptions}"
+                                          PreviewMouseWheel="OnTranslationSettingPreviewMouseWheel"
+                                          SelectedValue="{Binding OfflineTranslationQuality, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                          SelectedValuePath="Value"
+                                          SelectionChanged="OnImmediateSettingChanged" />
+                                <TextBlock Margin="0,6,0,0"
+                                           FontSize="12"
+                                           Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                           Text="高质量与超高质量会增加 CPU 用量和等待时间，但无需重复下载模型；可翻译范围仍以 Mozilla 当前支持的语言为准。"
+                                           TextWrapping="Wrap" />
                                 <TextBlock x:Name="OfflineModelRouteText"
                                            Margin="0,9,0,0"
                                            FontSize="12"
@@ -1362,6 +1648,56 @@
                                     <Button Margin="8,0,0,0"
                                             Padding="14,5"
                                             Click="OnOpenOfflineModelDirectoryClick"
+                                            Content="打开目录" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Border Margin="0,12,0,0"
+                                Padding="16"
+                                Background="{DynamicResource AppPanelBackgroundBrush}"
+                                BorderBrush="{DynamicResource AppBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                            <StackPanel>
+                                <TextBlock FontSize="15"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                           Text="Qwen2.5 1.5B · 本机翻译大模型" />
+                                <TextBlock Margin="0,6,0,0"
+                                           Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                           TextWrapping="Wrap"
+                                           Text="比轻量翻译模型更擅长结合上下文和修正明显 OCR 断词；CPU 本机运行，速度较慢，建议至少 4 GB 可用内存。" />
+                                <TextBlock x:Name="LocalLargeModelStatusText"
+                                           Margin="0,10,0,0"
+                                           FontWeight="SemiBold"
+                                           Foreground="{DynamicResource AppAccentBrush}"
+                                           TextWrapping="Wrap" />
+                                <TextBlock x:Name="LocalLargeModelPathText"
+                                           Margin="0,5,0,0"
+                                           FontSize="12"
+                                           Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                           TextWrapping="Wrap" />
+                                <ProgressBar x:Name="LocalLargeModelDownloadProgressBar"
+                                             Height="6"
+                                             Margin="0,13,0,0"
+                                             Maximum="100"
+                                             Visibility="Collapsed" />
+                                <TextBlock x:Name="LocalLargeModelDownloadProgressText"
+                                           Margin="0,5,0,0"
+                                           FontSize="12"
+                                           Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                           Visibility="Collapsed" />
+                                <StackPanel Margin="0,14,0,0"
+                                            Orientation="Horizontal">
+                                    <Button x:Name="DownloadLocalLargeModelButton"
+                                            MinWidth="126"
+                                            Padding="14,5"
+                                            Click="OnDownloadLocalLargeModelClick"
+                                            Content="下载翻译大模型" />
+                                    <Button Margin="8,0,0,0"
+                                            Padding="14,5"
+                                            Click="OnOpenLocalLargeModelDirectoryClick"
                                             Content="打开目录" />
                                 </StackPanel>
                             </StackPanel>

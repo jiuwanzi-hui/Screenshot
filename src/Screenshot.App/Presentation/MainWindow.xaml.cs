@@ -46,6 +46,9 @@ public partial class MainWindow : Window, IDisposable
     private readonly ApplicationUpdateService _applicationUpdateService;
     private readonly bool _ownsApplicationUpdateService;
     private readonly OfflineTranslationModelManager _offlineTranslationModelManager;
+    private readonly HighQualityOcrModelManager _highQualityOcrModelManager;
+    private readonly LocalLargeTranslationModelManager
+        _localLargeTranslationModelManager;
     private readonly CancellationTokenSource _updateCancellationSource = new();
     private AppSettings _savedSettings;
     private IReadOnlyList<HotKeyBinding>? _suspendedHotKeyBindings;
@@ -62,6 +65,8 @@ public partial class MainWindow : Window, IDisposable
     private int _automaticUpdateCheckInProgress;
     private int _onlineAvailabilityCheckInProgress;
     private int _offlineModelPlanGeneration;
+    private bool _isFolderDialogOpen;
+    private bool? _pendingShowInTaskbar;
     private bool _disposed;
 
     public MainWindow(
@@ -72,7 +77,9 @@ public partial class MainWindow : Window, IDisposable
         ITranslationCredentialStore translationCredentialStore,
         HttpClient? modelCatalogHttpClient = null,
         ApplicationUpdateService? applicationUpdateService = null,
-        OfflineTranslationModelManager? offlineTranslationModelManager = null)
+        OfflineTranslationModelManager? offlineTranslationModelManager = null,
+        HighQualityOcrModelManager? highQualityOcrModelManager = null,
+        LocalLargeTranslationModelManager? localLargeTranslationModelManager = null)
     {
         ArgumentNullException.ThrowIfNull(initialSettings);
         ArgumentNullException.ThrowIfNull(settingsStore);
@@ -98,6 +105,10 @@ public partial class MainWindow : Window, IDisposable
         _ownsApplicationUpdateService = applicationUpdateService is null;
         _offlineTranslationModelManager = offlineTranslationModelManager ??
             OfflineTranslationModelManager.Shared;
+        _highQualityOcrModelManager = highQualityOcrModelManager ??
+            HighQualityOcrModelManager.Shared;
+        _localLargeTranslationModelManager = localLargeTranslationModelManager ??
+            LocalLargeTranslationModelManager.Shared;
         _settingsViewModel = new SettingsViewModel(initialSettings);
         _settingsApplyTimer = new DispatcherTimer
         {
@@ -113,6 +124,8 @@ public partial class MainWindow : Window, IDisposable
         DataContext = _settingsViewModel;
         RefreshTranslationProviderDetails();
         RefreshOfflineTranslationModelStatus();
+        RefreshHighQualityOcrModelStatus();
+        RefreshLocalLargeModelStatus();
         UpdateThemeSelection(initialSettings.Theme);
         UpdateCloseBehaviorSelection(initialSettings.CloseBehavior);
         UpdateFloatingCaptureClickBehaviorSelection(
@@ -130,7 +143,29 @@ public partial class MainWindow : Window, IDisposable
 
     public void ConfigureTaskbarVisibility(bool showInTaskbar)
     {
+        if (!IsVisible)
+        {
+            ShowInTaskbar = showInTaskbar;
+            _pendingShowInTaskbar = null;
+            return;
+        }
+
+        // Changing ShowInTaskbar on a visible WPF window updates native window
+        // styles and can briefly expose an unpainted white surface.
+        _pendingShowInTaskbar = ShowInTaskbar == showInTaskbar
+            ? null
+            : showInTaskbar;
+    }
+
+    private void ApplyPendingTaskbarVisibility()
+    {
+        if (IsVisible || _pendingShowInTaskbar is not { } showInTaskbar)
+        {
+            return;
+        }
+
         ShowInTaskbar = showInTaskbar;
+        _pendingShowInTaskbar = null;
     }
 
     public void ApplySettingsPalette(AppTheme theme)
@@ -162,6 +197,7 @@ public partial class MainWindow : Window, IDisposable
 
     public void ShowFromTray()
     {
+        ApplyPendingTaskbarVisibility();
         Show();
 
         if (WindowState == WindowState.Minimized)
@@ -176,6 +212,8 @@ public partial class MainWindow : Window, IDisposable
     {
         _ = CheckForUpdatesOnOpenAsync();
         RefreshCachedOfflineTranslationInstallationState();
+        RefreshHighQualityOcrModelStatus();
+        RefreshLocalLargeModelStatus();
         _ = VerifyOnlineTranslationAvailabilityAsync();
     }
 
@@ -258,6 +296,7 @@ public partial class MainWindow : Window, IDisposable
         {
             e.Cancel = true;
             Hide();
+            ApplyPendingTaskbarVisibility();
             // Entering tray residency is the moment the footprint matters.
             _ = Dispatcher.BeginInvoke(
                 System.Windows.Threading.DispatcherPriority.ApplicationIdle,
@@ -277,44 +316,92 @@ public partial class MainWindow : Window, IDisposable
         ShowSettingsSection(SettingsNavigation.SelectedIndex);
     }
 
-    private void OnBrowseSaveDirectoryClick(object sender, RoutedEventArgs e)
+    private async void OnBrowseSaveDirectoryClick(object sender, RoutedEventArgs e)
     {
-        using var dialog = new WinForms.FolderBrowserDialog
+        var selectedPath = await BrowseForFolderAsync(
+            "选择截图保存位置",
+            _settingsViewModel.SaveDirectory);
+        if (selectedPath is not null)
         {
-            Description = "选择截图保存位置",
-            UseDescriptionForTitle = true,
-        };
-
-        if (Directory.Exists(_settingsViewModel.SaveDirectory))
-        {
-            dialog.InitialDirectory = _settingsViewModel.SaveDirectory;
-        }
-
-        if (dialog.ShowDialog() == WinForms.DialogResult.OK)
-        {
-            _settingsViewModel.SaveDirectory = dialog.SelectedPath;
+            _settingsViewModel.SaveDirectory = selectedPath;
             ApplySettings();
         }
     }
 
-    private void OnBrowseVideoSaveDirectoryClick(object sender, RoutedEventArgs e)
+    private async void OnBrowseVideoSaveDirectoryClick(object sender, RoutedEventArgs e)
     {
-        using var dialog = new WinForms.FolderBrowserDialog
+        var selectedPath = await BrowseForFolderAsync(
+            "选择视频保存位置",
+            _settingsViewModel.VideoSaveDirectory);
+        if (selectedPath is not null)
         {
-            Description = "选择视频保存位置",
-            UseDescriptionForTitle = true,
-        };
-
-        if (Directory.Exists(_settingsViewModel.VideoSaveDirectory))
-        {
-            dialog.InitialDirectory = _settingsViewModel.VideoSaveDirectory;
-        }
-
-        if (dialog.ShowDialog() == WinForms.DialogResult.OK)
-        {
-            _settingsViewModel.VideoSaveDirectory = dialog.SelectedPath;
+            _settingsViewModel.VideoSaveDirectory = selectedPath;
             ApplySettings();
         }
+    }
+
+    private async Task<string?> BrowseForFolderAsync(
+        string description,
+        string initialDirectory)
+    {
+        if (_isFolderDialogOpen)
+        {
+            return null;
+        }
+
+        _isFolderDialogOpen = true;
+        BrowseSaveDirectoryButton.IsEnabled = false;
+        BrowseVideoSaveDirectoryButton.IsEnabled = false;
+        try
+        {
+            return await RunOnStaThreadAsync(() =>
+            {
+                using var dialog = new WinForms.FolderBrowserDialog
+                {
+                    Description = description,
+                    UseDescriptionForTitle = true,
+                };
+                if (Directory.Exists(initialDirectory))
+                {
+                    dialog.InitialDirectory = initialDirectory;
+                }
+
+                return dialog.ShowDialog() == WinForms.DialogResult.OK
+                    ? dialog.SelectedPath
+                    : null;
+            });
+        }
+        finally
+        {
+            _isFolderDialogOpen = false;
+            BrowseSaveDirectoryButton.IsEnabled = true;
+            BrowseVideoSaveDirectoryButton.IsEnabled = true;
+        }
+    }
+
+    internal static Task<T> RunOnStaThreadAsync<T>(Func<T> action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        var completion = new TaskCompletionSource<T>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                completion.TrySetResult(action());
+            }
+            catch (Exception exception)
+            {
+                completion.TrySetException(exception);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "SnapCut Folder Picker",
+        };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return completion.Task;
     }
 
     private async void OnCheckForUpdatesClick(object sender, RoutedEventArgs e)
@@ -991,6 +1078,247 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
+    private async void OnDownloadHighQualityOcrModelClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button button)
+        {
+            return;
+        }
+
+        var status = _highQualityOcrModelManager.GetStatus();
+        if (status.IsInstalled)
+        {
+            RefreshHighQualityOcrModelStatus();
+            _settingsViewModel.SetStatus("PP-OCRv6 高质量识别模型已经安装。");
+            return;
+        }
+
+        var availableSpace = status.AvailableSpace > 0
+            ? FormatFileSize(status.AvailableSpace)
+            : "无法读取";
+        var confirmation = System.Windows.MessageBox.Show(
+            this,
+            "将下载 PP-OCRv6 Small 多语言识别模型。\n\n" +
+            $"下载流量：{FormatFileSize(status.DownloadSize)}\n" +
+            $"安装占用：约 {FormatFileSize(status.InstalledSize)}\n" +
+            $"磁盘可用：{availableSpace}\n\n" +
+            $"安装位置：\n{status.InstallationDirectory}\n\n" +
+            "模型来自 PaddleOCR / RapidOCR（Apache-2.0），完全本机运行。是否继续？",
+            "下载高质量识别模型",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Information,
+            MessageBoxResult.Yes);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        button.IsEnabled = false;
+        HighQualityOcrDownloadProgressBar.Value = 0;
+        HighQualityOcrDownloadProgressBar.Visibility = Visibility.Visible;
+        HighQualityOcrDownloadProgressText.Visibility = Visibility.Visible;
+        var progress = new Progress<ModelDownloadProgress>(value =>
+        {
+            var percent = value.TotalBytes <= 0
+                ? 0
+                : Math.Clamp(
+                    value.DownloadedBytes * 100d / value.TotalBytes,
+                    0,
+                    100);
+            HighQualityOcrDownloadProgressBar.Value = percent;
+            HighQualityOcrDownloadProgressText.Text =
+                $"{percent:0}% · {FormatFileSize(value.DownloadedBytes)} / " +
+                $"{FormatFileSize(value.TotalBytes)} · {value.CurrentFileName}";
+        });
+        try
+        {
+            var result = await _highQualityOcrModelManager.InstallAsync(
+                progress,
+                _updateCancellationSource.Token);
+            RefreshHighQualityOcrModelStatus();
+            _settingsViewModel.SetStatus(result.IsSuccess
+                ? "高质量识别模型安装完成，已可在内容识别中选择。"
+                : result.ErrorMessage ?? "高质量识别模型安装失败。");
+        }
+        finally
+        {
+            button.IsEnabled = true;
+            HighQualityOcrDownloadProgressBar.Visibility = Visibility.Collapsed;
+            HighQualityOcrDownloadProgressText.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void OnOpenHighQualityOcrModelDirectoryClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        try
+        {
+            Directory.CreateDirectory(
+                _highQualityOcrModelManager.InstallationDirectory);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = _highQualityOcrModelManager.InstallationDirectory,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                System.ComponentModel.Win32Exception)
+        {
+            _settingsViewModel.SetStatus("无法打开高质量识别模型目录。");
+        }
+    }
+
+    private void RefreshHighQualityOcrModelStatus()
+    {
+        if (HighQualityOcrModelStatusText is null ||
+            HighQualityOcrModelPathText is null ||
+            DownloadHighQualityOcrModelButton is null)
+        {
+            return;
+        }
+
+        var status = _highQualityOcrModelManager.GetStatus();
+        HighQualityOcrModelStatusText.Text = status.IsInstalled
+            ? $"已安装 · 占用约 {FormatFileSize(status.InstalledSize)}"
+            : $"未安装 · 需下载 {FormatFileSize(status.DownloadSize)}";
+        HighQualityOcrModelPathText.Text =
+            $"安装目录：{status.InstallationDirectory}";
+        DownloadHighQualityOcrModelButton.Content = status.IsInstalled
+            ? "模型已安装"
+            : "下载识别模型";
+    }
+
+    private async void OnDownloadLocalLargeModelClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button button)
+        {
+            return;
+        }
+
+        var status = _localLargeTranslationModelManager.GetStatus();
+        if (status.IsInstalled)
+        {
+            RefreshLocalLargeModelStatus();
+            _settingsViewModel.SetStatus("Qwen 本机翻译大模型已经安装。");
+            return;
+        }
+
+        var availableSpace = status.AvailableSpace > 0
+            ? FormatFileSize(status.AvailableSpace)
+            : "无法读取";
+        var confirmation = System.Windows.MessageBox.Show(
+            this,
+            "将下载 Qwen2.5 1.5B 4-bit 本机翻译大模型及 CPU 推理程序。\n\n" +
+            $"本次需下载：{FormatFileSize(status.DownloadSize)}\n" +
+            $"安装占用：约 {FormatFileSize(status.InstalledSize)}\n" +
+            $"磁盘可用：{availableSpace}\n" +
+            "运行建议：至少 4 GB 可用内存，纯 CPU 翻译会比在线模型慢。\n\n" +
+            $"安装位置：\n{status.InstallationDirectory}\n\n" +
+            "模型为 Qwen2.5（Apache-2.0），推理程序为 llama.cpp（MIT）。是否继续？",
+            "下载本机翻译大模型",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Information,
+            MessageBoxResult.Yes);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        button.IsEnabled = false;
+        LocalLargeModelDownloadProgressBar.Value = 0;
+        LocalLargeModelDownloadProgressBar.Visibility = Visibility.Visible;
+        LocalLargeModelDownloadProgressText.Visibility = Visibility.Visible;
+        var progress = new Progress<ModelDownloadProgress>(value =>
+        {
+            var percent = value.TotalBytes <= 0
+                ? 0
+                : Math.Clamp(
+                    value.DownloadedBytes * 100d / value.TotalBytes,
+                    0,
+                    100);
+            LocalLargeModelDownloadProgressBar.Value = percent;
+            LocalLargeModelDownloadProgressText.Text =
+                $"{percent:0.0}% · {FormatFileSize(value.DownloadedBytes)} / " +
+                $"{FormatFileSize(value.TotalBytes)} · {value.CurrentFileName}";
+        });
+        try
+        {
+            var result = await _localLargeTranslationModelManager.InstallAsync(
+                progress,
+                _updateCancellationSource.Token);
+            RefreshLocalLargeModelStatus();
+            _settingsViewModel.SetStatus(result.IsSuccess
+                ? "Qwen 本机翻译大模型安装完成。"
+                : result.ErrorMessage ?? "本机翻译大模型安装失败。");
+        }
+        finally
+        {
+            button.IsEnabled = true;
+            LocalLargeModelDownloadProgressBar.Visibility = Visibility.Collapsed;
+            LocalLargeModelDownloadProgressText.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void OnOpenLocalLargeModelDirectoryClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        try
+        {
+            Directory.CreateDirectory(
+                _localLargeTranslationModelManager.InstallationDirectory);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName =
+                    _localLargeTranslationModelManager.InstallationDirectory,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or
+                System.ComponentModel.Win32Exception)
+        {
+            _settingsViewModel.SetStatus("无法打开本机翻译大模型目录。");
+        }
+    }
+
+    private void RefreshLocalLargeModelStatus()
+    {
+        if (LocalLargeModelStatusText is null ||
+            LocalLargeModelPathText is null ||
+            DownloadLocalLargeModelButton is null)
+        {
+            return;
+        }
+
+        var status = _localLargeTranslationModelManager.GetStatus();
+        LocalLargeModelStatusText.Text = status.IsInstalled
+            ? $"已安装 · 占用约 {FormatFileSize(status.InstalledSize)}"
+            : $"未安装 · 本次需下载 {FormatFileSize(status.DownloadSize)}";
+        LocalLargeModelPathText.Text =
+            $"安装目录：{status.InstallationDirectory}";
+        DownloadLocalLargeModelButton.Content = status.IsInstalled
+            ? "模型已安装"
+            : "下载翻译大模型";
+
+        if (_settingsViewModel.OfflineTranslationEngine ==
+            OfflineTranslationEngine.QwenLargeModel)
+        {
+            _settingsViewModel.UpdateTranslationProviderAvailability(
+                TranslationProviderKind.Offline,
+                status.IsInstalled,
+                status.IsInstalled
+                    ? "Qwen 本机翻译大模型已安装"
+                    : "Qwen 本机翻译大模型尚未下载");
+        }
+    }
+
     private async void RefreshOfflineTranslationModelStatus()
     {
         if (OfflineModelStatusText is null || OfflineModelPathText is null ||
@@ -1001,8 +1329,7 @@ public partial class MainWindow : Window, IDisposable
 
         var generation = Interlocked.Increment(ref _offlineModelPlanGeneration);
         _offlineTranslationPlan = null;
-        _settingsViewModel.UpdateTranslationProviderAvailability(
-            TranslationProviderKind.Offline,
+        UpdateMozillaTranslationAvailability(
             isAvailable: false,
             "正在检查当前目标语言所需的离线模型");
         DownloadOfflineModelButton.IsEnabled = false;
@@ -1014,7 +1341,8 @@ public partial class MainWindow : Window, IDisposable
         {
             OfflineModelRouteText.Text =
                 "源语言：自动检测（与文字识别语言设置无关） · " +
-                $"目标语言：{TranslationLanguageCatalog.GetDisplayName(_settingsViewModel.TranslationTargetLanguage)}";
+                $"目标语言：{TranslationLanguageCatalog.GetDisplayName(_settingsViewModel.TranslationTargetLanguage)} · " +
+                $"精度：{OfflineTranslationModelCatalog.GetQualityDisplayName(_settingsViewModel.OfflineTranslationQuality)}";
         }
 
         OfflineTranslationModelPlanResult result;
@@ -1042,8 +1370,7 @@ public partial class MainWindow : Window, IDisposable
             var error = result.ErrorMessage ??
                 "当前目标语言暂不支持离线翻译。";
             OfflineModelStatusText.Text = error;
-            _settingsViewModel.UpdateTranslationProviderAvailability(
-                TranslationProviderKind.Offline,
+            UpdateMozillaTranslationAvailability(
                 isAvailable: false,
                 error);
             DownloadOfflineModelButton.Content = "暂不支持";
@@ -1066,8 +1393,7 @@ public partial class MainWindow : Window, IDisposable
         }
 
         var status = _offlineTranslationModelManager.GetStatus(plan);
-        _settingsViewModel.UpdateTranslationProviderAvailability(
-            TranslationProviderKind.Offline,
+        UpdateMozillaTranslationAvailability(
             status.IsInstalled,
             status.IsInstalled
                 ? $"当前目标语言所需的离线模型已安装（{plan.DisplayName}）"
@@ -1080,6 +1406,22 @@ public partial class MainWindow : Window, IDisposable
             ? "模型已安装"
             : "下载目标语言包";
         DownloadOfflineModelButton.IsEnabled = true;
+    }
+
+    private void UpdateMozillaTranslationAvailability(
+        bool isAvailable,
+        string reason)
+    {
+        if (_settingsViewModel.OfflineTranslationEngine !=
+            OfflineTranslationEngine.Mozilla)
+        {
+            return;
+        }
+
+        _settingsViewModel.UpdateTranslationProviderAvailability(
+            TranslationProviderKind.Offline,
+            isAvailable,
+            reason);
     }
 
     private static string FormatFileSize(long bytes)
@@ -1124,7 +1466,14 @@ public partial class MainWindow : Window, IDisposable
             comboBox.GetBindingExpression(property)?.UpdateSource();
         }
 
-        ApplySettingsImmediately();
+        var applied = ApplySettingsImmediately();
+        if (applied &&
+            ReferenceEquals(sender, ShowTaskbarIconCheckBox) &&
+            _pendingShowInTaskbar.HasValue)
+        {
+            _settingsViewModel.SetStatus(
+                "任务栏图标将在设置窗口下次打开时更新。");
+        }
         if (ReferenceEquals(sender, TranslationModelComboBox))
         {
             RefreshOnlineTranslationAvailability();
@@ -1132,6 +1481,27 @@ public partial class MainWindow : Window, IDisposable
         if (ReferenceEquals(sender, TranslationTargetLanguageComboBox))
         {
             RefreshOfflineTranslationModelStatus();
+        }
+        else if (ReferenceEquals(sender, OfflineTranslationQualityComboBox))
+        {
+            RefreshCachedOfflineTranslationInstallationState();
+            _settingsViewModel.SetStatus(
+                $"离线翻译精度已切换为{OfflineTranslationModelCatalog.GetQualityDisplayName(_settingsViewModel.OfflineTranslationQuality)}。");
+        }
+        else if (ReferenceEquals(sender, OcrEngineComboBox))
+        {
+            RefreshHighQualityOcrModelStatus();
+            ShowOcrLanguageAvailability();
+        }
+        else if (ReferenceEquals(sender, OfflineTranslationEngineComboBox))
+        {
+            RefreshCachedOfflineTranslationInstallationState();
+            RefreshLocalLargeModelStatus();
+            _settingsViewModel.SetStatus(
+                _settingsViewModel.OfflineTranslationEngine ==
+                OfflineTranslationEngine.QwenLargeModel
+                    ? "本机离线翻译已切换为 Qwen 大模型。"
+                    : "本机离线翻译已切换为 Mozilla 轻量模型。");
         }
     }
 
@@ -1164,9 +1534,13 @@ public partial class MainWindow : Window, IDisposable
 
     private void UpdateThemeSelection(AppTheme theme)
     {
-        SystemThemeOption.IsChecked = theme == AppTheme.System;
-        LightThemeOption.IsChecked = theme == AppTheme.Light;
-        DarkThemeOption.IsChecked = theme == AppTheme.Dark;
+        theme = AppSettings.NormalizeTheme(theme);
+        AuroraMistThemeOption.IsChecked = theme == AppTheme.AuroraMist;
+        CoralSkyThemeOption.IsChecked = theme == AppTheme.CoralSky;
+        GinkgoPaperThemeOption.IsChecked = theme == AppTheme.GinkgoPaper;
+        ForestNightThemeOption.IsChecked = theme == AppTheme.ForestNight;
+        ObsidianGoldThemeOption.IsChecked = theme == AppTheme.ObsidianGold;
+        NeonDeepThemeOption.IsChecked = theme == AppTheme.NeonDeep;
     }
 
     private void OnCloseBehaviorOptionChecked(object sender, RoutedEventArgs e)
@@ -1745,6 +2119,17 @@ public partial class MainWindow : Window, IDisposable
 
     private void ShowOcrLanguageAvailability()
     {
+        if (_settingsViewModel.OcrEngine == OcrEngineMode.PaddleOcrV6)
+        {
+            if (!_highQualityOcrModelManager.GetStatus().IsInstalled)
+            {
+                _settingsViewModel.SetStatus(
+                    "PP-OCRv6 高质量识别模型尚未下载。");
+            }
+
+            return;
+        }
+
         var availableLanguages = OcrService.GetAvailableLanguageTags();
 
         if (availableLanguages.Contains(

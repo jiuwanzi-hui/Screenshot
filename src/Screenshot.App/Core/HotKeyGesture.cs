@@ -32,6 +32,8 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
     private const uint VirtualKeyPrintScreen = 0x2C;
     private const uint VirtualKeyInsert = 0x2D;
     private const uint VirtualKeyDelete = 0x2E;
+    private const uint VirtualKeyNumpad0 = 0x60;
+    private const uint VirtualKeyNumpad9 = 0x69;
     private const uint VirtualKeyF4 = 0x73;
     private const uint VirtualKeySemicolon = 0xBA;
     private const uint VirtualKeyPlus = 0xBB;
@@ -61,16 +63,17 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         if (tokens.Length == 1 &&
-            TryParseKey(tokens[0], out var unmodifiedMouseKey) &&
-            IsMouseVirtualKey(unmodifiedMouseKey))
+            TryParseKey(tokens[0], out var unmodifiedKey) &&
+            (IsMouseVirtualKey(unmodifiedKey) ||
+             AllowsStandaloneKeyboardShortcut(unmodifiedKey)))
         {
-            gesture = new HotKeyGesture(HotKeyModifiers.None, unmodifiedMouseKey);
+            gesture = new HotKeyGesture(HotKeyModifiers.None, unmodifiedKey);
             return true;
         }
 
         if (tokens.Length < 2)
         {
-            errorMessage = "键盘快捷键需要修饰键；鼠标侧键可单独使用，左、中、右键可长按使用。";
+            errorMessage = "普通键盘按键需要修饰键；PrintScreen、小键盘数字键和鼠标键可单独使用。";
             return false;
         }
 
@@ -154,6 +157,12 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
             VirtualKeyMouseForward;
     }
 
+    public static bool AllowsStandaloneKeyboardShortcut(uint virtualKey)
+    {
+        return virtualKey == VirtualKeyPrintScreen ||
+               virtualKey is >= VirtualKeyNumpad0 and <= VirtualKeyNumpad9;
+    }
+
     public bool IsSystemReserved(out string errorMessage)
     {
         if ((Modifiers & HotKeyModifiers.Windows) != 0)
@@ -181,12 +190,6 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
             VirtualKey == VirtualKeyDelete)
         {
             errorMessage = "Ctrl+Alt+Delete 由 Windows 保留，不能使用。";
-            return true;
-        }
-
-        if (VirtualKey == VirtualKeyPrintScreen)
-        {
-            errorMessage = "PrintScreen 属于系统截图快捷键，不能使用。";
             return true;
         }
 
@@ -243,6 +246,14 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
             return true;
         }
 
+        if (normalizedToken.StartsWith("NUMPAD", StringComparison.OrdinalIgnoreCase) &&
+            normalizedToken.Length == 7 &&
+            char.IsAsciiDigit(normalizedToken[^1]))
+        {
+            virtualKey = VirtualKeyNumpad0 + (uint)(normalizedToken[^1] - '0');
+            return true;
+        }
+
         virtualKey = normalizedToken.ToUpperInvariant() switch
         {
             "MOUSELEFT" or "LEFTMOUSE" or "鼠标左键" or "长按鼠标左键" =>
@@ -294,6 +305,11 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
         if (virtualKey is >= 0x70 and <= 0x87)
         {
             return $"F{virtualKey - 0x70 + 1}";
+        }
+
+        if (virtualKey is >= VirtualKeyNumpad0 and <= VirtualKeyNumpad9)
+        {
+            return $"Numpad{virtualKey - VirtualKeyNumpad0}";
         }
 
         return virtualKey switch

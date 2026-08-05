@@ -5,6 +5,24 @@ namespace Screenshot.App.Tests;
 
 public sealed class SettingsValidationTests
 {
+    [Theory]
+    [InlineData(AppTheme.System, AppTheme.AuroraMist)]
+    [InlineData(AppTheme.Light, AppTheme.AuroraMist)]
+    [InlineData(AppTheme.Dark, AppTheme.ForestNight)]
+    [InlineData(AppTheme.CoralSky, AppTheme.CoralSky)]
+    [InlineData((AppTheme)999, AppTheme.AuroraMist)]
+    public void MigratesLegacyAndInvalidThemes(
+        AppTheme input,
+        AppTheme expected)
+    {
+        var normalized = (AppSettings.CreateDefault() with
+        {
+            Theme = input,
+        }).Normalize();
+
+        Assert.Equal(expected, normalized.Theme);
+    }
+
     [Fact]
     public void NormalizesScreenshotAndVideoSaveDirectories()
     {
@@ -33,5 +51,33 @@ public sealed class SettingsValidationTests
         Assert.Equal(
             Path.GetFullPath(AppMetadata.DefaultVideoDirectory),
             normalized.VideoSaveDirectory);
+    }
+
+    [Fact]
+    public void InvalidOfflineTranslationQualityUsesHighQualityDefault()
+    {
+        var normalized = (AppSettings.CreateDefault() with
+        {
+            OfflineTranslationQuality = (OfflineTranslationQuality)999,
+        }).Normalize();
+
+        Assert.Equal(
+            OfflineTranslationQuality.High,
+            normalized.OfflineTranslationQuality);
+    }
+
+    [Fact]
+    public void InvalidOptionalModelSelectionsUseBundledDefaults()
+    {
+        var normalized = (AppSettings.CreateDefault() with
+        {
+            OcrEngine = (OcrEngineMode)999,
+            OfflineTranslationEngine = (OfflineTranslationEngine)999,
+        }).Normalize();
+
+        Assert.Equal(OcrEngineMode.Windows, normalized.OcrEngine);
+        Assert.Equal(
+            OfflineTranslationEngine.Mozilla,
+            normalized.OfflineTranslationEngine);
     }
 }

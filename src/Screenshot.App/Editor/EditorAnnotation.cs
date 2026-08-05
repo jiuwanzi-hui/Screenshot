@@ -11,6 +11,11 @@ public sealed record RectangleAnnotation(
     WpfColor StrokeColor,
     double StrokeWidth) : EditorAnnotation;
 
+public sealed record EllipseAnnotation(
+    WpfRect Bounds,
+    WpfColor StrokeColor,
+    double StrokeWidth) : EditorAnnotation;
+
 public sealed record ArrowAnnotation(
     WpfPoint Start,
     WpfPoint End,

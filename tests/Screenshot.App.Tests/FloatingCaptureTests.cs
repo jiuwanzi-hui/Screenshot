@@ -51,7 +51,10 @@ public sealed class FloatingCaptureTests : IDisposable
                 Assert.IsType<Button>(window.FindName("VideoRecordingMenuButton"));
                 Assert.IsType<Button>(window.FindName("PinCaptureMenuButton"));
                 Assert.IsType<Button>(window.FindName("AllScreensCaptureMenuButton"));
-                Assert.IsType<Button>(window.FindName("HistoryMenuButton"));
+                Assert.Equal(
+                    "历史查看",
+                    Assert.IsType<Button>(
+                        window.FindName("HistoryMenuButton")).Content);
                 Assert.IsType<Popup>(window.FindName("FeatureMenuPopup"));
                 var firstSeparator = Assert.IsType<Border>(
                     window.FindName("RegionScrollMenuSeparator"));

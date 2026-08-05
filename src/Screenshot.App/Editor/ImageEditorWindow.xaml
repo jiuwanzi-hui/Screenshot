@@ -14,6 +14,10 @@
         FontFamily="Microsoft YaHei UI"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
+        <ResourceDictionary>
+        <ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary Source="../Themes/ThemedContextMenus.xaml" />
+        </ResourceDictionary.MergedDictionaries>
         <Geometry x:Key="UndoIconGeometry">M 8,4 L 3,9 L 8,14 M 3,9 L 11,9 C 15,9 18,11.5 18,16</Geometry>
         <Geometry x:Key="RedoIconGeometry">M 12,4 L 17,9 L 12,14 M 17,9 L 9,9 C 5,9 2,11.5 2,16</Geometry>
         <Style x:Key="GlassButton" TargetType="Button">
@@ -187,6 +191,7 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        </ResourceDictionary>
     </Window.Resources>
 
     <Border x:Name="EditorShell"
@@ -239,18 +244,41 @@
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource ImageEditorTitleBrush}"
                                    Text="编辑截图" />
-                        <RadioButton Tag="Rectangle"
+                        <RadioButton x:Name="ShapeToolButton"
+                                     Tag="Rectangle"
                                      Checked="OnToolSelected"
                                      IsChecked="True"
-                                     ToolTip="矩形标注"
+                                     ToolTip="矩形/椭圆标注"
                                      Style="{StaticResource GlassTool}">
+                            <RadioButton.ContextMenu>
+                                <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
+                                    <MenuItem Header="矩形"
+                                              Tag="Rectangle"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnShapeMenuItemClick" />
+                                    <MenuItem Header="椭圆"
+                                              Tag="Ellipse"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnShapeMenuItemClick" />
+                                </ContextMenu>
+                            </RadioButton.ContextMenu>
                             <Grid VerticalAlignment="Center">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="18" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe UI Symbol" FontSize="16" Text="□" TextAlignment="Center" />
-                                <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="矩形" />
+                                <TextBlock x:Name="ShapeToolIcon" HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe UI Symbol" FontSize="16" Text="□" TextAlignment="Center" />
+                                <TextBlock x:Name="ShapeToolLabel" Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="矩形" />
+                                <TextBlock Grid.Column="2"
+                                           Margin="5,0,0,0"
+                                           Padding="3,2"
+                                           VerticalAlignment="Center"
+                                           Cursor="Hand"
+                                           FontSize="10"
+                                           Text="▾"
+                                           ToolTip="选择形状"
+                                           PreviewMouseLeftButtonDown="OnShapeMenuArrowMouseDown" />
                             </Grid>
                         </RadioButton>
                         <RadioButton Tag="Arrow"
@@ -323,6 +351,10 @@
                                    Height="24"
                                    Margin="5,0,12,0"
                                    Background="{DynamicResource ImageEditorSeparatorBrush}" />
+                        <Button Click="OnCropClick"
+                                Content="裁剪"
+                                ToolTip="按上、右、下、左四边裁剪图片"
+                                Style="{StaticResource GlassButton}" />
                         <Button x:Name="UndoButton"
                                 Click="OnUndoClick"
                                 ToolTip="撤销"

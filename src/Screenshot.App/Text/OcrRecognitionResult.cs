@@ -5,6 +5,16 @@ public sealed record OcrTextRegion(
     double X,
     double Y,
     double Width,
+    double Height)
+{
+    public double EstimatedFontSize { get; init; }
+}
+
+public sealed record OcrWordRegion(
+    string Text,
+    double X,
+    double Y,
+    double Width,
     double Height);
 
 public sealed record OcrRecognitionResult(
@@ -13,6 +23,8 @@ public sealed record OcrRecognitionResult(
     string? ErrorMessage)
 {
     public IReadOnlyList<OcrTextRegion> Regions { get; init; } = [];
+
+    public IReadOnlyList<OcrWordRegion> Words { get; init; } = [];
 
     public static OcrRecognitionResult Failure(string errorMessage)
     {

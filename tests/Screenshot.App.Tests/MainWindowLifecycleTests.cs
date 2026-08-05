@@ -13,6 +13,98 @@ namespace Screenshot.App.Tests;
 public sealed class MainWindowLifecycleTests
 {
     [Fact]
+    public void GlobalCheckBoxesUseTheRoundedThemeTemplate()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var controls = new ResourceDictionary
+            {
+                Source = new Uri(
+                    "/SnapCut;component/Themes/ThemedControls.xaml",
+                    UriKind.Relative),
+            };
+            Application.Current.Resources.MergedDictionaries.Add(controls);
+            var checkBox = new CheckBox
+            {
+                Content = "主题复选框",
+                IsChecked = true,
+                Style = Assert.IsType<Style>(
+                    controls[typeof(CheckBox)]),
+            };
+            var host = new Window
+            {
+                Width = 240,
+                Height = 120,
+                Content = checkBox,
+                ShowInTaskbar = false,
+            };
+            try
+            {
+                host.Show();
+                host.UpdateLayout();
+
+                var border = Assert.IsType<Border>(
+                    checkBox.Template.FindName("CheckBoxBorder", checkBox));
+                var checkMark = Assert.IsType<System.Windows.Shapes.Path>(
+                    checkBox.Template.FindName("CheckMark", checkBox));
+                var content = Assert.IsType<ContentPresenter>(
+                    checkBox.Template.FindName("CheckBoxContent", checkBox));
+
+                Assert.Equal(new CornerRadius(5), border.CornerRadius);
+                Assert.Equal(Visibility.Visible, checkMark.Visibility);
+                Assert.Equal(VerticalAlignment.Center, checkBox.VerticalContentAlignment);
+                var borderTop = border.TranslatePoint(new Point(), checkBox).Y;
+                var contentTop = content.TranslatePoint(new Point(), checkBox).Y;
+                Assert.InRange(
+                    Math.Abs(
+                        borderTop + (border.ActualHeight / 2) -
+                        contentTop - (content.ActualHeight / 2)),
+                    0,
+                    1);
+            }
+            finally
+            {
+                host.Close();
+                Application.Current.Resources.MergedDictionaries.Remove(controls);
+            }
+        });
+    }
+
+    [Fact]
+    public void TaskbarVisibilityChangeIsDeferredUntilTheWindowIsHidden()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                AppSettings.CreateDefault() with { ShowTaskbarIcon = false },
+                new SettingsStore(Path.Combine(
+                    Path.GetTempPath(),
+                    "Screenshot.App.Tests",
+                    "deferred-taskbar-settings.json")),
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+
+            window.ConfigureTaskbarVisibility(showInTaskbar: false);
+            window.ShowFromTray();
+            Assert.False(window.ShowInTaskbar);
+
+            window.ConfigureTaskbarVisibility(showInTaskbar: true);
+            Assert.True(window.IsVisible);
+            Assert.False(window.ShowInTaskbar);
+
+            window.Close();
+            Assert.False(window.IsVisible);
+            Assert.True(window.ShowInTaskbar);
+
+            window.ShowFromTray();
+            Assert.True(window.ShowInTaskbar);
+            window.RequestExit();
+        });
+    }
+
+    [Fact]
     public void ShowsHidesAndExplicitlyClosesTheSettingsWindow()
     {
         var wasVisibleAfterShow = false;
@@ -333,7 +425,7 @@ public sealed class MainWindowLifecycleTests
                 hotKeyManager,
                 new FakeTranslationCredentialStore());
 
-            window.ApplySettingsPalette(AppTheme.Light);
+            window.ApplySettingsPalette(AppTheme.AuroraMist);
             window.ShowFromTray();
             var navigation = Assert.IsType<ListBox>(
                 window.FindName("SettingsNavigation"));

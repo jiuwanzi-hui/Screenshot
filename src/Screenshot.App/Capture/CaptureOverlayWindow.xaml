@@ -14,9 +14,14 @@
         Topmost="True"
         WindowStyle="None">
     <Window.Resources>
+        <ResourceDictionary>
+        <ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary Source="../Themes/ThemedContextMenus.xaml" />
+        </ResourceDictionary.MergedDictionaries>
         <Geometry x:Key="UndoIconGeometry">M 8,4 L 3,9 L 8,14 M 3,9 L 11,9 C 15,9 18,11.5 18,16</Geometry>
         <Geometry x:Key="RedoIconGeometry">M 12,4 L 17,9 L 12,14 M 17,9 L 9,9 C 5,9 2,11.5 2,16</Geometry>
         <Geometry x:Key="RectangleIconGeometry">M 2,2 H 16 V 16 H 2 Z</Geometry>
+        <Geometry x:Key="EllipseIconGeometry">M 9,2 C 13.5,2 17,5.1 17,9 C 17,12.9 13.5,16 9,16 C 4.5,16 1,12.9 1,9 C 1,5.1 4.5,2 9,2 Z</Geometry>
         <Geometry x:Key="ArrowIconGeometry">M 2,9 H 15 M 10,4 L 15,9 L 10,14</Geometry>
         <Geometry x:Key="PenIconGeometry">M 3,14 L 4.2,9.8 L 12.6,1.4 L 16.6,5.4 L 8.2,13.8 Z M 11.2,3.8 L 14.2,6.8</Geometry>
         <Geometry x:Key="MosaicIconGeometry">M 2,2 H 16 V 16 H 2 Z M 6.7,2 V 16 M 11.3,2 V 16 M 2,6.7 H 16 M 2,11.3 H 16</Geometry>
@@ -244,6 +249,7 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        </ResourceDictionary>
     </Window.Resources>
     <Grid x:Name="CaptureSurface"
           Background="Transparent"
@@ -326,6 +332,44 @@
                     ClipToBounds="True"
                     Panel.ZIndex="95"
                     Visibility="Collapsed" />
+
+            <Canvas x:Name="ContentRecognitionOverlay"
+                    ClipToBounds="True"
+                    Panel.ZIndex="97"
+                    Visibility="Collapsed" />
+
+            <Border x:Name="SelectionMessageToast"
+                    MinWidth="150"
+                    MaxWidth="360"
+                    Padding="14,9"
+                    Background="{DynamicResource AppPanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource AppAccentBrush}"
+                    BorderThickness="1"
+                    CornerRadius="9"
+                    IsHitTestVisible="False"
+                    Panel.ZIndex="120"
+                    Visibility="Collapsed">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="14"
+                                      Direction="270"
+                                      Opacity="0.28"
+                                      ShadowDepth="3"
+                                      Color="#000000" />
+                </Border.Effect>
+                <StackPanel HorizontalAlignment="Center" Orientation="Horizontal">
+                    <Ellipse Width="8"
+                             Height="8"
+                             Margin="0,0,8,0"
+                             VerticalAlignment="Center"
+                             Fill="{DynamicResource AppAccentBrush}" />
+                    <TextBlock x:Name="SelectionMessageText"
+                               VerticalAlignment="Center"
+                               Foreground="{DynamicResource AppControlForegroundBrush}"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
 
             <Rectangle x:Name="InlineEditorOutline"
                        Cursor="SizeAll"
@@ -431,14 +475,41 @@
                     Visibility="Collapsed">
                 <StackPanel>
                     <StackPanel x:Name="InlineEditorTools" Orientation="Horizontal">
-                        <RadioButton GroupName="InlineEditorTool"
+                        <RadioButton x:Name="InlineShapeToolButton"
+                                     GroupName="InlineEditorTool"
                                      Checked="OnInlineEditorToolSelected"
                                      IsChecked="True"
                                      Style="{StaticResource InlineToolButton}"
                                      Tag="Rectangle"
-                                     ToolTip="矩形">
-                            <Path Data="{StaticResource RectangleIconGeometry}"
-                                  Style="{StaticResource InlineIconPath}" />
+                                     ToolTip="矩形/椭圆">
+                            <RadioButton.ContextMenu>
+                                <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
+                                    <MenuItem Header="矩形"
+                                              Tag="Rectangle"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnInlineShapeMenuItemClick" />
+                                    <MenuItem Header="椭圆"
+                                              Tag="Ellipse"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnInlineShapeMenuItemClick" />
+                                </ContextMenu>
+                            </RadioButton.ContextMenu>
+                            <Grid Width="27">
+                                <Path x:Name="InlineShapeToolIcon"
+                                      Width="17"
+                                      Height="17"
+                                      HorizontalAlignment="Left"
+                                      Data="{StaticResource RectangleIconGeometry}"
+                                      Style="{StaticResource InlineIconPath}" />
+                                <TextBlock HorizontalAlignment="Right"
+                                           VerticalAlignment="Center"
+                                           Cursor="Hand"
+                                           FontSize="9"
+                                           Foreground="{DynamicResource EditorToolbarIconBrush}"
+                                           Text="▾"
+                                           ToolTip="选择形状"
+                                           PreviewMouseLeftButtonDown="OnInlineShapeMenuArrowMouseDown" />
+                            </Grid>
                         </RadioButton>
                         <RadioButton GroupName="InlineEditorTool"
                                      Checked="OnInlineEditorToolSelected"
@@ -507,9 +578,31 @@
                         <Button x:Name="OcrButton"
                                 Click="OnOcrClick"
                                 Style="{StaticResource InlineActionButton}"
-                                ToolTip="识别并直接选择图片文字">
-                            <Path Data="{StaticResource OcrIconGeometry}"
-                                  Style="{StaticResource InlineIconPath}" />
+                                ToolTip="识别文字并在原位置选择复制">
+                            <Button.ContextMenu>
+                                <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
+                                    <MenuItem Header="表格复制"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnCopyTableMenuItemClick" />
+                                </ContextMenu>
+                            </Button.ContextMenu>
+                            <Grid Width="27">
+                                <TextBlock HorizontalAlignment="Left"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource EditorToolbarIconBrush}"
+                                           FontFamily="Microsoft YaHei UI"
+                                           FontSize="14"
+                                           FontWeight="SemiBold"
+                                           Text="文" />
+                                <TextBlock HorizontalAlignment="Right"
+                                           VerticalAlignment="Center"
+                                           Cursor="Hand"
+                                           FontSize="9"
+                                           Foreground="{DynamicResource EditorToolbarIconBrush}"
+                                           Text="▾"
+                                           ToolTip="更多识别功能"
+                                           PreviewMouseLeftButtonDown="OnOcrMenuArrowMouseDown" />
+                            </Grid>
                         </Button>
                         <Button x:Name="TranslateButton"
                                 Click="OnTranslateClick"
@@ -568,15 +661,19 @@
                                 Background="{DynamicResource EditorToolbarConfirmBackgroundBrush}"
                                 BorderBrush="{DynamicResource EditorToolbarConfirmBorderBrush}"
                                 Style="{StaticResource InlineActionButton}"
-                                ToolTip="复制并完成截图">
+                                ToolTip="完成并复制到剪贴板（Ctrl+C）">
                             <Path Data="{StaticResource ConfirmIconGeometry}"
                                   Stroke="{DynamicResource EditorToolbarConfirmIconBrush}"
                                   Style="{StaticResource InlineIconPath}" />
                         </Button>
                     </StackPanel>
 
+                    <Grid Margin="0,6,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
                     <StackPanel x:Name="InlineEditorOptions"
-                                Margin="0,6,0,0"
                                 Orientation="Horizontal"
                                 Visibility="Collapsed">
                         <ScrollViewer x:Name="InlineEmojiPalette"
@@ -641,12 +738,16 @@
                     </StackPanel>
 
                     <TextBlock x:Name="CaptureStatusText"
-                               Margin="2,6,2,0"
+                               Grid.Column="1"
+                               Margin="12,0,2,0"
                                MaxWidth="460"
+                               HorizontalAlignment="Right"
+                               VerticalAlignment="Center"
                                FontSize="12"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
                                TextWrapping="Wrap"
                                Visibility="Collapsed" />
+                    </Grid>
                 </StackPanel>
             </Border>
         </Canvas>

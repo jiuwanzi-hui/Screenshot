@@ -11,6 +11,7 @@ public static class TranslationProviderFactory
     /// </summary>
     public const string OpenAiCompatibleProviderId = "OpenAICompatible";
     public const string OfflineProviderId = "OfflineBergamot";
+    public const string LocalLargeModelProviderId = "OfflineQwenLargeModel";
 
     public sealed record ProviderDefinition(
         string Id,
@@ -153,7 +154,8 @@ public static class TranslationProviderFactory
         AppSettings settings,
         ITranslationCredentialStore credentialStore,
         HttpClient httpClient,
-        OfflineTranslationModelManager? offlineModelManager = null)
+        OfflineTranslationModelManager? offlineModelManager = null,
+        LocalLargeTranslationModelManager? localLargeModelManager = null)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(credentialStore);
@@ -163,8 +165,15 @@ public static class TranslationProviderFactory
         {
             if (provider == TranslationProviderKind.Offline)
             {
-                return new OfflineTranslationProvider(
-                    offlineModelManager ?? OfflineTranslationModelManager.Shared);
+                return settings.OfflineTranslationEngine ==
+                       OfflineTranslationEngine.QwenLargeModel
+                    ? new LocalLargeModelTranslationProvider(
+                        localLargeModelManager ??
+                        LocalLargeTranslationModelManager.Shared)
+                    : new OfflineTranslationProvider(
+                        offlineModelManager ??
+                        OfflineTranslationModelManager.Shared,
+                        settings.OfflineTranslationQuality);
             }
 
             var providerId = ResolveProviderId(settings.TranslationProvider);

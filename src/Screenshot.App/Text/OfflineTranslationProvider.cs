@@ -1,29 +1,45 @@
 using System.Collections.Concurrent;
 using System.IO;
 using BergamotTranslatorSharp;
+using Screenshot.App.Core;
 
 namespace Screenshot.App.Text;
 
 public sealed class OfflineTranslationProvider : ITranslationProvider
 {
+    private static readonly TimeSpan EngineIdleTimeout = TimeSpan.FromSeconds(30);
+    private static readonly object EngineLifecycleLock = new();
     private static readonly ConcurrentDictionary<string, TranslationEngine> Engines =
         new(StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Threading.Timer EngineUnloadTimer = new(
+        _ => TryUnloadIdleEngines(),
+        state: null,
+        Timeout.InfiniteTimeSpan,
+        Timeout.InfiniteTimeSpan);
+    private static int _activeOperations;
     private readonly OfflineTranslationModelManager _modelManager;
     private readonly IOfflineLanguageDetector _languageDetector;
+    private readonly OfflineTranslationQuality _quality;
 
-    public OfflineTranslationProvider(OfflineTranslationModelManager modelManager)
-        : this(modelManager, Cld3OfflineLanguageDetector.Shared)
+    public OfflineTranslationProvider(
+        OfflineTranslationModelManager modelManager,
+        OfflineTranslationQuality quality = OfflineTranslationQuality.High)
+        : this(modelManager, Cld3OfflineLanguageDetector.Shared, quality)
     {
     }
 
     internal OfflineTranslationProvider(
         OfflineTranslationModelManager modelManager,
-        IOfflineLanguageDetector languageDetector)
+        IOfflineLanguageDetector languageDetector,
+        OfflineTranslationQuality quality = OfflineTranslationQuality.High)
     {
         _modelManager = modelManager ??
             throw new ArgumentNullException(nameof(modelManager));
         _languageDetector = languageDetector ??
             throw new ArgumentNullException(nameof(languageDetector));
+        _quality = Enum.IsDefined(quality)
+            ? quality
+            : OfflineTranslationQuality.High;
     }
 
     public string Id => TranslationProviderFactory.OfflineProviderId;
@@ -68,6 +84,14 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
             return TranslationSegmentsResult.Failure("请选择离线翻译目标语言。");
         }
 
+        if (segments.All(segment =>
+                TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(
+                    segment,
+                    targetLanguage)))
+        {
+            return new TranslationSegmentsResult(true, segments.ToArray(), null);
+        }
+
         var translated = segments.ToArray();
         var eligibleIndexes = Enumerable.Range(0, segments.Count)
             .Where(index => ShouldTranslateSegment(segments[index]))
@@ -77,6 +101,7 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
             return new TranslationSegmentsResult(true, translated, null);
         }
 
+        BeginEngineUse();
         try
         {
             var sources = ResolveSourceLanguages(
@@ -99,7 +124,8 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
                 var indexes = group.Select(entry => entry.Key).ToArray();
                 var configurationPaths = _modelManager.GetInstalledRoute(
                     sourceCode,
-                    targetCode);
+                    targetCode,
+                    _quality);
                 if (configurationPaths is null)
                 {
                     return TranslationSegmentsResult.Failure(
@@ -153,6 +179,83 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
         {
             return TranslationSegmentsResult.Failure(
                 "无法加载离线翻译模型，请返回设置重新下载语言包。");
+        }
+        finally
+        {
+            EndEngineUse();
+        }
+    }
+
+    private static void BeginEngineUse()
+    {
+        lock (EngineLifecycleLock)
+        {
+            _activeOperations++;
+            EngineUnloadTimer.Change(
+                Timeout.InfiniteTimeSpan,
+                Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    private static void EndEngineUse()
+    {
+        lock (EngineLifecycleLock)
+        {
+            _activeOperations--;
+            if (_activeOperations == 0)
+            {
+                EngineUnloadTimer.Change(
+                    EngineIdleTimeout,
+                    Timeout.InfiniteTimeSpan);
+            }
+        }
+    }
+
+    private static void TryUnloadIdleEngines()
+    {
+        lock (EngineLifecycleLock)
+        {
+            if (_activeOperations != 0)
+            {
+                EngineUnloadTimer.Change(
+                    TimeSpan.FromSeconds(5),
+                    Timeout.InfiniteTimeSpan);
+                return;
+            }
+
+            var retryNeeded = false;
+            foreach (var entry in Engines.ToArray())
+            {
+                var engine = entry.Value;
+                if (!engine.Gate.Wait(0))
+                {
+                    retryNeeded = true;
+                    continue;
+                }
+
+                try
+                {
+                    if (Engines.TryRemove(
+                            new KeyValuePair<string, TranslationEngine>(
+                                entry.Key,
+                                engine)) &&
+                        engine.Service.IsValueCreated)
+                    {
+                        engine.Service.Value.Dispose();
+                    }
+                }
+                finally
+                {
+                    engine.Gate.Release();
+                }
+            }
+
+            if (retryNeeded)
+            {
+                EngineUnloadTimer.Change(
+                    TimeSpan.FromSeconds(5),
+                    Timeout.InfiniteTimeSpan);
+            }
         }
     }
 

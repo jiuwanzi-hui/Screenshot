@@ -73,6 +73,11 @@ internal sealed class RegionVideoRecorder : IDisposable
                 sourceRegion.Height),
             IsCursorCaptureEnabled = true,
             IsBorderRequired = false,
+            Position = new ScreenRecorderLib.ScreenPoint(0, 0),
+            OutputSize = new ScreenSize(
+                sourceRegion.Width,
+                sourceRegion.Height),
+            Stretch = StretchMode.Fill,
         };
         var options = new RecorderOptions
         {

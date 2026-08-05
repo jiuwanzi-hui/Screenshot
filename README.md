@@ -36,12 +36,14 @@ SnapCut（简截）是一款以 Windows 10/11 正式版为主的轻量截图工�
 
 下载最新的 x64 自包含版本。2.3.0 起发布附件统一使用 `SnapCut-Setup-*` 和 `SnapCut-Portable-*`；同时保留旧清单入口，2.1.0 及之后版本仍可在程序内在线更新：
 
-- [安装版 SnapCut Setup 2.7.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.7.1-win-x64.exe)
-- [免安装版 SnapCut Portable 2.7.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.7.1-win-x64.zip)
-- [安装版 SnapCut Setup 2.7.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.1/SnapCut-Setup-2.7.1-win-x64.exe)
-- [免安装版 SnapCut Portable 2.7.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.1/SnapCut-Portable-2.7.1-win-x64.zip)
+- [安装版 SnapCut Setup 2.8.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.8.0-win-x64.exe)
+- [免安装版 SnapCut Portable 2.8.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.8.0-win-x64.zip)
+- [安装版 SnapCut Setup 2.8.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.8.0/SnapCut-Setup-2.8.0-win-x64.exe)
+- [免安装版 SnapCut Portable 2.8.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.8.0/SnapCut-Portable-2.8.0-win-x64.zip)
 
-免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.7.1 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET 或 Visual C++ 运行库。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.8.0 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+
+2.8.0 新增截图与录屏统一历史查看、视频重命名/排序/定位、长图裁剪和多套独立主题；截图框选后可直接 `Ctrl+C` 完成复制，OCR 文字支持跨行选择，标注可选中后按 `Delete` 删除。内容识别改为按需运行：二维码保持轻量自动检测，文字 OCR 与表格复制由用户点击触发；可选高质量 OCR 与本地大模型支持断点下载、状态校验和超时回退。翻译、OCR 的布局匹配、取消响应和自适应线程预算进一步完善，降低不同配置电脑上的卡顿和 CPU 峰值。长截图恢复为选区内单击向下、双击向上后再开始受控滚动，不再使用物理滚轮采集。发布包继续自包含 .NET，并额外内置录屏所需的 Visual C++ x64 运行库，避免干净系统因缺少运行库而无法录屏。
 
 2.7.1 修复 2.7.0 单文件正式包内嵌的 C++/CLI 录屏组件在部分环境无法加载、导致区域录制无法启动的问题。录屏组件现在作为独立文件随程序一同分发且无需用户额外安装，构建流程会在生成下载包前强制检查该文件；区域录制异常没有系统消息时也会显示具体异常类型，便于诊断。
 
@@ -154,12 +156,14 @@ SnapCut is primarily a lightweight Windows 10/11 capture utility. It combines re
 
 Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-*` and `SnapCut-Portable-*` starting with 2.3.0. The legacy manifest endpoint remains available so versions 2.1.0 and later continue to update in-app:
 
-- [SnapCut Setup 2.7.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.7.1-win-x64.exe)
-- [SnapCut Portable 2.7.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.7.1-win-x64.zip)
-- [SnapCut Setup 2.7.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.1/SnapCut-Setup-2.7.1-win-x64.exe)
-- [SnapCut Portable 2.7.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.7.1/SnapCut-Portable-2.7.1-win-x64.zip)
+- [SnapCut Setup 2.8.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.8.0-win-x64.exe)
+- [SnapCut Portable 2.8.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.8.0-win-x64.zip)
+- [SnapCut Setup 2.8.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.8.0/SnapCut-Setup-2.8.0-win-x64.exe)
+- [SnapCut Portable 2.8.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.8.0/SnapCut-Portable-2.8.0-win-x64.zip)
 
-Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.7.1 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET or Visual C++ runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.8.0 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+
+Version 2.8.0 adds unified screenshot and recording history, video rename/sort/location actions, scrolling-capture cropping, and several independent themes. A selected capture can now finish directly with `Ctrl+C`; OCR text supports multiline selection, and selected annotations can be deleted with `Delete`. Content recognition is now demand-driven: QR detection remains automatic and lightweight, while OCR and table copying run only when requested. Optional high-quality OCR and local large translation models support resumable downloads, file validation, timeouts, and fallback. Translation/OCR layout matching, cancellation, and adaptive thread budgets reduce stalls and CPU spikes across different hardware. Scrolling capture again waits for a click to move down or a double-click to move up and no longer exposes physical-wheel capture. Both packages remain .NET self-contained and now include the x64 Visual C++ runtime required by recording on clean Windows installations.
 
 Version 2.7.1 fixes the embedded C++/CLI recording component failing to load from the 2.7.0 single-file packages on some systems, which prevented region recording from starting. The component now ships as a side-by-side file with SnapCut and requires no separate user installation; packaging fails early if it is absent. Recording startup failures also report the concrete exception type when Windows provides no message.
 
