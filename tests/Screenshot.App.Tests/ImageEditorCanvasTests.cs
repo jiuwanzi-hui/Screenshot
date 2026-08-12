@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Reflection;
 using Screenshot.App.Capture;
+using Screenshot.App.Core;
 using Screenshot.App.Editor;
 using WpfBrushes = System.Windows.Media.Brushes;
 using WpfPoint = System.Windows.Point;
@@ -423,6 +424,146 @@ public sealed class ImageEditorCanvasTests
                 Assert.True(points.Count >= 2);
             }
         }
+    }
+
+    [Fact]
+    public void ArrowDefaultsToFilledAndHollowStyleUsesAnOutlinedPolygon()
+    {
+        var annotation = new ArrowAnnotation(
+            new WpfPoint(4, 8),
+            new WpfPoint(48, 24),
+            System.Windows.Media.Colors.Red,
+            4);
+        Assert.Equal(ArrowStyle.Filled, annotation.Style);
+
+        WpfTestHost.Invoke(() =>
+        {
+            var createPolygon = typeof(ImageEditorCanvas).GetMethod(
+                "CreateArrowPolygon",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(createPolygon);
+
+            var polygon = Assert.IsType<System.Windows.Shapes.Polygon>(
+                createPolygon.Invoke(
+                    null,
+                    [
+                        annotation.Start,
+                        annotation.End,
+                        annotation.StrokeColor,
+                        annotation.StrokeWidth,
+                        ArrowStyle.Hollow,
+                    ]));
+
+            Assert.Same(WpfBrushes.Transparent, polygon.Fill);
+            var stroke = Assert.IsType<System.Windows.Media.SolidColorBrush>(
+                polygon.Stroke);
+            Assert.Equal(annotation.StrokeColor, stroke.Color);
+            Assert.True(polygon.StrokeThickness > 0);
+        });
+    }
+
+    [Fact]
+    public void ChangingSelectedArrowStyleCanBeUndone()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var bitmap = new Bitmap(100, 80, PixelFormat.Format32bppPArgb);
+            using var image = new CapturedImage((Bitmap)bitmap.Clone());
+            var editor = new ImageEditorCanvas();
+            editor.Initialize(image, displayWidth: 100, displayHeight: 80);
+            var documentField = typeof(ImageEditorCanvas).GetField(
+                "_document",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var selectedField = typeof(ImageEditorCanvas).GetField(
+                "_selectedAnnotationIndex",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(documentField);
+            Assert.NotNull(selectedField);
+            var document = Assert.IsType<EditorDocument>(
+                documentField.GetValue(editor));
+            document.Add(new ArrowAnnotation(
+                new WpfPoint(10, 12),
+                new WpfPoint(70, 44),
+                System.Windows.Media.Colors.Red,
+                4));
+            selectedField.SetValue(editor, 0);
+
+            editor.SelectArrowStyle(ArrowStyle.Hollow);
+
+            var changed = Assert.IsType<ArrowAnnotation>(
+                Assert.Single(document.Annotations));
+            Assert.Equal(ArrowStyle.Hollow, changed.Style);
+            Assert.True(editor.CanUndo);
+
+            editor.Undo();
+
+            var restored = Assert.IsType<ArrowAnnotation>(
+                Assert.Single(document.Annotations));
+            Assert.Equal(ArrowStyle.Filled, restored.Style);
+        });
+    }
+
+    [Fact]
+    public void MovingAnArrowPreservesItsHollowStyle()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var bitmap = new Bitmap(100, 80, PixelFormat.Format32bppPArgb);
+            using var image = new CapturedImage((Bitmap)bitmap.Clone());
+            var editor = new ImageEditorCanvas();
+            editor.Initialize(image, displayWidth: 100, displayHeight: 80);
+            var documentField = typeof(ImageEditorCanvas).GetField(
+                "_document",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var selectedField = typeof(ImageEditorCanvas).GetField(
+                "_selectedAnnotationIndex",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var editOriginalField = typeof(ImageEditorCanvas).GetField(
+                "_annotationEditOriginal",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var editStartField = typeof(ImageEditorCanvas).GetField(
+                "_annotationEditStartPoint",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var editingField = typeof(ImageEditorCanvas).GetField(
+                "_isEditingAnnotation",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var activeHandleField = typeof(ImageEditorCanvas).GetField(
+                "_activeAnnotationHandle",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var updateEdit = typeof(ImageEditorCanvas).GetMethod(
+                "UpdateAnnotationEdit",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(documentField);
+            Assert.NotNull(selectedField);
+            Assert.NotNull(editOriginalField);
+            Assert.NotNull(editStartField);
+            Assert.NotNull(editingField);
+            Assert.NotNull(activeHandleField);
+            Assert.NotNull(updateEdit);
+
+            var arrow = new ArrowAnnotation(
+                new WpfPoint(10, 12),
+                new WpfPoint(70, 44),
+                System.Windows.Media.Colors.Red,
+                4,
+                ArrowStyle.Hollow);
+            var document = Assert.IsType<EditorDocument>(
+                documentField.GetValue(editor));
+            document.Add(arrow);
+            selectedField.SetValue(editor, 0);
+            editOriginalField.SetValue(editor, arrow);
+            editStartField.SetValue(editor, new WpfPoint(30, 25));
+            editingField.SetValue(editor, true);
+            activeHandleField.SetValue(editor, -1);
+
+            updateEdit.Invoke(editor, [new WpfPoint(37, 30)]);
+
+            var moved = Assert.IsType<ArrowAnnotation>(
+                Assert.Single(document.Annotations));
+            Assert.Equal(ArrowStyle.Hollow, moved.Style);
+            Assert.Equal(new WpfPoint(17, 17), moved.Start);
+            Assert.Equal(new WpfPoint(77, 49), moved.End);
+        });
     }
 
     [Fact]

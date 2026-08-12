@@ -231,6 +231,23 @@ public sealed class HotKeyConfigurationTests
     }
 
     [Fact]
+    public void RegistersSelectedTextTranslationShortcut()
+    {
+        var settings = AppSettings.CreateDefault() with
+        {
+            RegionCaptureHotKey = string.Empty,
+            TextTranslationHotKey = "Ctrl+Alt+T",
+        };
+
+        var bindings = HotKeyConfiguration.CreateBindings(settings);
+
+        Assert.Contains(
+            bindings,
+            binding => binding.Action == HotKeyAction.TranslateSelectedText &&
+                       binding.Gesture.ToString() == "Ctrl+Alt+T");
+    }
+
+    [Fact]
     public void InvalidLegacyOcrSettingUsesTheTranslationDisplayName()
     {
         var settings = AppSettings.CreateDefault() with

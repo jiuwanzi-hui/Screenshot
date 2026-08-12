@@ -34,6 +34,15 @@ public static class ScrollCaptureService
     // to the compositor, so roughly forty retained samples bridge the burst
     // and let the chain drain losslessly once the motion stops.
     private const int ActiveFrameQueueMaximumCapacity = 72;
+    // Image matching is intentionally conservative, but a smooth-scroll burst
+    // can still produce dozens of same-direction samples while one match is in
+    // flight. Replaying that whole run makes the preview seconds behind the
+    // actual viewport and can consume the only frames that cross a captured
+    // boundary. Once this many same-direction samples are pending, keep the
+    // freshest sample and carry the measured wheel motion into it.
+    private const int SameDirectionBacklogCollapseThreshold = 12;
+    private const int SameDirectionRetainedHeadFrames = 3;
+    private const int SameDirectionRetainedTailFrames = 5;
     private const long ActiveFrameQueueMemoryBudgetBytes = 160L * 1024 * 1024;
     // The hand-off channel and the matcher backlog can both be full at once.
     private const int ActiveFrameBufferCount = 2;
@@ -62,10 +71,18 @@ public static class ScrollCaptureService
     private const int ControlledSettleSamples = 2;
     private const int ControlledCompletionSettleAttempts = 10;
     private const int ControlledReturnInputOvershootPixels = 48;
+    private const int ControlledInitialBoundaryStationarySamples = 2;
     private const double ControlledInitialCrossingMinimumConfidence = 0.965;
+    private const double ControlledInputReturnMinimumConfidence = 0.985;
     private const int ControlledReanchorAttempts = 3;
     private const int ControlledReanchorDelayMilliseconds = 110;
+    // How many consecutive unlocated samples may trigger the automatic resume
+    // re-anchor before the capture gives up and pauses itself.
+    private const int ControlledAutomaticReanchorRounds = 2;
     private const int ControlledAlignmentCorrectionAttempts = 12;
+    // Chat UIs keep the fingerprint "moving" forever. Cap Aligning* so a
+    // confirmed return cannot strand the capture on "正在对齐初始位置".
+    private const int ControlledAlignmentMaxSettleAttempts = 8;
 
     public static async Task<ScrollCaptureResult> CaptureOnWheelAsync(
         ScrollCaptureTarget target,
@@ -74,6 +91,7 @@ public static class ScrollCaptureService
         ScrollCaptureOptions? options = null,
         Func<bool, CancellationToken, Task>? setPreviewVisibilityAsync = null,
         Action<ScrollCapturePreviewState>? previewChanged = null,
+        bool throttleWheelInput = false,
         Bitmap? initialFrame = null,
         CancellationToken cancellationToken = default)
     {
@@ -94,6 +112,7 @@ public static class ScrollCaptureService
         var diagnostics = new ScrollCaptureDiagnostics();
         Channel<QueuedScrollFrame>? activeFrameQueue = null;
         Task? activeFrameProcessor = null;
+        ManualScrollDriver? throttledScrollDriver = null;
 
         try
         {
@@ -131,6 +150,14 @@ public static class ScrollCaptureService
             var frameQueueState = new ActiveFrameQueueState(diagnostics);
             var sampleCadence = new SampleCadence(target.CaptureRegion.Height);
             var boundaryDetector = new StationaryScrollBoundaryDetector();
+            if (throttleWheelInput)
+            {
+                throttledScrollDriver = new ManualScrollDriver(target);
+                diagnostics.Record(
+                    "wheel-input-throttled",
+                    ("tickIntervalMs", ManualScrollDriver.TickIntervalMilliseconds),
+                    ("pixelsPerTick", ManualScrollDriver.CapturePixelsPerTick));
+            }
             var lastWheelEventTimestamp = 0L;
             var lastDiagnosticWheelTimestamp = 0L;
             var completionRequestedTimestamp = 0L;
@@ -145,7 +172,14 @@ public static class ScrollCaptureService
                 cancellationToken);
             var activeFrameCapacity = GetActiveFrameQueueCapacity(
                 target.CaptureRegion);
-            var backpressureThreshold = Math.Max(4, activeFrameCapacity / 4);
+            // Start pacing before a large high-resolution queue is a quarter
+            // full. At that point the matcher can already be several seconds
+            // behind the visible viewport, so it is stitching stale smooth-
+            // scroll transition frames. The cadence guard below still forces
+            // enough samples to preserve overlap continuity.
+            var backpressureThreshold = GetBackpressureThreshold(
+                activeFrameCapacity);
+            var throttledPausedForBackpressure = false;
             var lastSampleTimestamp = 0L;
             activeFrameQueue = Channel.CreateBounded<QueuedScrollFrame>(
                 new BoundedChannelOptions(activeFrameCapacity)
@@ -170,6 +204,7 @@ public static class ScrollCaptureService
                 diagnostics,
                 activeFrameCapacity,
                 sampleCadence,
+                throttledScrollDriver,
                 cancellationToken);
 
             while (true)
@@ -183,6 +218,15 @@ public static class ScrollCaptureService
                 if (completedTask == completionRequested)
                 {
                     await completionRequested;
+                    throttledScrollDriver?.SetDirection(null);
+                    var finalInjectedWheelDelta =
+                        throttledScrollDriver?.TakeInjectedWheelDelta() ?? 0;
+                    if (finalInjectedWheelDelta != 0)
+                    {
+                        motionTracker.AddDelta(finalInjectedWheelDelta);
+                        activeDirection = motionTracker.Direction;
+                        lastWheelEventTimestamp = Stopwatch.GetTimestamp();
+                    }
                     var completionTimestamp = Stopwatch.GetTimestamp();
                     completionRequestedTimestamp = completionTimestamp;
                     diagnostics.Record(
@@ -191,11 +235,13 @@ public static class ScrollCaptureService
                         ("latestSequence", frameQueueState.LatestSequence),
                         ("outputHeight", composer.OutputHeight));
 
-                    // Drain late wheel events so the settle pass uses the
-                    // freshest scroll direction (including reverse).
+                    // In direct mode, late events describe movement that the
+                    // target already received. In throttled mode they are only
+                    // unexecuted requests, so do not turn them into fake motion
+                    // after the driver has stopped.
                     while (wheelEvents.TryRead(out var lateDelta))
                     {
-                        if (lateDelta != 0)
+                        if (!throttleWheelInput && lateDelta != 0)
                         {
                             motionTracker.AddDelta(lateDelta);
                             activeDirection = motionTracker.Direction;
@@ -272,6 +318,37 @@ public static class ScrollCaptureService
                                     cancellationToken);
                             }
                         }
+
+                        // The chain can end unlocated: the page's last hop
+                        // lands at its physical edge and that final frame
+                        // matched nothing (field trace lost the top ~2 text
+                        // lines this way). The stored edge frame is an
+                        // absolute reference for exactly this case.
+                        if (composer.LastRejectReason is not null)
+                        {
+                            using var finalFrame = await CaptureFrameAsync(
+                                target,
+                                null,
+                                cancellationToken);
+                            var reanchored = await Task.Run(
+                                () => composer.TryReanchorAtBoundary(
+                                    finalFrame,
+                                    activeDirection.Value,
+                                    settleOptions),
+                                cancellationToken);
+                            diagnostics.Record(
+                                "completion-reanchor",
+                                ("direction", activeDirection.Value.ToString()),
+                                ("succeeded", reanchored),
+                                ("outputHeight", composer.OutputHeight));
+                            if (reanchored)
+                            {
+                                await ReportPreviewAsync(
+                                    composer,
+                                    previewChanged,
+                                    cancellationToken);
+                            }
+                        }
                     }
 
                     break;
@@ -281,17 +358,50 @@ public static class ScrollCaptureService
                 {
                     var wheelDelta = await nextWheelEvent;
                     var observedWheelDelta = wheelDelta;
+                    ScrollCaptureDirection? throttledRequestedDirection = null;
 
                     if (wheelDelta != 0)
                     {
-                        motionTracker.AddDelta(wheelDelta);
+                        // Keep manual-wheel input attached to the window that
+                        // was selected for capture.  The progress preview is
+                        // topmost and non-activating, but a focus change can
+                        // still leave the editor stationary while the global
+                        // hook continues to report wheel messages.
+                        _ = ForegroundWindowCaptureService.TryFocusScrollTarget(
+                            target);
+                    }
+
+                    if (wheelDelta != 0)
+                    {
+                        if (throttleWheelInput)
+                        {
+                            throttledScrollDriver?.QueueCaptureInput(wheelDelta);
+                            throttledRequestedDirection = wheelDelta > 0
+                                ? ScrollCaptureDirection.Up
+                                : ScrollCaptureDirection.Down;
+                        }
+                        else
+                        {
+                            motionTracker.AddDelta(wheelDelta);
+                        }
                     }
 
                     while (wheelEvents.TryRead(out var additionalDelta))
                     {
                         if (additionalDelta != 0)
                         {
-                            motionTracker.AddDelta(additionalDelta);
+                            if (throttleWheelInput)
+                            {
+                                throttledScrollDriver?.QueueCaptureInput(
+                                    additionalDelta);
+                                throttledRequestedDirection = additionalDelta > 0
+                                    ? ScrollCaptureDirection.Up
+                                    : ScrollCaptureDirection.Down;
+                            }
+                            else
+                            {
+                                motionTracker.AddDelta(additionalDelta);
+                            }
                             observedWheelDelta = (int)Math.Clamp(
                                 (long)observedWheelDelta + additionalDelta,
                                 int.MinValue,
@@ -299,9 +409,12 @@ public static class ScrollCaptureService
                         }
                     }
 
-                    if (motionTracker.HasPendingInput)
+                    if (motionTracker.HasPendingInput ||
+                        throttledRequestedDirection is not null)
                     {
-                        activeDirection = motionTracker.Direction;
+                        activeDirection = throttledRequestedDirection ??
+                            motionTracker.Direction;
+                        throttledScrollDriver?.SetDirection(activeDirection);
                         lastWheelEventTimestamp = Stopwatch.GetTimestamp();
                         boundaryDetector.ObserveWheel(
                             activeDirection.Value,
@@ -316,6 +429,8 @@ public static class ScrollCaptureService
                             "wheel",
                             ("direction", activeDirection.Value.ToString()),
                             ("pendingDelta", motionTracker.PendingDelta),
+                            ("queuedInputSteps",
+                                throttledScrollDriver?.PendingCaptureStepCount ?? 0),
                             ("intervalMs", wheelInterval));
                     }
 
@@ -327,14 +442,9 @@ public static class ScrollCaptureService
                 var elapsedSinceWheel = lastWheelEventTimestamp == 0L
                     ? TimeSpan.MaxValue
                     : Stopwatch.GetElapsedTime(lastWheelEventTimestamp);
-                var sampleDelayMilliseconds = elapsedSinceWheel <
-                    TimeSpan.FromMilliseconds(80)
-                    ? Math.Min(
-                        options.FrameDelayMilliseconds,
-                        ActiveScrollSampleDelayMilliseconds)
-                    : Math.Min(
-                        options.FrameDelayMilliseconds,
-                        SettlingSampleDelayMilliseconds);
+                var sampleDelayMilliseconds = GetActiveSampleDelayMilliseconds(
+                    options.FrameDelayMilliseconds,
+                    elapsedSinceWheel);
                 nextSample = Task.Delay(
                     sampleDelayMilliseconds,
                     cancellationToken);
@@ -342,7 +452,19 @@ public static class ScrollCaptureService
                 if (activeDirection is null ||
                     elapsedSinceWheel > activeScrollWindow)
                 {
-                    continue;
+                    var queuedDirection = throttleWheelInput
+                        ? throttledScrollDriver?.PendingCaptureDirection
+                        : null;
+                    if (queuedDirection is not null)
+                    {
+                        activeDirection = queuedDirection;
+                        throttledScrollDriver?.SetDirection(activeDirection);
+                    }
+                    else
+                    {
+                        throttledScrollDriver?.SetDirection(null);
+                        continue;
+                    }
                 }
 
                 // Backpressure: when the stitcher falls behind, sampling any
@@ -358,6 +480,34 @@ public static class ScrollCaptureService
                     target.CaptureRegion.Height,
                     options,
                     motionTracker.PendingDelta) ?? 0;
+                if (throttleWheelInput &&
+                    frameQueueState.PendingStitchCount >= backpressureThreshold)
+                {
+                    if (!throttledPausedForBackpressure)
+                    {
+                        throttledPausedForBackpressure = true;
+                        throttledScrollDriver?.SetDirection(null);
+                        diagnostics.Record(
+                            "wheel-input-backpressure-paused",
+                            ("pending", frameQueueState.PendingStitchCount),
+                            ("threshold", backpressureThreshold));
+                    }
+
+                    continue;
+                }
+
+                if (throttleWheelInput &&
+                    throttledPausedForBackpressure &&
+                    frameQueueState.PendingStitchCount <=
+                        Math.Max(1, backpressureThreshold / 2))
+                {
+                    throttledPausedForBackpressure = false;
+                    throttledScrollDriver?.SetDirection(activeDirection);
+                    diagnostics.Record(
+                        "wheel-input-backpressure-resumed",
+                        ("pending", frameQueueState.PendingStitchCount));
+                }
+
                 var mustSample =
                     estimatedPendingRows >= target.CaptureRegion.Height / 4 ||
                     lastSampleTimestamp == 0L ||
@@ -385,6 +535,7 @@ public static class ScrollCaptureService
                     frameGate,
                     boundaryDetector,
                     diagnostics,
+                    throttledScrollDriver,
                     // Do not build a second full-size result while the user is
                     // still scrolling. On long captures this competed with the
                     // matcher and let the live preview fall seconds behind. The
@@ -437,8 +588,13 @@ public static class ScrollCaptureService
         {
             return ScrollCaptureResult.Failure("滚动截图已取消。");
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            diagnostics.Record(
+                "capture-failed",
+                ("exceptionType", exception.GetType().FullName),
+                ("message", exception.Message),
+                ("stackTrace", exception.StackTrace));
             return ScrollCaptureResult.Failure("滚动截图失败。");
         }
         finally
@@ -454,6 +610,17 @@ public static class ScrollCaptureService
                 {
                     // The public result above already reports cancellation or
                     // failure; still drain/dispose queued bitmaps before exit.
+                }
+            }
+
+            if (throttledScrollDriver is not null)
+            {
+                try
+                {
+                    await throttledScrollDriver.DisposeAsync();
+                }
+                catch
+                {
                 }
             }
 
@@ -609,7 +776,7 @@ public static class ScrollCaptureService
                 ("settleDelayMs", ControlledSettleSampleDelayMilliseconds));
             using var capturedInitialFrame = initialFrame ??
                 await CaptureFrameAsync(target, null, cancellationToken);
-            var initialFingerprint = ViewportFingerprint.Create(
+            var initialFingerprint = AutomaticViewportFingerprint.Create(
                 capturedInitialFrame);
             var previousFingerprint = initialFingerprint;
             await Task.Run(
@@ -627,10 +794,13 @@ public static class ScrollCaptureService
             var settleStationarySamples = 0;
             var sequence = 0;
             var returnSteps = 0;
+            var returnStationarySamples = 0;
             long outboundInputMagnitude = 0;
+            var outboundVisualTravelRows = 0;
             long returnInputMagnitude = 0;
             int? pendingInitialCrossingRows = null;
             long pendingInitialCrossingInputMagnitude = 0;
+            var pendingInitialCrossingConfidence = 0d;
             var resumeAnchorPending = false;
             var legHasVisibleMovement = false;
             var outboundHadVisibleMovement = false;
@@ -640,7 +810,15 @@ public static class ScrollCaptureService
             long lastSampledInputMagnitude = 0;
             long lastVisibleMovementInputMagnitude = 0;
             var alignmentFailureSamples = 0;
+            var alignmentSettleAttempts = 0;
             ScrollCaptureDirection? alignmentCorrectionDirection = null;
+            // Once a movement-cap retry succeeds, the target is a
+            // notch-quantizing scroller (editors jump a whole wheel notch,
+            // ~150+ rows, against a small per-frame expectation). Keep the
+            // resume-sized budget from then on so every later jump does not
+            // pay its own stop-retry-resume round — that cycle is what made
+            // editor captures visibly stop and go.
+            var notchJumpTarget = false;
 
             void SetState(ControlledScrollCaptureState nextState)
             {
@@ -690,11 +868,17 @@ public static class ScrollCaptureService
                 if (BeginsControlledReturnJourney(previousState, nextState))
                 {
                     outboundInputMagnitude = scrollDriver.TotalInputMagnitude;
+                    var returnDirection = GetControlledReturnDirection(nextState);
+                    outboundVisualTravelRows = returnDirection is { } value
+                        ? composer.GetTravelFromInitial(value)
+                        : 0;
                     outboundHadVisibleMovement = legHasVisibleMovement;
                     returnInputMagnitude = 0;
                     returnSteps = 0;
+                    returnStationarySamples = 0;
                     pendingInitialCrossingRows = null;
                     pendingInitialCrossingInputMagnitude = 0;
+                    pendingInitialCrossingConfidence = 0;
                     settleStationarySamples = 0;
                     scrollDriver.ResetDistance();
                     locatedInputMagnitude = 0;
@@ -705,6 +889,7 @@ public static class ScrollCaptureService
                 else if (IsControlledSettleState(nextState))
                 {
                     settleStationarySamples = 0;
+                    alignmentSettleAttempts = 0;
                 }
 
                 resumeAnchorPending = IsControlledResumeTransition(
@@ -765,7 +950,7 @@ public static class ScrollCaptureService
                             target,
                             scrollDriver,
                             cancellationToken);
-                        previousFingerprint = ViewportFingerprint.Create(
+                        previousFingerprint = AutomaticViewportFingerprint.Create(
                             returnAnchor);
                         diagnostics.Record(
                             "controlled-resume-anchor",
@@ -800,7 +985,7 @@ public static class ScrollCaptureService
                             target,
                             scrollDriver,
                             cancellationToken);
-                        var resumeFingerprint = ViewportFingerprint.Create(
+                        var resumeFingerprint = AutomaticViewportFingerprint.Create(
                             resumeFrame);
                         var resumeStationary = previousFingerprint
                             .IsStationaryComparedTo(resumeFingerprint);
@@ -815,14 +1000,39 @@ public static class ScrollCaptureService
                                 resumeFrame.Height,
                                 resumeExpectedRows,
                                 options.MinimumOverlapRows);
+                        // The accumulated driver travel is least trustworthy
+                        // exactly here: presentation collapsed several stalled
+                        // ticks onto one frame, so the linear estimate vetoed
+                        // every pixel-verified reconnect and the capture
+                        // paused itself. After the first failed attempt let
+                        // pixels decide alone with the full matchable budget;
+                        // the duplicate and reflow guards still protect the
+                        // result.
                         var resumeAdded = await TryAddControlledFrameAsync(
                             composer,
                             resumeFrame,
                             resumeDirection,
                             options,
-                            resumeExpectedRows,
+                            attempt >= 2 ? null : resumeExpectedRows,
                             cancellationToken,
-                            maximumAcceptedNewRows: resumeMaximumAcceptedRows);
+                            maximumAcceptedNewRows: attempt >= 2
+                                ? GetControlledSettleMaximumMovementRows(
+                                    resumeFrame.Height,
+                                    options.MinimumOverlapRows)
+                                : resumeMaximumAcceptedRows,
+                            tolerateQuantizedExpectation: notchJumpTarget);
+                        if (resumeAdded &&
+                            composer.LastFrameMovementRows is { } resumeMovement &&
+                            resumeMovement >
+                                Math.Max(96, (resumeExpectedRows ?? 0) * 3))
+                        {
+                            // The viewport jumps a whole wheel notch at once;
+                            // keep the larger movement budget from now on so
+                            // every later jump does not pay this stop-retry
+                            // detour again.
+                            notchJumpTarget = true;
+                        }
+
                         resumeLocated = IsControlledFrameLocated(
                             resumeAdded,
                             composer.LastFrameMovementRows,
@@ -850,10 +1060,16 @@ public static class ScrollCaptureService
                                 cancellationToken);
                         }
 
-                        if (resumeLocated)
+                        if (ShouldAdvanceControlledInputAnchor(
+                                resumeLocated,
+                                composer.LastFrameMovementRows))
                         {
                             locatedInputMagnitude =
                                 scrollDriver.TotalInputMagnitude;
+                        }
+
+                        if (resumeLocated)
+                        {
                             break;
                         }
                     }
@@ -887,19 +1103,18 @@ public static class ScrollCaptureService
                         scrollDriver,
                         cancellationToken);
                     var settleDirection = GetControlledSettleDirection(state);
-                    var settleFingerprint = ViewportFingerprint.Create(
+                    var settleFingerprint = AutomaticViewportFingerprint.Create(
                         settleFrame);
                     var settleStationary = previousFingerprint
                         .IsStationaryComparedTo(settleFingerprint);
                     previousFingerprint = settleFingerprint;
-                    if (!settleStationary)
+                    // Pause/return settle waits for stillness. Aligning* must
+                    // not: chat/AI pages keep the fingerprint jittering, and
+                    // the confirming return frame was already thrown away once
+                    // — gating here left "正在对齐初始位置" up forever while the
+                    // viewport had already scrolled past the start.
+                    if (!settleStationary && !isInitialAlignment)
                     {
-                        if (isInitialAlignment &&
-                            alignmentCorrectionDirection is not null)
-                        {
-                            scrollDriver.SetDirection(direction: null);
-                        }
-
                         settleStationarySamples = 0;
                         sequence++;
                         diagnostics.Record(
@@ -911,31 +1126,85 @@ public static class ScrollCaptureService
                         continue;
                     }
 
+                    if (isInitialAlignment &&
+                        alignmentCorrectionDirection is not null &&
+                        !settleStationary)
+                    {
+                        scrollDriver.SetDirection(direction: null);
+                    }
+
+                    // Pause/return settle must not inherit leftover driver travel
+                    // as a programmatic expectation: after an unlocated glide the
+                    // matcher often finds a near-viewport displacement while the
+                    // stopped driver reports only a few rows, and
+                    // automatic-expectation-veto then rejects every sample. Pass
+                    // null so the stitcher can absorb the inertia strip. Aligning
+                    // uses the confirmed crossing once, then the same open cap.
+                    var settleExpectedRows = isInitialAlignment
+                        ? pendingInitialCrossingRows
+                        : null;
+                    // The first strip of the opposite leg decides the seam:
+                    // demand a decisive match there (repetitive intros admit
+                    // near-perfect periodic lookalikes that duplicated whole
+                    // header blocks).
+                    var settleOptionsForAdd = isInitialAlignment
+                        ? options with
+                          {
+                              MinimumOverlapConfidence = Math.Max(
+                                  options.MinimumOverlapConfidence,
+                                  0.985),
+                          }
+                        : options;
                     var settleAdded = await TryAddControlledFrameAsync(
                         composer,
                         settleFrame,
                         settleDirection,
-                        options,
-                        isInitialAlignment
-                            ? null
-                            : GetControlledExpectedRowsForDriver(
-                                scrollDriver,
+                        settleOptionsForAdd,
+                        settleExpectedRows,
+                        cancellationToken,
+                        maximumAcceptedNewRows:
+                            GetControlledSettleMaximumMovementRows(
                                 settleFrame.Height,
-                                locatedInputMagnitude),
-                        cancellationToken);
+                                options.MinimumOverlapRows));
+                    if (isInitialAlignment && settleAdded)
+                    {
+                        pendingInitialCrossingRows = null;
+                    }
+
                     var settleLocated = IsControlledFrameLocated(
                         settleAdded,
                         composer.LastFrameMovementRows,
                         composer.LastRejectReason);
-                    var settled = IsControlledBoundarySample(
-                        beganUpwardExtension: false,
-                        settleAdded,
-                        settleStationary,
-                        composer.LastFrameMovementRows,
-                        composer.LastRejectReason);
-                    settleStationarySamples = settled
-                        ? settleStationarySamples + 1
-                        : 0;
+                    if (isInitialAlignment)
+                    {
+                        alignmentSettleAttempts++;
+                        if (settleAdded &&
+                            composer.LastFrameMovementRows is > 0)
+                        {
+                            // Already writing content past the initial point.
+                            settleStationarySamples = ControlledSettleSamples;
+                        }
+                        else if (settleStationary &&
+                                 IsControlledBoundarySample(
+                                     beganUpwardExtension: false,
+                                     settleAdded,
+                                     settleStationary,
+                                     composer.LastFrameMovementRows,
+                                     composer.LastRejectReason))
+                        {
+                            settleStationarySamples++;
+                        }
+                        else if (!settleLocated)
+                        {
+                            settleStationarySamples = 0;
+                        }
+                    }
+                    else
+                    {
+                        // Fingerprint already proved the viewport is still.
+                        settleStationarySamples++;
+                    }
+
                     sequence++;
                     diagnostics.Record(
                         "controlled-settle-frame",
@@ -949,7 +1218,8 @@ public static class ScrollCaptureService
                         ("confidence", composer.LastOverlapConfidence),
                         ("horizontalOffset", composer.LastHorizontalOffset),
                         ("reject", composer.LastRejectReason),
-                        ("stableSamples", settleStationarySamples));
+                        ("stableSamples", settleStationarySamples),
+                        ("alignmentAttempts", alignmentSettleAttempts));
 
                     if (settleAdded ||
                         composer.LastFrameMovementRows is not null and not 0)
@@ -957,11 +1227,17 @@ public static class ScrollCaptureService
                         legHasVisibleMovement = true;
                     }
 
+                    if (ShouldAdvanceControlledInputAnchor(
+                            settleLocated,
+                            composer.LastFrameMovementRows))
+                    {
+                        locatedInputMagnitude =
+                            scrollDriver.TotalInputMagnitude;
+                    }
+
                     if (settleLocated)
                     {
                         alignmentFailureSamples = 0;
-                        locatedInputMagnitude =
-                            scrollDriver.TotalInputMagnitude;
                     }
                     else if (isInitialAlignment &&
                              alignmentCorrectionDirection is { } correctionDirection)
@@ -998,8 +1274,12 @@ public static class ScrollCaptureService
                             cancellationToken);
                     }
 
-                    if (settleLocated &&
-                        settleStationarySamples >= ControlledSettleSamples)
+                    var settleReady = isInitialAlignment
+                        ? settleStationarySamples >= ControlledSettleSamples ||
+                          alignmentSettleAttempts >=
+                              ControlledAlignmentMaxSettleAttempts
+                        : settleStationarySamples >= ControlledSettleSamples;
+                    if (settleReady)
                     {
                         var settledState = GetControlledSettledState(state);
                         if (settledState is
@@ -1016,6 +1296,7 @@ public static class ScrollCaptureService
                             lastVisibleMovementInputMagnitude = 0;
                             returnInputMagnitude = 0;
                             returnSteps = 0;
+                            returnStationarySamples = 0;
                         }
 
                         stationarySamples = 0;
@@ -1023,7 +1304,9 @@ public static class ScrollCaptureService
                         if (isInitialAlignment)
                         {
                             alignmentFailureSamples = 0;
+                            alignmentSettleAttempts = 0;
                             alignmentCorrectionDirection = null;
+                            pendingInitialCrossingRows = null;
                         }
 
                         SetState(settledState);
@@ -1086,7 +1369,8 @@ public static class ScrollCaptureService
                         0,
                         outboundInputMagnitude -
                         (target.CaptureRegion.Height * 3L) / 4L);
-                    if (returnInputMagnitude >= slowReturnThreshold)
+                    if (returnInputMagnitude >= slowReturnThreshold &&
+                        pendingInitialCrossingRows is null)
                     {
                         // The first part of a return journey can be fast. Near
                         // the initial viewport, switch to the fine capture
@@ -1125,10 +1409,13 @@ public static class ScrollCaptureService
                 var inputAdvancedSincePreviousSample =
                     sampledInputMagnitude > lastSampledInputMagnitude;
                 lastSampledInputMagnitude = sampledInputMagnitude;
-                var fingerprint = ViewportFingerprint.Create(frame);
+                var fingerprint = AutomaticViewportFingerprint.Create(frame);
                 var isStationary = previousFingerprint
                     .IsStationaryComparedTo(fingerprint);
                 previousFingerprint = fingerprint;
+                returnStationarySamples = isReturning && isStationary
+                    ? returnStationarySamples + 1
+                    : 0;
 
                 var processingTimestamp = Stopwatch.GetTimestamp();
                 var expectedRows = GetControlledExpectedRowsForDriver(
@@ -1144,20 +1431,30 @@ public static class ScrollCaptureService
                     var minimumEvidenceMagnitude =
                         GetControlledMinimumReturnMagnitude(
                             outboundInputMagnitude);
+                    var isStrictInitialViewport = initialFingerprint
+                        .IsSimilarTo(fingerprint);
+                    var isLooseInitialViewport = initialFingerprint
+                        .IsPreviouslySeenComparedTo(fingerprint);
                     initialReached = returnInputMagnitude >=
                             minimumEvidenceMagnitude &&
-                        initialFingerprint.IsPreviouslySeenComparedTo(
-                            fingerprint);
+                        IsControlledInitialViewportReached(
+                            isStrictInitialViewport,
+                            isLooseInitialViewport,
+                            returnStationarySamples);
                     var crossedInitial = initialReached;
                     if (initialReached)
                     {
                         pendingInitialCrossingRows = null;
                         pendingInitialCrossingInputMagnitude = 0;
+                        pendingInitialCrossingConfidence = 0;
                     }
                     else if (returnInputMagnitude >= outboundInputMagnitude)
                     {
                         var expectedCrossingRows = (int)Math.Clamp(
-                            returnInputMagnitude - outboundInputMagnitude,
+                            GetControlledExpectedCrossingRows(
+                                returnInputMagnitude,
+                                outboundInputMagnitude,
+                                outboundVisualTravelRows),
                             1,
                             Math.Max(
                                 1,
@@ -1172,30 +1469,78 @@ public static class ScrollCaptureService
                             cancellationToken);
                         if (initialOverlap is null)
                         {
-                            pendingInitialCrossingRows = null;
-                            pendingInitialCrossingInputMagnitude = 0;
+                            // Editors glide a full viewport between samples.
+                            // A decisive crossing measured on the previous
+                            // sample followed by a vanished overlap band means
+                            // the page has certainly moved past the start —
+                            // clearing the evidence here made the driver
+                            // scroll away from the document forever.
+                            if (pendingInitialCrossingRows is > 0 &&
+                                pendingInitialCrossingConfidence >=
+                                    ControlledInputReturnMinimumConfidence)
+                            {
+                                initialCrossingConfirmed = true;
+                                crossedInitial = true;
+                            }
+                            else
+                            {
+                                pendingInitialCrossingRows = null;
+                                pendingInitialCrossingInputMagnitude = 0;
+                                pendingInitialCrossingConfidence = 0;
+                            }
                         }
                         else
                         {
                             var crossingRows = frame.Height -
                                 initialOverlap.OverlapRows;
+                            var inputReturnIsDecisive =
+                                Math.Abs(
+                                    returnInputMagnitude -
+                                    outboundInputMagnitude) <=
+                                    Math.Max(64, frame.Height / 6) &&
+                                crossingRows <= Math.Max(64, frame.Height / 4) &&
+                                initialOverlap.Confidence >=
+                                    ControlledInputReturnMinimumConfidence;
                             initialCrossingConfirmed =
+                                inputReturnIsDecisive ||
                                 pendingInitialCrossingRows is { } previousRows &&
-                                IsControlledInitialCrossingConsistent(
-                                    previousRows,
-                                    pendingInitialCrossingInputMagnitude,
-                                    crossingRows,
-                                    returnInputMagnitude);
+                                    (IsControlledInitialCrossingConsistent(
+                                         previousRows,
+                                         pendingInitialCrossingInputMagnitude,
+                                         crossingRows,
+                                         returnInputMagnitude) ||
+                                     IsControlledInitialCrossingStable(
+                                         previousRows,
+                                         pendingInitialCrossingInputMagnitude,
+                                         crossingRows,
+                                         returnInputMagnitude,
+                                         initialOverlap.Confidence) ||
+                                     IsControlledInitialCrossingGlide(
+                                         previousRows,
+                                         pendingInitialCrossingConfidence,
+                                         crossingRows,
+                                         initialOverlap.Confidence));
                             crossedInitial = initialCrossingConfirmed;
                             pendingInitialCrossingRows = crossingRows;
                             pendingInitialCrossingInputMagnitude =
                                 returnInputMagnitude;
+                            pendingInitialCrossingConfidence =
+                                initialOverlap.Confidence;
+                            // Once a frame has a decisive overlap with the
+                            // initial viewport, stop the return driver while
+                            // waiting for the confirming sample. Continuing to
+                            // inject wheel messages here caused the first
+                            // confirming frame to overshoot the initial point
+                            // by hundreds of rows; the upward leg then stitched
+                            // that overshoot as duplicated content.
+                            scrollDriver.SetDirection(direction: null);
                         }
                     }
                     else
                     {
                         pendingInitialCrossingRows = null;
                         pendingInitialCrossingInputMagnitude = 0;
+                        pendingInitialCrossingConfidence = 0;
                     }
 
                     diagnostics.Record(
@@ -1204,8 +1549,12 @@ public static class ScrollCaptureService
                         ("returnStep", returnSteps),
                         ("returnMode", "fixed-wheel-message"),
                         ("outboundInputMagnitude", outboundInputMagnitude),
+                        ("outboundVisualTravelRows", outboundVisualTravelRows),
                         ("returnInputMagnitude", returnInputMagnitude),
                         ("minimumEvidenceMagnitude", minimumEvidenceMagnitude),
+                        ("strictInitialViewport", isStrictInitialViewport),
+                        ("looseInitialViewport", isLooseInitialViewport),
+                        ("returnStationarySamples", returnStationarySamples),
                         ("initialReached", initialReached),
                         ("crossedInitial", crossedInitial),
                         ("initialCrossingConfirmed", initialCrossingConfirmed),
@@ -1225,20 +1574,76 @@ public static class ScrollCaptureService
                                 capturedInitialFrame,
                                 options),
                             cancellationToken);
-                        state = ControlledScrollCaptureState.AligningUpwardStart;
-                    }
-                    else
-                    {
-                        state = ControlledScrollCaptureState.AligningDownwardStart;
                     }
 
-                    legHasVisibleMovement = false;
+                    // The overlap that confirmed the crossing is the first
+                    // strip past the initial viewport. Seeding it here keeps
+                    // that content (and the logical anchor) instead of waiting
+                    // for Aligning settle while inertia scrolls further away.
+                    // The very first strip of the opposite leg decides the
+                    // seam against everything captured so far, and repetitive
+                    // intros admit periodic lookalikes — demand a decisive
+                    // match and cap the strip near the measured crossing, or
+                    // the whole page header gets prepended twice.
+                    var seededCrossing = false;
+                    if (pendingInitialCrossingRows is { } confirmedCrossingRows &&
+                        confirmedCrossingRows > 0)
+                    {
+                        seededCrossing = await TryAddControlledFrameAsync(
+                            composer,
+                            frame,
+                            direction == ScrollCaptureDirection.Up
+                                ? ScrollCaptureDirection.Up
+                                : ScrollCaptureDirection.Down,
+                            options with
+                            {
+                                MinimumOverlapConfidence = Math.Max(
+                                    options.MinimumOverlapConfidence,
+                                    0.985),
+                            },
+                            confirmedCrossingRows,
+                            cancellationToken,
+                            maximumAcceptedNewRows: Math.Min(
+                                frame.Height - options.MinimumOverlapRows,
+                                confirmedCrossingRows + 96));
+                        if (seededCrossing)
+                        {
+                            pendingInitialCrossingRows = null;
+                            await ReportControlledPreviewAsync(
+                                composer,
+                                previewChanged,
+                                cancellationToken);
+                        }
+                    }
+
+                    legHasVisibleMovement = seededCrossing;
                     scrollDriver.ResetDistance();
                     locatedInputMagnitude = 0;
                     lastSampledInputMagnitude = 0;
                     lastVisibleMovementInputMagnitude = 0;
                     unlocatedProgramSteps = 0;
                     stationarySamples = 0;
+                    settleStationarySamples = 0;
+                    alignmentSettleAttempts = 0;
+
+                    // Always settle through Aligning before the capture leg.
+                    // Starting the wheel immediately after a seeded crossing
+                    // looked attractive, but the page is often still gliding
+                    // there; the leg then opened with unlocatable frames and
+                    // auto-paused itself within seconds. Aligning exits after
+                    // one located moving add, two stationary samples, or the
+                    // attempt cap — it is cheap when the page is truly ready.
+                    state = direction == ScrollCaptureDirection.Up
+                        ? ControlledScrollCaptureState.AligningUpwardStart
+                        : ControlledScrollCaptureState.AligningDownwardStart;
+                    alignmentCorrectionDirection = seededCrossing
+                        ? null
+                        // Nudge hunting if the seed could not connect; without
+                        // this Aligning failures never started correction.
+                        : direction == ScrollCaptureDirection.Up
+                            ? ScrollCaptureDirection.Down
+                            : ScrollCaptureDirection.Up;
+
                     SetState(state);
                     sequence++;
                     continue;
@@ -1251,7 +1656,14 @@ public static class ScrollCaptureService
                         direction,
                         options,
                         expectedRows,
-                        cancellationToken);
+                        cancellationToken,
+                        maximumAcceptedNewRows: notchJumpTarget
+                            ? GetControlledResumeMaximumMovementRows(
+                                frame.Height,
+                                expectedRows,
+                                options.MinimumOverlapRows)
+                            : null,
+                        tolerateQuantizedExpectation: notchJumpTarget);
                 }
 
                 var frameLocated = IsControlledFrameLocated(
@@ -1261,9 +1673,21 @@ public static class ScrollCaptureService
                 if (!frameLocated)
                 {
                     scrollDriver.SetDirection(direction: null);
+                    var wasMovementCapVeto =
+                        composer.LastRejectReason == "movement-cap-veto";
+                    var retryMaximumAcceptedRows =
+                        GetControlledRetryMaximumMovementRows(
+                            composer.LastRejectReason,
+                            frame.Height,
+                            expectedRows,
+                            options.MinimumOverlapRows);
                     // Do not issue another wheel step after an unlocated
                     // viewport. Let animations settle and retry this exact
-                    // position so a single torn frame cannot create a gap.
+                    // position so a single torn frame cannot create a gap. A
+                    // clean movement-cap rejection gets one bounded re-anchor
+                    // allowance while the driver is stopped; otherwise a real
+                    // compositor jump can repeat the same rejection three
+                    // times and pause automatic scrolling by itself.
                     for (var attempt = 1;
                          attempt <= ControlledReanchorAttempts;
                          attempt++)
@@ -1275,18 +1699,32 @@ public static class ScrollCaptureService
                             target,
                             scrollDriver,
                             cancellationToken);
-                        var retryFingerprint = ViewportFingerprint.Create(
+                        var retryFingerprint = AutomaticViewportFingerprint.Create(
                             retryFrame);
                         isStationary = previousFingerprint
                             .IsStationaryComparedTo(retryFingerprint);
                         previousFingerprint = retryFingerprint;
+                        // The driver keeps injecting while matching runs, so a
+                        // capped rejection often only means the accumulated
+                        // jump outgrew the resume budget too. Escalate to the
+                        // full matchable range after the first failed retry —
+                        // duplicate and expectation guards still apply.
+                        var escalatedMaximumRows = wasMovementCapVeto &&
+                            attempt >= 2
+                            ? GetControlledSettleMaximumMovementRows(
+                                retryFrame.Height,
+                                options.MinimumOverlapRows)
+                            : retryMaximumAcceptedRows;
                         var retryAdded = await TryAddControlledFrameAsync(
                             composer,
                             retryFrame,
                             direction,
                             options,
                             expectedRows,
-                            cancellationToken);
+                            cancellationToken,
+                            escalatedMaximumRows,
+                            tolerateQuantizedExpectation: notchJumpTarget ||
+                                wasMovementCapVeto);
                         added |= retryAdded;
                         frameLocated = IsControlledFrameLocated(
                             retryAdded,
@@ -1297,6 +1735,8 @@ public static class ScrollCaptureService
                             ("sequence", sequence + 1),
                             ("direction", direction.ToString()),
                             ("attempt", attempt),
+                            ("maximumAcceptedRows",
+                                retryMaximumAcceptedRows),
                             ("located", frameLocated),
                             ("added", retryAdded),
                             ("stationary", isStationary),
@@ -1308,6 +1748,11 @@ public static class ScrollCaptureService
 
                         if (frameLocated)
                         {
+                            if (wasMovementCapVeto && retryAdded)
+                            {
+                                notchJumpTarget = true;
+                            }
+
                             locatedInputMagnitude =
                                 scrollDriver.TotalInputMagnitude;
                             // Matching pauses the driver so a torn frame cannot
@@ -1330,8 +1775,17 @@ public static class ScrollCaptureService
                     // capture time, not the later distance after matching;
                     // otherwise that unobserved travel is discarded from the
                     // next expected displacement and periodic rows can win at
-                    // a shorter, incorrect overlap.
-                    locatedInputMagnitude = sampledInputMagnitude;
+                    // a shorter, incorrect overlap. A visually stationary
+                    // frame is located, but it has not presented the new wheel
+                    // input yet; advancing the input anchor there loses that
+                    // pending travel and makes the next real movement hit a
+                    // spuriously small movement cap.
+                    if (ShouldAdvanceControlledInputAnchor(
+                            frameLocated,
+                            composer.LastFrameMovementRows))
+                    {
+                        locatedInputMagnitude = sampledInputMagnitude;
+                    }
                 }
                 sequence++;
                 if (added ||
@@ -1354,7 +1808,12 @@ public static class ScrollCaptureService
                     ("added", added),
                     ("stationary", isStationary),
                     ("expectedRows", expectedRows),
+                    ("preferredRows", composer.LastPreferredExpectedRows),
                     ("movementRows", composer.LastFrameMovementRows),
+                    ("temporalUndershootRows",
+                        composer.LastTemporalUndershootRows),
+                    ("temporalReplacementRows",
+                        composer.LastTemporalReplacementRows),
                     ("overlapRows", composer.LastOverlapRows),
                     ("confidence", composer.LastOverlapConfidence),
                     ("horizontalOffset", composer.LastHorizontalOffset),
@@ -1362,9 +1821,14 @@ public static class ScrollCaptureService
                     ("inputMode", "fixed-wheel-message"),
                     ("inputMagnitude", sampledInputMagnitude),
                     ("inputStepCount", scrollDriver.InputStepCount),
+                    ("inputStepsSincePreviousFrame",
+                        scrollDriver.LastCapturedInputStepCount),
+                    ("backpressureWaitTicks",
+                        scrollDriver.LastCapturedBackpressureWaitTicks),
                     ("inputAdvanced", inputAdvancedSincePreviousSample),
                     ("inputTravelSinceMovement",
                         inputTravelSinceVisibleMovement),
+                    ("fixedBottomRows", composer.FixedBottomRows),
                     ("frameCount", composer.FrameCount),
                     ("outputHeight", composer.OutputHeight));
 
@@ -1393,6 +1857,28 @@ public static class ScrollCaptureService
                 if (!frameLocated)
                 {
                     unlocatedProgramSteps++;
+                    if (unlocatedProgramSteps <=
+                        ControlledAutomaticReanchorRounds)
+                    {
+                        // The quick in-place retries above reuse the original
+                        // sample's expectation and its small movement cap, so
+                        // leftover return-leg inertia at the start of a new
+                        // capture leg fails all three and used to pause the
+                        // capture by itself. The dedicated resume re-anchor
+                        // (wider allowance, boundary-aware) reconnects that
+                        // exact situation when the user resumes manually —
+                        // run it automatically first, and only surrender to a
+                        // pause when even that cannot locate the viewport.
+                        diagnostics.Record(
+                            "controlled-unlocated-reanchor",
+                            ("state", state.ToString()),
+                            ("direction", direction.ToString()),
+                            ("unlocatedSteps", unlocatedProgramSteps));
+                        resumeAnchorPending = true;
+                        stationarySamples = 0;
+                        continue;
+                    }
+
                     diagnostics.Record(
                         "controlled-unlocated-paused",
                         ("state", state.ToString()),
@@ -1474,7 +1960,7 @@ public static class ScrollCaptureService
                         target,
                         scrollDriver,
                         cancellationToken);
-                    var completionFingerprint = ViewportFingerprint.Create(
+                    var completionFingerprint = AutomaticViewportFingerprint.Create(
                         completionFrame);
                     var completionStationary = previousFingerprint
                         .IsStationaryComparedTo(completionFingerprint);
@@ -1559,12 +2045,16 @@ public static class ScrollCaptureService
             {
                 ControlledScrollCaptureState.ScrollingDown =>
                     ControlledScrollCaptureState.PreparingReturnFromDown,
+                ControlledScrollCaptureState.PreparingPauseDown =>
+                    ControlledScrollCaptureState.PreparingReturnFromDown,
                 ControlledScrollCaptureState.PausedDown or
                 ControlledScrollCaptureState.BottomReached =>
                     ControlledScrollCaptureState.ReturningToStart,
                 ControlledScrollCaptureState.WaitingToStart =>
                     ControlledScrollCaptureState.ScrollingUpFirst,
                 ControlledScrollCaptureState.ScrollingUpFirst =>
+                    ControlledScrollCaptureState.PreparingReturnFromUp,
+                ControlledScrollCaptureState.PreparingPauseUpFirst =>
                     ControlledScrollCaptureState.PreparingReturnFromUp,
                 ControlledScrollCaptureState.PausedUpFirst or
                 ControlledScrollCaptureState.TopReached =>
@@ -1617,6 +2107,34 @@ public static class ScrollCaptureService
                 ControlledScrollCaptureState.ScrollingDownSecond,
             _ => state,
         };
+    }
+
+    /// <summary>
+    /// Whether a single click must wait out the double-click interval before
+    /// it is delivered. In idle states a click starts motion while a double
+    /// click starts a different motion, so acting on the first half would
+    /// briefly drive the wrong way. In motion states a click means "stop":
+    /// the state machine maps a following double-click from the resulting
+    /// pause-preparing state to the same action it has from the motion state,
+    /// so the click can be delivered immediately and pausing feels instant.
+    /// </summary>
+    internal static bool ShouldDeferControlledPointerClicks(
+        ControlledScrollCaptureState state)
+    {
+        return state is
+            ControlledScrollCaptureState.WaitingToStart or
+            ControlledScrollCaptureState.PausedDown or
+            ControlledScrollCaptureState.PausedReturning or
+            ControlledScrollCaptureState.PausedUp or
+            ControlledScrollCaptureState.PausedUpFirst or
+            ControlledScrollCaptureState.PausedReturningDown or
+            ControlledScrollCaptureState.PausedDownSecond or
+            ControlledScrollCaptureState.BottomReached or
+            ControlledScrollCaptureState.TopReached or
+            ControlledScrollCaptureState.FinalTopReached or
+            ControlledScrollCaptureState.FinalBottomReached or
+            ControlledScrollCaptureState.InputUnavailable or
+            ControlledScrollCaptureState.Completing;
     }
 
     internal static bool IsControlledResumeTransition(
@@ -1795,6 +2313,23 @@ public static class ScrollCaptureService
         return !outboundHadVisibleMovement && isInitialViewport;
     }
 
+    internal static bool IsControlledInitialViewportReached(
+        bool isStrictInitialViewport,
+        bool isLooseInitialViewport,
+        int stationarySamples)
+    {
+        // A texture-weighted return fingerprint intentionally tolerates live
+        // values and hover changes. On sparse pages that tolerance can also
+        // make a nearby viewport look like the initial one, especially when
+        // there is no unique left-side marker such as a code line number.
+        // While the viewport is moving, only the pixel-strict signature may
+        // end the return leg. The tolerant signature is a physical-boundary
+        // fallback and therefore needs consecutive stationary observations.
+        return isStrictInitialViewport ||
+            isLooseInitialViewport &&
+            stationarySamples >= ControlledInitialBoundaryStationarySamples;
+    }
+
     private static int? GetControlledExpectedRowsForDriver(
         ControlledScrollDriver scrollDriver,
         int frameHeight,
@@ -1832,7 +2367,7 @@ public static class ScrollCaptureService
         ScrollCaptureOptions options)
     {
         var match = returnDirection == ScrollCaptureDirection.Up
-            ? ImageOverlapMatcher.FindVerticalOverlap(
+            ? AutomaticImageOverlapMatcher.FindVerticalOverlap(
                 returnFrame,
                 initialFrame,
                 options.MinimumOverlapRows,
@@ -1841,7 +2376,7 @@ public static class ScrollCaptureService
                     ControlledInitialCrossingMinimumConfidence),
                 options.MinimumNewRows,
                 expectedCrossingRows)
-            : ImageOverlapMatcher.FindVerticalOverlap(
+            : AutomaticImageOverlapMatcher.FindVerticalOverlap(
                 initialFrame,
                 returnFrame,
                 options.MinimumOverlapRows,
@@ -1860,6 +2395,26 @@ public static class ScrollCaptureService
         return Math.Abs(movementRows - expectedCrossingRows) <= tolerance
             ? match
             : null;
+    }
+
+    internal static long GetControlledExpectedCrossingRows(
+        long returnInputMagnitude,
+        long outboundInputMagnitude,
+        int outboundVisualTravelRows)
+    {
+        var inputPastInitial = Math.Max(
+            0,
+            returnInputMagnitude - outboundInputMagnitude);
+        if (inputPastInitial == 0 ||
+            outboundInputMagnitude <= 0 ||
+            outboundVisualTravelRows <= 0)
+        {
+            return inputPastInitial;
+        }
+
+        return (long)Math.Round(
+            inputPastInitial *
+            (outboundVisualTravelRows / (double)outboundInputMagnitude));
     }
 
     internal static bool IsControlledInitialCrossingConsistent(
@@ -1883,6 +2438,37 @@ public static class ScrollCaptureService
             Math.Max(24L, inputDelta);
     }
 
+    internal static bool IsControlledInitialCrossingStable(
+        int previousMovementRows,
+        long previousInputMagnitude,
+        int currentMovementRows,
+        long currentInputMagnitude,
+        double confidence)
+    {
+        return confidence >= ControlledInitialCrossingMinimumConfidence &&
+            currentInputMagnitude == previousInputMagnitude &&
+            Math.Abs(currentMovementRows - previousMovementRows) <= 24;
+    }
+
+    /// <summary>
+    /// Editors and inertial pages keep drifting past the initial viewport
+    /// while the driver is already stopped: consecutive samples both overlap
+    /// the initial frame decisively but the crossing grows by far more than
+    /// the ±24-row stability window (field: 82→175→220→245 rows at confidence
+    /// 1.000 without ever confirming). Two decisive measurements with a
+    /// growing crossing are proof of the crossing itself.
+    /// </summary>
+    internal static bool IsControlledInitialCrossingGlide(
+        int previousMovementRows,
+        double previousConfidence,
+        int currentMovementRows,
+        double currentConfidence)
+    {
+        return previousConfidence >= ControlledInitialCrossingMinimumConfidence &&
+            currentConfidence >= ControlledInputReturnMinimumConfidence &&
+            currentMovementRows > previousMovementRows;
+    }
+
     internal static int GetControlledResumeMaximumMovementRows(
         int frameHeight,
         int? expectedRows,
@@ -1899,6 +2485,57 @@ public static class ScrollCaptureService
             Math.Max(frameHeight / 2L, expectedAllowance));
     }
 
+    /// <summary>
+    /// Pause/return settle already waits for a stationary fingerprint, so any
+    /// remaining inertia strip that still overlaps the previous frame is safe
+    /// to commit. Cap at the matcher limit rather than the resume half-viewport
+    /// allowance that previously left PreparingPauseDown stuck on
+    /// movement-cap-veto.
+    /// </summary>
+    internal static int GetControlledSettleMaximumMovementRows(
+        int frameHeight,
+        int minimumOverlapRows)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(frameHeight, 2);
+        return frameHeight - Math.Clamp(
+            minimumOverlapRows,
+            1,
+            frameHeight - 1);
+    }
+
+    internal static int? GetControlledRetryMaximumMovementRows(
+        string? rejectReason,
+        int frameHeight,
+        int? expectedRows,
+        int minimumOverlapRows)
+    {
+        return rejectReason == "movement-cap-veto"
+            ? GetControlledResumeMaximumMovementRows(
+                frameHeight,
+                expectedRows,
+                minimumOverlapRows)
+            : null;
+    }
+
+    internal static int GetControlledInitialAlignmentMaximumMovementRows(
+        int frameHeight,
+        int? confirmedCrossingRows,
+        int minimumOverlapRows)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(frameHeight, 2);
+        var maximumMatchableRows = frameHeight - Math.Clamp(
+            minimumOverlapRows,
+            1,
+            frameHeight - 1);
+        var baseline = Math.Max(64, frameHeight / 3);
+        var confirmedAllowance = confirmedCrossingRows is > 0
+            ? confirmedCrossingRows.Value + 24
+            : 0;
+        return Math.Min(
+            maximumMatchableRows,
+            Math.Max(baseline, confirmedAllowance));
+    }
+
     private static Task<bool> TryAddControlledFrameAsync(
         ControlledScrollCaptureComposer composer,
         Bitmap frame,
@@ -1906,7 +2543,8 @@ public static class ScrollCaptureService
         ScrollCaptureOptions options,
         int? expectedRows,
         CancellationToken cancellationToken,
-        int? maximumAcceptedNewRows = null)
+        int? maximumAcceptedNewRows = null,
+        bool tolerateQuantizedExpectation = false)
     {
         // A fixed-rate wheel animation can legitimately leave only a few new
         // rows at startup or immediately before a pause. Advancing the viewport
@@ -1916,18 +2554,27 @@ public static class ScrollCaptureService
             expectedRows < options.MinimumNewRows
             ? options with { MinimumNewRows = 1 }
             : options;
+        if (maximumAcceptedNewRows is null && expectedRows is > 0)
+        {
+            maximumAcceptedNewRows = Math.Min(
+                frame.Height - effectiveOptions.MinimumOverlapRows,
+                Math.Max(96, expectedRows.Value * 3));
+        }
+
         return Task.Run(
             () => direction == ScrollCaptureDirection.Down
                 ? composer.TryAddDown(
                     frame,
                     effectiveOptions,
                     expectedRows,
-                    maximumAcceptedNewRows)
+                    maximumAcceptedNewRows,
+                    tolerateQuantizedExpectation)
                 : composer.TryAddUp(
                     frame,
                     effectiveOptions,
                     expectedRows,
-                    maximumAcceptedNewRows),
+                    maximumAcceptedNewRows,
+                    tolerateQuantizedExpectation),
             cancellationToken);
     }
 
@@ -1939,6 +2586,13 @@ public static class ScrollCaptureService
         return added ||
             movementRows.HasValue ||
             rejectReason == "below-minimum";
+    }
+
+    internal static bool ShouldAdvanceControlledInputAnchor(
+        bool frameLocated,
+        int? movementRows)
+    {
+        return frameLocated && movementRows is > 0;
     }
 
     internal static bool IsControlledBoundarySample(
@@ -2198,6 +2852,21 @@ public static class ScrollCaptureService
     // it like a video feed would burn memory bandwidth for no visible gain.
     private const int PreviewMinIntervalMilliseconds = 120;
 
+    internal static int GetActiveSampleDelayMilliseconds(
+        int configuredDelayMilliseconds,
+        TimeSpan elapsedSinceWheel)
+    {
+        var cadenceFloor = elapsedSinceWheel < TimeSpan.FromMilliseconds(80)
+            ? ActiveScrollSampleDelayMilliseconds
+            : SettlingSampleDelayMilliseconds;
+        return Math.Max(configuredDelayMilliseconds, cadenceFloor);
+    }
+
+    internal static int GetBackpressureThreshold(int queueCapacity)
+    {
+        return Math.Max(4, queueCapacity / 8);
+    }
+
     private static int GetActiveFrameQueueCapacity(ScreenRegion region)
     {
         var frameBytes = Math.Max(
@@ -2221,6 +2890,7 @@ public static class ScrollCaptureService
         CapturedFrameGate frameGate,
         StationaryScrollBoundaryDetector boundaryDetector,
         ScrollCaptureDiagnostics diagnostics,
+        ManualScrollDriver? throttledScrollDriver,
         bool prepareResult,
         CancellationToken cancellationToken)
     {
@@ -2229,6 +2899,13 @@ public static class ScrollCaptureService
             target,
             setPreviewVisibilityAsync,
             cancellationToken);
+
+        var injectedWheelDelta =
+            throttledScrollDriver?.TakeInjectedWheelDelta() ?? 0;
+        if (injectedWheelDelta != 0)
+        {
+            motionTracker.AddDelta(injectedWheelDelta);
+        }
 
         // Deliberately no blank-frame drop here: chat and web pages routinely
         // scroll through viewports that are almost entirely white, and
@@ -2352,6 +3029,7 @@ public static class ScrollCaptureService
         ScrollCaptureDiagnostics diagnostics,
         int backlogCapacity,
         SampleCadence sampleCadence,
+        ManualScrollDriver? throttledScrollDriver,
         CancellationToken cancellationToken)
     {
         var backlog = new List<QueuedScrollFrame>(backlogCapacity + 1);
@@ -2410,6 +3088,39 @@ public static class ScrollCaptureService
                     continue;
                 }
 
+                if (backlog.Count >= SameDirectionBacklogCollapseThreshold &&
+                    backlog.All(item =>
+                        item.Motion.Direction == backlog[0].Motion.Direction &&
+                        item.ConfirmedBoundary is null) &&
+                    composer.IsNearCapturedBoundary(
+                        backlog[0].Motion.Direction,
+                        backlog[0].Frame.Height))
+                {
+                    // The anchor is at the edge and the queue still contains a
+                    // long same-direction tail. Retain two overlap frames to
+                    // prove continuity, then carry the remaining displacement
+                    // to the freshest frame so the actual boundary crossing is
+                    // processed now instead of several seconds later.
+                    var pendingBeforeCollapse = backlog.Count;
+                    CollapseStaleDirectionRun(
+                        backlog,
+                        motionTracker,
+                        options,
+                        queueState,
+                        allowSameDirectionCollapse: true);
+                    if (backlog.Count < pendingBeforeCollapse)
+                    {
+                        diagnostics.Record(
+                            "boundary-backlog-collapsed",
+                            ("direction", backlog[0].Motion.Direction.ToString()),
+                            ("dropped", pendingBeforeCollapse - backlog.Count),
+                            ("retained", backlog.Count),
+                            ("currentTop", composer.CurrentFrameTop),
+                            ("capturedTop", composer.CapturedContentTop),
+                            ("capturedBottom", composer.CapturedContentBottom));
+                    }
+                }
+
                 await ProcessNextBacklogFrameAsync(
                     backlog,
                     chainState,
@@ -2423,6 +3134,7 @@ public static class ScrollCaptureService
                     diagnostics,
                     drainDeadlineTimestamp,
                     sampleCadence,
+                    throttledScrollDriver,
                     cancellationToken);
             }
         }
@@ -2506,7 +3218,8 @@ public static class ScrollCaptureService
         List<QueuedScrollFrame> backlog,
         ScrollWheelMotionTracker motionTracker,
         ScrollCaptureOptions options,
-        ActiveFrameQueueState queueState)
+        ActiveFrameQueueState queueState,
+        bool allowSameDirectionCollapse = false)
     {
         if (backlog.Count < 4)
         {
@@ -2517,9 +3230,65 @@ public static class ScrollCaptureService
         var tailDirection = backlog[^1].Motion.Direction;
         if (headDirection == tailDirection)
         {
-            // Backpressure bounds a same-direction run. Every retained sample
-            // is part of the overlap chain; dropping the middle based on count
-            // alone can leave an unmatchable full-viewport gap.
+            // Backpressure bounds a same-direction run. Keep the full short
+            // overlap chain here; a boundary-aware collapse is performed by
+            // the processor only when the stitched anchor is actually close to
+            // that edge.
+            if (!allowSameDirectionCollapse ||
+                backlog.Count < SameDirectionBacklogCollapseThreshold ||
+                backlog.Count <
+                    SameDirectionRetainedHeadFrames +
+                    SameDirectionRetainedTailFrames ||
+                backlog.Any(item =>
+                    item.Motion.Direction != headDirection ||
+                    item.ConfirmedBoundary is not null))
+            {
+                return;
+            }
+
+            // Drop middle frames aggressively, but never let one surviving
+            // frame carry a merged displacement beyond a third of the
+            // viewport. Merging the whole run onto the first tail frame
+            // created one jump larger than a viewport exactly at the captured
+            // edge — unmatchable on the feature-poor bands where page tops
+            // live — so content went missing. Keeping every other frame
+            // instead preserved the chain but left the backlog hovering at
+            // the threshold, and the matcher saturated a core while the
+            // preview lagged by seconds. The displacement bound gives both:
+            // wholesale-level reduction wherever the estimate says the gap
+            // stays bridgeable, and a retained frame exactly where it stops
+            // being bridgeable.
+            var mergeCapRows = Math.Max(
+                96,
+                backlog[0].Frame.Height / 3);
+            var mergeIndex = SameDirectionRetainedHeadFrames;
+            while (mergeIndex <
+                   backlog.Count - SameDirectionRetainedTailFrames)
+            {
+                var current = backlog[mergeIndex];
+                var successor = backlog[mergeIndex + 1];
+                var merged = motionTracker.MergeMotion(
+                    current.Motion,
+                    successor.Motion,
+                    successor.Frame.Height,
+                    options);
+                if (merged.ExpectedRows is not { } mergedRows ||
+                    mergedRows > mergeCapRows)
+                {
+                    // Absorbing this frame would make the successor's gap
+                    // unbridgeable (or unmeasurable); keep it as a stepping
+                    // stone and continue behind it.
+                    mergeIndex++;
+                    continue;
+                }
+
+                successor.Motion = merged;
+                backlog.RemoveAt(mergeIndex);
+                queueState.OnDropped(current);
+                queueState.OnFrameRetired();
+                current.Dispose();
+            }
+
             return;
         }
 
@@ -2597,6 +3366,7 @@ public static class ScrollCaptureService
         ScrollCaptureDiagnostics diagnostics,
         long drainDeadlineTimestamp,
         SampleCadence sampleCadence,
+        ManualScrollDriver? throttledScrollDriver,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -2614,7 +3384,7 @@ public static class ScrollCaptureService
             // Out of budget after Finish/Edit: keep only the freshest
             // viewport (and carry its accumulated wheel motion) so the
             // result still ends where the user stopped without replaying
-            // every remaining match. Do not collapse just because a few
+            // every queued match. Do not collapse just because a few
             // frames are pending — reverse flings need those chain steps.
             CarryBacklogMotion(
                 backlog,
@@ -2622,6 +3392,25 @@ public static class ScrollCaptureService
                 motionTracker,
                 options);
             DisposeBacklog(backlog, backlog.Count - 1, queueState);
+        }
+
+        // A boundary marker is queued only when the wheel keeps moving while
+        // the screen already stands still — the page is parked at a physical
+        // edge. Every sample queued before it shows the same parked viewport
+        // and none of them matched (that is why they piled up: unmatchable
+        // edge frames cost a full search each). Draining them first delayed
+        // the marker by several seconds while the preview sat frozen, so let
+        // the marker jump the queue and let the edge re-anchor resolve the
+        // position in one step.
+        var markerIndex = backlog.FindIndex(
+            queued => queued.ConfirmedBoundary is not null);
+        if (markerIndex > 0)
+        {
+            CarryBacklogMotion(backlog, markerIndex, motionTracker, options);
+            DisposeBacklog(backlog, markerIndex, queueState);
+            diagnostics.Record(
+                "boundary-marker-promoted",
+                ("skippedFrames", markerIndex));
         }
 
         var queuedFrame = backlog[0];
@@ -2652,10 +3441,34 @@ public static class ScrollCaptureService
             var wasConfirmed = composer.TryMarkBoundaryReached(
                 queuedFrame.Frame,
                 confirmedBoundary);
+            var wasReanchored = false;
+            if (!wasConfirmed)
+            {
+                // The wheel monitor proved the page stopped at a physical
+                // edge, yet the marker frame does not match the stored edge:
+                // the anchor lost a fast fling. Re-locate against the stored
+                // edge instead of discarding the strongest position evidence
+                // this capture will ever get.
+                wasReanchored = composer.TryReanchorAtBoundary(
+                    queuedFrame.Frame,
+                    confirmedBoundary,
+                    options);
+                if (wasReanchored)
+                {
+                    composer.MarkBoundaryReached(confirmedBoundary);
+                    await ReportPreviewAsync(
+                        composer,
+                        previewChanged,
+                        cancellationToken);
+                }
+            }
+
             diagnostics.Record(
                 wasConfirmed
                     ? "boundary-confirmed"
-                    : "boundary-marker-rejected",
+                    : wasReanchored
+                        ? "boundary-reanchored"
+                        : "boundary-marker-rejected",
                 ("sequence", queuedFrame.Sequence),
                 ("direction", confirmedBoundary.ToString()),
                 ("outputHeight", composer.OutputHeight));
@@ -2692,6 +3505,15 @@ public static class ScrollCaptureService
         }
 
         DisposeBacklog(backlog, 1, queueState);
+        // Manual wheel mode is allowed to advance only after the preceding
+        // sampled viewport has actually been matched. Replenishing this budget
+        // at capture time lets a slow/repetitive frame search fall seconds
+        // behind while the target keeps scrolling, eventually destroying all
+        // overlap. Controlled automatic mode uses its own capture handshake.
+        if (queueState.PendingStitchCount == 0)
+        {
+            throttledScrollDriver?.AcknowledgeCapturedFrame();
+        }
     }
 
     private static void CarryBacklogMotion(
@@ -2783,6 +3605,7 @@ public static class ScrollCaptureService
             ("currentTop", composer.CurrentFrameTop),
             ("capturedTop", composer.CapturedContentTop),
             ("capturedBottom", composer.CapturedContentBottom),
+            ("fixedBottomRows", composer.FixedBottomRows),
             ("bridged", composer.LastFrameWasBridged),
             ("reject", composer.LastRejectReason),
             ("boundaryDrift", composer.LastBoundaryDriftRows),

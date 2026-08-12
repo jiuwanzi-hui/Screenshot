@@ -20,6 +20,7 @@ public partial class App : System.Windows.Application, IDisposable
     private CaptureHistoryService? _captureHistoryService;
     private CaptureHistoryWindow? _captureHistoryWindow;
     private FloatingCaptureWindow? _floatingCaptureWindow;
+    private TextTranslationWindow? _textTranslationWindow;
     private PinnedImageManager? _pinnedImageManager;
     private HttpClient? _translationHttpClient;
     private AppThemeManager? _themeManager;
@@ -101,11 +102,13 @@ public partial class App : System.Windows.Application, IDisposable
         _mainWindow.SettingsSaved += OnSettingsSaved;
         _mainWindow.ExitRequested += OnExitRequested;
         _mainWindow.UpdateInstallationStarted += OnUpdateInstallationStarted;
+        _mainWindow.TextTranslationRequested += OnTextTranslationRequested;
         _mainWindow.ConfigureTaskbarVisibility(_currentSettings.ShowTaskbarIcon);
         _captureHistoryService = new CaptureHistoryService();
         _pinnedImageManager = new PinnedImageManager(
             RecognizePinnedImageAsync,
-            TranslatePinnedImageAsync);
+            TranslatePinnedImageAsync,
+            () => _ = Dispatcher.BeginInvoke(ShowMainWindow));
         _regionCaptureCoordinator = new RegionCaptureCoordinator(
             () => _currentSettings,
             _captureHistoryService,
@@ -114,7 +117,10 @@ public partial class App : System.Windows.Application, IDisposable
             _translationHttpClient,
             message => _mainWindow?.ShowStatus(message),
             suspended => _hotKeyManager.SetMouseShortcutsSuspended(suspended),
-            preferences => _mainWindow?.SaveVideoRecordingPreferences(preferences));
+            preferences => _mainWindow?.SaveVideoRecordingPreferences(preferences),
+            arrowStyle => _mainWindow?.SaveArrowStyle(arrowStyle),
+            colorText => _mainWindow?.SaveCustomStrokeColor(colorText),
+            colors => _mainWindow?.SaveCustomColorPalette(colors));
         _regionCaptureCoordinator.CaptureStateChanged += OnCaptureStateChanged;
 
         if (dataMigrationResult.Warning is not null)
@@ -225,6 +231,7 @@ public partial class App : System.Windows.Application, IDisposable
             _mainWindow.SettingsSaved -= OnSettingsSaved;
             _mainWindow.ExitRequested -= OnExitRequested;
             _mainWindow.UpdateInstallationStarted -= OnUpdateInstallationStarted;
+            _mainWindow.TextTranslationRequested -= OnTextTranslationRequested;
         }
 
         _singleInstanceCoordinator?.Dispose();
@@ -266,6 +273,11 @@ public partial class App : System.Windows.Application, IDisposable
     private void OnHistoryRequested(object? sender, EventArgs e)
     {
         _ = Dispatcher.BeginInvoke(ShowCaptureHistory);
+    }
+
+    private void OnTextTranslationRequested(object? sender, EventArgs e)
+    {
+        _ = Dispatcher.BeginInvoke(() => ShowTextTranslationWindow());
     }
 
     private void OnSettingsSaved(object? sender, SettingsSavedEventArgs e)
@@ -311,6 +323,8 @@ public partial class App : System.Windows.Application, IDisposable
         window.PinCaptureRequested += OnFloatingPinCaptureRequested;
         window.AllScreensCaptureRequested += OnFloatingAllScreensCaptureRequested;
         window.HistoryRequested += OnFloatingHistoryRequested;
+        window.SettingsRequested += OnFloatingSettingsRequested;
+        window.TextTranslationRequested += OnFloatingTextTranslationRequested;
         window.CloseRequested += OnFloatingCloseRequested;
         window.Closed += OnFloatingCaptureWindowClosed;
         _floatingCaptureWindow = window;
@@ -337,6 +351,8 @@ public partial class App : System.Windows.Application, IDisposable
         window.PinCaptureRequested -= OnFloatingPinCaptureRequested;
         window.AllScreensCaptureRequested -= OnFloatingAllScreensCaptureRequested;
         window.HistoryRequested -= OnFloatingHistoryRequested;
+        window.SettingsRequested -= OnFloatingSettingsRequested;
+        window.TextTranslationRequested -= OnFloatingTextTranslationRequested;
         window.CloseRequested -= OnFloatingCloseRequested;
         window.Closed -= OnFloatingCaptureWindowClosed;
         window.Close();
@@ -348,6 +364,16 @@ public partial class App : System.Windows.Application, IDisposable
         {
             _floatingCaptureWindow = null;
         }
+    }
+
+    private void OnFloatingSettingsRequested(object? sender, EventArgs e)
+    {
+        _ = Dispatcher.BeginInvoke(ShowMainWindow);
+    }
+
+    private void OnFloatingTextTranslationRequested(object? sender, EventArgs e)
+    {
+        _ = Dispatcher.BeginInvoke(() => ShowTextTranslationWindow());
     }
 
     private void OnCaptureStateChanged(bool isInProgress)
@@ -487,6 +513,10 @@ public partial class App : System.Windows.Application, IDisposable
         {
             _ = Dispatcher.BeginInvoke(ShowMainWindow);
         }
+        else if (e.Action == HotKeyAction.TranslateSelectedText)
+        {
+            _ = TranslateSelectedTextAsync();
+        }
     }
 
     private CapturedImage? DetachUsablePreCapturedScreen(
@@ -505,6 +535,67 @@ public partial class App : System.Windows.Application, IDisposable
     private void ShowMainWindow()
     {
         _mainWindow?.ShowFromTray();
+    }
+
+    private async Task TranslateSelectedTextAsync()
+    {
+        try
+        {
+            var selectedText = await SelectedTextCaptureService
+                .TryCopySelectedTextAsync();
+            if (string.IsNullOrWhiteSpace(selectedText))
+            {
+                ShowTextTranslationWindow();
+                return;
+            }
+
+            ShowTextTranslationWindow(selectedText, translateImmediately: true);
+        }
+        catch
+        {
+            ShowTextTranslationWindow();
+        }
+    }
+
+    private void ShowTextTranslationWindow(
+        string? sourceText = null,
+        bool translateImmediately = false)
+    {
+        if (_textTranslationWindow is null)
+        {
+            _textTranslationWindow = new TextTranslationWindow(
+                () => _currentSettings,
+                languageTag =>
+                    _mainWindow?.SaveTranslationTargetLanguage(languageTag),
+                languageTag =>
+                    _mainWindow?.OpenTranslationModelSettings(languageTag));
+            _textTranslationWindow.Closed += OnTextTranslationWindowClosed;
+            _textTranslationWindow.Show();
+        }
+        else
+        {
+            _textTranslationWindow.Show();
+            _textTranslationWindow.Activate();
+        }
+
+        if (!string.IsNullOrWhiteSpace(sourceText))
+        {
+            _textTranslationWindow.SetSourceText(
+                sourceText,
+                translateImmediately);
+        }
+    }
+
+    private void OnTextTranslationWindowClosed(object? sender, EventArgs e)
+    {
+        if (_textTranslationWindow is not { } window ||
+            !ReferenceEquals(sender, window))
+        {
+            return;
+        }
+
+        window.Closed -= OnTextTranslationWindowClosed;
+        _textTranslationWindow = null;
     }
 
     private void ShowCaptureHistory()
@@ -684,7 +775,8 @@ public partial class App : System.Windows.Application, IDisposable
             var provider = TranslationProviderFactory.Create(
                 _currentSettings,
                 new DpapiTranslationCredentialStore(),
-                _translationHttpClient);
+                _translationHttpClient,
+                preferFastOffline: false);
             return await provider.TranslateSegmentsAsync(
                 recognition.Regions.Select(region => region.Text).ToArray(),
                 "auto",

@@ -223,6 +223,17 @@ public static class ForegroundWindowCaptureService
             return false;
         }
 
+        // The live preview is a topmost, non-activating window, but a render
+        // pass or an incidental click can still leave it as the foreground
+        // window.  Re-focus the actual scroll child before the next wheel
+        // message; otherwise the global hook records the wheel while the
+        // editor remains stationary and the stitcher cannot cross its edge.
+        if (NativeMethods.GetForegroundWindow() == target.WindowHandle)
+        {
+            return NativeMethods.SetFocus(target.ScrollTargetHandle) !=
+                   IntPtr.Zero;
+        }
+
         var attached = FocusScrollTarget(
             target,
             out var currentThreadId,
@@ -317,7 +328,7 @@ public static class ForegroundWindowCaptureService
 
             if (routeThroughViewport)
             {
-                Thread.Sleep(10);
+                Thread.Sleep(1);
             }
 
             var wheelInput = new NativeInput
@@ -339,7 +350,10 @@ public static class ForegroundWindowCaptureService
 
             if (routeThroughViewport)
             {
-                Thread.Sleep(10);
+                Thread.Sleep(1);
+                // Restore only when the user did not move while the packet was
+                // routed. This preserves an intentional pointer move during a
+                // live automatic capture instead of fighting it every tick.
                 if (!NativeMethods.GetCursorPos(out var positionAfterWheel) ||
                     (positionAfterWheel.X == routeX &&
                      positionAfterWheel.Y == routeY))

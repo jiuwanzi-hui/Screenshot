@@ -1,4 +1,5 @@
 using System.IO;
+using System.Drawing;
 using Screenshot.App.Capture;
 using WinForms = System.Windows.Forms;
 
@@ -187,5 +188,26 @@ public sealed class RegionVideoRecorderTests
             out _,
             out _,
             out _));
+    }
+
+    [Fact]
+    public void DetectsUniformProtectedContentBlackFrame()
+    {
+        using var bitmap = new Bitmap(120, 80);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.Clear(Color.Black);
+
+        Assert.True(RegionVideoRecorder.IsNearlyBlackFrame(bitmap));
+    }
+
+    [Fact]
+    public void DoesNotRejectANormalDarkSceneWithVisibleDetail()
+    {
+        using var bitmap = new Bitmap(120, 80);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.Clear(Color.FromArgb(4, 4, 4));
+        graphics.FillRectangle(Brushes.White, 20, 20, 50, 12);
+
+        Assert.False(RegionVideoRecorder.IsNearlyBlackFrame(bitmap));
     }
 }

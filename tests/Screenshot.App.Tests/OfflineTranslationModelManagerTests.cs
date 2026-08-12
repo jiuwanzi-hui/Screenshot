@@ -358,6 +358,35 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task MixedChineseScreenshotOnlyDetectsEnglishLinesForChineseTarget()
+    {
+        using var manager = new OfflineTranslationModelManager(_testDirectory);
+        var detector = new RecordingLanguageDetector();
+        var provider = new OfflineTranslationProvider(manager, detector);
+        string[] segments =
+        [
+            "翻译卡住/整页失败的问题已修好，Release 已启动。",
+            "Load Diff",
+            "Large diffs are hidden by default.",
+            "Automatic click-scroll only; manual capture has its own fingerprint type.",
+            "AutomaticViewportFingerprint",
+        ];
+
+        var result = await provider.TranslateSegmentsAsync(
+            segments,
+            "auto",
+            "zh-Hans");
+
+        Assert.False(result.IsSuccess);
+        Assert.DoesNotContain(detector.Inputs, input => input.Contains(
+            "翻译卡住",
+            StringComparison.Ordinal));
+        Assert.Contains(detector.Inputs, input => input.Contains(
+            "Large diffs are hidden by default.",
+            StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void AutoDetectPackCoversEverySupportedSourceRoute()
     {
         var directions = TranslationLanguageCatalog
@@ -571,6 +600,17 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
         {
             CallCount++;
             return new OfflineLanguageDetectionResult(languageCode, 1, true);
+        }
+    }
+
+    private sealed class RecordingLanguageDetector : IOfflineLanguageDetector
+    {
+        public List<string> Inputs { get; } = [];
+
+        public OfflineLanguageDetectionResult Detect(string text)
+        {
+            Inputs.Add(text);
+            return new OfflineLanguageDetectionResult("en", 1, true);
         }
     }
 }

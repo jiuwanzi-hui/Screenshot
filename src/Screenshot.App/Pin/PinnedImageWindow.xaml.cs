@@ -61,6 +61,8 @@ public partial class PinnedImageWindow : Window
 
     internal Task TextRecognitionTask => _textRecognitionTask;
 
+    public event EventHandler? SettingsRequested;
+
     protected override void OnClosed(EventArgs e)
     {
         _isClosed = true;
@@ -94,6 +96,16 @@ public partial class PinnedImageWindow : Window
     private void OnOpacityValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         Opacity = e.NewValue;
+    }
+
+    private void OnOpenSettingsClick(object sender, RoutedEventArgs e)
+    {
+        SettingsRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnCloseFromContextMenuClick(object sender, RoutedEventArgs e)
+    {
+        Close();
     }
 
     private void OnImageMouseLeftButtonDown(object sender, MouseButtonEventArgs e)

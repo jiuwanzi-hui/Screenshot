@@ -19,6 +19,9 @@ public sealed class RegionCaptureCoordinator
     private readonly Action<bool>? _mouseShortcutSuppressionChanged;
     private readonly Action<VideoRecordingPreferences>?
         _videoRecordingPreferencesChanged;
+    private readonly Action<ArrowStyle>? _arrowStyleChanged;
+    private readonly Action<string>? _customStrokeColorChanged;
+    private readonly Action<int[]>? _customColorPaletteChanged;
     private bool _isCaptureInProgress;
     private bool _isRecordingInProgress;
     private ScreenRegion? _lastOrdinaryCaptureRegion;
@@ -31,7 +34,10 @@ public sealed class RegionCaptureCoordinator
         HttpClient httpClient,
         Action<string> statusReporter,
         Action<bool>? mouseShortcutSuppressionChanged = null,
-        Action<VideoRecordingPreferences>? videoRecordingPreferencesChanged = null)
+        Action<VideoRecordingPreferences>? videoRecordingPreferencesChanged = null,
+        Action<ArrowStyle>? arrowStyleChanged = null,
+        Action<string>? customStrokeColorChanged = null,
+        Action<int[]>? customColorPaletteChanged = null)
     {
         ArgumentNullException.ThrowIfNull(settingsProvider);
         ArgumentNullException.ThrowIfNull(historyService);
@@ -48,6 +54,9 @@ public sealed class RegionCaptureCoordinator
         _statusReporter = statusReporter;
         _mouseShortcutSuppressionChanged = mouseShortcutSuppressionChanged;
         _videoRecordingPreferencesChanged = videoRecordingPreferencesChanged;
+        _arrowStyleChanged = arrowStyleChanged;
+        _customStrokeColorChanged = customStrokeColorChanged;
+        _customColorPaletteChanged = customColorPaletteChanged;
     }
 
     public Task RequestCaptureAsync(
@@ -303,6 +312,14 @@ public sealed class RegionCaptureCoordinator
                         ? region => _lastOrdinaryCaptureRegion = region
                         : null,
                     CaptureClosed = OnInteractiveCaptureClosed,
+                    ArrowStyle = settings.ArrowStyle,
+                    VisibleToolbarFeatures =
+                        settings.VisibleCaptureToolbarFeatures.ToArray(),
+                    ArrowStyleChanged = _arrowStyleChanged,
+                    CustomStrokeColor = settings.CustomStrokeColor,
+                    CustomStrokeColorChanged = _customStrokeColorChanged,
+                    CustomColorPalette = settings.CustomColorPalette,
+                    CustomColorPaletteChanged = _customColorPaletteChanged,
                 },
                 initialScreenSnapshot);
         }
@@ -385,7 +402,8 @@ public sealed class RegionCaptureCoordinator
         var provider = TranslationProviderFactory.Create(
             settings,
             _translationCredentialStore,
-            _httpClient);
+            _httpClient,
+            preferFastOffline: false);
         return provider.TranslateSegmentsAsync(
             recognition.Regions.Select(region => region.Text).ToArray(),
             "auto",
@@ -497,6 +515,7 @@ public sealed class RegionCaptureCoordinator
 
                 try
                 {
+                    var captureMode = _settingsProvider().ScrollCaptureMode;
                     // Commit the selected region before installing the pointer
                     // hook. Once capture starts, the region becomes a control
                     // surface: click pauses/resumes and double-click reverses.
@@ -611,18 +630,58 @@ public sealed class RegionCaptureCoordinator
                             0,
                             firstFrame.Width,
                             firstFrame.Height));
-                    wheelMonitor.EnableControlledCaptureInput();
-                    progressWindow.QueueInteractionState(
-                        ControlledScrollCaptureState.WaitingToStart);
-                    var result = await ScrollCaptureService.CaptureControlledAsync(
-                        target,
-                        completionSource.Task,
-                        wheelMonitor.PointerActions,
-                        stateChanged: progressWindow.QueueInteractionState,
-                        previewChanged: previewState =>
-                            UpdateProgress(progressWindow, previewState),
-                        initialFrame: firstFrame,
-                        cancellationToken: cancellationSource.Token);
+                    ScrollCaptureResult result;
+                    if (captureMode == ScrollCaptureMode.ManualWheel)
+                    {
+                        // Manual mode is deliberately unthrottled: the user's
+                        // physical wheel drives the target directly at any
+                        // speed and in either direction, while the hook only
+                        // observes deltas to pace sampling and stitching.
+                        // Right-click cancel still needs the pointer block.
+                        wheelMonitor.BlockNonWheelInput();
+                        progressWindow.ConfigureManualWheelMode();
+                        result = await ScrollCaptureService.CaptureOnWheelAsync(
+                            target,
+                            completionSource.Task,
+                            wheelMonitor.WheelEvents,
+                            previewChanged: previewState =>
+                                UpdateProgress(progressWindow, previewState),
+                            throttleWheelInput: false,
+                            initialFrame: firstFrame,
+                            cancellationToken: cancellationSource.Token);
+                    }
+                    else
+                    {
+                        wheelMonitor.EnableControlledCaptureInput();
+                        // Clicks in motion states mean "pause" and must feel
+                        // immediate; only idle states still need the
+                        // double-click disambiguation delay.
+                        var latestControlledState =
+                            (int)ControlledScrollCaptureState.WaitingToStart;
+                        wheelMonitor.ConfigureClickDeferral(
+                            () => ScrollCaptureService
+                                .ShouldDeferControlledPointerClicks(
+                                    (ControlledScrollCaptureState)Volatile.Read(
+                                        ref latestControlledState)));
+                        progressWindow.QueueInteractionState(
+                            ControlledScrollCaptureState.WaitingToStart);
+                        result = await ScrollCaptureService.CaptureControlledAsync(
+                            target,
+                            completionSource.Task,
+                            wheelMonitor.PointerActions,
+                            stateChanged: interactionState =>
+                            {
+                                Volatile.Write(
+                                    ref latestControlledState,
+                                    (int)interactionState);
+                                progressWindow.QueueInteractionState(
+                                    interactionState);
+                            },
+                            previewChanged: previewState =>
+                                UpdateProgress(progressWindow, previewState),
+                            initialFrame: firstFrame,
+                            cancellationToken: cancellationSource.Token);
+                    }
                     var image = result.Image;
 
                     if (!result.IsSuccess || image is null)
@@ -648,7 +707,13 @@ public sealed class RegionCaptureCoordinator
                                 : null;
                             var editor = new ImageEditorWindow(
                                 editorImage,
-                                settings.SaveDirectory);
+                                settings.SaveDirectory,
+                                settings.ArrowStyle,
+                                _arrowStyleChanged,
+                                settings.CustomStrokeColor,
+                                _customStrokeColorChanged,
+                                settings.CustomColorPalette,
+                                _customColorPaletteChanged);
                             editor.Show();
                             completedImage = null;
 
@@ -750,7 +815,13 @@ public sealed class RegionCaptureCoordinator
         {
             var editor = new ImageEditorWindow(
                 preview.CloneImage(),
-                _settingsProvider().SaveDirectory);
+                _settingsProvider().SaveDirectory,
+                _settingsProvider().ArrowStyle,
+                _arrowStyleChanged,
+                _settingsProvider().CustomStrokeColor,
+                _customStrokeColorChanged,
+                _settingsProvider().CustomColorPalette,
+                _customColorPaletteChanged);
             editor.Show();
             preview.Close();
         };

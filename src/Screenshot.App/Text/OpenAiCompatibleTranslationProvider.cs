@@ -130,24 +130,30 @@ public sealed class OpenAiCompatibleTranslationProvider : ITranslationProvider
             out var requestedTranslations);
         if (parseStatus == SegmentTranslationParseStatus.InvalidFormat)
         {
-            return await TranslateSegmentsIndividuallyAsync(
-                segments,
-                indexesToTranslate,
-                sourceLanguage,
-                targetLanguage,
-                "翻译服务未按分段格式返回结果",
-                cancellationToken);
+            return segments.Count <= 3
+                ? await TranslateSegmentsIndividuallyAsync(
+                    segments,
+                    indexesToTranslate,
+                    sourceLanguage,
+                    targetLanguage,
+                    "翻译服务未按分段格式返回结果",
+                    cancellationToken)
+                : TranslationSegmentsResult.Failure(
+                    "翻译服务未按分段格式返回结果");
         }
 
         if (parseStatus == SegmentTranslationParseStatus.Incomplete)
         {
-            return await TranslateSegmentsIndividuallyAsync(
-                segments,
-                indexesToTranslate,
-                sourceLanguage,
-                targetLanguage,
-                "翻译服务返回的分段结果不完整",
-                cancellationToken);
+            return segments.Count <= 3
+                ? await TranslateSegmentsIndividuallyAsync(
+                    segments,
+                    indexesToTranslate,
+                    sourceLanguage,
+                    targetLanguage,
+                    "翻译服务返回的分段结果不完整",
+                    cancellationToken)
+                : TranslationSegmentsResult.Failure(
+                    "翻译服务返回的分段结果不完整");
         }
 
         if (Enumerable.Range(0, requestedSegments.Length).All(id =>

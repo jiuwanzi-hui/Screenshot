@@ -47,6 +47,15 @@ internal sealed class Cld3OfflineLanguageDetector : IOfflineLanguageDetector
 
         try
         {
+            // Distinctive scripts are more reliable than statistical language
+            // detection for short UI text. For example, a Chinese sentence
+            // containing "CPU" could otherwise be classified as English and
+            // then incorrectly treated as already translated to English.
+            if (DetectByScript(text) is { } scriptDetection)
+            {
+                return scriptDetection;
+            }
+
             lock (DetectorLock)
             {
                 var prediction = Detector.Value.PredictLanguage(text.Trim());
@@ -204,7 +213,7 @@ internal sealed class Cld3OfflineLanguageDetector : IOfflineLanguageDetector
     private static bool LooksTraditionalChinese(string text)
     {
         const string traditionalMarkers =
-            "體臺灣為這個們來時會裡後發與國學說對開關長間點無萬東車門風電書見頭實從還過現機樣應當經總區別種線數據網頁軟體設置下載顯示譯檔儲處錄圖標選擇確認錯誤";
+            "體臺灣為這個們來時會裡後發與國學說對開關長間點無萬東車門風電書見頭實從還過現機樣應當經總區別種線數據網頁軟設載顯譯檔儲處錄圖標選擇認錯誤";
         return text.Any(traditionalMarkers.Contains);
     }
 }

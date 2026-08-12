@@ -33,6 +33,35 @@ public enum FloatingCaptureClickBehavior
     CaptureAllScreens,
 }
 
+public enum ScrollCaptureMode
+{
+    Automatic,
+    ManualWheel,
+}
+
+public enum ArrowStyle
+{
+    Filled,
+    Hollow,
+}
+
+public enum CaptureToolbarFeature
+{
+    Shape,
+    Arrow,
+    Emoji,
+    Brush,
+    Text,
+    Mosaic,
+    VideoRecording,
+    Save,
+    ScrollCapture,
+    TextRecognition,
+    Translation,
+    PinImage,
+    UndoRedo,
+}
+
 public enum VideoRecordingCodec
 {
     H264,
@@ -110,6 +139,14 @@ public sealed record AppSettings
     public FloatingCaptureClickBehavior FloatingCaptureClickBehavior { get; init; } =
         FloatingCaptureClickBehavior.ShowSelection;
 
+    public ScrollCaptureMode ScrollCaptureMode { get; init; } =
+        ScrollCaptureMode.Automatic;
+
+    public ArrowStyle ArrowStyle { get; init; } = ArrowStyle.Filled;
+
+    public CaptureToolbarFeature[] VisibleCaptureToolbarFeatures { get; init; } =
+        Enum.GetValues<CaptureToolbarFeature>();
+
     public bool LaunchAtStartup { get; init; }
 
     public WindowCloseBehavior CloseBehavior { get; init; } =
@@ -125,6 +162,8 @@ public sealed record AppSettings
 
     public string OcrHotKey { get; init; } = "Ctrl+Alt+O";
 
+    public string TextTranslationHotKey { get; init; } = string.Empty;
+
     public string PinHotKey { get; init; } = "Ctrl+Alt+P";
 
     public string OpenSettingsHotKey { get; init; } = "Ctrl+Alt+Comma";
@@ -138,6 +177,19 @@ public sealed record AppSettings
     public int DefaultFontSize { get; init; } = 16;
 
     public string DefaultStrokeColor { get; init; } = "#007F73";
+
+    /// <summary>
+    /// The last color picked through the "custom color" swatch in the capture
+    /// toolbar or the editor. Empty until the user picks one; kept across
+    /// sessions so the swatch does not reset on every new capture.
+    /// </summary>
+    public string CustomStrokeColor { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Win32 COLORREF values shown in the custom-color slots of the system
+    /// color picker. Stored separately from the active custom swatch.
+    /// </summary>
+    public int[] CustomColorPalette { get; init; } = [];
 
     public int DefaultStrokeWidth { get; init; } = 3;
 
@@ -220,6 +272,18 @@ public sealed record AppSettings
             FloatingCaptureClickBehavior = Enum.IsDefined(FloatingCaptureClickBehavior)
                 ? FloatingCaptureClickBehavior
                 : defaults.FloatingCaptureClickBehavior,
+            ScrollCaptureMode = Enum.IsDefined(ScrollCaptureMode)
+                ? ScrollCaptureMode
+                : defaults.ScrollCaptureMode,
+            ArrowStyle = Enum.IsDefined(ArrowStyle)
+                ? ArrowStyle
+                : defaults.ArrowStyle,
+            VisibleCaptureToolbarFeatures =
+                (VisibleCaptureToolbarFeatures ??
+                    defaults.VisibleCaptureToolbarFeatures)
+                .Where(Enum.IsDefined)
+                .Distinct()
+                .ToArray(),
             VideoRecordingCodec = Enum.IsDefined(VideoRecordingCodec)
                 ? VideoRecordingCodec
                 : defaults.VideoRecordingCodec,
@@ -236,6 +300,7 @@ public sealed record AppSettings
             VideoRecordingHotKey = VideoRecordingHotKey?.Trim() ?? string.Empty,
             ScrollCaptureHotKey = ScrollCaptureHotKey?.Trim() ?? string.Empty,
             OcrHotKey = OcrHotKey?.Trim() ?? string.Empty,
+            TextTranslationHotKey = TextTranslationHotKey?.Trim() ?? string.Empty,
             PinHotKey = PinHotKey?.Trim() ?? string.Empty,
             OpenSettingsHotKey = OpenSettingsHotKey?.Trim() ?? string.Empty,
             MouseLongPressMilliseconds = Math.Clamp(
@@ -249,6 +314,11 @@ public sealed record AppSettings
             DefaultStrokeColor = string.IsNullOrWhiteSpace(DefaultStrokeColor)
                 ? defaults.DefaultStrokeColor
                 : DefaultStrokeColor.Trim(),
+            CustomStrokeColor = CustomStrokeColor?.Trim() ?? string.Empty,
+            CustomColorPalette = (CustomColorPalette ?? [])
+                .Where(color => color is >= 0 and <= 0xFFFFFF)
+                .Take(16)
+                .ToArray(),
             DefaultStrokeWidth = Math.Clamp(DefaultStrokeWidth, 1, 24),
             OcrLanguageTag = string.IsNullOrWhiteSpace(OcrLanguageTag)
                 ? defaults.OcrLanguageTag

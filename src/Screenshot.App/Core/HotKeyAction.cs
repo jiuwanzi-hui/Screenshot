@@ -8,4 +8,5 @@ public enum HotKeyAction
     PinImage = 4,
     OpenSettings = 5,
     VideoRecording = 6,
+    TranslateSelectedText = 7,
 }

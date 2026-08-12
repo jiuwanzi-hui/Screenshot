@@ -94,7 +94,11 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
 
         var translated = segments.ToArray();
         var eligibleIndexes = Enumerable.Range(0, segments.Count)
-            .Where(index => ShouldTranslateSegment(segments[index]))
+            .Where(index =>
+                ShouldTranslateSegment(segments[index]) &&
+                !TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(
+                    segments[index],
+                    targetLanguage))
             .ToArray();
         if (eligibleIndexes.Length == 0)
         {
@@ -134,7 +138,9 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
                         "所需的离线模型，请到设置的“翻译”页面下载当前目标语言包。");
                 }
 
-                var current = indexes.Select(index => segments[index]).ToArray();
+                var original = indexes.Select(index => segments[index]).ToArray();
+                var termProtector = TranslationTermProtector.Create(original);
+                var current = termProtector.Segments.ToArray();
                 foreach (var configurationPath in configurationPaths)
                 {
                     var engine = Engines.GetOrAdd(
@@ -161,9 +167,15 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
 
                 for (var index = 0; index < indexes.Length; index++)
                 {
-                    translated[indexes[index]] = string.IsNullOrWhiteSpace(current[index])
+                    var restored = termProtector.Restore(
+                        index,
+                        current[index]).Trim();
+                    restored = TranslationTechnicalTokenRestorer.Restore(
+                        original[index],
+                        restored);
+                    translated[indexes[index]] = string.IsNullOrWhiteSpace(restored)
                         ? segments[indexes[index]]
-                        : current[index].Trim();
+                        : restored;
                 }
             }
 
@@ -276,48 +288,49 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
         var combinedDetection = _languageDetector.Detect(string.Join(
             Environment.NewLine,
             eligibleIndexes.Select(index => segments[index])));
+        if (!combinedDetection.IsSuccess ||
+            combinedDetection.ErrorMessage is not null ||
+            !TranslationLanguageCatalog.IsSupportedSource(
+                combinedDetection.LanguageCode))
+        {
+            return new SourceLanguageResolution(
+                new Dictionary<int, string>(),
+                combinedDetection.ErrorMessage ??
+                "无法可靠识别整张截图的源语言，请手动选择源语言。");
+        }
+
         var languageByIndex = new Dictionary<int, string>();
         foreach (var index in eligibleIndexes)
         {
             var detection = _languageDetector.Detect(segments[index]);
-            var selected = SelectDetection(detection, combinedDetection);
-            if (!selected.IsSuccess || selected.ErrorMessage is not null ||
-                !TranslationLanguageCatalog.IsSupportedSource(selected.LanguageCode))
+            // A screenshot contains many short UI fragments. Per-line CLD3
+            // guesses are noisy and one bad guess used to abort the entire
+            // capture. Use the reliable whole-capture language by default;
+            // only a distinctive-script, fully reliable line may override it.
+            var letters = segments[index].Count(char.IsLetter);
+            var detectedLanguage = detection.IsSuccess &&
+                detection.ErrorMessage is null &&
+                detection.IsReliable &&
+                detection.Confidence >= 0.85d &&
+                letters >= 20 &&
+                TranslationLanguageCatalog.IsSupportedSource(
+                    detection.LanguageCode)
+                    ? detection.LanguageCode!
+                    : combinedDetection.LanguageCode!;
+            if (TranslationTargetLanguageMatcher.HasLatinNaturalLanguageClause(
+                    segments[index]) &&
+                string.Equals(
+                    detectedLanguage,
+                    "zh",
+                    StringComparison.OrdinalIgnoreCase))
             {
-                var preview = segments[index].Trim();
-                if (preview.Length > 24)
-                {
-                    preview = preview[..24] + "…";
-                }
-
-                return new SourceLanguageResolution(
-                    languageByIndex,
-                    $"无法自动识别“{preview}”的源语言。" +
-                    (selected.ErrorMessage ?? "请增加文字内容后重试。"));
+                detectedLanguage = "en";
             }
 
-            languageByIndex[index] = selected.LanguageCode!;
+            languageByIndex[index] = detectedLanguage;
         }
 
         return new SourceLanguageResolution(languageByIndex, null);
-    }
-
-    private static OfflineLanguageDetectionResult SelectDetection(
-        OfflineLanguageDetectionResult segment,
-        OfflineLanguageDetectionResult combined)
-    {
-        if (segment.IsSuccess &&
-            TranslationLanguageCatalog.IsSupportedSource(segment.LanguageCode) &&
-            (segment.IsReliable || segment.Confidence >= 0.70d))
-        {
-            return segment;
-        }
-
-        return combined.IsSuccess && combined.ErrorMessage is null &&
-               TranslationLanguageCatalog.IsSupportedSource(combined.LanguageCode) &&
-               (combined.IsReliable || combined.Confidence >= 0.70d)
-            ? combined
-            : segment;
     }
 
     private static bool ShouldTranslateSegment(string text)
@@ -327,27 +340,7 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
             return false;
         }
 
-        var value = text.Trim();
-        if (Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
-            uri.Scheme is "http" or "https" or "file")
-        {
-            return false;
-        }
-
-        if (value.Contains('\\') ||
-            (!value.Any(char.IsWhiteSpace) && value.Contains('/')))
-        {
-            return false;
-        }
-
-        if (value.Any(char.IsWhiteSpace))
-        {
-            return true;
-        }
-
-        var extension = Path.GetExtension(value);
-        return string.IsNullOrEmpty(extension) || extension.Length is < 2 or > 11 ||
-               !extension.AsSpan(1).ToArray().All(char.IsLetterOrDigit);
+        return !TranslationTargetLanguageMatcher.IsLikelyInvariant(text);
     }
 
     private sealed record SourceLanguageResolution(
