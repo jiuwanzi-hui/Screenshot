@@ -234,8 +234,8 @@
         </Style>
         <Style x:Key="SelectionResizeThumb" TargetType="Thumb">
             <Setter Property="Panel.ZIndex" Value="90" />
-            <Setter Property="Background" Value="#2EAFA5" />
-            <Setter Property="BorderBrush" Value="#075C59" />
+            <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppSubtleBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="ForceCursor" Value="True" />
             <Setter Property="Template">
@@ -271,22 +271,22 @@
                 IsHitTestVisible="False" />
         <Canvas>
             <Rectangle x:Name="TopMask"
-                       Fill="#70000000"
+                       Fill="#48000000"
                        IsHitTestVisible="False"
                        Panel.ZIndex="60"
                        Visibility="Collapsed" />
             <Rectangle x:Name="LeftMask"
-                       Fill="#70000000"
+                       Fill="#48000000"
                        IsHitTestVisible="False"
                        Panel.ZIndex="60"
                        Visibility="Collapsed" />
             <Rectangle x:Name="RightMask"
-                       Fill="#70000000"
+                       Fill="#48000000"
                        IsHitTestVisible="False"
                        Panel.ZIndex="60"
                        Visibility="Collapsed" />
             <Rectangle x:Name="BottomMask"
-                       Fill="#70000000"
+                       Fill="#48000000"
                        IsHitTestVisible="False"
                        Panel.ZIndex="60"
                        Visibility="Collapsed" />
@@ -294,14 +294,14 @@
                        Fill="Transparent"
                        IsHitTestVisible="False"
                        Panel.ZIndex="80"
-                       Stroke="#00A99D"
+                       Stroke="{DynamicResource AppAccentBrush}"
                        StrokeThickness="4"
                        Visibility="Collapsed" />
             <Rectangle x:Name="WindowSnapRectangle"
-                       Fill="#1800CFC1"
+                       Fill="#24000000"
                        IsHitTestVisible="False"
                        Panel.ZIndex="45"
-                       Stroke="#66FFF2"
+                       Stroke="{DynamicResource AppAccentBrush}"
                        StrokeThickness="3"
                        Visibility="Collapsed">
                 <Rectangle.Effect>
@@ -309,15 +309,15 @@
                                       Direction="0"
                                       Opacity="0.8"
                                       ShadowDepth="0"
-                                      Color="#00B8AC" />
+                                      Color="#000000" />
                 </Rectangle.Effect>
             </Rectangle>
             <Rectangle x:Name="SelectionRectangle"
                        Cursor="SizeAll"
-                       Fill="#18007F73"
+                       Fill="#16000000"
                        ForceCursor="True"
                        Panel.ZIndex="70"
-                       Stroke="#00A99D"
+                       Stroke="{DynamicResource AppAccentBrush}"
                        StrokeThickness="2"
                        Visibility="Collapsed"
                        MouseLeftButtonDown="OnSelectionRectangleMouseLeftButtonDown"
@@ -376,7 +376,7 @@
                        Fill="{x:Null}"
                        IsHitTestVisible="True"
                        Panel.ZIndex="80"
-                       Stroke="#66FFF2"
+                       Stroke="{DynamicResource AppAccentBrush}"
                        StrokeThickness="3"
                        Visibility="Collapsed"
                        MouseLeftButtonDown="OnInlineEditorOutlineMouseLeftButtonDown"
@@ -387,7 +387,7 @@
                                       Direction="0"
                                       Opacity="0.85"
                                       ShadowDepth="0"
-                                      Color="#00B8AC" />
+                                      Color="#000000" />
                 </Rectangle.Effect>
             </Rectangle>
 
@@ -511,22 +511,50 @@
                                            PreviewMouseLeftButtonDown="OnInlineShapeMenuArrowMouseDown" />
                             </Grid>
                         </RadioButton>
-                        <RadioButton GroupName="InlineEditorTool"
+                        <RadioButton x:Name="InlineArrowToolButton"
+                                     GroupName="InlineEditorTool"
                                      Checked="OnInlineEditorToolSelected"
                                      Style="{StaticResource InlineToolButton}"
                                      Tag="Arrow"
                                      ToolTip="箭头">
-                            <Path Data="{StaticResource ArrowIconGeometry}"
-                                  Style="{StaticResource InlineIconPath}" />
+                            <RadioButton.ContextMenu>
+                                <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
+                                    <MenuItem Header="实心箭头"
+                                              Tag="Filled"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnInlineArrowStyleMenuItemClick" />
+                                    <MenuItem Header="空心箭头"
+                                              Tag="Hollow"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnInlineArrowStyleMenuItemClick" />
+                                </ContextMenu>
+                            </RadioButton.ContextMenu>
+                            <Grid Width="27">
+                                <Path Width="17"
+                                      Height="17"
+                                      HorizontalAlignment="Left"
+                                      Data="{StaticResource ArrowIconGeometry}"
+                                      Style="{StaticResource InlineIconPath}" />
+                                <TextBlock HorizontalAlignment="Right"
+                                           VerticalAlignment="Center"
+                                           Cursor="Hand"
+                                           FontSize="9"
+                                           Foreground="{DynamicResource EditorToolbarIconBrush}"
+                                           Text="▾"
+                                           ToolTip="选择箭头样式"
+                                           PreviewMouseLeftButtonDown="OnInlineArrowMenuArrowMouseDown" />
+                            </Grid>
                         </RadioButton>
-                        <RadioButton GroupName="InlineEditorTool"
+                        <RadioButton x:Name="InlineEmojiToolButton"
+                                     GroupName="InlineEditorTool"
                                      Checked="OnInlineEditorToolSelected"
                                      Style="{StaticResource InlineToolButton}"
                                      Tag="Emoji"
                                      ToolTip="表情">
                             <editor:EmojiStickerImage Width="21" Height="21" Sticker="😊" />
                         </RadioButton>
-                        <RadioButton GroupName="InlineEditorTool"
+                        <RadioButton x:Name="InlineBrushToolButton"
+                                     GroupName="InlineEditorTool"
                                      Checked="OnInlineEditorToolSelected"
                                      Style="{StaticResource InlineToolButton}"
                                      Tag="Brush"
@@ -534,7 +562,8 @@
                             <Path Data="{StaticResource PenIconGeometry}"
                                   Style="{StaticResource InlineIconPath}" />
                         </RadioButton>
-                        <RadioButton GroupName="InlineEditorTool"
+                        <RadioButton x:Name="InlineTextToolButton"
+                                     GroupName="InlineEditorTool"
                                      Checked="OnInlineEditorToolSelected"
                                      Style="{StaticResource InlineToolButton}"
                                      Tag="Text"
@@ -542,7 +571,8 @@
                             <Path Data="{StaticResource TextIconGeometry}"
                                   Style="{StaticResource InlineIconPath}" />
                         </RadioButton>
-                        <RadioButton GroupName="InlineEditorTool"
+                        <RadioButton x:Name="InlineMosaicToolButton"
+                                     GroupName="InlineEditorTool"
                                      Checked="OnInlineEditorToolSelected"
                                      Style="{StaticResource InlineToolButton}"
                                      Tag="Mosaic"
@@ -580,7 +610,13 @@
                                 Style="{StaticResource InlineActionButton}"
                                 ToolTip="识别文字并在原位置选择复制">
                             <Button.ContextMenu>
-                                <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
+                                <ContextMenu Opened="OnOcrContextMenuOpened"
+                                             Style="{StaticResource ThemedContextMenuStyle}">
+                                    <MenuItem x:Name="CopyAllRecognizedTextMenuItem"
+                                              Header="识别并复制全部文字"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              ToolTipService.ShowOnDisabled="True"
+                                              Click="OnCopyAllRecognizedTextMenuItemClick" />
                                     <MenuItem Header="表格复制"
                                               Style="{StaticResource ThemedMenuItemStyle}"
                                               Click="OnCopyTableMenuItemClick" />

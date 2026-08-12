@@ -33,18 +33,28 @@ public sealed class SettingsStoreTests : IDisposable
             VideoRecordingCodec = VideoRecordingCodec.H265,
             VideoRecordingFrameRate = 60,
             VideoRecordingHotKey = "Ctrl+Alt+R",
+            TextTranslationHotKey = "Ctrl+Alt+T",
             ShowKeyboardInputInRecording = true,
             ShowMouseInputInRecording = true,
             ShowTaskbarIcon = true,
             ShowFloatingCaptureButton = true,
             FloatingCaptureClickBehavior =
                 FloatingCaptureClickBehavior.CaptureAllScreens,
+            ScrollCaptureMode = ScrollCaptureMode.ManualWheel,
+            ArrowStyle = ArrowStyle.Hollow,
+            CustomStrokeColor = "#123456",
+            CustomColorPalette = [0x123456, 0xABCDEF],
             CloseBehavior = WindowCloseBehavior.ExitApplication,
             MouseLongPressMilliseconds = 1150,
             MouseSideButtonsUseLongPress = true,
             OcrEngine = OcrEngineMode.PaddleOcrV6,
             OfflineTranslationQuality = OfflineTranslationQuality.Ultra,
             OfflineTranslationEngine = OfflineTranslationEngine.QwenLargeModel,
+            VisibleCaptureToolbarFeatures =
+            [
+                CaptureToolbarFeature.Text,
+                CaptureToolbarFeature.Save,
+            ],
         };
 
         store.Save(settings);
@@ -57,6 +67,14 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(
             FloatingCaptureClickBehavior.CaptureAllScreens,
             loadResult.Settings.FloatingCaptureClickBehavior);
+        Assert.Equal(
+            ScrollCaptureMode.ManualWheel,
+            loadResult.Settings.ScrollCaptureMode);
+        Assert.Equal(ArrowStyle.Hollow, loadResult.Settings.ArrowStyle);
+        Assert.Equal("#123456", loadResult.Settings.CustomStrokeColor);
+        Assert.Equal(
+            [0x123456, 0xABCDEF],
+            loadResult.Settings.CustomColorPalette);
         Assert.Equal(settings.CloseBehavior, loadResult.Settings.CloseBehavior);
         Assert.Equal(1150, loadResult.Settings.MouseLongPressMilliseconds);
         Assert.True(loadResult.Settings.MouseSideButtonsUseLongPress);
@@ -72,6 +90,7 @@ public sealed class SettingsStoreTests : IDisposable
             loadResult.Settings.VideoRecordingCodec);
         Assert.Equal(60, loadResult.Settings.VideoRecordingFrameRate);
         Assert.Equal("Ctrl+Alt+R", loadResult.Settings.VideoRecordingHotKey);
+        Assert.Equal("Ctrl+Alt+T", loadResult.Settings.TextTranslationHotKey);
         Assert.True(loadResult.Settings.ShowKeyboardInputInRecording);
         Assert.True(loadResult.Settings.ShowMouseInputInRecording);
         Assert.Equal(
@@ -80,6 +99,9 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(
             OfflineTranslationEngine.QwenLargeModel,
             loadResult.Settings.OfflineTranslationEngine);
+        Assert.Equal(
+            [CaptureToolbarFeature.Text, CaptureToolbarFeature.Save],
+            loadResult.Settings.VisibleCaptureToolbarFeatures);
     }
 
     [Fact]
@@ -146,6 +168,47 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(
             FloatingCaptureClickBehavior.ShowSelection,
             loadResult.Settings.FloatingCaptureClickBehavior);
+        Assert.Equal(
+            Enum.GetValues<CaptureToolbarFeature>(),
+            loadResult.Settings.VisibleCaptureToolbarFeatures);
+    }
+
+    [Fact]
+    public void PreservesAnExplicitlyEmptyCaptureToolbarAndNormalizesInvalidValues()
+    {
+        var empty = (AppSettings.CreateDefault() with
+        {
+            VisibleCaptureToolbarFeatures = [],
+        }).Normalize();
+        Assert.Empty(empty.VisibleCaptureToolbarFeatures);
+
+        var normalized = (AppSettings.CreateDefault() with
+        {
+            VisibleCaptureToolbarFeatures =
+            [
+                CaptureToolbarFeature.Text,
+                CaptureToolbarFeature.Text,
+                (CaptureToolbarFeature)999,
+                CaptureToolbarFeature.Save,
+            ],
+        }).Normalize();
+
+        Assert.Equal(
+            [CaptureToolbarFeature.Text, CaptureToolbarFeature.Save],
+            normalized.VisibleCaptureToolbarFeatures);
+    }
+
+    [Fact]
+    public void NullCaptureToolbarConfigurationUsesAllFeatures()
+    {
+        var normalized = (AppSettings.CreateDefault() with
+        {
+            VisibleCaptureToolbarFeatures = null!,
+        }).Normalize();
+
+        Assert.Equal(
+            Enum.GetValues<CaptureToolbarFeature>(),
+            normalized.VisibleCaptureToolbarFeatures);
     }
 
     public void Dispose()

@@ -213,8 +213,9 @@ public sealed class FloatingCaptureTests : IDisposable
             {
                 var button = Assert.IsType<Border>(
                     window.FindName("FloatingButton"));
+                Assert.Equal(3, button.ContextMenu!.Items.Count);
                 var menuItem = Assert.IsType<MenuItem>(
-                    Assert.Single(button.ContextMenu!.Items));
+                    window.FindName("CloseFloatingButtonMenuItem"));
                 menuItem.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
 
                 Assert.True(closeRequested);

@@ -1,11 +1,12 @@
 namespace Screenshot.App.Capture;
 
-// Automatic click-scroll only. Do not add manual wheel queue behavior here.
+// Manual wheel mode only. This driver consumes queued physical wheel intent;
+// automatic click-scroll uses ControlledScrollDriver instead.
 /// <summary>
 /// Moves the selected viewport with fixed-cadence wheel input. Each input batch
 /// restores the pointer immediately, so the driver never holds the user's mouse.
 /// </summary>
-internal sealed class ControlledScrollDriver : IAsyncDisposable
+internal sealed class ManualScrollDriver : IAsyncDisposable
 {
     internal const int TickIntervalMilliseconds = 20;
     internal const int CapturePixelsPerTick = 5;
@@ -14,6 +15,8 @@ internal sealed class ControlledScrollDriver : IAsyncDisposable
     internal const int ReturnPixelsPerTick = 20;
     internal const int PresentationSettleMilliseconds = 0;
     private const int ReturnWheelDelta = 40;
+    private const int MaximumQueuedCaptureSteps = 2400;
+
     private readonly ScrollCaptureTarget _target;
     private readonly CancellationTokenSource _cancellationSource = new();
     private readonly Task _runTask;
@@ -24,6 +27,8 @@ internal sealed class ControlledScrollDriver : IAsyncDisposable
     private int _inputStepCount;
     private int _remainingCaptureStepBudget = MaximumCaptureStepsPerFrame;
     private int _captureStepsSinceFrame;
+    private int _injectedWheelDeltaSinceSample;
+    private int _pendingCaptureSteps;
     private int _backpressureWaitTicksSinceFrame;
     private int _lastCapturedInputStepCount;
     private int _lastCapturedBackpressureWaitTicks;
@@ -32,7 +37,7 @@ internal sealed class ControlledScrollDriver : IAsyncDisposable
     private string? _inputFailureStage;
     private bool _disposed;
 
-    public ControlledScrollDriver(ScrollCaptureTarget target)
+    public ManualScrollDriver(ScrollCaptureTarget target)
     {
         ArgumentNullException.ThrowIfNull(target);
         _target = target;
@@ -55,6 +60,59 @@ internal sealed class ControlledScrollDriver : IAsyncDisposable
 
     internal int LastCapturedBackpressureWaitTicks => Volatile.Read(
         ref _lastCapturedBackpressureWaitTicks);
+
+    internal bool HasPendingCaptureInput =>
+        Volatile.Read(ref _pendingCaptureSteps) != 0;
+
+    internal int PendingCaptureStepCount =>
+        Math.Abs(Volatile.Read(ref _pendingCaptureSteps));
+
+    internal ScrollCaptureDirection? PendingCaptureDirection =>
+        Volatile.Read(ref _pendingCaptureSteps) switch
+        {
+            > 0 => ScrollCaptureDirection.Up,
+            < 0 => ScrollCaptureDirection.Down,
+            _ => null,
+        };
+
+    internal void QueueCaptureInput(int wheelDelta)
+    {
+        if (wheelDelta == 0)
+        {
+            return;
+        }
+
+        var direction = Math.Sign(wheelDelta);
+        var wheelNotches = Math.Max(1, Math.Abs(wheelDelta) / 120);
+        var requestedSteps = Math.Min(
+            MaximumQueuedCaptureSteps,
+            wheelNotches * MaximumCaptureStepsPerFrame);
+        lock (_inputGate)
+        {
+            if (_pendingCaptureSteps != 0 &&
+                Math.Sign(_pendingCaptureSteps) != direction)
+            {
+                // A real reversal must react immediately; unfinished travel in
+                // the old direction is stale user intent, not work to drain.
+                _pendingCaptureSteps = 0;
+            }
+
+            _pendingCaptureSteps = Math.Clamp(
+                _pendingCaptureSteps + (direction * requestedSteps),
+                -MaximumQueuedCaptureSteps,
+                MaximumQueuedCaptureSteps);
+        }
+    }
+
+    internal int TakeInjectedWheelDelta()
+    {
+        lock (_inputGate)
+        {
+            var delta = _injectedWheelDeltaSinceSample;
+            _injectedWheelDeltaSinceSample = 0;
+            return delta;
+        }
+    }
 
     internal void RequestBoundaryProbe()
     {
@@ -178,6 +236,13 @@ internal sealed class ControlledScrollDriver : IAsyncDisposable
                     continue;
                 }
 
+                if (!fastReturn &&
+                    (_pendingCaptureSteps == 0 ||
+                     Math.Sign(_pendingCaptureSteps) != direction))
+                {
+                    continue;
+                }
+
                 if (!fastReturn)
                 {
                     _remainingCaptureStepBudget--;
@@ -193,6 +258,8 @@ internal sealed class ControlledScrollDriver : IAsyncDisposable
                 else if (injected && !fastReturn)
                 {
                     _captureStepsSinceFrame++;
+                    _injectedWheelDeltaSinceSample += wheelDelta;
+                    _pendingCaptureSteps -= direction;
                 }
             }
 

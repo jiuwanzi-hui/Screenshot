@@ -17,8 +17,9 @@
         WindowStyle="None"
         PreviewMouseRightButtonDown="OnPreviewMouseRightButtonDown"
         PreviewMouseRightButtonUp="OnPreviewMouseRightButtonUp">
-    <Border Background="#E6142830"
-            BorderBrush="#7A5BBDB5"
+    <Border x:Name="ProgressShell"
+            Background="{DynamicResource AppPanelBackgroundBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
             BorderThickness="1"
             CornerRadius="6">
         <Border.Effect>
@@ -38,26 +39,28 @@
                 <TextBlock x:Name="StatusText"
                            FontSize="15"
                            FontWeight="SemiBold"
-                           Foreground="#E0F4F1"
+                            Foreground="{DynamicResource AppTextPrimaryBrush}"
                            Text="滚动截图 · 实时预览" />
                 <TextBlock x:Name="FrameCountText"
                            Margin="0,3,0,0"
                            FontSize="12"
-                           Foreground="#91C8C5"
+                            Foreground="{DynamicResource AppTextSecondaryBrush}"
                            Text="1 帧 · 上 0 · 下 0" />
                 <TextBlock x:Name="InstructionText"
                            Margin="0,3,0,0"
                            FontSize="11"
-                           Foreground="#B8DDD9"
+                            Foreground="{DynamicResource AppMutedTextBrush}"
                            Text="单击向下；双击向上；右键取消"
                            TextTrimming="CharacterEllipsis" />
             </StackPanel>
 
-            <Border Grid.Row="1"
+            <Border x:Name="PreviewFrame"
+                    Grid.Row="1"
                     Margin="10,0"
-                    Background="#B51B3037"
-                    BorderBrush="#4F738789"
-                    BorderThickness="1">
+                    Background="{DynamicResource ImageEditorViewportBackgroundBrush}"
+                    BorderBrush="{DynamicResource AppSubtleBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6">
                 <!-- The preview is a global map of the whole stitched image.
                      The window grows toward the work-area height as the image
                      grows, so the Uniform fit stays as wide and readable as
@@ -77,25 +80,25 @@
                 <Button Width="64"
                         Height="34"
                         Margin="0,0,8,0"
-                        Background="#D91A3037"
-                        BorderBrush="#5C7A9292"
-                        Foreground="#D9F5F1"
+                        Background="{DynamicResource AppInputBackgroundBrush}"
+                        BorderBrush="{DynamicResource AppSubtleBorderBrush}"
+                        Foreground="{DynamicResource AppControlForegroundBrush}"
                         Click="OnCancelClick"
                         Content="取消"
                         ToolTip="取消滚动截图" />
                 <Button Width="56"
                         Height="34"
                         Margin="0,0,8,0"
-                        Background="#D91A3037"
-                        BorderBrush="#5C7A9292"
-                        Foreground="#D9F5F1"
+                        Background="{DynamicResource AppInputBackgroundBrush}"
+                        BorderBrush="{DynamicResource AppSubtleBorderBrush}"
+                        Foreground="{DynamicResource AppControlForegroundBrush}"
                         Click="OnEditClick"
                         Content="编辑"
                         ToolTip="完成并进入详情编辑" />
                 <Button Width="36"
                         Height="34"
-                        Background="#2EAFA5"
-                        BorderBrush="#8AE1D8D0"
+                        Background="{DynamicResource AppAccentBrush}"
+                        BorderBrush="{DynamicResource AppAccentBrush}"
                         Click="OnCompleteClick"
                         Foreground="#FFFFFF"
                         ToolTip="复制并完成滚动截图">

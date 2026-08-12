@@ -20,6 +20,7 @@ public partial class CapturePreviewWindow : Window
     private bool _fitToWidth = true;
     private bool _resizeWindowToImage;
     private bool _fitUpdatePending;
+    private bool _isApplyingFit;
     private bool _isPanning;
     private ScreenRegion? _pendingPositionRegion;
     private System.Windows.Point _panStartPoint;
@@ -185,6 +186,7 @@ public partial class CapturePreviewWindow : Window
         SizeChangedEventArgs e)
     {
         if (_fitToWidth &&
+            !_isApplyingFit &&
             Math.Abs(e.NewSize.Width - e.PreviousSize.Width) > 0.1)
         {
             QueueFitToWidth();
@@ -195,7 +197,9 @@ public partial class CapturePreviewWindow : Window
         object sender,
         ScrollChangedEventArgs e)
     {
-        if (_fitToWidth && Math.Abs(e.ViewportWidthChange) > 0.1)
+        if (_fitToWidth &&
+            !_isApplyingFit &&
+            Math.Abs(e.ViewportWidthChange) > 0.1)
         {
             QueueFitToWidth();
         }
@@ -225,14 +229,23 @@ public partial class CapturePreviewWindow : Window
                     viewportWidth = PreviewScrollViewer.ActualWidth;
                 }
 
-                SetZoom(CalculateFitWidthZoom(
-                    viewportWidth,
-                    _capturedImage.Preview.PixelWidth));
-                PreviewScrollViewer.ScrollToHorizontalOffset(0);
-                if (_resizeWindowToImage)
+                _isApplyingFit = true;
+                try
                 {
-                    PreviewScrollViewer.UpdateLayout();
-                    ResizeWindowToImageHeight();
+                    SetZoom(CalculateFitWidthZoom(
+                        viewportWidth,
+                        _capturedImage.Preview.PixelWidth));
+                    PreviewScrollViewer.ScrollToHorizontalOffset(0);
+                    if (_resizeWindowToImage)
+                    {
+                        PreviewScrollViewer.UpdateLayout();
+                        ResizeWindowToImageHeight();
+                        _resizeWindowToImage = false;
+                    }
+                }
+                finally
+                {
+                    _isApplyingFit = false;
                 }
             });
     }
@@ -245,12 +258,16 @@ public partial class CapturePreviewWindow : Window
         var maximumHeight = Math.Max(
             MinHeight,
             (workArea.Height / dpi.DpiScaleY) - 24);
-        Height = CalculateAdaptiveWindowHeight(
+        var nextHeight = CalculateAdaptiveWindowHeight(
             ActualHeight,
             PreviewScrollViewer.ActualHeight,
             imageHeight,
             MinHeight,
             maximumHeight);
+        if (Math.Abs(nextHeight - Height) >= 1)
+        {
+            Height = nextHeight;
+        }
     }
 
     private void OnPreviewMouseWheel(object sender, MouseWheelEventArgs e)

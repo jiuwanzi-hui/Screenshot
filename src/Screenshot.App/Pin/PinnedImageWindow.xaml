@@ -16,15 +16,19 @@
         WindowStartupLocation="CenterScreen"
         WindowStyle="None">
     <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="../Themes/ThemedContextMenus.xaml" />
+            </ResourceDictionary.MergedDictionaries>
         <Style x:Key="PinnedCommandButton" TargetType="Button">
             <Setter Property="Height" Value="24" />
             <Setter Property="MinWidth" Value="42" />
             <Setter Property="Padding" Value="7,1" />
             <Setter Property="Margin" Value="0,0,5,0" />
-            <Setter Property="Background" Value="#D9253B40" />
-            <Setter Property="BorderBrush" Value="#5C7A9292" />
+            <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppSubtleBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Foreground" Value="#D9F5F1" />
+            <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -40,8 +44,8 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="CommandBorder" Property="Background" Value="#E6335257" />
-                                <Setter TargetName="CommandBorder" Property="BorderBrush" Value="#8A68C7BF" />
+                                <Setter TargetName="CommandBorder" Property="Background" Value="{DynamicResource AppAccentMutedBrush}" />
+                                <Setter TargetName="CommandBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="CommandBorder" Property="Opacity" Value="0.72" />
@@ -59,7 +63,7 @@
             <Setter Property="Height" Value="24" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#91C8C5" />
+            <Setter Property="Foreground" Value="{DynamicResource AppTextSecondaryBrush}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
@@ -92,7 +96,7 @@
                     <ControlTemplate TargetType="Slider">
                         <Grid VerticalAlignment="Center">
                             <Border Height="4"
-                                    Background="#405C7472"
+                                    Background="{DynamicResource ImageEditorSliderTrackBrush}"
                                     CornerRadius="2" />
                             <Track x:Name="PART_Track"
                                    Height="14"
@@ -104,7 +108,7 @@
                                             <ControlTemplate TargetType="RepeatButton">
                                                 <Border Height="4"
                                                         VerticalAlignment="Center"
-                                                        Background="#2EAFA5"
+                                                        Background="{DynamicResource AppAccentBrush}"
                                                         CornerRadius="2" />
                                             </ControlTemplate>
                                         </RepeatButton.Template>
@@ -124,8 +128,8 @@
                                 <Track.Thumb>
                                     <Thumb Width="12"
                                            Height="12"
-                                           Background="#8FE7DE"
-                                           BorderBrush="#075C59"
+                                           Background="{DynamicResource AppAccentBrush}"
+                                           BorderBrush="{DynamicResource ImageEditorSliderThumbBorderBrush}"
                                            BorderThickness="1"
                                            Cursor="Hand">
                                         <Thumb.Template>
@@ -155,12 +159,24 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        </ResourceDictionary>
     </Window.Resources>
-    <Border Margin="12"
-            Background="#F0142830"
-            BorderBrush="#8A68C7BF"
+    <Border x:Name="PinnedShell"
+            Margin="12"
+            Background="{DynamicResource AppPanelBackgroundBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
             BorderThickness="1"
             CornerRadius="8">
+        <Border.ContextMenu>
+            <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
+                <MenuItem Click="OnOpenSettingsClick"
+                          Header="打开设置"
+                          Style="{StaticResource ThemedMenuItemStyle}" />
+                <MenuItem Click="OnCloseFromContextMenuClick"
+                          Header="关闭钉图"
+                          Style="{StaticResource ThemedMenuItemStyle}" />
+            </ContextMenu>
+        </Border.ContextMenu>
         <Border.Effect>
             <DropShadowEffect BlurRadius="18"
                               Direction="0"
@@ -174,9 +190,10 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <Border Grid.Row="0"
-                    Background="#E61A3037"
-                    BorderBrush="#526D918E"
+            <Border x:Name="PinnedHeader"
+                    Grid.Row="0"
+                    Background="{DynamicResource AppSidebarBackgroundBrush}"
+                    BorderBrush="{DynamicResource AppSeparatorBrush}"
                     BorderThickness="0,0,0,1"
                     CornerRadius="7,7,0,0"
                     Cursor="SizeAll"
@@ -215,7 +232,7 @@
                                Margin="9,0,8,0"
                                VerticalAlignment="Center"
                                FontSize="12"
-                               Foreground="#E0F4F1"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
                                TextTrimming="CharacterEllipsis"
                                Text="钉图" />
                 </DockPanel>
@@ -223,7 +240,7 @@
 
             <Border x:Name="ImageSurface"
                     Grid.Row="1"
-                    Background="#F00F171A"
+                    Background="{DynamicResource ImageEditorViewportBackgroundBrush}"
                     CornerRadius="0,0,7,7"
                     Cursor="SizeAll"
                     ClipToBounds="True"

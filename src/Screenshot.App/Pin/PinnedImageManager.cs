@@ -10,15 +10,18 @@ public sealed class PinnedImageManager : IDisposable
         _recognizeTextAsync;
     private readonly Func<OcrRecognitionResult, Task<TranslationSegmentsResult>>?
         _translateTextAsync;
+    private readonly Action? _openSettings;
     private bool _disposed;
 
     public PinnedImageManager(
         Func<CapturedImage, Task<OcrRecognitionResult>>? recognizeTextAsync = null,
         Func<OcrRecognitionResult, Task<TranslationSegmentsResult>>?
-            translateTextAsync = null)
+            translateTextAsync = null,
+        Action? openSettings = null)
     {
         _recognizeTextAsync = recognizeTextAsync;
         _translateTextAsync = translateTextAsync;
+        _openSettings = openSettings;
     }
 
     public int Count => _windows.Count;
@@ -37,6 +40,7 @@ public sealed class PinnedImageManager : IDisposable
                 _recognizeTextAsync,
                 _translateTextAsync);
             window.Closed += OnPinnedImageWindowClosed;
+            window.SettingsRequested += OnPinnedImageSettingsRequested;
             _windows.Add(window);
             window.Show();
         }
@@ -45,6 +49,7 @@ public sealed class PinnedImageManager : IDisposable
             if (window is not null)
             {
                 window.Closed -= OnPinnedImageWindowClosed;
+                window.SettingsRequested -= OnPinnedImageSettingsRequested;
                 _windows.Remove(window);
             }
 
@@ -65,6 +70,7 @@ public sealed class PinnedImageManager : IDisposable
         foreach (var window in _windows.ToArray())
         {
             window.Closed -= OnPinnedImageWindowClosed;
+            window.SettingsRequested -= OnPinnedImageSettingsRequested;
             window.Close();
         }
 
@@ -79,6 +85,12 @@ public sealed class PinnedImageManager : IDisposable
         }
 
         window.Closed -= OnPinnedImageWindowClosed;
+        window.SettingsRequested -= OnPinnedImageSettingsRequested;
         _windows.Remove(window);
+    }
+
+    private void OnPinnedImageSettingsRequested(object? sender, EventArgs e)
+    {
+        _openSettings?.Invoke();
     }
 }

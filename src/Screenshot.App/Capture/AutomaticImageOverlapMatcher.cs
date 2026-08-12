@@ -4,9 +4,8 @@ using System.Runtime.InteropServices;
 
 namespace Screenshot.App.Capture;
 
-public sealed record ImageOverlapMatch(int OverlapRows, double Confidence, int HorizontalOffset = 0);
-
-public static class ImageOverlapMatcher
+// Frozen matching implementation for automatic click-scroll capture only.
+internal static class AutomaticImageOverlapMatcher
 {
     internal static int FindStationaryLeadingRows(
         Bitmap anchorFrame,

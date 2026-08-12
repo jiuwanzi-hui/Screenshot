@@ -1,12 +1,49 @@
 using Screenshot.App.Capture;
 using Screenshot.App.Pin;
 using Screenshot.App.Text;
+using Screenshot.App.Core;
+using Screenshot.App.Infrastructure;
 using System.Windows.Controls;
+using System.Windows.Media;
 
 namespace Screenshot.App.Tests;
 
 public sealed class PinnedImageWindowTests
 {
+    [Fact]
+    public void PinChromeChangesWithTheSelectedApplicationTheme()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            AppThemeManager.ApplySettingsPalette(
+                System.Windows.Application.Current.Resources,
+                AppTheme.ForestNight);
+            using var image = new CapturedImage(new System.Drawing.Bitmap(80, 60));
+            var window = new PinnedImageWindow(image.Clone());
+            try
+            {
+                var shell = Assert.IsType<Border>(window.FindName("PinnedShell"));
+                var dark = Assert.IsType<LinearGradientBrush>(shell.Background)
+                    .GradientStops[0].Color;
+
+                AppThemeManager.ApplySettingsPalette(
+                    System.Windows.Application.Current.Resources,
+                    AppTheme.CoralSky);
+                var light = Assert.IsType<LinearGradientBrush>(shell.Background)
+                    .GradientStops[0].Color;
+
+                Assert.NotEqual(dark, light);
+            }
+            finally
+            {
+                window.Close();
+                AppThemeManager.ApplySettingsPalette(
+                    System.Windows.Application.Current.Resources,
+                    AppTheme.AuroraMist);
+            }
+        });
+    }
+
     [Fact]
     public async Task AutomaticallyRecognizesAndDisplaysSelectableText()
     {

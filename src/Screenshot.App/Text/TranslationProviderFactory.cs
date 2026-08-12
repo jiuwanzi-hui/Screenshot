@@ -155,38 +155,57 @@ public static class TranslationProviderFactory
         ITranslationCredentialStore credentialStore,
         HttpClient httpClient,
         OfflineTranslationModelManager? offlineModelManager = null,
-        LocalLargeTranslationModelManager? localLargeModelManager = null)
+        LocalLargeTranslationModelManager? localLargeModelManager = null,
+        bool preferFastOffline = false)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(credentialStore);
         ArgumentNullException.ThrowIfNull(httpClient);
 
-        ITranslationProvider CreateProvider(TranslationProviderKind provider)
+        IEnumerable<ITranslationProvider> CreateProviders(
+            TranslationProviderKind provider)
         {
             if (provider == TranslationProviderKind.Offline)
             {
-                return settings.OfflineTranslationEngine ==
-                       OfflineTranslationEngine.QwenLargeModel
-                    ? new LocalLargeModelTranslationProvider(
-                        localLargeModelManager ??
-                        LocalLargeTranslationModelManager.Shared)
-                    : new OfflineTranslationProvider(
-                        offlineModelManager ??
-                        OfflineTranslationModelManager.Shared,
-                        settings.OfflineTranslationQuality);
+                var bergamot = new OfflineTranslationProvider(
+                    offlineModelManager ??
+                    OfflineTranslationModelManager.Shared,
+                    preferFastOffline
+                        ? OfflineTranslationQuality.Fast
+                        : settings.OfflineTranslationQuality);
+                if (settings.OfflineTranslationEngine ==
+                    OfflineTranslationEngine.QwenLargeModel)
+                {
+                    // Bergamot is a purpose-built translation engine and is
+                    // both faster and more deterministic for installed
+                    // language pairs. Qwen remains available when a pair is
+                    // missing or Bergamot cannot translate the input.
+                    return
+                    [
+                        bergamot,
+                        new LocalLargeModelTranslationProvider(
+                            localLargeModelManager ??
+                            LocalLargeTranslationModelManager.Shared),
+                    ];
+                }
+
+                return [bergamot];
             }
 
             var providerId = ResolveProviderId(settings.TranslationProvider);
-            return new OpenAiCompatibleTranslationProvider(
-                settings.TranslationEndpoint,
-                settings.TranslationModel,
-                credentialStore.GetApiKey(providerId),
-                httpClient);
+            return
+            [
+                new OpenAiCompatibleTranslationProvider(
+                    settings.TranslationEndpoint,
+                    settings.TranslationModel,
+                    credentialStore.GetApiKey(providerId),
+                    httpClient),
+            ];
         }
 
         return new OrderedTranslationProvider(
             settings.ResolveTranslationProviderPriority()
-                .Select(CreateProvider)
+                .SelectMany(CreateProviders)
                 .ToArray());
     }
 }

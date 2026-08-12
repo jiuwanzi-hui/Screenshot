@@ -17,6 +17,10 @@ public static class HotKeyConfiguration
         AddBinding(bindings, HotKeyAction.RegionCapture, settings.RegionCaptureHotKey);
         AddBinding(bindings, HotKeyAction.VideoRecording, settings.VideoRecordingHotKey);
         AddBinding(bindings, HotKeyAction.RecognizeText, settings.OcrHotKey);
+        AddBinding(
+            bindings,
+            HotKeyAction.TranslateSelectedText,
+            settings.TextTranslationHotKey);
         AddBinding(bindings, HotKeyAction.PinImage, settings.PinHotKey);
         AddBinding(bindings, HotKeyAction.OpenSettings, settings.OpenSettingsHotKey);
         return bindings;
@@ -78,6 +82,7 @@ public static class HotKeyConfiguration
             HotKeyAction.VideoRecording => "视频录制",
             HotKeyAction.ScrollCapture => "长截图",
             HotKeyAction.RecognizeText => "翻译",
+            HotKeyAction.TranslateSelectedText => "选中文字翻译",
             HotKeyAction.PinImage => "钉图",
             HotKeyAction.OpenSettings => "打开设置",
             _ => action.ToString(),

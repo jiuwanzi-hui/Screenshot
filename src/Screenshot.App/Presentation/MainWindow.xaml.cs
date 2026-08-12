@@ -130,6 +130,7 @@ public partial class MainWindow : Window, IDisposable
         UpdateCloseBehaviorSelection(initialSettings.CloseBehavior);
         UpdateFloatingCaptureClickBehaviorSelection(
             initialSettings.FloatingCaptureClickBehavior);
+        UpdateScrollCaptureModeSelection(initialSettings.ScrollCaptureMode);
         LoadTranslationApiKey(
             TranslationProviderFactory.ResolveProviderId(
                 initialSettings.TranslationProvider));
@@ -187,11 +188,42 @@ public partial class MainWindow : Window, IDisposable
         ApplySettingsImmediately();
     }
 
+    internal void SaveArrowStyle(ArrowStyle arrowStyle)
+    {
+        _settingsViewModel.ArrowStyle = arrowStyle;
+        ApplySettingsImmediately();
+    }
+
+    internal void SaveCustomStrokeColor(string colorText)
+    {
+        _settingsViewModel.CustomStrokeColor = colorText?.Trim() ?? string.Empty;
+        ApplySettingsImmediately();
+    }
+
+    internal void SaveCustomColorPalette(int[] colors)
+    {
+        _settingsViewModel.CustomColorPalette = colors?.ToArray() ?? [];
+        ApplySettingsImmediately();
+    }
+
+    internal void SaveTranslationTargetLanguage(string languageTag)
+    {
+        if (string.IsNullOrWhiteSpace(languageTag))
+        {
+            return;
+        }
+
+        _settingsViewModel.TranslationTargetLanguage = languageTag.Trim();
+        ApplySettingsImmediately();
+    }
+
     public event EventHandler<SettingsSavedEventArgs>? SettingsSaved;
 
     public event EventHandler? ExitRequested;
 
     public event EventHandler? UpdateInstallationStarted;
+
+    public event EventHandler? TextTranslationRequested;
 
     public bool IsCapturingHotKey { get; private set; }
 
@@ -205,6 +237,22 @@ public partial class MainWindow : Window, IDisposable
             WindowState = WindowState.Normal;
         }
 
+        Activate();
+    }
+
+    public void OpenTranslationModelSettings(string? targetLanguage = null)
+    {
+        if (!string.IsNullOrWhiteSpace(targetLanguage))
+        {
+            SaveTranslationTargetLanguage(targetLanguage);
+        }
+
+        SettingsNavigation.SelectedIndex = 3;
+        ShowSettingsSection(3);
+        Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.Input,
+            () => DownloadOfflineModelButton?.Focus());
+        Show();
         Activate();
     }
 
@@ -1592,6 +1640,28 @@ public partial class MainWindow : Window, IDisposable
         FloatingCaptureClickBehaviorComboBox.SelectedValue = behavior;
     }
 
+    private void OnScrollCaptureModeSelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || _isApplyingSettings ||
+            sender is not System.Windows.Controls.ComboBox
+            {
+                SelectedItem: ComboBoxItem { Tag: ScrollCaptureMode mode },
+            })
+        {
+            return;
+        }
+
+        _settingsViewModel.ScrollCaptureMode = mode;
+        ApplySettingsImmediately();
+    }
+
+    private void UpdateScrollCaptureModeSelection(ScrollCaptureMode mode)
+    {
+        ScrollCaptureModeComboBox.SelectedValue = mode;
+    }
+
     private void OnSettingEditorLostKeyboardFocus(
         object sender,
         KeyboardFocusChangedEventArgs e)
@@ -1810,6 +1880,9 @@ public partial class MainWindow : Window, IDisposable
                 break;
             case nameof(SettingsViewModel.OcrHotKey):
                 _settingsViewModel.OcrHotKey = e.Gesture;
+                break;
+            case nameof(SettingsViewModel.TextTranslationHotKey):
+                _settingsViewModel.TextTranslationHotKey = e.Gesture;
                 break;
             case nameof(SettingsViewModel.PinHotKey):
                 _settingsViewModel.PinHotKey = e.Gesture;
@@ -2056,6 +2129,10 @@ public partial class MainWindow : Window, IDisposable
             case nameof(SettingsViewModel.OcrHotKey):
                 _settingsViewModel.OcrHotKey = _savedSettings.OcrHotKey;
                 break;
+            case nameof(SettingsViewModel.TextTranslationHotKey):
+                _settingsViewModel.TextTranslationHotKey =
+                    _savedSettings.TextTranslationHotKey;
+                break;
             case nameof(SettingsViewModel.PinHotKey):
                 _settingsViewModel.PinHotKey = _savedSettings.PinHotKey;
                 break;
@@ -2077,12 +2154,19 @@ public partial class MainWindow : Window, IDisposable
                 HotKeyAction.ScrollCapture,
             nameof(SettingsViewModel.OcrHotKey) =>
                 HotKeyAction.RecognizeText,
+            nameof(SettingsViewModel.TextTranslationHotKey) =>
+                HotKeyAction.TranslateSelectedText,
             nameof(SettingsViewModel.PinHotKey) =>
                 HotKeyAction.PinImage,
             nameof(SettingsViewModel.OpenSettingsHotKey) =>
                 HotKeyAction.OpenSettings,
             _ => null,
         };
+    }
+
+    private void OnOpenTextTranslationClick(object sender, RoutedEventArgs e)
+    {
+        TextTranslationRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void ShowSettingsSection(int sectionIndex)

@@ -243,6 +243,10 @@ public partial class FloatingCaptureWindow : Window
 
     public event EventHandler? HistoryRequested;
 
+    public event EventHandler? SettingsRequested;
+
+    public event EventHandler? TextTranslationRequested;
+
     public event EventHandler? CloseRequested;
 
     public void SetCaptureInProgress(bool isInProgress)
@@ -677,6 +681,18 @@ public partial class FloatingCaptureWindow : Window
     {
         FeatureMenuPopup.IsOpen = false;
         CloseRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnOpenSettingsClick(object sender, RoutedEventArgs e)
+    {
+        FeatureMenuPopup.IsOpen = false;
+        SettingsRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnOpenTextTranslationClick(object sender, RoutedEventArgs e)
+    {
+        FeatureMenuPopup.IsOpen = false;
+        TextTranslationRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private DrawingRectangle GetButtonScreenBounds()

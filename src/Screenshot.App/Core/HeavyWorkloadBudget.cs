@@ -7,6 +7,16 @@ internal static class HeavyWorkloadBudget
     internal static int CpuThreadCount =>
         CalculateCpuThreadCount(Environment.ProcessorCount);
 
+    /// <summary>
+    /// Thread budget for a user-visible blocking operation such as
+    /// translating a capture: the user is actively waiting, so borrow nearly
+    /// every core for the duration and let the engine release them when the
+    /// call completes. Background-friendly work keeps using
+    /// <see cref="CpuThreadCount"/>.
+    /// </summary>
+    internal static int BurstCpuThreadCount =>
+        CalculateBurstCpuThreadCount(Environment.ProcessorCount);
+
     internal static int CalculateCpuThreadCount(int logicalProcessorCount)
     {
         if (logicalProcessorCount <= 2)
@@ -19,5 +29,12 @@ internal static class HeavyWorkloadBudget
         return Math.Min(
             logicalProcessorCount - 1,
             Math.Clamp(logicalProcessorCount / 4, 2, MaximumCpuThreads));
+    }
+
+    internal static int CalculateBurstCpuThreadCount(int logicalProcessorCount)
+    {
+        // Leave two logical cores for the UI thread and the compositor so the
+        // waiting animation stays responsive while the model saturates the rest.
+        return Math.Max(1, logicalProcessorCount - 2);
     }
 }

@@ -174,6 +174,23 @@ public sealed class ScrollCaptureProgressWindowTests
         Assert.True(ScreenRegion.Intersect(previewBounds, captureRegion).IsEmpty);
     }
 
+    [Fact]
+    public void ScalesPreviewWidthWithMonitorDpiSoButtonsAreNotClipped()
+    {
+        // Field report: at 200% scaling on a 3200x2000 display the window was
+        // sized as 300 raw pixels = 150 DIP, clipping the action buttons. The
+        // layout needs 300 DIP, i.e. 600 physical pixels on that monitor.
+        var captureRegion = new ScreenRegion(200, 200, 1200, 800);
+        var monitorBounds = new ScreenRegion(0, 0, 3200, 2000);
+
+        var width = GetPreviewPhysicalWidth(
+            captureRegion,
+            monitorBounds,
+            dpiScaleX: 2.0);
+
+        Assert.Equal(600, width);
+    }
+
     private static ScreenRegion ChoosePreviewBounds(
         ScreenRegion captureRegion,
         ScreenRegion monitorBounds,
@@ -184,14 +201,17 @@ public sealed class ScrollCaptureProgressWindowTests
             "ChoosePreviewBounds",
             BindingFlags.Static | BindingFlags.NonPublic);
         Assert.NotNull(method);
+        // All layout expectations in this file assume a 100% scale monitor,
+        // where the minimum usable width is 200 physical pixels.
         return Assert.IsType<ScreenRegion>(method.Invoke(
             null,
-            [captureRegion, monitorBounds, width, height]));
+            [captureRegion, monitorBounds, width, height, 200]));
     }
 
     private static int GetPreviewPhysicalWidth(
         ScreenRegion captureRegion,
-        ScreenRegion monitorBounds)
+        ScreenRegion monitorBounds,
+        double dpiScaleX = 1.0)
     {
         var method = typeof(ScrollCaptureProgressWindow).GetMethod(
             "GetPreviewPhysicalWidth",
@@ -199,6 +219,6 @@ public sealed class ScrollCaptureProgressWindowTests
         Assert.NotNull(method);
         return Assert.IsType<int>(method.Invoke(
             null,
-            [captureRegion, monitorBounds]));
+            [captureRegion, monitorBounds, dpiScaleX]));
     }
 }

@@ -9,6 +9,44 @@ namespace Screenshot.App.Presentation;
 
 public sealed record SettingOption(string Value, string Label);
 
+public sealed class CaptureToolbarFeatureItem : INotifyPropertyChanged
+{
+    private bool _isVisible;
+
+    public CaptureToolbarFeatureItem(
+        CaptureToolbarFeature feature,
+        string label,
+        bool isVisible)
+    {
+        Feature = feature;
+        Label = label;
+        _isVisible = isVisible;
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    public CaptureToolbarFeature Feature { get; }
+
+    public string Label { get; }
+
+    public bool IsVisible
+    {
+        get => _isVisible;
+        set
+        {
+            if (_isVisible == value)
+            {
+                return;
+            }
+
+            _isVisible = value;
+            PropertyChanged?.Invoke(
+                this,
+                new PropertyChangedEventArgs(nameof(IsVisible)));
+        }
+    }
+}
+
 public sealed class TranslationPriorityItem : INotifyPropertyChanged
 {
     private bool _isAvailable;
@@ -105,6 +143,10 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private bool _showNotificationIcon;
     private bool _showFloatingCaptureButton;
     private FloatingCaptureClickBehavior _floatingCaptureClickBehavior;
+    private ScrollCaptureMode _scrollCaptureMode;
+    private ArrowStyle _arrowStyle;
+    private string _customStrokeColor;
+    private int[] _customColorPalette;
     private bool _launchAtStartup;
     private WindowCloseBehavior _closeBehavior;
     private AppTheme _theme;
@@ -113,6 +155,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private string _videoRecordingHotKey;
     private string _scrollCaptureHotKey;
     private string _ocrHotKey;
+    private string _textTranslationHotKey;
     private string _pinHotKey;
     private string _openSettingsHotKey;
     private int _mouseLongPressMilliseconds;
@@ -143,6 +186,11 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _showNotificationIcon = settings.ShowNotificationIcon;
         _showFloatingCaptureButton = settings.ShowFloatingCaptureButton;
         _floatingCaptureClickBehavior = settings.FloatingCaptureClickBehavior;
+        _scrollCaptureMode = settings.ScrollCaptureMode;
+        _arrowStyle = settings.ArrowStyle;
+        SetCaptureToolbarFeatures(settings.VisibleCaptureToolbarFeatures);
+        _customStrokeColor = settings.CustomStrokeColor;
+        _customColorPalette = settings.CustomColorPalette.ToArray();
         _launchAtStartup = settings.LaunchAtStartup;
         _closeBehavior = settings.CloseBehavior;
         _theme = settings.Theme;
@@ -151,6 +199,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _videoRecordingHotKey = settings.VideoRecordingHotKey;
         _scrollCaptureHotKey = settings.ScrollCaptureHotKey;
         _ocrHotKey = settings.OcrHotKey;
+        _textTranslationHotKey = settings.TextTranslationHotKey;
         _pinHotKey = settings.PinHotKey;
         _openSettingsHotKey = settings.OpenSettingsHotKey;
         _mouseLongPressMilliseconds = settings.MouseLongPressMilliseconds;
@@ -244,6 +293,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         "gpt-4o-mini",
     ]);
 
+    public ObservableCollection<CaptureToolbarFeatureItem>
+        CaptureToolbarFeatureItems { get; } = [];
+
     public string SaveDirectory
     {
         get => _saveDirectory;
@@ -316,6 +368,30 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _floatingCaptureClickBehavior, value);
     }
 
+    public ScrollCaptureMode ScrollCaptureMode
+    {
+        get => _scrollCaptureMode;
+        set => SetProperty(ref _scrollCaptureMode, value);
+    }
+
+    public ArrowStyle ArrowStyle
+    {
+        get => _arrowStyle;
+        set => SetProperty(ref _arrowStyle, value);
+    }
+
+    public string CustomStrokeColor
+    {
+        get => _customStrokeColor;
+        set => SetProperty(ref _customStrokeColor, value);
+    }
+
+    public int[] CustomColorPalette
+    {
+        get => _customColorPalette;
+        set => SetProperty(ref _customColorPalette, value ?? []);
+    }
+
     public bool LaunchAtStartup
     {
         get => _launchAtStartup;
@@ -362,6 +438,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         get => _ocrHotKey;
         set => SetProperty(ref _ocrHotKey, value);
+    }
+
+    public string TextTranslationHotKey
+    {
+        get => _textTranslationHotKey;
+        set => SetProperty(ref _textTranslationHotKey, value);
     }
 
     public string PinHotKey
@@ -464,6 +546,14 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             ShowNotificationIcon = ShowNotificationIcon,
             ShowFloatingCaptureButton = ShowFloatingCaptureButton,
             FloatingCaptureClickBehavior = FloatingCaptureClickBehavior,
+            ScrollCaptureMode = ScrollCaptureMode,
+            ArrowStyle = ArrowStyle,
+            VisibleCaptureToolbarFeatures = CaptureToolbarFeatureItems
+                .Where(item => item.IsVisible)
+                .Select(item => item.Feature)
+                .ToArray(),
+            CustomStrokeColor = CustomStrokeColor,
+            CustomColorPalette = CustomColorPalette.ToArray(),
             LaunchAtStartup = LaunchAtStartup,
             CloseBehavior = CloseBehavior,
             Theme = Theme,
@@ -472,6 +562,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             VideoRecordingHotKey = VideoRecordingHotKey,
             ScrollCaptureHotKey = ScrollCaptureHotKey,
             OcrHotKey = OcrHotKey,
+            TextTranslationHotKey = TextTranslationHotKey,
             PinHotKey = PinHotKey,
             OpenSettingsHotKey = OpenSettingsHotKey,
             MouseLongPressMilliseconds = MouseLongPressMilliseconds,
@@ -507,6 +598,11 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         ShowNotificationIcon = settings.ShowNotificationIcon;
         ShowFloatingCaptureButton = settings.ShowFloatingCaptureButton;
         FloatingCaptureClickBehavior = settings.FloatingCaptureClickBehavior;
+        ScrollCaptureMode = settings.ScrollCaptureMode;
+        ArrowStyle = settings.ArrowStyle;
+        SetCaptureToolbarFeatures(settings.VisibleCaptureToolbarFeatures);
+        CustomStrokeColor = settings.CustomStrokeColor;
+        CustomColorPalette = settings.CustomColorPalette.ToArray();
         LaunchAtStartup = settings.LaunchAtStartup;
         CloseBehavior = settings.CloseBehavior;
         Theme = settings.Theme;
@@ -515,6 +611,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         VideoRecordingHotKey = settings.VideoRecordingHotKey;
         ScrollCaptureHotKey = settings.ScrollCaptureHotKey;
         OcrHotKey = settings.OcrHotKey;
+        TextTranslationHotKey = settings.TextTranslationHotKey;
         PinHotKey = settings.PinHotKey;
         OpenSettingsHotKey = settings.OpenSettingsHotKey;
         MouseLongPressMilliseconds = settings.MouseLongPressMilliseconds;
@@ -537,6 +634,46 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     public void SetStatus(string message)
     {
         StatusMessage = message;
+    }
+
+    private void SetCaptureToolbarFeatures(
+        IEnumerable<CaptureToolbarFeature>? visibleFeatures)
+    {
+        var visible = (visibleFeatures ?? []).ToHashSet();
+        var labels = new Dictionary<CaptureToolbarFeature, string>
+        {
+            [CaptureToolbarFeature.Shape] = "矩形 / 椭圆",
+            [CaptureToolbarFeature.Arrow] = "箭头",
+            [CaptureToolbarFeature.Emoji] = "表情",
+            [CaptureToolbarFeature.Brush] = "画笔",
+            [CaptureToolbarFeature.Text] = "文字",
+            [CaptureToolbarFeature.Mosaic] = "马赛克",
+            [CaptureToolbarFeature.VideoRecording] = "录屏",
+            [CaptureToolbarFeature.Save] = "保存图片",
+            [CaptureToolbarFeature.ScrollCapture] = "长截图",
+            [CaptureToolbarFeature.TextRecognition] = "文字识别",
+            [CaptureToolbarFeature.Translation] = "翻译",
+            [CaptureToolbarFeature.PinImage] = "钉图",
+            [CaptureToolbarFeature.UndoRedo] = "撤销 / 重做",
+        };
+
+        if (CaptureToolbarFeatureItems.Count == 0)
+        {
+            foreach (var feature in Enum.GetValues<CaptureToolbarFeature>())
+            {
+                CaptureToolbarFeatureItems.Add(new CaptureToolbarFeatureItem(
+                    feature,
+                    labels[feature],
+                    visible.Contains(feature)));
+            }
+
+            return;
+        }
+
+        foreach (var item in CaptureToolbarFeatureItems)
+        {
+            item.IsVisible = visible.Contains(item.Feature);
+        }
     }
 
     public void SetTranslationModels(IReadOnlyList<string> models)
