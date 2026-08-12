@@ -152,6 +152,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private bool _completeAfterRightButtonUp;
     private bool _cancelScrollCaptureAfterRightButtonUp;
     private bool _isWindowSnapClickPending;
+    private bool _isColorPickerActive;
+    private DrawingColor _selectedPixelColor = DrawingColor.Black;
     private Rect? _windowSnapBounds;
     private IntPtr _windowHandle;
     private bool _isCompleted;
@@ -172,6 +174,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private bool _isScrollCaptureTemporarilyHidden;
     private bool _hasVisibleInlineEditorTools;
     private bool _isDisposed;
+    private bool _isUpdatingInlineColorPanel;
+    private WpfColor _inlineColorPanelPreviewColor = WpfColor.FromRgb(0, 127, 115);
     private WpfColor? _inlineCustomColor;
     private int[] _inlineCustomColorPalette = [];
     private WeakReference<ScrollCaptureSelection>?
@@ -222,6 +226,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         InlineEditorCanvas.HistoryChanged += OnInlineEditorHistoryChanged;
         InlineEditorCanvas.AnnotationSelectionChanged +=
             OnInlineAnnotationSelectionChanged;
+        InlineEditorCanvas.PreviewMouseLeftButtonDown +=
+            OnInlineEditorCanvasPreviewMouseLeftButtonDown;
 
         _virtualScreenBounds = VirtualScreen.GetBounds();
         try
@@ -311,6 +317,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         InlineEditorCanvas.HistoryChanged -= OnInlineEditorHistoryChanged;
         InlineEditorCanvas.AnnotationSelectionChanged -=
             OnInlineAnnotationSelectionChanged;
+        InlineEditorCanvas.PreviewMouseLeftButtonDown -=
+            OnInlineEditorCanvasPreviewMouseLeftButtonDown;
         _inlineEditorImage?.Dispose();
         _inlineEditorImage = null;
         FrozenScreenImage.Source = null;
@@ -369,10 +377,43 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         Keyboard.Focus(CaptureSurface);
         _windowSnapTimer.Start();
         BeginContinuedSelectionIfNeeded();
+        if (_options is not null &&
+            !_isSelecting &&
+            !HasValidSelection())
+        {
+            EnterColorPicker();
+        }
     }
 
     private void OnCaptureSurfaceKeyDown(object sender, WpfKeyEventArgs e)
     {
+        if (_isColorPickerActive)
+        {
+            if (e.Key == Key.Escape)
+            {
+                ExitColorPicker();
+                e.Handled = true;
+            }
+            else if (IsColorCopyKey(e))
+            {
+                _ = CopyPickedColorAsync();
+                e.Handled = true;
+            }
+
+            return;
+        }
+
+        if (e.Key == Key.C &&
+            Keyboard.Modifiers == ModifierKeys.None &&
+            !_isSelecting &&
+            !HasValidSelection() &&
+            !_isScrollCaptureSelection)
+        {
+            EnterColorPicker();
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.Escape)
         {
             if (_isScrollCaptureSelection && _isScrollCaptureSelectionPublished)
@@ -428,6 +469,18 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         object sender,
         MouseButtonEventArgs e)
     {
+        if (TryGetInlineCustomPaletteSlotIndex(e.OriginalSource, out var slotIndex))
+        {
+            SaveInlineColorToPaletteSlot(slotIndex);
+            e.Handled = true;
+            return;
+        }
+
+        if (_isColorPickerActive)
+        {
+            ExitColorPicker();
+        }
+
         if (_isSelecting &&
             _continuedSelectionButton == CapturePointerButton.Right)
         {
@@ -555,6 +608,24 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void OnCaptureSurfaceMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (InlineCustomColorPanel.Visibility == Visibility.Visible &&
+            !IsSourceInsideInlineCustomColorPanel(e.OriginalSource))
+        {
+            HideInlineCustomColorPanel();
+        }
+
+        if (_isColorPickerActive)
+        {
+            var point = e.GetPosition(CaptureSurface);
+            if (IsInsideColorPickerPanel(point))
+            {
+                e.Handled = true;
+                return;
+            }
+
+            ExitColorPicker();
+        }
+
         if (!CanStartNewSelectionFromBackground(e.OriginalSource))
         {
             return;
@@ -648,6 +719,12 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void OnCaptureSurfaceMouseMove(object sender, WpfMouseEventArgs e)
     {
+        if (_isColorPickerActive)
+        {
+            UpdateColorPicker(e.GetPosition(CaptureSurface));
+            return;
+        }
+
         if (_isSelecting)
         {
             var currentPoint = e.GetPosition(CaptureSurface);
@@ -822,8 +899,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         // Double-clicking inside the selection confirms the capture, matching the
         // WeChat and PixPin workflow where the user does not have to reach for the
-        // toolbar checkmark. In editor mode we let the canvas handle the click.
-        if (e.ClickCount == 2 && !InlineEditorCanvas.HasImage)
+        // toolbar checkmark.
+        if (e.ClickCount == 2)
         {
             e.Handled = true;
             ConfirmCurrentSelection();
@@ -835,6 +912,178 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         _dragStartBounds = GetSelectionBounds();
         SelectionRectangle.CaptureMouse();
         e.Handled = true;
+    }
+
+    private void OnInlineEditorCanvasPreviewMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (e.ClickCount != 2 ||
+            _isColorPickerActive ||
+            _isActionInProgress ||
+            !HasValidSelection())
+        {
+            return;
+        }
+
+        e.Handled = true;
+        ConfirmCurrentSelection();
+    }
+
+    private void EnterColorPicker()
+    {
+        if (_screenSnapshot is null || _isCompleted || _isActionInProgress)
+        {
+            return;
+        }
+
+        _isColorPickerActive = true;
+        _windowSnapTimer.Stop();
+        HideWindowSnap();
+        CaptureSurface.Cursor = System.Windows.Input.Cursors.Cross;
+        ColorPickerPanel.Visibility = Visibility.Visible;
+        ColorPickerPanel.UpdateLayout();
+        CaptureSurface.CaptureMouse();
+        Activate();
+        CaptureSurface.Focus();
+        UpdateColorPicker(CaptureSurface.PointFromScreen(
+            new WpfPoint(WinForms.Cursor.Position.X, WinForms.Cursor.Position.Y)));
+    }
+
+    private void OnCaptureWindowTextInput(object sender, TextCompositionEventArgs e)
+    {
+        if (_isColorPickerActive &&
+            e.Text.Any(character => character is 'c' or 'C'))
+        {
+            _ = CopyPickedColorAsync();
+            e.Handled = true;
+        }
+    }
+
+    private void OnCaptureWindowPreviewKeyDown(object sender, WpfKeyEventArgs e)
+    {
+        if (_isColorPickerActive && IsColorCopyKey(e))
+        {
+            _ = CopyPickedColorAsync();
+            e.Handled = true;
+        }
+    }
+
+    private void ExitColorPicker()
+    {
+        if (!_isColorPickerActive)
+        {
+            return;
+        }
+
+        _isColorPickerActive = false;
+        ColorPickerPanel.Visibility = Visibility.Collapsed;
+        ColorPickerMagnifier.Source = null;
+        CaptureSurface.Cursor = System.Windows.Input.Cursors.Cross;
+        if (CaptureSurface.IsMouseCaptured)
+        {
+            CaptureSurface.ReleaseMouseCapture();
+        }
+
+        if (!_isCompleted)
+        {
+            _windowSnapTimer.Start();
+            CaptureSurface.Focus();
+        }
+    }
+
+    private async Task CopyPickedColorAsync()
+    {
+        var colorText = $"#{_selectedPixelColor.R:X2}{_selectedPixelColor.G:X2}{_selectedPixelColor.B:X2}";
+        try
+        {
+            await ClipboardTextService.SetTextAsync(colorText);
+            await ShowSelectionMessageForAsync($"已复制 {colorText}", 650);
+            CompleteSelection(result: null);
+        }
+        catch
+        {
+            await ShowSelectionMessageForAsync("复制颜色失败，请重试", 1500);
+        }
+    }
+
+    private void UpdateColorPicker(WpfPoint point)
+    {
+        if (!_isColorPickerActive || _screenSnapshot is null)
+        {
+            return;
+        }
+
+        var screenPoint = CaptureSurface.PointToScreen(point);
+        var pixelX = Math.Clamp(
+            (int)Math.Round(screenPoint.X) - _virtualScreenBounds.X,
+            0,
+            Math.Max(0, _screenSnapshot.Bitmap.Width - 1));
+        var pixelY = Math.Clamp(
+            (int)Math.Round(screenPoint.Y) - _virtualScreenBounds.Y,
+            0,
+            Math.Max(0, _screenSnapshot.Bitmap.Height - 1));
+        _selectedPixelColor = _screenSnapshot.Bitmap.GetPixel(pixelX, pixelY);
+        ColorPickerValueText.Text = $"#{_selectedPixelColor.R:X2}{_selectedPixelColor.G:X2}{_selectedPixelColor.B:X2}";
+        ColorPickerRgbText.Text = $"RGB({_selectedPixelColor.R}, {_selectedPixelColor.G}, {_selectedPixelColor.B})";
+
+        const int sampleRadius = 12;
+        var sourceLeft = Math.Clamp(pixelX - sampleRadius, 0, Math.Max(0, _screenSnapshot.Bitmap.Width - (sampleRadius * 2 + 1)));
+        var sourceTop = Math.Clamp(pixelY - sampleRadius, 0, Math.Max(0, _screenSnapshot.Bitmap.Height - (sampleRadius * 2 + 1)));
+        var sample = _screenSnapshot.Bitmap.Clone(
+            new System.Drawing.Rectangle(sourceLeft, sourceTop, sampleRadius * 2 + 1, sampleRadius * 2 + 1),
+            System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+        try
+        {
+            using var magnified = new System.Drawing.Bitmap(104, 104);
+            using (var graphics = System.Drawing.Graphics.FromImage(magnified))
+            {
+                graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+                graphics.DrawImage(sample, new System.Drawing.Rectangle(0, 0, magnified.Width, magnified.Height));
+                using var crossPen = new System.Drawing.Pen(System.Drawing.Color.White, 2);
+                graphics.DrawLine(crossPen, 52, 46, 52, 58);
+                graphics.DrawLine(crossPen, 46, 52, 58, 52);
+                using var outlinePen = new System.Drawing.Pen(System.Drawing.Color.Black, 1);
+                graphics.DrawRectangle(outlinePen, 50, 50, 4, 4);
+            }
+
+            ColorPickerMagnifier.Source = CapturedImage.ToBitmapSource(magnified);
+        }
+        finally
+        {
+            sample.Dispose();
+        }
+
+        var panelX = Math.Clamp(point.X + 20, 8, Math.Max(8, CaptureSurface.ActualWidth - ColorPickerPanel.ActualWidth - 8));
+        var panelY = Math.Clamp(point.Y + 20, 8, Math.Max(8, CaptureSurface.ActualHeight - ColorPickerPanel.ActualHeight - 8));
+        Canvas.SetLeft(ColorPickerPanel, panelX);
+        Canvas.SetTop(ColorPickerPanel, panelY);
+    }
+
+    private static bool IsColorCopyKey(WpfKeyEventArgs e)
+    {
+        return e.Key == Key.C ||
+               (e.Key == Key.ImeProcessed && e.ImeProcessedKey == Key.C) ||
+               (e.Key == Key.System && e.SystemKey == Key.C);
+    }
+
+    private bool IsInsideColorPickerPanel(WpfPoint point)
+    {
+        if (ColorPickerPanel.Visibility != Visibility.Visible)
+        {
+            return false;
+        }
+
+        var left = Canvas.GetLeft(ColorPickerPanel);
+        var top = Canvas.GetTop(ColorPickerPanel);
+        if (double.IsNaN(left) || double.IsNaN(top))
+        {
+            return false;
+        }
+
+        return new Rect(left, top, ColorPickerPanel.ActualWidth, ColorPickerPanel.ActualHeight)
+            .Contains(point);
     }
 
     private void OnSelectionRectangleMouseMove(object sender, WpfMouseEventArgs e)
@@ -870,6 +1119,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         object sender,
         MouseButtonEventArgs e)
     {
+        if (e.ClickCount == 2 && HasValidSelection())
+        {
+            e.Handled = true;
+            ConfirmCurrentSelection();
+            return;
+        }
+
         if (!CanMoveSelection())
         {
             e.Handled = true;
@@ -1093,6 +1349,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 selectionBounds.Width,
                 selectionBounds.Height);
             InlineEditorCanvas.SelectTool(_selectedInlineTool);
+            if (_inlineCustomColor is { } savedColor)
+            {
+                InlineEditorCanvas.SelectColor(savedColor);
+            }
             Canvas.SetLeft(InlineEditorCanvas, selectionBounds.X);
             Canvas.SetTop(InlineEditorCanvas, selectionBounds.Y);
             InlineEditorCanvas.Visibility = Visibility.Visible;
@@ -1373,13 +1633,27 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void PositionSelectionMessageToast()
     {
-        if (!HasValidSelection() ||
-            SelectionMessageToast.Visibility != Visibility.Visible)
+        if (SelectionMessageToast.Visibility != Visibility.Visible)
         {
             return;
         }
 
-        var bounds = GetSelectionBounds();
+        Rect bounds;
+        if (HasValidSelection())
+        {
+            bounds = GetSelectionBounds();
+        }
+        else if (_isColorPickerActive)
+        {
+            var cursor = CaptureSurface.PointFromScreen(
+                new WpfPoint(WinForms.Cursor.Position.X, WinForms.Cursor.Position.Y));
+            bounds = new Rect(cursor.X, cursor.Y, 1, 1);
+        }
+        else
+        {
+            return;
+        }
+
         var width = Math.Max(
             SelectionMessageToast.MinWidth,
             SelectionMessageToast.ActualWidth);
@@ -2607,48 +2881,270 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         if (sender is System.Windows.Controls.Button { Tag: string colorValue } &&
             WpfColorConverter.ConvertFromString(colorValue) is WpfColor color)
         {
-            UpdateInlineSelectedColorButton((System.Windows.Controls.Button)sender);
-            InlineEditorCanvas.SelectColor(color);
-            InlineEditorCanvas.Focus();
+            ApplyInlineCustomColor(color);
         }
     }
 
     private void OnInlineCustomColorClick(object sender, RoutedEventArgs e)
     {
-        var seedColor = _inlineCustomColor ??
-            WpfColor.FromRgb(0, 127, 115);
-        using var dialog = new WinForms.ColorDialog
-        {
-            AllowFullOpen = true,
-            FullOpen = true,
-            AnyColor = true,
-            Color = DrawingColor.FromArgb(
-                seedColor.R,
-                seedColor.G,
-                seedColor.B),
-            CustomColors = _inlineCustomColorPalette.ToArray(),
-        };
+        ShowInlineCustomColorPanel();
+        e.Handled = true;
+    }
 
-        if (dialog.ShowDialog() != WinForms.DialogResult.OK)
+    private void OnInlineCustomPaletteColorClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { Tag: int slotIndex })
+        {
+            if (slotIndex < _inlineCustomColorPalette.Length)
+            {
+                var colorValue = _inlineCustomColorPalette[slotIndex];
+                ApplyInlineCustomColor(WpfColor.FromRgb(
+                    (byte)(colorValue >> 16),
+                    (byte)(colorValue >> 8),
+                    (byte)colorValue));
+                HideInlineCustomColorPanel();
+            }
+            else
+            {
+                SaveInlineColorToPaletteSlot(slotIndex);
+            }
+
+            e.Handled = true;
+        }
+    }
+
+    private void ShowInlineCustomColorPanel()
+    {
+        InlineRecentColorsPanel.Children.Clear();
+        for (var index = 0; index < 8; index++)
+        {
+            var hasColor = index < _inlineCustomColorPalette.Length;
+            var value = hasColor ? _inlineCustomColorPalette[index] : 0;
+            var color = hasColor
+                ? WpfColor.FromRgb((byte)(value >> 16), (byte)(value >> 8), (byte)value)
+                : WpfColor.FromArgb(0, 0, 0, 0);
+            var button = new System.Windows.Controls.Button
+            {
+                Tag = index,
+                Background = new WpfSolidColorBrush(color),
+                BorderBrush = hasColor
+                    ? new WpfSolidColorBrush(WpfColor.FromArgb(0x8A, 0xE1, 0xD8, 0xD0))
+                    : new WpfSolidColorBrush(WpfColor.FromArgb(0x80, 0xA9, 0xCE, 0xCA)),
+                Style = (Style)FindResource("InlineColorSwatch"),
+                ToolTip = hasColor ? "左键使用，右键覆盖" : "左键或右键保存当前颜色",
+            };
+            if (!hasColor)
+            {
+                button.Content = new TextBlock
+                {
+                    Text = "+",
+                    FontSize = 13,
+                    Foreground = WpfBrushes.White,
+                };
+            }
+            button.Click += OnInlineCustomPaletteColorClick;
+            InlineRecentColorsPanel.Children.Add(button);
+        }
+
+        SetInlineColorPanelValues(_inlineCustomColor ?? WpfColor.FromRgb(0, 127, 115));
+        InlineCustomColorPanel.Visibility = Visibility.Visible;
+        InlineCustomColorPanel.UpdateLayout();
+        var toolbarX = Canvas.GetLeft(CaptureToolbar);
+        var toolbarY = Canvas.GetTop(CaptureToolbar);
+        var panelX = Math.Clamp(
+            InlineCustomColorButton.TranslatePoint(
+                new WpfPoint(0, 0), CaptureSurface).X,
+            8,
+            Math.Max(8, CaptureSurface.ActualWidth - InlineCustomColorPanel.ActualWidth - 8));
+        var panelY = toolbarY - InlineCustomColorPanel.ActualHeight - 8;
+        if (panelY < 8)
+        {
+            panelY = toolbarY + CaptureToolbar.ActualHeight + 8;
+        }
+
+        Canvas.SetLeft(InlineCustomColorPanel, panelX);
+        Canvas.SetTop(InlineCustomColorPanel, panelY);
+    }
+
+    private void HideInlineCustomColorPanel()
+    {
+        InlineCustomColorPanel.Visibility = Visibility.Collapsed;
+    }
+
+    private bool IsSourceInsideInlineCustomColorPanel(object source)
+    {
+        return source is DependencyObject element &&
+            InlineCustomColorPanel.IsAncestorOf(element);
+    }
+
+    private void OnInlineColorComponentChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_isUpdatingInlineColorPanel)
         {
             return;
         }
 
-        var color = WpfColor.FromArgb(
-            dialog.Color.A,
-            dialog.Color.R,
-            dialog.Color.G,
-            dialog.Color.B);
-        _inlineCustomColor = color;
+        var color = ColorFromHsv(
+            InlineHueSlider.Value,
+            InlineSaturationSlider.Value / 100d,
+            InlineValueSlider.Value / 100d,
+            (byte)Math.Round(InlineAlphaSlider.Value * 2.55d));
+        UpdateInlineColorPanelPreview(color);
+    }
+
+    private void OnInlineColorSliderMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        ApplyInlineCustomColor(_inlineColorPanelPreviewColor);
+        e.Handled = true;
+    }
+
+    private void OnInlineColorSliderLostKeyboardFocus(
+        object sender,
+        KeyboardFocusChangedEventArgs e)
+    {
+        ApplyInlineCustomColor(_inlineColorPanelPreviewColor);
+    }
+
+    private void SaveInlineColorToPaletteSlot(int slotIndex)
+    {
+        var colorValue = _inlineColorPanelPreviewColor.R << 16 |
+            _inlineColorPanelPreviewColor.G << 8 |
+            _inlineColorPanelPreviewColor.B;
+        var slots = _inlineCustomColorPalette.Take(8).ToList();
+        while (slots.Count <= slotIndex)
+        {
+            slots.Add(colorValue);
+        }
+
+        slots[slotIndex] = colorValue;
         _inlineCustomColorPalette = NormalizeCustomColorPalette(
-            dialog.CustomColors);
+            slots.Concat(_inlineCustomColorPalette.Skip(8)));
+        _options?.CustomColorPaletteChanged?.Invoke(_inlineCustomColorPalette.ToArray());
+        ShowInlineCustomColorPanel();
+    }
+
+    private bool TryGetInlineCustomPaletteSlotIndex(object source, out int slotIndex)
+    {
+        for (var element = source as DependencyObject;
+             element is not null;
+             element = System.Windows.Media.VisualTreeHelper.GetParent(element))
+        {
+            if (element is System.Windows.Controls.Button { Tag: int index } &&
+                InlineRecentColorsPanel.IsAncestorOf(element))
+            {
+                slotIndex = index;
+                return true;
+            }
+
+            if (ReferenceEquals(element, InlineCustomColorPanel))
+            {
+                break;
+            }
+        }
+
+        slotIndex = -1;
+        return false;
+    }
+
+    private void OnInlineColorHexTextBoxPreviewKeyDown(
+        object sender,
+        WpfKeyEventArgs e)
+    {
+        if (e.Key == Key.C && Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            _ = ClipboardTextService.SetTextAsync(InlineColorHexTextBox.Text);
+            e.Handled = true;
+        }
+    }
+
+    private void OnInlineColorHexTextBoxKeyDown(object sender, WpfKeyEventArgs e)
+    {
+        if (e.Key != Key.Enter ||
+            WpfColorConverter.ConvertFromString(InlineColorHexTextBox.Text.Trim()) is not WpfColor color)
+        {
+            return;
+        }
+
+        SetInlineColorPanelValues(color);
+        ApplyInlineCustomColor(color);
+        HideInlineCustomColorPanel();
+        e.Handled = true;
+    }
+
+    private void SetInlineColorPanelValues(WpfColor color)
+    {
+        _isUpdatingInlineColorPanel = true;
+        try
+        {
+            var (hue, saturation, value) = ColorToHsv(color);
+            InlineHueSlider.Value = hue;
+            InlineSaturationSlider.Value = saturation * 100d;
+            InlineValueSlider.Value = value * 100d;
+            InlineAlphaSlider.Value = color.A / 2.55d;
+            UpdateInlineColorPanelPreview(color);
+        }
+        finally
+        {
+            _isUpdatingInlineColorPanel = false;
+        }
+    }
+
+    private void UpdateInlineColorPanelPreview(WpfColor color)
+    {
+        _inlineColorPanelPreviewColor = color;
+        InlineColorPreview.Background = new WpfSolidColorBrush(color);
+        InlineColorHexTextBox.Text = FormatInlineColorText(color);
+        InlineHueText.Text = $"{Math.Round(InlineHueSlider.Value):0}";
+        InlineSaturationText.Text = $"{Math.Round(InlineSaturationSlider.Value):0}%";
+        InlineValueText.Text = $"{Math.Round(InlineValueSlider.Value):0}%";
+        InlineAlphaText.Text = $"{Math.Round(InlineAlphaSlider.Value):0}%";
+    }
+
+    private static WpfColor ColorFromHsv(double hue, double saturation, double value, byte alpha)
+    {
+        var chroma = value * saturation;
+        var x = chroma * (1 - Math.Abs((hue / 60d % 2) - 1));
+        var match = value - chroma;
+        var (red, green, blue) = hue switch
+        {
+            < 60 => (chroma, x, 0d),
+            < 120 => (x, chroma, 0d),
+            < 180 => (0d, chroma, x),
+            < 240 => (0d, x, chroma),
+            < 300 => (x, 0d, chroma),
+            _ => (chroma, 0d, x),
+        };
+        return WpfColor.FromArgb(alpha,
+            (byte)Math.Round((red + match) * 255),
+            (byte)Math.Round((green + match) * 255),
+            (byte)Math.Round((blue + match) * 255));
+    }
+
+    private static (double Hue, double Saturation, double Value) ColorToHsv(WpfColor color)
+    {
+        var red = color.R / 255d;
+        var green = color.G / 255d;
+        var blue = color.B / 255d;
+        var maximum = Math.Max(red, Math.Max(green, blue));
+        var minimum = Math.Min(red, Math.Min(green, blue));
+        var delta = maximum - minimum;
+        var hue = delta == 0 ? 0 : maximum == red
+            ? 60 * ((green - blue) / delta % 6)
+            : maximum == green ? 60 * ((blue - red) / delta + 2)
+            : 60 * ((red - green) / delta + 4);
+        return (hue < 0 ? hue + 360 : hue,
+            maximum == 0 ? 0 : delta / maximum,
+            maximum);
+    }
+
+    private void ApplyInlineCustomColor(WpfColor color)
+    {
+        _inlineCustomColor = color;
         InlineCustomColorButton.Background = new WpfSolidColorBrush(color);
         UpdateInlineSelectedColorButton(InlineCustomColorButton);
         InlineEditorCanvas.SelectColor(color);
         InlineEditorCanvas.Focus();
         _options?.CustomStrokeColorChanged?.Invoke(FormatInlineColorText(color));
-        _options?.CustomColorPaletteChanged?.Invoke(
-            _inlineCustomColorPalette.ToArray());
     }
 
     private void ApplySavedInlineCustomColor(string? customStrokeColor)
@@ -2691,6 +3187,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     {
         return (colors ?? [])
             .Where(color => color is >= 0 and <= 0xFFFFFF)
+            .Distinct()
             .Take(16)
             .ToArray();
     }
@@ -2849,6 +3346,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private void UpdateSelectionBounds(Rect requestedBounds)
     {
         var bounds = ClampBoundsToSurface(NormalizeBounds(requestedBounds));
+        if (_isColorPickerActive &&
+            bounds.Width >= MinimumSelectionEdge &&
+            bounds.Height >= MinimumSelectionEdge)
+        {
+            ExitColorPicker();
+        }
+
         Canvas.SetLeft(SelectionRectangle, bounds.X);
         Canvas.SetTop(SelectionRectangle, bounds.Y);
         SelectionRectangle.Width = bounds.Width;
@@ -2983,6 +3487,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void ClearSelection()
     {
+        HideInlineCustomColorPanel();
         _isSelecting = false;
         _isMovingSelection = false;
 
