@@ -1,5 +1,6 @@
 namespace Screenshot.App.Capture;
 
+// Automatic click-scroll only. Do not add manual wheel queue behavior here.
 /// <summary>
 /// Moves the selected viewport with fixed-cadence wheel input. Each input batch
 /// restores the pointer immediately, so the driver never holds the user's mouse.
@@ -8,11 +9,11 @@ internal sealed class ControlledScrollDriver : IAsyncDisposable
 {
     internal const int TickIntervalMilliseconds = 20;
     internal const int CapturePixelsPerTick = 5;
+    internal const int CaptureWheelDeltaForCapture = 10;
+    internal const int MaximumCaptureStepsPerFrame = 12;
     internal const int ReturnPixelsPerTick = 20;
     internal const int PresentationSettleMilliseconds = 0;
-    private const int CaptureWheelDelta = 10;
     private const int ReturnWheelDelta = 40;
-
     private readonly ScrollCaptureTarget _target;
     private readonly CancellationTokenSource _cancellationSource = new();
     private readonly Task _runTask;
@@ -21,6 +22,11 @@ internal sealed class ControlledScrollDriver : IAsyncDisposable
     private int _fastReturn;
     private long _totalTravelPixels;
     private int _inputStepCount;
+    private int _remainingCaptureStepBudget = MaximumCaptureStepsPerFrame;
+    private int _captureStepsSinceFrame;
+    private int _backpressureWaitTicksSinceFrame;
+    private int _lastCapturedInputStepCount;
+    private int _lastCapturedBackpressureWaitTicks;
     private int _recoveryProbeRequested;
     private int _inputFailureCode;
     private string? _inputFailureStage;
@@ -44,6 +50,12 @@ internal sealed class ControlledScrollDriver : IAsyncDisposable
 
     internal int InputStepCount => Volatile.Read(ref _inputStepCount);
 
+    internal int LastCapturedInputStepCount => Volatile.Read(
+        ref _lastCapturedInputStepCount);
+
+    internal int LastCapturedBackpressureWaitTicks => Volatile.Read(
+        ref _lastCapturedBackpressureWaitTicks);
+
     internal void RequestBoundaryProbe()
     {
         // Wheel input has no bounded gesture to restart. The next timer tick
@@ -54,10 +66,25 @@ internal sealed class ControlledScrollDriver : IAsyncDisposable
     public System.Drawing.Bitmap CaptureFrame()
     {
         // DwmFlush inside CaptureRegion provides a complete presented frame.
-        // Do not stop the input stream just to sample it; that created a visible
-        // pause at every capture interval.
-        return ForegroundWindowCaptureService.CaptureRegion(
-            _target.CaptureRegion);
+        // Hold the input gate so a wheel packet cannot change the viewport in
+        // the middle of the screen copy. Replenishing one standard detent of
+        // fine-grained input here couples maximum travel to the rate at which
+        // frames are actually captured and processed.
+        lock (_inputGate)
+        {
+            var frame = ForegroundWindowCaptureService.CaptureRegion(
+                _target.CaptureRegion);
+            AcknowledgeCapturedFrameCore();
+            return frame;
+        }
+    }
+
+    internal void AcknowledgeCapturedFrame()
+    {
+        lock (_inputGate)
+        {
+            AcknowledgeCapturedFrameCore();
+        }
     }
 
     public void SetDirection(
@@ -133,17 +160,40 @@ internal sealed class ControlledScrollDriver : IAsyncDisposable
                 : CapturePixelsPerTick;
             var wheelMagnitude = fastReturn
                 ? ReturnWheelDelta
-                : CaptureWheelDelta;
+                : CaptureWheelDeltaForCapture;
             var wheelDelta = direction < 0
                 ? -wheelMagnitude
                 : wheelMagnitude;
             bool injected;
             lock (_inputGate)
             {
-                injected = Volatile.Read(ref _direction) == direction &&
-                    ForegroundWindowCaptureService.ScrollWithWheelMessage(
-                        _target,
-                        wheelDelta);
+                if (Volatile.Read(ref _direction) != direction)
+                {
+                    continue;
+                }
+
+                if (!fastReturn && _remainingCaptureStepBudget <= 0)
+                {
+                    _backpressureWaitTicksSinceFrame++;
+                    continue;
+                }
+
+                if (!fastReturn)
+                {
+                    _remainingCaptureStepBudget--;
+                }
+
+                injected = ForegroundWindowCaptureService.ScrollWithWheelMessage(
+                    _target,
+                    wheelDelta);
+                if (!injected && !fastReturn)
+                {
+                    _remainingCaptureStepBudget++;
+                }
+                else if (injected && !fastReturn)
+                {
+                    _captureStepsSinceFrame++;
+                }
             }
 
             if (!injected)
@@ -173,5 +223,18 @@ internal sealed class ControlledScrollDriver : IAsyncDisposable
         {
             Volatile.Write(ref _inputFailureStage, stage);
         }
+    }
+
+    private void AcknowledgeCapturedFrameCore()
+    {
+        Volatile.Write(
+            ref _lastCapturedInputStepCount,
+            _captureStepsSinceFrame);
+        Volatile.Write(
+            ref _lastCapturedBackpressureWaitTicks,
+            _backpressureWaitTicksSinceFrame);
+        _captureStepsSinceFrame = 0;
+        _backpressureWaitTicksSinceFrame = 0;
+        _remainingCaptureStepBudget = MaximumCaptureStepsPerFrame;
     }
 }

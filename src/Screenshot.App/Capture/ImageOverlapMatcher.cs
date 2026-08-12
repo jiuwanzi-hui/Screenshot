@@ -124,7 +124,69 @@ public static class ImageOverlapMatcher
         double minimumConfidence,
         int minimumNewRows = 0,
         int? preferredNewRows = null,
-        bool preferredNeighborhoodOnly = false)
+        bool preferredNeighborhoodOnly = false,
+        bool? retryWithoutTrailingBand = null)
+    {
+        var match = FindVerticalOverlapCore(
+            previousFrame,
+            currentFrame,
+            minimumOverlapRows,
+            minimumConfidence,
+            minimumNewRows,
+            preferredNewRows,
+            preferredNeighborhoodOnly,
+            excludeMinimapBand: false);
+        if (match is not null)
+        {
+            return match;
+        }
+
+        // Code editors render a minimap on the right (~60-120px) that scrolls
+        // at a fraction of the text speed, so at the text's true displacement
+        // the minimap never lines up and the whole-width comparison rejects
+        // the correct offset. Retry once without that band — only after the
+        // ordinary comparison failed, so pages whose discriminative content
+        // lives on the right keep their full-width match. Neighborhood-only
+        // probes do not retry by default: on repetitive list content the
+        // narrower band can validate a periodic false peak, and those probes
+        // are confirm/refute checks whose callers fall back to a full search
+        // anyway. Boundary-crossing verification opts in explicitly because
+        // its minimap-poisoned misses stalled editor reverse walks for many
+        // seconds at the captured top edge.
+        if ((retryWithoutTrailingBand ?? !preferredNeighborhoodOnly) &&
+            previousFrame.Width >= 400)
+        {
+            var retryMatch = FindVerticalOverlapCore(
+                previousFrame,
+                currentFrame,
+                minimumOverlapRows,
+                minimumConfidence,
+                minimumNewRows,
+                preferredNewRows,
+                preferredNeighborhoodOnly,
+                excludeMinimapBand: true);
+            // The narrowed band loses discriminative columns, so only a
+            // decisive peak may stand in for the failed full-width match. A
+            // sub-decisive retry on repetitive list content produced periodic
+            // false peaks that displaced the wheel-bridge fallback and got
+            // vetoed downstream, unlocating every frame.
+            return retryMatch is { Confidence: >= 0.985 }
+                ? retryMatch
+                : null;
+        }
+
+        return null;
+    }
+
+    private static ImageOverlapMatch? FindVerticalOverlapCore(
+        Bitmap previousFrame,
+        Bitmap currentFrame,
+        int minimumOverlapRows,
+        double minimumConfidence,
+        int minimumNewRows,
+        int? preferredNewRows,
+        bool preferredNeighborhoodOnly,
+        bool excludeMinimapBand)
     {
         ArgumentNullException.ThrowIfNull(previousFrame);
         ArgumentNullException.ThrowIfNull(currentFrame);
@@ -166,15 +228,18 @@ public static class ImageOverlapMatcher
 
         var previousPixels = PixelBuffer.Create(previousFrame);
         var currentPixels = PixelBuffer.Create(currentFrame);
-        // Keep line numbers and chat avatars on the left; ignore only the
-        // narrow scrollbar strip on the right and a thin bottom chrome band.
+        // Keep line numbers and chat avatars on the left; by default ignore
+        // only the narrow scrollbar strip on the right and a thin bottom
+        // chrome band. The minimap retry widens the right band instead.
         const int ignoredLeft = 0;
         var ignoredRight = previousFrame.Width >= 80
-            ? Math.Clamp(previousFrame.Width / 80, 10, 24)
+            ? excludeMinimapBand
+                ? Math.Clamp(previousFrame.Width / 8, 10, 144)
+                : Math.Clamp(previousFrame.Width / 80, 10, 24)
             : 0;
         var comparisonRight = previousFrame.Width - ignoredRight;
         var ignoredBottom = previousFrame.Height >= 120
-            ? Math.Min(24, previousFrame.Height / 30)
+            ? Math.Clamp(previousFrame.Height / 20, 16, 24)
             : 0;
         // Stable content bands: full frame for general content, and a band that
         // skips sticky headers. Require candidates to agree across both.

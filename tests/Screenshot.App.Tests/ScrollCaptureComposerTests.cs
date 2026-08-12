@@ -111,6 +111,80 @@ public sealed class ScrollCaptureComposerTests
     }
 
     [Fact]
+    public void ReverseCrossingSucceedsWhenStoredTopEdgeCannotBeMatched()
+    {
+        // Field regression (manual wheel mode): scroll down, then scroll back
+        // up past the captured start. The stored top edge frame had been
+        // repainted by the live page, so the strict boundary verification
+        // could never match it and every upward frame was rejected — the
+        // capture stalled at "上 0" forever. A pixel-verified step from the
+        // current anchor plus agreeing fresh wheel travel must cross anyway.
+        const int width = 96;
+        const int height = 100;
+        using var initialFrame = CreateFrameWithRepaintedBand(
+            startY: 40,
+            width,
+            height,
+            staleRows: 30);
+        using var firstDownFrame = CreateFrame(startY: 80, width, height);
+        using var secondDownFrame = CreateFrame(startY: 120, width, height);
+        using var returnKnownFrame = CreateFrame(startY: 80, width, height);
+        using var approachFrame = CreateFrame(startY: 45, width, height);
+        using var crossingFrame = CreateFrame(startY: 10, width, height);
+        using var composer = new ScrollCaptureComposer();
+
+        Assert.True(composer.TryAddFrame(initialFrame, Options, out _));
+        Assert.True(composer.TryAddFrame(
+            firstDownFrame,
+            ScrollCaptureDirection.Down,
+            Options,
+            out _));
+        Assert.True(composer.TryAddFrame(
+            secondDownFrame,
+            ScrollCaptureDirection.Down,
+            Options,
+            out _));
+        Assert.Equal(180, composer.OutputHeight);
+
+        // The wheel reverses: return through captured content. Neither step
+        // adds pixels, they only move the logical anchor toward the top edge.
+        Assert.False(composer.TryAddFrame(
+            returnKnownFrame,
+            ScrollCaptureDirection.Up,
+            Options,
+            expectedNewRows: 40,
+            lockDirection: true,
+            out _));
+        Assert.False(composer.TryAddFrame(
+            approachFrame,
+            ScrollCaptureDirection.Up,
+            Options,
+            expectedNewRows: 35,
+            lockDirection: true,
+            out _));
+        Assert.Equal(0, composer.AddedAboveFrameCount);
+
+        Assert.True(composer.TryAddFrame(
+            crossingFrame,
+            ScrollCaptureDirection.Up,
+            Options,
+            expectedNewRows: 35,
+            lockDirection: true,
+            out _));
+        Assert.Equal(1, composer.AddedAboveFrameCount);
+        Assert.Equal(210, composer.OutputHeight);
+
+        using var result = composer.Compose();
+        Assert.Equal(210, result.Height);
+        for (var y = 0; y < 30; y += 5)
+        {
+            Assert.Equal(
+                ExpectedColor(15, 10 + y),
+                result.GetPixel(15, y));
+        }
+    }
+
+    [Fact]
     public void RejectsRepeatedViewportFramesAtBothScrollableBoundaries()
     {
         const int width = 120;
@@ -1239,6 +1313,219 @@ public sealed class ScrollCaptureComposerTests
     }
 
     [Fact]
+    public void ReturningToCapturedTopDoesNotPrependSettlingFramesAfterAGap()
+    {
+        const int width = 320;
+        const int height = 240;
+        const int downTop = 180;
+        var options = Options with
+        {
+            MinimumOverlapRows = 24,
+            MinimumOverlapConfidence = 0.96,
+        };
+        using var document = CreateCodeEditorContent(width, downTop + height + 20);
+        using var initial = Crop(document, 0, height);
+        using var down = Crop(document, downTop, height);
+        using var unrelatedTransition = CreateRepeatingFrame(
+            width,
+            height,
+            Color.Magenta);
+        using var composer = new ScrollCaptureComposer();
+
+        Assert.True(composer.TryAddFrame(initial, options, out _));
+        Assert.True(composer.TryAddFrame(
+            down,
+            ScrollCaptureDirection.Down,
+            options,
+            expectedNewRows: downTop,
+            lockDirection: true,
+            out _));
+
+        // Walk back to the exact starting viewport. This establishes a return
+        // leg through content that is already part of the result.
+        Assert.False(composer.TryAddFrame(
+            initial,
+            ScrollCaptureDirection.Up,
+            options,
+            expectedNewRows: downTop,
+            lockDirection: true,
+            out _));
+        Assert.Equal(0, composer.CurrentFrameTop);
+
+        // A paint transition at the physical top cannot be located. The next
+        // few frames shift the original viewport down by small amounts, just
+        // like a sticky header settling. They have perfect overlap and used to
+        // be prepended as new rows, duplicating the page title.
+        Assert.False(composer.TryAddFrame(
+            unrelatedTransition,
+            ScrollCaptureDirection.Up,
+            options,
+            expectedNewRows: 43,
+            lockDirection: true,
+            out _));
+
+        var originalHeight = composer.OutputHeight;
+        foreach (var shift in new[] { 27, 61, 80, 125 })
+        {
+            using var settlingFrame = ShiftViewportDown(initial, shift);
+            Assert.False(composer.TryAddFrame(
+                settlingFrame,
+                ScrollCaptureDirection.Up,
+                options,
+                expectedNewRows: 43,
+                lockDirection: true,
+                out _));
+            Assert.Equal("return-boundary-gap-veto", composer.LastRejectReason);
+            Assert.Equal(originalHeight, composer.OutputHeight);
+            Assert.Equal(0, composer.CapturedContentTop);
+        }
+
+        using var result = composer.Compose();
+        Assert.Equal(originalHeight, result.Height);
+    }
+
+    [Fact]
+    public void ReturningToCapturedTopDoesNotPrependSettlingFramesWithoutAGap()
+    {
+        const int width = 320;
+        const int height = 240;
+        const int downTop = 180;
+        var options = Options with
+        {
+            MinimumOverlapRows = 24,
+            MinimumOverlapConfidence = 0.96,
+        };
+        using var document = CreateCodeEditorContent(width, downTop + height + 20);
+        using var initial = Crop(document, 0, height);
+        using var down = Crop(document, downTop, height);
+        using var composer = new ScrollCaptureComposer();
+
+        Assert.True(composer.TryAddFrame(initial, options, out _));
+        Assert.True(composer.TryAddFrame(
+            down,
+            ScrollCaptureDirection.Down,
+            options,
+            expectedNewRows: downTop,
+            lockDirection: true,
+            out _));
+        Assert.False(composer.TryAddFrame(
+            initial,
+            ScrollCaptureDirection.Up,
+            options,
+            expectedNewRows: downTop,
+            lockDirection: true,
+            out _));
+
+        var originalHeight = composer.OutputHeight;
+        // This frame has a clean, high-confidence overlap with the initial
+        // viewport, but is only a top-layout transition (the same shape seen
+        // in the live report).  There is no unmatched gap before it.
+        using var firstSettlingFrame = ShiftViewportDown(initial, 75);
+        Assert.False(composer.TryAddFrame(
+            firstSettlingFrame,
+            ScrollCaptureDirection.Up,
+            options,
+            expectedNewRows: 56,
+            lockDirection: true,
+            out _));
+        Assert.Equal("return-boundary-settle-veto", composer.LastRejectReason);
+
+        foreach (var shift in new[] { 131, 42, 187 })
+        {
+            using var settlingFrame = ShiftViewportDown(initial, shift);
+            Assert.False(composer.TryAddFrame(
+                settlingFrame,
+                ScrollCaptureDirection.Up,
+                options,
+                expectedNewRows: null,
+                lockDirection: true,
+                out _));
+            Assert.Equal(originalHeight, composer.OutputHeight);
+            Assert.Equal(0, composer.CapturedContentTop);
+        }
+    }
+
+    [Fact]
+    public void StationaryReturnedTopDoesNotPrependDelayedDuplicateHeaderFrames()
+    {
+        const int width = 320;
+        const int height = 240;
+        const int downTop = 180;
+        var options = Options with
+        {
+            MinimumOverlapRows = 24,
+            MinimumOverlapConfidence = 0.96,
+        };
+        using var document = CreateCodeEditorContent(
+            width,
+            downTop + height + 20);
+        using var initial = Crop(document, 0, height);
+        using var down = Crop(document, downTop, height);
+        using var composer = new ScrollCaptureComposer();
+
+        Assert.True(composer.TryAddFrame(initial, options, out _));
+        Assert.True(composer.TryAddFrame(
+            down,
+            ScrollCaptureDirection.Down,
+            options,
+            expectedNewRows: downTop,
+            lockDirection: true,
+            out _));
+        Assert.False(composer.TryAddFrame(
+            initial,
+            ScrollCaptureDirection.Up,
+            options,
+            expectedNewRows: downTop,
+            lockDirection: true,
+            out _));
+
+        // The live trace contained one more identical sample at top before a
+        // queued wheel tick was paired with a 10 px compositor transition.
+        Assert.False(composer.TryAddFrame(
+            initial,
+            ScrollCaptureDirection.Up,
+            options,
+            expectedNewRows: null,
+            lockDirection: false,
+            out _));
+
+        var originalHeight = composer.OutputHeight;
+        using var delayedTenPixelFrame = PrefixDuplicateAndShiftDown(
+            initial,
+            10);
+        Assert.False(composer.TryAddFrame(
+            delayedTenPixelFrame,
+            ScrollCaptureDirection.Up,
+            options,
+            expectedNewRows: 34,
+            lockDirection: true,
+            out _));
+        Assert.True(
+            composer.LastRejectReason is
+                "return-boundary-stationary-duplicate-veto" or
+                "return-boundary-settle-veto");
+
+        // Further same-direction wheel input and inertia still belong to the
+        // same physical-top settle. They must not clear the visual boundary.
+        using var delayedSeventyPixelFrame = PrefixDuplicateAndShiftDown(
+            initial,
+            70);
+        Assert.False(composer.TryAddFrame(
+            delayedSeventyPixelFrame,
+            ScrollCaptureDirection.Up,
+            options,
+            expectedNewRows: 32,
+            lockDirection: true,
+            out _));
+        Assert.True(
+            composer.LastRejectReason is
+                "return-boundary-gap-veto" or
+                "return-boundary-settle-veto");
+        Assert.Equal(originalHeight, composer.OutputHeight);
+        Assert.Equal(0, composer.CapturedContentTop);
+    }
+
+    [Fact]
     public void KeepsEveryRowContiguousAcrossDownUpDownFrameStitching()
     {
         using var initialFrame = CreateFrame(startY: 200, width: 96, height: 100);
@@ -1718,6 +2005,91 @@ public sealed class ScrollCaptureComposerTests
         Assert.NotNull(match);
         Assert.Equal(height - largeStep, match.OverlapRows);
     }
+    [Fact]
+    public void ExcludesFixedBottomChromeAcrossDownUpAndAboveStartScrolling()
+    {
+        const int width = 360;
+        const int frameHeight = 307;
+        const int fixedBottomRows = 18;
+        const int scrollableHeight = frameHeight - fixedBottomRows;
+        const int initialTop = 240;
+        var tops = new[] { initialTop, 300, 310, 360, 300, initialTop, 180 };
+        var directions = new[]
+        {
+            ScrollCaptureDirection.Down,
+            ScrollCaptureDirection.Down,
+            ScrollCaptureDirection.Down,
+            ScrollCaptureDirection.Up,
+            ScrollCaptureDirection.Up,
+            ScrollCaptureDirection.Up,
+        };
+        var options = Options with
+        {
+            MaximumFrames = 20,
+            MinimumOverlapRows = 24,
+            MinimumOverlapConfidence = 0.96,
+        };
+        var expectedTop = tops.Min();
+        var expectedBottom = tops.Max() + scrollableHeight;
+        using var document = CreateCodeEditorContent(
+            width,
+            expectedBottom + 40);
+        using var composer = new ScrollCaptureComposer();
+
+        using (var initial = CreateFrameWithFixedBottomChrome(
+                   document,
+                   tops[0],
+                   frameHeight,
+                   fixedBottomRows))
+        {
+            Assert.True(composer.TryAddFrame(initial, options, out _));
+        }
+
+        for (var index = 1; index < tops.Length; index++)
+        {
+            using var frame = CreateFrameWithFixedBottomChrome(
+                document,
+                tops[index],
+                frameHeight,
+                fixedBottomRows);
+            _ = composer.TryAddFrame(
+                frame,
+                directions[index - 1],
+                options,
+                expectedNewRows: Math.Abs(tops[index] - tops[index - 1]),
+                lockDirection: true,
+                out _);
+
+            // A pause produces repeated frames in the live queue. It must not
+            // write the fixed horizontal scrollbar or duplicate code rows.
+            _ = composer.TryAddFrame(
+                frame,
+                directions[index - 1],
+                options,
+                expectedNewRows: null,
+                lockDirection: false,
+                out _);
+        }
+
+        Assert.Equal(fixedBottomRows, composer.FixedBottomRows);
+        using var result = composer.Compose();
+        using var expected = document.Clone(
+            new Rectangle(
+                0,
+                expectedTop,
+                width,
+                expectedBottom - expectedTop),
+            PixelFormat.Format32bppPArgb);
+        Assert.Equal(expected.Size, result.Size);
+        for (var y = 0; y < expected.Height; y++)
+        {
+            for (var x = 0; x < expected.Width; x++)
+            {
+                Assert.Equal(expected.GetPixel(x, y), result.GetPixel(x, y));
+            }
+        }
+    }
+
     private static Bitmap CreateWeChatLikeChatContent(int width, int height)
     {
         var bitmap = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
@@ -1818,6 +2190,35 @@ public sealed class ScrollCaptureComposerTests
 
         return content;
     }
+    /// <summary>
+    /// A frame whose top <paramref name="staleRows"/> rows carry a different
+    /// texture family than <see cref="CreateFrame"/> produces for the same
+    /// document rows — simulating a page that repainted that band after the
+    /// frame was stored (live timestamps, hover state, streaming indicators).
+    /// </summary>
+    private static Bitmap CreateFrameWithRepaintedBand(
+        int startY,
+        int width,
+        int height,
+        int staleRows)
+    {
+        var frame = CreateFrame(startY, width, height);
+        for (var y = 0; y < staleRows; y++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var documentY = startY + y;
+                frame.SetPixel(x, y, Color.FromArgb(
+                    255,
+                    (x * 53 + documentY * 97) & 0xff,
+                    (x * 11 + documentY * 3) & 0xff,
+                    (x * 29 + documentY * 61) & 0xff));
+            }
+        }
+
+        return frame;
+    }
+
     private static Bitmap CreateFrame(int startY, int width, int height)
     {
         var frame = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
@@ -1899,6 +2300,50 @@ public sealed class ScrollCaptureComposerTests
             }
         }
 
+        return frame;
+    }
+
+    private static Bitmap ShiftViewportDown(Bitmap source, int rows)
+    {
+        var shift = Math.Clamp(rows, 1, source.Height - 1);
+        var frame = new Bitmap(
+            source.Width,
+            source.Height,
+            PixelFormat.Format32bppPArgb);
+        using var graphics = Graphics.FromImage(frame);
+        graphics.Clear(Color.White);
+        using var markerBrush = new SolidBrush(Color.FromArgb(255, 31, 63, 95));
+        graphics.FillRectangle(markerBrush, 0, 0, source.Width, shift);
+        graphics.DrawImageUnscaled(source, 0, shift);
+        return frame;
+    }
+
+    private static Bitmap PrefixDuplicateAndShiftDown(Bitmap source, int rows)
+    {
+        var shift = Math.Clamp(rows, 1, source.Height - 1);
+        var frame = new Bitmap(
+            source.Width,
+            source.Height,
+            PixelFormat.Format32bppPArgb);
+        using var graphics = Graphics.FromImage(frame);
+        graphics.DrawImage(
+            source,
+            new Rectangle(0, 0, source.Width, shift),
+            new Rectangle(0, 0, source.Width, shift),
+            GraphicsUnit.Pixel);
+        graphics.DrawImage(
+            source,
+            new Rectangle(
+                0,
+                shift,
+                source.Width,
+                source.Height - shift),
+            new Rectangle(
+                0,
+                0,
+                source.Width,
+                source.Height - shift),
+            GraphicsUnit.Pixel);
         return frame;
     }
 
@@ -2049,6 +2494,71 @@ public sealed class ScrollCaptureComposerTests
         return content;
     }
 
+    [Fact]
+    public void ReanchorsALostFlingAtThePhysicalTopBoundary()
+    {
+        const int width = 320;
+        const int height = 260;
+        var options = Options with
+        {
+            MaximumFrames = 20,
+            MinimumOverlapRows = 24,
+            MinimumOverlapConfidence = 0.96,
+        };
+        using var content = new Bitmap(width, 900, PixelFormat.Format32bppPArgb);
+        for (var y = 0; y < content.Height; y++)
+        {
+            for (var x = 0; x < content.Width; x++)
+            {
+                content.SetPixel(x, y, ExpectedBrowserColor(x, y));
+            }
+        }
+
+        using var composer = new ScrollCaptureComposer();
+
+        // Capture starts 300 rows below the page top and scrolls down.
+        foreach (var top in new[] { 300, 400, 500 })
+        {
+            using var frame = Crop(content, top, height);
+            Assert.True(
+                composer.TryAddFrame(
+                    frame,
+                    ScrollCaptureDirection.Down,
+                    options,
+                    out _),
+                $"failed at top={top}");
+        }
+
+        // A virtualized fling jumps the page to its physical top without any
+        // located samples in between; the anchor is now stale. The boundary
+        // marker path hands the stationary top frame to the re-anchor.
+        using var physicalTopFrame = Crop(content, 100, height);
+        Assert.False(
+            composer.TryMarkBoundaryReached(
+                physicalTopFrame,
+                ScrollCaptureDirection.Up));
+        Assert.True(
+            composer.TryReanchorAtBoundary(
+                physicalTopFrame,
+                ScrollCaptureDirection.Up,
+                options));
+
+        // 200 missing rows above the old start must now be in the output.
+        Assert.Equal(1, composer.AddedAboveFrameCount);
+        Assert.Equal(height + 200 + 200, composer.OutputHeight);
+
+        using var result = composer.Compose();
+        for (var y = 0; y < result.Height; y += 3)
+        {
+            for (var x = 0; x < result.Width; x += 7)
+            {
+                Assert.Equal(
+                    content.GetPixel(x, y + 100),
+                    result.GetPixel(x, y));
+            }
+        }
+    }
+
     private static Bitmap CreateCodeEditorContent(int width, int height)
     {
         var content = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
@@ -2097,6 +2607,52 @@ public sealed class ScrollCaptureComposerTests
         }
 
         return content;
+    }
+
+    private static Bitmap CreateFrameWithFixedBottomChrome(
+        Bitmap document,
+        int documentTop,
+        int frameHeight,
+        int fixedBottomRows)
+    {
+        var scrollableHeight = frameHeight - fixedBottomRows;
+        var frame = new Bitmap(
+            document.Width,
+            frameHeight,
+            PixelFormat.Format32bppPArgb);
+        using var graphics = Graphics.FromImage(frame);
+        graphics.CompositingMode = CompositingMode.SourceCopy;
+        graphics.DrawImage(
+            document,
+            new Rectangle(0, 0, document.Width, scrollableHeight),
+            new Rectangle(
+                0,
+                documentTop,
+                document.Width,
+                scrollableHeight),
+            GraphicsUnit.Pixel);
+        using var background = new SolidBrush(Color.FromArgb(255, 31, 31, 31));
+        using var track = new SolidBrush(Color.FromArgb(255, 55, 55, 55));
+        using var thumb = new SolidBrush(Color.FromArgb(255, 118, 118, 118));
+        graphics.FillRectangle(
+            background,
+            0,
+            scrollableHeight,
+            document.Width,
+            fixedBottomRows);
+        graphics.FillRectangle(
+            track,
+            0,
+            scrollableHeight,
+            document.Width,
+            1);
+        graphics.FillRectangle(
+            thumb,
+            document.Width / 4,
+            scrollableHeight + 5,
+            document.Width / 3,
+            8);
+        return frame;
     }
 
     private static Bitmap Crop(Bitmap source, int top, int height)

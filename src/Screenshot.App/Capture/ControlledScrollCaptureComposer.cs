@@ -12,11 +12,11 @@ namespace Screenshot.App.Capture;
 /// </summary>
 internal sealed class ControlledScrollCaptureComposer : IDisposable
 {
-    private readonly ScrollCaptureComposer _downward = new(
+    private readonly AutomaticScrollCaptureComposerCore _downward = new(
         detectStationaryLeadingRows: false);
     private readonly Queue<int> _recentDownwardExpansionRows = new(3);
     private readonly Queue<int> _recentUpwardExpansionRows = new(3);
-    private ScrollCaptureComposer? _upward;
+    private AutomaticScrollCaptureComposerCore? _upward;
     private int _initialFrameHeight;
     private bool _initialized;
     private bool _disposed;
@@ -31,9 +31,20 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
 
     public int OutputWidth => _downward.OutputWidth;
 
+    internal int FixedBottomRows => _downward.FixedBottomRows;
+
+    internal int GetTravelFromInitial(
+        ScrollCaptureDirection returnDirection)
+    {
+        EnsureInitialized();
+        return returnDirection == ScrollCaptureDirection.Up
+            ? Math.Max(0, _downward.CurrentFrameTop)
+            : Math.Max(0, -(_upward?.CurrentFrameTop ?? 0));
+    }
+
     public int OutputHeight => _downward.OutputHeight +
-        Math.Max(0, (_upward?.OutputHeight ?? _initialFrameHeight) -
-            _initialFrameHeight);
+        Math.Max(0, (_upward?.OutputHeight ?? SharedInitialHeight) -
+            SharedInitialHeight);
 
     public bool IsUpwardExtensionStarted => _upward is not null;
 
@@ -46,6 +57,12 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
     public double? LastOverlapConfidence { get; private set; }
 
     public int? LastHorizontalOffset { get; private set; }
+
+    internal int? LastPreferredExpectedRows { get; private set; }
+
+    internal int? LastTemporalUndershootRows { get; private set; }
+
+    internal int? LastTemporalReplacementRows { get; private set; }
 
     public void Initialize(Bitmap initialFrame, ScrollCaptureOptions options)
     {
@@ -67,12 +84,14 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
         Bitmap frame,
         ScrollCaptureOptions options,
         int? expectedRows,
-        int? maximumAcceptedNewRows = null)
+        int? maximumAcceptedNewRows = null,
+        bool tolerateQuantizedExpectation = false)
     {
         EnsureInitialized();
         var preferredRows = GetPreferredExpectedRows(
             expectedRows,
             _recentDownwardExpansionRows);
+        LastPreferredExpectedRows = preferredRows;
         var added = _downward.TryAddFrame(
             frame,
             ScrollCaptureDirection.Down,
@@ -80,7 +99,9 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
             preferredRows,
             lockDirection: true,
             maximumAcceptedNewRows,
-            out var overlapMatch);
+            out var overlapMatch,
+            programmaticExpectedRows: expectedRows,
+            tolerateQuantizedExpectation: tolerateQuantizedExpectation);
         if (added && _downward.LastFrameMovementRows is > 0)
         {
             RememberExpansionRows(
@@ -114,8 +135,9 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
             return;
         }
 
-        _upward = new ScrollCaptureComposer(
-            detectStationaryLeadingRows: false);
+        _upward = new AutomaticScrollCaptureComposerCore(
+            detectStationaryLeadingRows: false,
+            fixedBottomRows: _downward.FixedBottomRows);
         _ = _upward.TryAddFrame(initialFrame, options, out _);
         CopyDiagnosticsFrom(_upward);
     }
@@ -124,7 +146,8 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
         Bitmap frame,
         ScrollCaptureOptions options,
         int? expectedRows,
-        int? maximumAcceptedNewRows = null)
+        int? maximumAcceptedNewRows = null,
+        bool tolerateQuantizedExpectation = false)
     {
         EnsureInitialized();
         if (_upward is null)
@@ -135,6 +158,7 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
         var preferredRows = GetPreferredExpectedRows(
             expectedRows,
             _recentUpwardExpansionRows);
+        LastPreferredExpectedRows = preferredRows;
         var added = _upward.TryAddFrame(
             frame,
             ScrollCaptureDirection.Up,
@@ -142,7 +166,9 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
             preferredRows,
             lockDirection: true,
             maximumAcceptedNewRows,
-            out var overlapMatch);
+            out var overlapMatch,
+            programmaticExpectedRows: expectedRows,
+            tolerateQuantizedExpectation: tolerateQuantizedExpectation);
         if (added && _upward.LastFrameMovementRows is > 0)
         {
             RememberExpansionRows(
@@ -169,7 +195,7 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
 
         using var upward = _upward.Compose();
         var width = Math.Max(upward.Width, downward.Width);
-        var downwardTop = upward.Height - _initialFrameHeight;
+        var downwardTop = upward.Height - SharedInitialHeight;
         var height = downwardTop + downward.Height;
         var combined = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
         using var graphics = Graphics.FromImage(combined);
@@ -228,8 +254,12 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
         }
     }
 
+    private int SharedInitialHeight => _initialized
+        ? _downward.InitialContentHeight
+        : _initialFrameHeight;
+
     private void CopyDiagnosticsFrom(
-        ScrollCaptureComposer composer,
+        AutomaticScrollCaptureComposerCore composer,
         ImageOverlapMatch? overlapMatch = null)
     {
         LastFrameMovementRows = composer.LastFrameMovementRows;
@@ -237,6 +267,8 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
         LastOverlapRows = overlapMatch?.OverlapRows;
         LastOverlapConfidence = overlapMatch?.Confidence;
         LastHorizontalOffset = overlapMatch?.HorizontalOffset;
+        LastTemporalUndershootRows = composer.LastTemporalUndershootRows;
+        LastTemporalReplacementRows = composer.LastTemporalReplacementRows;
     }
 
     internal static int GetFixedBottomExclusion(int frameHeight)

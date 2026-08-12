@@ -1,3 +1,4 @@
+using Screenshot.App.Core;
 using WpfColor = System.Windows.Media.Color;
 using WpfPoint = System.Windows.Point;
 using WpfRect = System.Windows.Rect;
@@ -20,7 +21,8 @@ public sealed record ArrowAnnotation(
     WpfPoint Start,
     WpfPoint End,
     WpfColor StrokeColor,
-    double StrokeWidth) : EditorAnnotation;
+    double StrokeWidth,
+    ArrowStyle Style = ArrowStyle.Filled) : EditorAnnotation;
 
 public sealed record BrushAnnotation(
     IReadOnlyList<WpfPoint> Points,

@@ -67,7 +67,7 @@ public sealed class ControlledScrollCaptureComposerTests
             new Rectangle(0, initialTop - 30, width, viewportHeight),
             PixelFormat.Format32bppPArgb);
         Assert.True(
-            ImageOverlapMatcher.FindStationaryLeadingRows(
+            AutomaticImageOverlapMatcher.FindStationaryLeadingRows(
                 initial,
                 firstUp,
                 ScrollCaptureDirection.Up,
@@ -115,7 +115,7 @@ public sealed class ControlledScrollCaptureComposerTests
         // The fixed wheel packet count can lag smooth-scroll inertia. On a
         // 27px code-line period, preferring 25px selects the equally exact 26px
         // overlap and silently drops one complete line.
-        var laggingInputMatch = ImageOverlapMatcher.FindVerticalOverlap(
+        var laggingInputMatch = AutomaticImageOverlapMatcher.FindVerticalOverlap(
             previous,
             current,
             minimumOverlapRows: 24,
@@ -130,7 +130,7 @@ public sealed class ControlledScrollCaptureComposerTests
                 inputExpectedRows: 25,
                 recentExpansionRows: [29, 54]);
         Assert.Equal(54, stableExpectedRows);
-        var stableMatch = ImageOverlapMatcher.FindVerticalOverlap(
+        var stableMatch = AutomaticImageOverlapMatcher.FindVerticalOverlap(
             previous,
             current,
             minimumOverlapRows: 24,
@@ -149,7 +149,144 @@ public sealed class ControlledScrollCaptureComposerTests
             10,
             ControlledScrollCaptureComposer.GetPreferredExpectedRows(
                 inputExpectedRows: 10,
-                recentExpansionRows: [165]));
+            recentExpansionRows: [165]));
+    }
+
+    [Theory]
+    [InlineData(25, 79, 104, true)]
+    [InlineData(15, 91, 130, true)]
+    [InlineData(25, 27, 104, false)]
+    [InlineData(25, 79, 30, false)]
+    public void TemporalUndershootReplacementMustBeMateriallyCloserToPrior(
+        int originalRows,
+        int replacementRows,
+        int preferredRows,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            AutomaticScrollCaptureComposerCore.ShouldReplaceTemporalUndershoot(
+                originalRows,
+                replacementRows,
+                preferredRows));
+    }
+
+    [Fact]
+    public void AutomaticComposerRecheckEscapesASeverePeriodicCodePeak()
+    {
+        const int width = 360;
+        const int viewportHeight = 318;
+        const int period = 54;
+        const int firstMovement = 70;
+        const int actualSecondMovement = 79;
+        const int falseSecondMovement = actualSecondMovement - period;
+        const int temporalPrior = 104;
+        using var document = CreatePeriodicDocument(
+            width,
+            viewportHeight + firstMovement + actualSecondMovement,
+            period);
+        using var first = document.Clone(
+            new Rectangle(0, firstMovement, width, viewportHeight),
+            PixelFormat.Format32bppPArgb);
+        using var second = document.Clone(
+            new Rectangle(
+                0,
+                firstMovement + actualSecondMovement,
+                width,
+                viewportHeight),
+            PixelFormat.Format32bppPArgb);
+        var options = ScrollCaptureOptions.Default with
+        {
+            MinimumOverlapConfidence = 0.94,
+        };
+        var originalMatch = AutomaticImageOverlapMatcher.FindVerticalOverlap(
+            first,
+            second,
+            minimumOverlapRows: options.MinimumOverlapRows,
+            minimumConfidence: options.MinimumOverlapConfidence,
+            minimumNewRows: options.MinimumNewRows,
+            preferredNewRows: falseSecondMovement);
+        Assert.NotNull(originalMatch);
+        Assert.Equal(
+            falseSecondMovement,
+            viewportHeight - originalMatch.OverlapRows);
+
+        var replacementMatch =
+            AutomaticScrollCaptureComposerCore.FindTemporalUndershootReplacement(
+                first,
+                second,
+                originalMatch,
+                temporalPrior,
+                options);
+
+        Assert.NotNull(replacementMatch);
+        Assert.Equal(
+            actualSecondMovement,
+            viewportHeight - replacementMatch.OverlapRows);
+    }
+
+    [Fact]
+    public void NearRepeatedCodeRowsDoNotTrimTheTrustedInitialViewport()
+    {
+        const int width = 180;
+        const int viewportHeight = 160;
+        const int initialTop = 100;
+        const int upwardMovement = 40;
+        using var document = CreateDocument(width, height: 280);
+
+        // The rows immediately above the initial viewport look like the first
+        // code line inside it, but differ by one RGB level. The old approximate
+        // duplicate cleanup treated them as the same line and removed 20 rows
+        // from the original initial frame, producing an intermittent clipped
+        // seam like the real 4999/5000 result.
+        for (var row = 0; row < 20; row++)
+        {
+            for (var x = 0; x < width; x++)
+            {
+                var shade = 36 + (((x / 6) + row) % 8) * 20;
+                document.SetPixel(
+                    x,
+                    initialTop - 20 + row,
+                    Color.FromArgb(255, shade, shade + 8, shade + 16));
+                document.SetPixel(
+                    x,
+                    initialTop + row,
+                    Color.FromArgb(255, shade + 1, shade + 9, shade + 17));
+            }
+        }
+
+        using var initial = document.Clone(
+            new Rectangle(0, initialTop, width, viewportHeight),
+            PixelFormat.Format32bppPArgb);
+        using var upward = document.Clone(
+            new Rectangle(
+                0,
+                initialTop - upwardMovement,
+                width,
+                viewportHeight),
+            PixelFormat.Format32bppPArgb);
+        var options = ScrollCaptureOptions.Default with
+        {
+            MinimumOverlapConfidence = 0.90,
+        };
+        using var composer = new ControlledScrollCaptureComposer();
+        composer.Initialize(initial, options);
+        composer.BeginUpwardExtension(initial, options);
+
+        Assert.True(composer.TryAddUp(
+            upward,
+            options,
+            expectedRows: upwardMovement));
+
+        using var result = composer.Compose();
+        using var expected = document.Clone(
+            new Rectangle(
+                0,
+                initialTop - upwardMovement,
+                width,
+                viewportHeight + upwardMovement),
+            PixelFormat.Format32bppPArgb);
+        AssertPixelsEqual(expected, result, expected.Height);
     }
 
     [Fact]
@@ -211,7 +348,7 @@ public sealed class ControlledScrollCaptureComposerTests
             graphics.FillRectangle(brush, 0, 80, width, 17);
         }
 
-        var looseMatch = ImageOverlapMatcher.FindVerticalOverlap(
+        var looseMatch = AutomaticImageOverlapMatcher.FindVerticalOverlap(
             dynamicReturnFrame,
             initial,
             minimumOverlapRows: 20,
@@ -258,7 +395,7 @@ public sealed class ControlledScrollCaptureComposerTests
         {
             MinimumOverlapConfidence = 0.90,
         };
-        using var composer = new ScrollCaptureComposer(
+        using var composer = new AutomaticScrollCaptureComposerCore(
             detectStationaryLeadingRows: false);
         Assert.True(composer.TryAddFrame(initial, options, out _));
         Assert.True(composer.TryAddFrame(
@@ -301,7 +438,7 @@ public sealed class ControlledScrollCaptureComposerTests
         {
             MinimumOverlapConfidence = 0.90,
         };
-        using var composer = new ScrollCaptureComposer(
+        using var composer = new AutomaticScrollCaptureComposerCore(
             detectStationaryLeadingRows: false);
         Assert.True(composer.TryAddFrame(initial, options, out _));
         Assert.True(composer.TryAddFrame(
@@ -343,7 +480,7 @@ public sealed class ControlledScrollCaptureComposerTests
         {
             MinimumOverlapConfidence = 0.90,
         };
-        using var composer = new ScrollCaptureComposer(
+        using var composer = new AutomaticScrollCaptureComposerCore(
             detectStationaryLeadingRows: false);
         Assert.True(composer.TryAddFrame(initial, options, out _));
 
@@ -410,7 +547,7 @@ public sealed class ControlledScrollCaptureComposerTests
                 fixedBottomRows);
         }
 
-        using var composer = new ScrollCaptureComposer(
+        using var composer = new AutomaticScrollCaptureComposerCore(
             detectStationaryLeadingRows: false);
         Assert.True(composer.TryAddFrame(
             document,
@@ -465,6 +602,59 @@ public sealed class ControlledScrollCaptureComposerTests
             viewportHeight + 8);
     }
 
+    [Fact]
+    public void FixedBottomChromeIsExcludedFromBothControlledDirections()
+    {
+        const int width = 180;
+        const int frameHeight = 160;
+        const int fixedBottomRows = 20;
+        const int scrollableHeight = frameHeight - fixedBottomRows;
+        const int initialTop = 120;
+        using var document = CreateDocument(width, height: 400);
+        using var initial = CreateFrameWithFixedBottomChrome(
+            document,
+            initialTop,
+            frameHeight,
+            fixedBottomRows);
+        var options = ScrollCaptureOptions.Default with
+        {
+            MinimumOverlapConfidence = 0.90,
+        };
+        using var composer = new ControlledScrollCaptureComposer();
+        composer.Initialize(initial, options);
+
+        foreach (var top in new[] { 160, 200 })
+        {
+            using var frame = CreateFrameWithFixedBottomChrome(
+                document,
+                top,
+                frameHeight,
+                fixedBottomRows);
+            Assert.True(composer.TryAddDown(frame, options, expectedRows: 40));
+        }
+
+        composer.BeginUpwardExtension(initial, options);
+        foreach (var top in new[] { 80, 40 })
+        {
+            using var frame = CreateFrameWithFixedBottomChrome(
+                document,
+                top,
+                frameHeight,
+                fixedBottomRows);
+            Assert.True(composer.TryAddUp(frame, options, expectedRows: 40));
+        }
+
+        using var result = composer.Compose();
+        using var expected = document.Clone(
+            new Rectangle(
+                0,
+                40,
+                width,
+                (200 + scrollableHeight) - 40),
+            PixelFormat.Format32bppPArgb);
+        AssertPixelsEqual(expected, result, expected.Height);
+    }
+
     [Theory]
     [InlineData(119, 0)]
     [InlineData(120, 16)]
@@ -500,6 +690,47 @@ public sealed class ControlledScrollCaptureComposerTests
         }
 
         return bitmap;
+    }
+
+    private static Bitmap CreateFrameWithFixedBottomChrome(
+        Bitmap document,
+        int documentTop,
+        int frameHeight,
+        int fixedBottomRows)
+    {
+        var scrollableHeight = frameHeight - fixedBottomRows;
+        var frame = new Bitmap(
+            document.Width,
+            frameHeight,
+            PixelFormat.Format32bppPArgb);
+        using var graphics = Graphics.FromImage(frame);
+        graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+        graphics.DrawImage(
+            document,
+            new Rectangle(0, 0, document.Width, scrollableHeight),
+            new Rectangle(
+                0,
+                documentTop,
+                document.Width,
+                scrollableHeight),
+            GraphicsUnit.Pixel);
+        using var background = new SolidBrush(Color.FromArgb(255, 31, 31, 31));
+        using var border = new SolidBrush(Color.FromArgb(255, 56, 56, 56));
+        using var thumb = new SolidBrush(Color.FromArgb(255, 124, 124, 124));
+        graphics.FillRectangle(
+            background,
+            0,
+            scrollableHeight,
+            document.Width,
+            fixedBottomRows);
+        graphics.FillRectangle(border, 0, scrollableHeight, document.Width, 1);
+        graphics.FillRectangle(
+            thumb,
+            document.Width / 4,
+            scrollableHeight + 5,
+            document.Width / 3,
+            8);
+        return frame;
     }
 
     private static Bitmap CreateSparseCodeDocument(int width, int height)

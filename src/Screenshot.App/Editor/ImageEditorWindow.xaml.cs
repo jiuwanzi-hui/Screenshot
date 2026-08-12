@@ -6,6 +6,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Screenshot.App.Capture;
 using Screenshot.App.Infrastructure;
+using Screenshot.App.Core;
 using WpfButton = System.Windows.Controls.Button;
 using WpfColor = System.Windows.Media.Color;
 using WpfColorConverter = System.Windows.Media.ColorConverter;
@@ -19,23 +20,49 @@ public partial class ImageEditorWindow : Window
 {
     private CapturedImage _capturedImage;
     private readonly string _saveDirectory;
+    private readonly Action<ArrowStyle>? _arrowStyleChanged;
+    private readonly Action<string>? _customStrokeColorChanged;
+    private readonly Action<int[]>? _customColorPaletteChanged;
+    private ArrowStyle _arrowStyle;
     private EditorTool _selectedTool = EditorTool.Rectangle;
     private WpfColor _selectedColor = WpfColor.FromRgb(46, 175, 165);
+    private WpfColor? _customColor;
+    private int[] _customColorPalette;
     private double _displayWidth;
     private double _displayHeight;
     private bool _isInitialized;
     private bool _isClosed;
 
-    public ImageEditorWindow(CapturedImage capturedImage, string saveDirectory)
+    public ImageEditorWindow(
+        CapturedImage capturedImage,
+        string saveDirectory,
+        ArrowStyle arrowStyle = ArrowStyle.Filled,
+        Action<ArrowStyle>? arrowStyleChanged = null,
+        string? customStrokeColor = null,
+        Action<string>? customStrokeColorChanged = null,
+        int[]? customColorPalette = null,
+        Action<int[]>? customColorPaletteChanged = null)
     {
         ArgumentNullException.ThrowIfNull(capturedImage);
         ArgumentException.ThrowIfNullOrWhiteSpace(saveDirectory);
 
         _capturedImage = capturedImage;
         _saveDirectory = saveDirectory;
+        _arrowStyle = Enum.IsDefined(arrowStyle)
+            ? arrowStyle
+            : ArrowStyle.Filled;
+        _arrowStyleChanged = arrowStyleChanged;
+        _customStrokeColorChanged = customStrokeColorChanged;
+        _customColorPalette = NormalizeCustomColorPalette(customColorPalette);
+        _customColorPaletteChanged = customColorPaletteChanged;
 
         InitializeComponent();
         ApplyThemedContextMenu(ShapeToolButton.ContextMenu);
+        ApplyThemedContextMenu(ArrowToolButton.ContextMenu);
+        EditorCanvas.SelectArrowStyle(
+            _arrowStyle,
+            updateSelectedAnnotation: false);
+        ApplySavedCustomColor(customStrokeColor);
         WindowPlacementService.Track(this, WindowPlacementKeys.ImageEditor);
         PopulateEmojiPalette();
         EditorCanvas.HistoryChanged += OnEditorHistoryChanged;
@@ -116,6 +143,38 @@ public partial class ImageEditorWindow : Window
         menu.PlacementTarget = ShapeToolButton;
         menu.IsOpen = true;
         e.Handled = true;
+    }
+
+    private void OnArrowMenuArrowMouseDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (ArrowToolButton.ContextMenu is not { } menu)
+        {
+            return;
+        }
+
+        menu.PlacementTarget = ArrowToolButton;
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private void OnArrowStyleMenuItemClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { Tag: string styleName } ||
+            !Enum.TryParse<ArrowStyle>(styleName, out var arrowStyle))
+        {
+            return;
+        }
+
+        _arrowStyle = arrowStyle;
+        EditorCanvas.SelectArrowStyle(arrowStyle);
+        ArrowToolButton.IsChecked = true;
+        ArrowToolButton.ToolTip = arrowStyle == ArrowStyle.Hollow
+            ? "空心箭头标注"
+            : "实心箭头标注";
+        _arrowStyleChanged?.Invoke(arrowStyle);
+        EditorCanvas.Focus();
     }
 
     private static void ApplyThemedContextMenu(ContextMenu menu)
@@ -233,16 +292,18 @@ public partial class ImageEditorWindow : Window
 
     private void OnCustomColorClick(object sender, RoutedEventArgs e)
     {
+        var seedColor = _customColor ?? _selectedColor;
         using var dialog = new WinForms.ColorDialog
         {
             AllowFullOpen = true,
             FullOpen = true,
             AnyColor = true,
             Color = DrawingColor.FromArgb(
-                _selectedColor.A,
-                _selectedColor.R,
-                _selectedColor.G,
-                _selectedColor.B),
+                seedColor.A,
+                seedColor.R,
+                seedColor.G,
+                seedColor.B),
+            CustomColors = _customColorPalette.ToArray(),
         };
 
         if (dialog.ShowDialog() != WinForms.DialogResult.OK)
@@ -258,9 +319,57 @@ public partial class ImageEditorWindow : Window
         var brush = new SolidColorBrush(color);
         brush.Freeze();
         _selectedColor = color;
+        _customColor = color;
+        _customColorPalette = NormalizeCustomColorPalette(dialog.CustomColors);
         CustomColorButton.Background = brush;
         UpdateSelectedColorButton(CustomColorButton);
         EditorCanvas.SelectColor(color);
+        _customStrokeColorChanged?.Invoke(FormatColorText(color));
+        _customColorPaletteChanged?.Invoke(_customColorPalette.ToArray());
+    }
+
+    private void ApplySavedCustomColor(string? customStrokeColor)
+    {
+        if (string.IsNullOrWhiteSpace(customStrokeColor))
+        {
+            return;
+        }
+
+        WpfColor color;
+        try
+        {
+            if (WpfColorConverter.ConvertFromString(
+                    customStrokeColor.Trim()) is not WpfColor parsed)
+            {
+                return;
+            }
+
+            color = parsed;
+        }
+        catch (FormatException)
+        {
+            return;
+        }
+
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        _customColor = color;
+        CustomColorButton.Background = brush;
+    }
+
+    private static string FormatColorText(WpfColor color)
+    {
+        return color.A == byte.MaxValue
+            ? $"#{color.R:X2}{color.G:X2}{color.B:X2}"
+            : $"#{color.A:X2}{color.R:X2}{color.G:X2}{color.B:X2}";
+    }
+
+    private static int[] NormalizeCustomColorPalette(IEnumerable<int>? colors)
+    {
+        return (colors ?? [])
+            .Where(color => color is >= 0 and <= 0xFFFFFF)
+            .Take(16)
+            .ToArray();
     }
 
     private void OnStrokeWidthChanged(
@@ -399,7 +508,7 @@ public partial class ImageEditorWindow : Window
         selectedButton.BorderThickness = new Thickness(2);
     }
 
-    private void OnCopyClick(object sender, RoutedEventArgs e)
+    private async void OnCopyClick(object sender, RoutedEventArgs e)
     {
         if (!_isInitialized)
         {
@@ -409,7 +518,11 @@ public partial class ImageEditorWindow : Window
         try
         {
             var renderedImage = EditorCanvas.RenderEditedImage();
-            System.Windows.Clipboard.SetImage(renderedImage);
+            // Use the same native CF_DIB path as the capture window. WPF's
+            // delayed OLE bitmap provider is unreliable for tall scroll
+            // captures and reports a generic copy failure when the editor
+            // image is large or the clipboard is briefly occupied.
+            await ClipboardImageService.SetImageAsync(renderedImage);
             StatusText.Text = "已复制编辑后的图片。";
         }
         catch

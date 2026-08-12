@@ -327,6 +327,35 @@ public sealed class ImmediateSettingsTests : IDisposable
     }
 
     [Fact]
+    public void CaptureToolbarChoicesRoundTripThroughSettingsViewModel()
+    {
+        var viewModel = new SettingsViewModel(CreateSettings() with
+        {
+            VisibleCaptureToolbarFeatures =
+            [
+                CaptureToolbarFeature.Shape,
+                CaptureToolbarFeature.Translation,
+            ],
+        });
+
+        Assert.True(Assert.Single(
+            viewModel.CaptureToolbarFeatureItems,
+            item => item.Feature == CaptureToolbarFeature.Shape).IsVisible);
+        Assert.False(Assert.Single(
+            viewModel.CaptureToolbarFeatureItems,
+            item => item.Feature == CaptureToolbarFeature.Save).IsVisible);
+
+        foreach (var item in viewModel.CaptureToolbarFeatureItems)
+        {
+            item.IsVisible = item.Feature == CaptureToolbarFeature.PinImage;
+        }
+
+        Assert.Equal(
+            [CaptureToolbarFeature.PinImage],
+            viewModel.CreateSettings().VisibleCaptureToolbarFeatures);
+    }
+
+    [Fact]
     public void TranslationModelKeepsItsValueWhenTheCatalogIsRefreshed()
     {
         Directory.CreateDirectory(_testDirectory);

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Threading.Channels;
 using System.Windows;
 using System.Windows.Controls;
@@ -17,15 +18,19 @@ namespace Screenshot.App.Tests;
 /// </summary>
 public sealed class ScrollCaptureReverseFlingIntegrationTests
 {
-    [Fact]
-    public async Task DownThenUpFlingPrependsContentAboveTheStart()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DownThenUpFlingPrependsContentAboveTheStart(
+        bool manualWheelMode)
     {
         Window? window = null;
         ScrollViewer? scrollViewer = null;
         ScrollCaptureTarget? target = null;
+        var pointerActions = Channel.CreateUnbounded<ScrollCapturePointerAction>();
         var wheelEvents = Channel.CreateUnbounded<int>();
-        const double startOffset = 2200;
-        const double downTravel = (6 * 260) + 140;
+        const double startOffset = 1600;
+        const double downTravel = 950;
         double scrollableHeight = 0;
 
         WpfTestHost.Invoke(() =>
@@ -87,30 +92,14 @@ public sealed class ScrollCaptureReverseFlingIntegrationTests
 
         Assert.True(scrollableHeight >= 4200, $"文档太矮：{scrollableHeight}");
 
-        async Task SmoothScrollByAsync(double delta, int durationMs)
-        {
-            var steps = Math.Max(1, durationMs / 9);
-            var stepDelta = delta / steps;
-            for (var index = 0; index < steps; index++)
-            {
-                WpfTestHost.Invoke(() =>
-                {
-                    var viewer = scrollViewer!;
-                    viewer.ScrollToVerticalOffset(Math.Clamp(
-                        viewer.VerticalOffset + stepDelta,
-                        0,
-                        viewer.ScrollableHeight));
-                });
-                await Task.Delay(9);
-            }
-        }
-
         try
         {
             Assert.NotNull(target);
             var completionRequested = new TaskCompletionSource(
                 TaskCreationOptions.RunContinuationsAsynchronously);
             var previewStates = new ConcurrentQueue<ScrollCapturePreviewState>();
+            var controlledState = (int)
+                ControlledScrollCaptureState.WaitingToStart;
             await Task.Delay(250);
 
             // Windows from earlier desktop tests can linger topmost at the
@@ -125,24 +114,61 @@ public sealed class ScrollCaptureReverseFlingIntegrationTests
             });
             await Task.Delay(150);
 
-            var captureTask = ScrollCaptureService.CaptureOnWheelAsync(
-                target,
-                completionRequested.Task,
-                wheelEvents.Reader,
-                ScrollCaptureOptions.Default,
-                setPreviewVisibilityAsync: (_, _) => Task.CompletedTask,
-                previewChanged: previewStates.Enqueue);
+            var captureTask = manualWheelMode
+                ? ScrollCaptureService.CaptureOnWheelAsync(
+                    target,
+                    completionRequested.Task,
+                    wheelEvents.Reader,
+                    ScrollCaptureOptions.Default,
+                    previewChanged: previewStates.Enqueue,
+                    throttleWheelInput: true,
+                    initialFrame: null)
+                : ScrollCaptureService.CaptureControlledAsync(
+                    target,
+                    completionRequested.Task,
+                    pointerActions.Reader,
+                    ScrollCaptureOptions.Default,
+                    stateChanged: state =>
+                        Volatile.Write(ref controlledState, (int)state),
+                    previewChanged: previewStates.Enqueue,
+                    initialFrame: null);
 
-            // Down fling: wheel ticks arriving while smooth scrolling animates.
-            for (var tick = 0; tick < 6; tick++)
+            // Keep the real WPF/editor pixels used by this regression next to
+            // the stitched output.  This is intentionally a PNG artifact,
+            // not a synthetic bitmap, so a failed run can be inspected for
+            // missed rows, duplicate seams, and stale preview content.
+            var diagnosticDirectory = Path.Combine(
+                AppContext.BaseDirectory,
+                "ScreenshotData",
+                "Diagnostics");
+            Directory.CreateDirectory(diagnosticDirectory);
+            var referencePath = Path.Combine(
+                diagnosticDirectory,
+                manualWheelMode
+                    ? "real-scroll-manual-reference-initial.png"
+                    : "real-scroll-controlled-reference-initial.png");
+            using (var reference = ForegroundWindowCaptureService.CaptureRegion(
+                       target!.CaptureRegion))
             {
-                wheelEvents.Writer.TryWrite(-240);
-                await SmoothScrollByAsync(260, 130);
+                reference.Save(referencePath, System.Drawing.Imaging.ImageFormat.Png);
             }
 
-            // Deceleration tail without wheel input.
-            await SmoothScrollByAsync(140, 320);
-            await Task.Delay(650);
+            if (manualWheelMode)
+            {
+                await SendWheelBurstAsync(
+                    wheelEvents.Writer,
+                    delta: -120,
+                    count: 22,
+                    intervalMilliseconds: 90);
+                await Task.Delay(800);
+            }
+            else
+            {
+                pointerActions.Writer.TryWrite(ScrollCapturePointerAction.Click);
+                await Task.Delay(2200);
+                pointerActions.Writer.TryWrite(ScrollCapturePointerAction.Click);
+                await Task.Delay(700);
+            }
 
             // Up fling past the starting viewport. The pace is a brisk fling
             // in real terms while leaving margin for this contended test
@@ -151,49 +177,35 @@ public sealed class ScrollCaptureReverseFlingIntegrationTests
             // must stay under one viewport or no stitcher could connect
             // consecutive samples at all. Speed extremes are exercised by the
             // isolated stress runs, not by this regression gate.
-            for (var tick = 0; tick < 11; tick++)
+            if (manualWheelMode)
             {
-                wheelEvents.Writer.TryWrite(240);
-                await SmoothScrollByAsync(-180, 150);
+                await SendWheelBurstAsync(
+                    wheelEvents.Writer,
+                    delta: 120,
+                    count: 72,
+                    intervalMilliseconds: 90);
+                await Task.Delay(800);
             }
-
-            await SmoothScrollByAsync(-160, 320);
-            await Task.Delay(500);
-
-            // Rapid wiggling: the wheel direction flips faster than smooth
-            // scrolling settles, so the wheel hint disagrees with the actual
-            // screen motion on many frames. The stitcher must follow the image
-            // evidence and keep the anchor through every flip.
-            for (var flip = 0; flip < 4; flip++)
+            else
             {
-                var sign = flip % 2 == 0 ? 1 : -1;
-                wheelEvents.Writer.TryWrite(-240 * sign);
-                await SmoothScrollByAsync(190 * sign, 140);
+                pointerActions.Writer.TryWrite(
+                    ScrollCapturePointerAction.DoubleClick);
+                await Task.Delay(6500);
+                if ((ControlledScrollCaptureState)Volatile.Read(
+                        ref controlledState) is
+                    ControlledScrollCaptureState.ScrollingUp or
+                    ControlledScrollCaptureState.ScrollingUpFirst)
+                {
+                    pointerActions.Writer.TryWrite(
+                        ScrollCapturePointerAction.Click);
+                }
             }
-
-            await Task.Delay(400);
-
-            // The user's failing gesture: reverse down again briefly, then
-            // immediately fling up past the previous top. The transitional
-            // frames are expensive to match, and the second up-run must not
-            // let the backlog decimate itself into unmatchable gaps.
-            for (var tick = 0; tick < 2; tick++)
-            {
-                wheelEvents.Writer.TryWrite(-240);
-                await SmoothScrollByAsync(230, 120);
-            }
-
-            for (var tick = 0; tick < 7; tick++)
-            {
-                wheelEvents.Writer.TryWrite(240);
-                await SmoothScrollByAsync(-190, 140);
-            }
-
-            await SmoothScrollByAsync(-140, 300);
-            await Task.Delay(900);
+            // Give the matcher a stationary tail to finish the reverse chain
+            // even when the full test suite is competing for the UI thread.
+            await Task.Delay(2600);
 
             completionRequested.TrySetResult();
-            wheelEvents.Writer.TryComplete();
+            pointerActions.Writer.TryComplete();
             var result = await captureTask.WaitAsync(TimeSpan.FromSeconds(20));
 
             Assert.True(result.IsSuccess, result.ErrorMessage);
@@ -211,6 +223,14 @@ public sealed class ScrollCaptureReverseFlingIntegrationTests
 
             using (result.Image)
             {
+                var resultPath = Path.Combine(
+                    diagnosticDirectory,
+                    manualWheelMode
+                        ? "real-scroll-manual-throttled-result.png"
+                        : "real-scroll-controlled-result.png");
+                result.Image.Bitmap.Save(
+                    resultPath,
+                    System.Drawing.Imaging.ImageFormat.Png);
                 var report =
                     $"final image {result.Image.Bitmap.Width}x{result.Image.Bitmap.Height}, " +
                     $"above={addedAbove}, below={addedBelow}, " +
@@ -239,8 +259,22 @@ public sealed class ScrollCaptureReverseFlingIntegrationTests
         }
         finally
         {
+            pointerActions.Writer.TryComplete();
             wheelEvents.Writer.TryComplete();
             WpfTestHost.Invoke(() => window?.Close());
+        }
+    }
+
+    private static async Task SendWheelBurstAsync(
+        ChannelWriter<int> writer,
+        int delta,
+        int count,
+        int intervalMilliseconds)
+    {
+        for (var index = 0; index < count; index++)
+        {
+            Assert.True(writer.TryWrite(delta));
+            await Task.Delay(intervalMilliseconds);
         }
     }
 
