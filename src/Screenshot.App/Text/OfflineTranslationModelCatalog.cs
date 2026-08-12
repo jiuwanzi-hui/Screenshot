@@ -28,7 +28,7 @@ internal static class OfflineTranslationModelCatalog
         "workspace: 128\n" +
         "max-length-factor: 2.0\n" +
         "skip-cost: true\n" +
-        $"cpu-threads: {HeavyWorkloadBudget.CpuThreadCount}\n" +
+        $"cpu-threads: {HeavyWorkloadBudget.BurstCpuThreadCount}\n" +
         "quiet: true\n" +
         "quiet-translation: true\n" +
         "gemm-precision: int8shiftAlphaAll\n";
@@ -63,10 +63,18 @@ internal static class OfflineTranslationModelCatalog
             OfflineTranslationQuality.Ultra => 8,
             _ => 4,
         };
-        return System.Text.RegularExpressions.Regex.Replace(
+        var adjusted = System.Text.RegularExpressions.Regex.Replace(
             configuration,
             "(?m)^beam-size:\\s*\\d+\\s*$",
             $"beam-size: {beamSize}");
+        // The installed config.yml froze the conservative background thread
+        // count at download time. Translation is a user-blocking operation,
+        // so rewrite the thread budget at load time: use nearly every core
+        // while translating and let the engine idle-unload return them.
+        return System.Text.RegularExpressions.Regex.Replace(
+            adjusted,
+            "(?m)^cpu-threads:\\s*\\d+\\s*$",
+            $"cpu-threads: {HeavyWorkloadBudget.BurstCpuThreadCount}");
     }
 
     internal static string GetQualityDisplayName(OfflineTranslationQuality quality)

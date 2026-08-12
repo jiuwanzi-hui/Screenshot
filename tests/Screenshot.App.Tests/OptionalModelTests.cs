@@ -33,6 +33,20 @@ public sealed class OptionalModelTests : IDisposable
                 logicalProcessorCount));
     }
 
+    [Theory]
+    [InlineData(4, 2)]
+    [InlineData(8, 6)]
+    [InlineData(16, 14)]
+    public void BurstCpuBudgetLeavesTwoCoresForTheUi(
+        int logicalProcessorCount,
+        int expectedThreadCount)
+    {
+        Assert.Equal(
+            expectedThreadCount,
+            HeavyWorkloadBudget.CalculateBurstCpuThreadCount(
+                logicalProcessorCount));
+    }
+
     [Fact]
     public void OfflineTranslationConfigurationUsesTheSharedCpuBudget()
     {
@@ -43,7 +57,7 @@ public sealed class OptionalModelTests : IDisposable
             null);
 
         Assert.Contains(
-            $"cpu-threads: {HeavyWorkloadBudget.CpuThreadCount}",
+            $"cpu-threads: {HeavyWorkloadBudget.BurstCpuThreadCount}",
             configuration);
         Assert.DoesNotContain("cpu-threads: 0", configuration);
     }

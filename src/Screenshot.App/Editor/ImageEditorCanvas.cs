@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using Screenshot.App.Capture;
+using Screenshot.App.Core;
 using WpfBrushes = System.Windows.Media.Brushes;
 using WpfColor = System.Windows.Media.Color;
 using WpfCursors = System.Windows.Input.Cursors;
@@ -25,9 +26,11 @@ public sealed class ImageEditorCanvas : Canvas
     private CapturedImage? _capturedImage;
     private EditorDocument _document = new();
     private EditorTool _selectedTool = EditorTool.Rectangle;
+    private bool _isAnnotationCreationEnabled = true;
     private WpfColor _selectedColor = WpfColor.FromRgb(214, 69, 69);
     private string _selectedEmoji = EmojiStickerCatalog.Default;
     private double _strokeWidth = 3;
+    private ArrowStyle _arrowStyle = ArrowStyle.Filled;
     private WpfPoint _drawingStartPoint;
     private List<WpfPoint>? _brushPoints;
     private UIElement? _drawingPreview;
@@ -185,6 +188,15 @@ public sealed class ImageEditorCanvas : Canvas
         }
     }
 
+    public void SetAnnotationCreationEnabled(bool isEnabled)
+    {
+        _isAnnotationCreationEnabled = isEnabled;
+        if (!isEnabled)
+        {
+            _ = CancelActiveOperation();
+        }
+    }
+
     public void SelectColor(WpfColor color)
     {
         _selectedColor = color;
@@ -199,6 +211,29 @@ public sealed class ImageEditorCanvas : Canvas
     public void SetStrokeWidth(double strokeWidth)
     {
         _strokeWidth = Math.Clamp(strokeWidth, 1, 24);
+    }
+
+    public void SelectArrowStyle(
+        ArrowStyle arrowStyle,
+        bool updateSelectedAnnotation = true)
+    {
+        _arrowStyle = Enum.IsDefined(arrowStyle)
+            ? arrowStyle
+            : ArrowStyle.Filled;
+        if (!updateSelectedAnnotation ||
+            !HasSelectedAnnotation ||
+            _document.Annotations[_selectedAnnotationIndex] is not ArrowAnnotation arrow ||
+            arrow.Style == _arrowStyle)
+        {
+            return;
+        }
+
+        _document.ReplaceAt(
+            _selectedAnnotationIndex,
+            arrow,
+            arrow with { Style = _arrowStyle });
+        RebuildCanvas();
+        RaiseHistoryChanged();
     }
 
     public void AddTranslationOverlay(
@@ -436,6 +471,11 @@ public sealed class ImageEditorCanvas : Canvas
         if (BeginAnnotationEdit(point))
         {
             e.Handled = true;
+            return;
+        }
+
+        if (!_isAnnotationCreationEnabled)
+        {
             return;
         }
 
@@ -856,6 +896,12 @@ public sealed class ImageEditorCanvas : Canvas
             return;
         }
 
+        if (!_isAnnotationCreationEnabled)
+        {
+            Cursor = WpfCursors.Arrow;
+            return;
+        }
+
         Cursor = _selectedTool == EditorTool.Text
             ? WpfCursors.IBeam
             : WpfCursors.Cross;
@@ -1045,11 +1091,12 @@ public sealed class ImageEditorCanvas : Canvas
                 StrokeThickness = _strokeWidth,
                 Fill = WpfBrushes.Transparent,
             },
-            EditorTool.Arrow => new Polygon
-            {
-                Fill = new SolidColorBrush(_selectedColor),
-                Points = CreateTaperedArrowPoints(point, point, _strokeWidth),
-            },
+            EditorTool.Arrow => CreateArrowPolygon(
+                point,
+                point,
+                _selectedColor,
+                _strokeWidth,
+                _arrowStyle),
             EditorTool.Brush => CreateBrushPreview(point),
             EditorTool.Mosaic => CreateMosaicBrushPreview(point),
             _ => null,
@@ -1179,7 +1226,8 @@ public sealed class ImageEditorCanvas : Canvas
                 _drawingStartPoint,
                 endPoint,
                 _selectedColor,
-                _strokeWidth)
+                _strokeWidth,
+                _arrowStyle)
             : null;
     }
 
@@ -1513,15 +1561,36 @@ public sealed class ImageEditorCanvas : Canvas
 
     private void AddArrowVisual(ArrowAnnotation annotation)
     {
-        Children.Add(new Polygon
+        var polygon = CreateArrowPolygon(
+            annotation.Start,
+            annotation.End,
+            annotation.StrokeColor,
+            annotation.StrokeWidth,
+            annotation.Style);
+        polygon.IsHitTestVisible = false;
+        Children.Add(polygon);
+    }
+
+    private static Polygon CreateArrowPolygon(
+        WpfPoint start,
+        WpfPoint end,
+        WpfColor color,
+        double strokeWidth,
+        ArrowStyle style)
+    {
+        var brush = new SolidColorBrush(color);
+        return new Polygon
         {
-            Fill = new SolidColorBrush(annotation.StrokeColor),
-            Points = CreateTaperedArrowPoints(
-                annotation.Start,
-                annotation.End,
-                annotation.StrokeWidth),
-            IsHitTestVisible = false,
-        });
+            Fill = style == ArrowStyle.Hollow
+                ? WpfBrushes.Transparent
+                : brush,
+            Stroke = style == ArrowStyle.Hollow ? brush : null,
+            StrokeThickness = style == ArrowStyle.Hollow
+                ? Math.Max(1.5, strokeWidth * 0.55)
+                : 0,
+            StrokeLineJoin = PenLineJoin.Round,
+            Points = CreateTaperedArrowPoints(start, end, strokeWidth),
+        };
     }
 
     /// <summary>

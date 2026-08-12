@@ -6,6 +6,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using Screenshot.App.Capture;
+using Screenshot.App.Core;
 using Screenshot.App.Editor;
 using Screenshot.App.Pin;
 using Screenshot.App.Text;
@@ -14,6 +15,128 @@ namespace Screenshot.App.Tests;
 
 public sealed class CaptureOverlayWindowTests
 {
+    [Fact]
+    public void ToolbarConfigurationHidesFeaturesButKeepsExitActions()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var pinnedImageManager = new PinnedImageManager();
+            var virtualScreen = VirtualScreen.GetBounds();
+            var overlay = CaptureOverlayWindow.ShowInteractive(
+                new CaptureOverlayOptions
+                {
+                    SaveDirectory = Path.GetTempPath(),
+                    KeepHistory = false,
+                    HistoryLimit = 0,
+                    HistoryService = new CaptureHistoryService(),
+                    PinnedImageManager = pinnedImageManager,
+                    StartOcrAsync = image =>
+                    {
+                        image.Dispose();
+                        return Task.CompletedTask;
+                    },
+                    VisibleToolbarFeatures = [CaptureToolbarFeature.Text],
+                    InitialSelection = new ScreenRegion(
+                        virtualScreen.X + 20,
+                        virtualScreen.Y + 20,
+                        Math.Min(300, virtualScreen.Width - 20),
+                        Math.Min(180, virtualScreen.Height - 20)),
+                });
+
+            try
+            {
+                Assert.Equal(
+                    Visibility.Collapsed,
+                    Assert.IsType<RadioButton>(
+                        overlay.FindName("InlineShapeToolButton")).Visibility);
+                Assert.Equal(
+                    Visibility.Visible,
+                    Assert.IsType<RadioButton>(
+                        overlay.FindName("InlineTextToolButton")).Visibility);
+                Assert.Equal(
+                    Visibility.Collapsed,
+                    Assert.IsType<Button>(
+                        overlay.FindName("SaveButton")).Visibility);
+                Assert.Equal(
+                    Visibility.Visible,
+                    Assert.IsType<Button>(
+                        overlay.FindName("CancelButton")).Visibility);
+                Assert.Equal(
+                    Visibility.Visible,
+                    Assert.IsType<Button>(
+                        overlay.FindName("ConfirmButton")).Visibility);
+                Assert.Equal(
+                    Visibility.Collapsed,
+                    Assert.IsType<Border>(
+                        overlay.FindName("ToolActionSeparator")).Visibility);
+                Assert.Equal(
+                    Visibility.Collapsed,
+                    Assert.IsType<Border>(
+                        overlay.FindName("ActionHistorySeparator")).Visibility);
+                Assert.Equal(
+                    Visibility.Visible,
+                    Assert.IsType<Border>(
+                        overlay.FindName("HistoryFinishSeparator")).Visibility);
+            }
+            finally
+            {
+                overlay.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void EmptyToolbarConfigurationLeavesOnlyCancelAndConfirm()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var pinnedImageManager = new PinnedImageManager();
+            var overlay = CaptureOverlayWindow.ShowInteractive(
+                new CaptureOverlayOptions
+                {
+                    SaveDirectory = Path.GetTempPath(),
+                    KeepHistory = false,
+                    HistoryLimit = 0,
+                    HistoryService = new CaptureHistoryService(),
+                    PinnedImageManager = pinnedImageManager,
+                    StartOcrAsync = image =>
+                    {
+                        image.Dispose();
+                        return Task.CompletedTask;
+                    },
+                    VisibleToolbarFeatures = [],
+                });
+
+            try
+            {
+                Assert.Equal(
+                    Visibility.Visible,
+                    Assert.IsType<Button>(
+                        overlay.FindName("CancelButton")).Visibility);
+                Assert.Equal(
+                    Visibility.Visible,
+                    Assert.IsType<Button>(
+                        overlay.FindName("ConfirmButton")).Visibility);
+                Assert.Equal(
+                    Visibility.Collapsed,
+                    Assert.IsType<Border>(
+                        overlay.FindName("ToolActionSeparator")).Visibility);
+                Assert.Equal(
+                    Visibility.Collapsed,
+                    Assert.IsType<Border>(
+                        overlay.FindName("ActionHistorySeparator")).Visibility);
+                Assert.Equal(
+                    Visibility.Collapsed,
+                    Assert.IsType<Border>(
+                        overlay.FindName("HistoryFinishSeparator")).Visibility);
+            }
+            finally
+            {
+                overlay.Close();
+            }
+        });
+    }
+
     [Fact]
     public async Task RecordButtonClosesOverlayAndPublishesSelectedRegion()
     {
@@ -362,8 +485,12 @@ public sealed class CaptureOverlayWindowTests
                 Assert.Equal(2, shapeButton.ContextMenu.Items.Count);
                 var ocrButton = Assert.IsType<Button>(
                     overlay.FindName("OcrButton"));
+                Assert.Equal(2, ocrButton.ContextMenu.Items.Count);
                 var tableMenuItem = Assert.IsType<MenuItem>(
-                    Assert.Single(ocrButton.ContextMenu.Items));
+                    ocrButton.ContextMenu.Items[1]);
+                var copyAllMenuItem = Assert.IsType<MenuItem>(
+                    overlay.FindName("CopyAllRecognizedTextMenuItem"));
+                Assert.Equal("识别并复制全部文字", copyAllMenuItem.Header);
                 Assert.Equal("表格复制", tableMenuItem.Header);
                 Assert.NotNull(overlay.FindName("ContentRecognitionOverlay"));
                 Assert.NotNull(overlay.FindName("SelectionMessageToast"));
@@ -459,11 +586,21 @@ public sealed class CaptureOverlayWindowTests
                     overlay.FindName("TopMask"));
                 var rightMask = Assert.IsType<System.Windows.Shapes.Rectangle>(
                     overlay.FindName("RightMask"));
+                var selectionRectangle = Assert.IsType<System.Windows.Shapes.Rectangle>(
+                    overlay.FindName("SelectionRectangle"));
                 Assert.Equal(Visibility.Collapsed, shade.Visibility);
                 Assert.Equal(Visibility.Visible, topMask.Visibility);
                 Assert.Equal(Visibility.Visible, rightMask.Visibility);
                 Assert.Equal(bounds.Top, topMask.Height);
                 Assert.Equal(width - bounds.Right, rightMask.Width);
+                Assert.Equal(
+                    System.Windows.Media.Color.FromArgb(0x48, 0, 0, 0),
+                    Assert.IsType<System.Windows.Media.SolidColorBrush>(
+                        topMask.Fill).Color);
+                Assert.Equal(
+                    System.Windows.Media.Color.FromArgb(0x16, 0, 0, 0),
+                    Assert.IsType<System.Windows.Media.SolidColorBrush>(
+                        selectionRectangle.Fill).Color);
             }
             finally
             {

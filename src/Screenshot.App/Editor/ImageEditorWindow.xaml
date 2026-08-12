@@ -281,17 +281,40 @@
                                            PreviewMouseLeftButtonDown="OnShapeMenuArrowMouseDown" />
                             </Grid>
                         </RadioButton>
-                        <RadioButton Tag="Arrow"
+                        <RadioButton x:Name="ArrowToolButton"
+                                     Tag="Arrow"
                                      Checked="OnToolSelected"
                                      ToolTip="箭头标注"
                                      Style="{StaticResource GlassTool}">
+                            <RadioButton.ContextMenu>
+                                <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
+                                    <MenuItem Header="实心箭头"
+                                              Tag="Filled"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnArrowStyleMenuItemClick" />
+                                    <MenuItem Header="空心箭头"
+                                              Tag="Hollow"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnArrowStyleMenuItemClick" />
+                                </ContextMenu>
+                            </RadioButton.ContextMenu>
                             <Grid VerticalAlignment="Center">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="18" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe UI Symbol" FontSize="16" Text="→" TextAlignment="Center" />
                                 <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="箭头" />
+                                <TextBlock Grid.Column="2"
+                                           Margin="5,0,0,0"
+                                           Padding="3,2"
+                                           VerticalAlignment="Center"
+                                           Cursor="Hand"
+                                           FontSize="10"
+                                           Text="▾"
+                                           ToolTip="选择箭头样式"
+                                           PreviewMouseLeftButtonDown="OnArrowMenuArrowMouseDown" />
                             </Grid>
                         </RadioButton>
                         <RadioButton Tag="Brush"

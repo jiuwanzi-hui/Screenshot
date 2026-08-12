@@ -10,8 +10,14 @@ namespace Screenshot.App.Capture;
 public partial class ScrollCaptureProgressWindow : Window
 {
     private const int PositionGap = 12;
-    private const int PreviewPhysicalWidth = 300;
-    private const int MinimumPreviewPhysicalWidth = 200;
+    // Layout minimums are logical (DIP) sizes: the header text and the action
+    // buttons need this much room regardless of monitor scale. Physical sizes
+    // are derived from these with the monitor's DPI scale — sizing the window
+    // in raw pixels clipped the buttons in half at 200% scaling.
+    private const int PreviewWidthDip = 300;
+    private const int MinimumPreviewWidthDip = 200;
+    private const int MinimumWindowHeightDip = 280;
+    private const int PreferredMaximumWindowHeightDip = 640;
     private const int TopmostWindow = -1;
     private const uint DoNotResize = 0x0001;
     private const uint DoNotMove = 0x0002;
@@ -43,20 +49,31 @@ public partial class ScrollCaptureProgressWindow : Window
 
     public event EventHandler? CancelRequested;
 
+    public void ConfigureManualWheelMode()
+    {
+        StatusText.Text = "手动滚轮长截图";
+        InstructionText.Text = "在选区内自由滚动鼠标滚轮，可随时上下往返；完成后点击下方完成按钮";
+    }
+
     public void ConfigureForCaptureRegion(ScreenRegion captureRegion)
     {
         var monitorBounds = GetMonitorWorkArea(captureRegion);
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var minimumPhysicalHeight = (int)Math.Round(
+            MinimumWindowHeightDip * dpi.DpiScaleY);
+        var preferredMaximumPhysicalHeight = (int)Math.Round(
+            PreferredMaximumWindowHeightDip * dpi.DpiScaleY);
         var maximumHeight = Math.Max(
-            280,
+            minimumPhysicalHeight,
             monitorBounds.Height - (PositionGap * 2));
         var physicalHeight = Math.Clamp(
             captureRegion.Height,
-            280,
-            Math.Min(640, maximumHeight));
+            Math.Min(minimumPhysicalHeight, maximumHeight),
+            Math.Min(preferredMaximumPhysicalHeight, maximumHeight));
         var physicalWidth = GetPreviewPhysicalWidth(
             captureRegion,
-            monitorBounds);
-        var dpi = VisualTreeHelper.GetDpi(this);
+            monitorBounds,
+            dpi.DpiScaleX);
         Width = physicalWidth / dpi.DpiScaleX;
         Height = physicalHeight / dpi.DpiScaleY;
         _maximumHeightDip = maximumHeight / dpi.DpiScaleY;
@@ -237,16 +254,17 @@ public partial class ScrollCaptureProgressWindow : Window
         var width = windowBounds.Right - windowBounds.Left;
         var height = windowBounds.Bottom - windowBounds.Top;
         var monitorBounds = GetMonitorWorkArea(captureRegion);
+        var dpi = VisualTreeHelper.GetDpi(this);
         var previewBounds = ChoosePreviewBounds(
             captureRegion,
             monitorBounds,
             width,
-            height);
+            height,
+            (int)Math.Round(MinimumPreviewWidthDip * dpi.DpiScaleX));
         MoveWindow(windowHandle, previewBounds.X, previewBounds.Y);
 
         // Also set WPF coordinates so layout/measure does not snap the window
         // back to the default Manual origin on the next render pass.
-        var dpi = VisualTreeHelper.GetDpi(this);
         Left = previewBounds.X / dpi.DpiScaleX;
         Top = previewBounds.Y / dpi.DpiScaleY;
         return ScreenRegion.Intersect(previewBounds, captureRegion).IsEmpty;
@@ -399,7 +417,8 @@ public partial class ScrollCaptureProgressWindow : Window
         ScreenRegion captureRegion,
         ScreenRegion monitorBounds,
         int width,
-        int height)
+        int height,
+        int minimumPhysicalWidth)
     {
         // Prefer vertically aligned with the selection, clamped into the work area.
         var maxY = Math.Max(
@@ -415,17 +434,17 @@ public partial class ScrollCaptureProgressWindow : Window
         // placement and dump the panel to the far monitor edge, away from the region.
         var rightX = captureRegion.X + captureRegion.Width + PositionGap;
         var rightSpace = monitorBounds.X + monitorBounds.Width - rightX;
-        if (rightSpace >= Math.Min(width, MinimumPreviewPhysicalWidth))
+        if (rightSpace >= Math.Min(width, minimumPhysicalWidth))
         {
-            var clampedWidth = Math.Min(width, Math.Max(MinimumPreviewPhysicalWidth, rightSpace));
+            var clampedWidth = Math.Min(width, Math.Max(minimumPhysicalWidth, rightSpace));
             return new ScreenRegion(rightX, centeredY, clampedWidth, height);
         }
 
         var leftX = captureRegion.X - width - PositionGap;
         var leftSpace = captureRegion.X - monitorBounds.X - PositionGap;
-        if (leftSpace >= Math.Min(width, MinimumPreviewPhysicalWidth))
+        if (leftSpace >= Math.Min(width, minimumPhysicalWidth))
         {
-            var clampedWidth = Math.Min(width, Math.Max(MinimumPreviewPhysicalWidth, leftSpace));
+            var clampedWidth = Math.Min(width, Math.Max(minimumPhysicalWidth, leftSpace));
             var x = captureRegion.X - clampedWidth - PositionGap;
             return new ScreenRegion(x, centeredY, clampedWidth, height);
         }
@@ -447,23 +466,26 @@ public partial class ScrollCaptureProgressWindow : Window
 
     private static int GetPreviewPhysicalWidth(
         ScreenRegion captureRegion,
-        ScreenRegion monitorBounds)
+        ScreenRegion monitorBounds,
+        double dpiScaleX)
     {
+        var preferredWidth = (int)Math.Round(PreviewWidthDip * dpiScaleX);
+        var minimumWidth = (int)Math.Round(MinimumPreviewWidthDip * dpiScaleX);
         var rightSpace = monitorBounds.X + monitorBounds.Width -
                          (captureRegion.X + captureRegion.Width) -
                          PositionGap;
-        if (rightSpace >= MinimumPreviewPhysicalWidth)
+        if (rightSpace >= minimumWidth)
         {
-            return Math.Min(PreviewPhysicalWidth, rightSpace);
+            return Math.Min(preferredWidth, rightSpace);
         }
 
         var leftSpace = captureRegion.X - monitorBounds.X - PositionGap;
-        if (leftSpace >= MinimumPreviewPhysicalWidth)
+        if (leftSpace >= minimumWidth)
         {
-            return Math.Min(PreviewPhysicalWidth, leftSpace);
+            return Math.Min(preferredWidth, leftSpace);
         }
 
-        return Math.Min(PreviewPhysicalWidth, monitorBounds.Width);
+        return Math.Min(preferredWidth, monitorBounds.Width);
     }
 
     private static ScreenRegion GetMonitorWorkArea(ScreenRegion captureRegion)

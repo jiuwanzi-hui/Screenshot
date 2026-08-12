@@ -767,6 +767,35 @@
 
                 <Border Style="{StaticResource GeneralGroupSeparator}" />
 
+                <StackPanel x:Name="GeneralCaptureToolbarGroup">
+                    <TextBlock Style="{StaticResource GeneralGroupTitle}"
+                               Text="截图工具栏" />
+                    <TextBlock Style="{StaticResource GeneralGroupDescription}"
+                               Text="选择框选完成后显示的功能；取消和完成始终保留" />
+                    <ItemsControl Margin="0,12,0,0"
+                                  ItemsSource="{Binding CaptureToolbarFeatureItems}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Columns="3" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <CheckBox MinHeight="30"
+                                          Margin="0,3,12,3"
+                                          FontSize="13"
+                                          Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                          IsChecked="{Binding IsVisible, UpdateSourceTrigger=PropertyChanged}"
+                                          Checked="OnImmediateSettingChanged"
+                                          Unchecked="OnImmediateSettingChanged"
+                                          Content="{Binding Label}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+
+                <Border Style="{StaticResource GeneralGroupSeparator}" />
+
                 <StackPanel x:Name="GeneralWindowGroup">
                     <TextBlock Style="{StaticResource GeneralGroupTitle}"
                                Text="窗口与后台" />
@@ -873,6 +902,38 @@
                                           Tag="{x:Static core:FloatingCaptureClickBehavior.CaptureAllScreens}" />
                         </ComboBox>
                     </StackPanel>
+                </StackPanel>
+
+                <Border Style="{StaticResource GeneralGroupSeparator}" />
+
+                <StackPanel x:Name="GeneralScrollCaptureGroup">
+                    <TextBlock Style="{StaticResource GeneralGroupTitle}"
+                               Text="长截图" />
+                    <TextBlock Style="{StaticResource GeneralGroupDescription}"
+                               Text="选择页面滚动和拼接的控制方式" />
+                    <TextBlock Margin="0,14,0,0"
+                               Style="{StaticResource GeneralFieldLabel}"
+                               Text="滚动方式" />
+                    <ComboBox x:Name="ScrollCaptureModeComboBox"
+                              Width="270"
+                              Height="34"
+                              Margin="0,7,0,0"
+                              HorizontalAlignment="Left"
+                              Padding="9,2"
+                              FontSize="13"
+                              SelectedValuePath="Tag"
+                              SelectionChanged="OnScrollCaptureModeSelectionChanged"
+                              ToolTip="自动滚动或由鼠标滚轮手动控制">
+                        <ComboBoxItem Content="自动滚动（单击开始 / 暂停）"
+                                      Tag="{x:Static core:ScrollCaptureMode.Automatic}" />
+                        <ComboBoxItem Content="手动鼠标滚轮"
+                                      Tag="{x:Static core:ScrollCaptureMode.ManualWheel}" />
+                    </ComboBox>
+                    <TextBlock Margin="0,7,0,0"
+                               FontSize="12"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               TextWrapping="Wrap"
+                               Text="手动模式下滚轮直接控制页面，可随意上下滚动、不限速度，预览实时跟随；完成后点击长截图预览窗口中的完成按钮。" />
                 </StackPanel>
 
                 <Border Style="{StaticResource GeneralGroupSeparator}" />
@@ -1034,6 +1095,49 @@
                                     Style="{StaticResource SecondaryButton}"
                                     Tag="OcrHotKeyBox"
                                     ToolTip="不设置翻译快捷键">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,17,0,0">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="选中文字离线翻译" />
+                        <Grid Margin="0,8,16,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <local:HotKeyCaptureBox x:Name="TextTranslationHotKeyBox"
+                                                    Height="34"
+                                                    Padding="10,3"
+                                                    BorderBrush="{DynamicResource AppBorderBrush}"
+                                                    GotKeyboardFocus="OnHotKeyCaptureGotKeyboardFocus"
+                                                    HotKeyCaptured="OnHotKeyCaptured"
+                                                    HotKeyCaptureCanceled="OnHotKeyCaptureCanceled"
+                                                    LostKeyboardFocus="OnHotKeyCaptureLostKeyboardFocus"
+                                                    Tag="TextTranslationHotKey"
+                                                    Text="{Binding TextTranslationHotKey}"
+                                                    TextAlignment="Center"
+                                                    ToolTip="复制其他程序当前选中的文字并离线翻译" />
+                            <Button Grid.Column="1"
+                                    Width="68"
+                                    Margin="8,0,0,0"
+                                    Click="OnBeginHotKeyEditClick"
+                                    Content="修改"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="TextTranslationHotKeyBox"
+                                    ToolTip="修改选中文字翻译快捷键" />
+                            <Button Grid.Column="2"
+                                    Width="34"
+                                    Margin="6,0,0,0"
+                                    Click="OnClearHotKeyClick"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="TextTranslationHotKeyBox"
+                                    ToolTip="不设置选中文字翻译快捷键">
                                 <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
                             </Button>
                         </Grid>
@@ -1278,6 +1382,12 @@
                                FontSize="13"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
                                Text="可以使用在线大模型，也可以下载安装后完全离线翻译" />
+                    <Button Width="150"
+                            Margin="0,14,0,0"
+                            HorizontalAlignment="Left"
+                            Padding="14,6"
+                            Click="OnOpenTextTranslationClick"
+                            Content="打开离线文本翻译" />
 
                     <TextBlock Margin="0,22,0,0"
                                FontSize="14"

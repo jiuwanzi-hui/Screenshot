@@ -128,6 +128,12 @@
                              Closed="OnFloatingContextMenuClosed"
                              Opened="OnFloatingContextMenuOpened"
                              Style="{StaticResource FloatingContextMenu}">
+                    <MenuItem Click="OnOpenSettingsClick"
+                              Header="打开设置"
+                              Style="{StaticResource FloatingContextMenuItem}" />
+                    <MenuItem Click="OnOpenTextTranslationClick"
+                              Header="离线文本翻译"
+                              Style="{StaticResource FloatingContextMenuItem}" />
                     <MenuItem x:Name="CloseFloatingButtonMenuItem"
                               Click="OnCloseFloatingButtonClick"
                               Style="{StaticResource FloatingContextMenuItem}">

@@ -17,6 +17,7 @@ internal static class WindowPlacementKeys
     public const string CaptureHistory = "captureHistory";
     public const string CapturePreview = "capturePreview";
     public const string FloatingCapture = "floatingCapture";
+    public const string TextTranslation = "textTranslation";
 }
 
 internal sealed record WindowPlacementRecord(

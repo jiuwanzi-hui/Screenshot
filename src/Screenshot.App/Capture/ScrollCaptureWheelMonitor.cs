@@ -40,12 +40,15 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
     private bool _disposed;
     private volatile bool _blockNonWheelInput;
     private volatile bool _controlledCaptureInput;
+    private volatile bool _throttledWheelInput;
+    private CancellationTokenSource? _pendingClickCancellation;
+    private volatile Func<bool>? _shouldDeferClicks;
+    private long _clickGeneration;
     private bool _rightButtonCancellationPending;
     private bool _leftButtonCapturePending;
     private readonly object _clickSync = new();
     private uint _lastLeftButtonUpTime;
     private NativePoint _lastLeftButtonUpPoint;
-    private int _pendingSingleClickGeneration;
     private int _wheelDetectionRaised;
 
     public ScrollCaptureWheelMonitor(
@@ -95,6 +98,30 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
         _blockNonWheelInput = true;
     }
 
+    /// <summary>
+    /// Lets the coordinator decide per-click whether the single-click
+    /// deferral (used to distinguish it from a double-click) is required.
+    /// When the callback returns false the click is delivered immediately,
+    /// so pausing an active scroll does not lag by the double-click interval.
+    /// </summary>
+    public void ConfigureClickDeferral(Func<bool> shouldDeferClicks)
+    {
+        ArgumentNullException.ThrowIfNull(shouldDeferClicks);
+        _shouldDeferClicks = shouldDeferClicks;
+    }
+
+    /// <summary>
+    /// Keeps the user's wheel direction as the gesture source, but prevents
+    /// the target from consuming an unbounded burst.  CaptureOnWheelAsync
+    /// replays the queued direction at a fixed cadence so the matcher always
+    /// receives overlapping frames instead of an unrecoverable viewport jump.
+    /// </summary>
+    public void EnableThrottledWheelInput()
+    {
+        _throttledWheelInput = true;
+        _blockNonWheelInput = true;
+    }
+
     public void UpdateCaptureRegion(ScreenRegion captureRegion)
     {
         if (captureRegion.IsEmpty)
@@ -116,6 +143,14 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
         }
 
         _disposed = true;
+
+        lock (_clickSync)
+        {
+            _pendingClickCancellation?.Cancel();
+            _pendingClickCancellation?.Dispose();
+            _pendingClickCancellation = null;
+            _clickGeneration++;
+        }
 
         if (_hookHandle != IntPtr.Zero)
         {
@@ -158,6 +193,32 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
                         return new IntPtr(1);
                     }
 
+                    return NativeMethods.CallNextHookEx(
+                        _hookHandle,
+                        hookCode,
+                        message,
+                        hookDataPointer);
+                }
+
+                if (_throttledWheelInput &&
+                    (hookData.Flags & InjectedMouseEvent) == 0)
+                {
+                    var throttledDelta = unchecked(
+                        (short)(hookData.MouseData >> 16));
+                    if (throttledDelta != 0)
+                    {
+                        // Preserve direction input for the replay driver, but
+                        // swallow the physical packet so a high-speed fling
+                        // cannot outrun screen sampling.
+                        _wheelEvents.Writer.TryWrite(throttledDelta);
+                    }
+
+                    return new IntPtr(1);
+                }
+
+                if (_throttledWheelInput &&
+                    (hookData.Flags & InjectedMouseEvent) != 0)
+                {
                     return NativeMethods.CallNextHookEx(
                         _hookHandle,
                         hookCode,
@@ -222,6 +283,20 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
             if (pointerMessage == LeftButtonDownMessage &&
                 captureRegion.Contains(hookData.Point.X, hookData.Point.Y))
             {
+                // The progress window may sit over the selected region on a
+                // small display. Let its Edit/Complete/Cancel buttons receive
+                // the click instead of treating it as a capture gesture.
+                if (_allowBlockedInputAt?.Invoke(
+                        hookData.Point.X,
+                        hookData.Point.Y) == true)
+                {
+                    return NativeMethods.CallNextHookEx(
+                        _hookHandle,
+                        hookCode,
+                        message,
+                        hookDataPointer);
+                }
+
                 _leftButtonCapturePending = true;
                 return new IntPtr(1);
             }
@@ -301,8 +376,6 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
     {
         var doubleClickTime = NativeMethods.GetDoubleClickTime();
         var isDoubleClick = false;
-        int singleClickGeneration;
-
         lock (_clickSync)
         {
             var elapsed = unchecked(hookData.Time - _lastLeftButtonUpTime);
@@ -313,7 +386,6 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
                             elapsed <= doubleClickTime &&
                             closeEnough;
 
-            singleClickGeneration = ++_pendingSingleClickGeneration;
             if (isDoubleClick)
             {
                 _lastLeftButtonUpTime = 0;
@@ -327,37 +399,98 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
 
         if (isDoubleClick)
         {
+            lock (_clickSync)
+            {
+                _pendingClickCancellation?.Cancel();
+                _pendingClickCancellation?.Dispose();
+                _pendingClickCancellation = null;
+                _clickGeneration++;
+            }
             _pointerActions.Writer.TryWrite(
                 ScrollCapturePointerAction.DoubleClick);
             return;
         }
 
-        _ = PublishSingleClickAfterDoubleClickWindowAsync(
-            singleClickGeneration,
-            doubleClickTime);
-    }
-
-    private async Task PublishSingleClickAfterDoubleClickWindowAsync(
-        int generation,
-        uint doubleClickTime)
-    {
-        await Task.Delay((int)Math.Max(1, doubleClickTime));
-        if (_disposed)
+        // A controlled capture assigns different meanings to a single click
+        // and a double-click (resume downward vs. return upward). Publishing
+        // the first click immediately makes the first half of a double-click
+        // resume the downward driver before the second half is recognized.
+        // Coalesce only in controlled mode; manual-wheel capture does not use
+        // pointer gestures. A single click is still delivered after the normal
+        // Windows double-click interval.
+        if (!_controlledCaptureInput)
         {
+            _pointerActions.Writer.TryWrite(ScrollCapturePointerAction.Click);
             return;
         }
 
-        lock (_clickSync)
+        // While the capture is actively scrolling, a click means "stop now"
+        // and the state machine maps a follow-up double-click from the
+        // pause-preparing state to the same action it has from the motion
+        // state, so nothing is lost by delivering the click immediately.
+        // Waiting out the double-click interval here made every pause feel
+        // like a one-second lag.
+        if (_shouldDeferClicks?.Invoke() == false)
         {
-            if (generation != _pendingSingleClickGeneration)
+            lock (_clickSync)
             {
-                return;
+                _pendingClickCancellation?.Cancel();
+                _pendingClickCancellation?.Dispose();
+                _pendingClickCancellation = null;
+                _clickGeneration++;
             }
 
-            _lastLeftButtonUpTime = 0;
+            _pointerActions.Writer.TryWrite(ScrollCapturePointerAction.Click);
+            return;
         }
 
-        _pointerActions.Writer.TryWrite(ScrollCapturePointerAction.Click);
+        CancellationTokenSource cancellation;
+        long generation;
+        lock (_clickSync)
+        {
+            _pendingClickCancellation?.Cancel();
+            _pendingClickCancellation?.Dispose();
+            cancellation = new CancellationTokenSource();
+            _pendingClickCancellation = cancellation;
+            generation = ++_clickGeneration;
+        }
+
+        _ = PublishDeferredClickAsync(
+            cancellation,
+            generation,
+            TimeSpan.FromMilliseconds(NativeMethods.GetDoubleClickTime()));
+    }
+
+    private async Task PublishDeferredClickAsync(
+        CancellationTokenSource cancellation,
+        long generation,
+        TimeSpan delay)
+    {
+        try
+        {
+            await Task.Delay(delay, cancellation.Token);
+            lock (_clickSync)
+            {
+                if (_disposed ||
+                    generation != _clickGeneration ||
+                    !ReferenceEquals(_pendingClickCancellation, cancellation))
+                {
+                    return;
+                }
+
+                _pendingClickCancellation = null;
+                _lastLeftButtonUpTime = 0;
+            }
+
+            _pointerActions.Writer.TryWrite(ScrollCapturePointerAction.Click);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            cancellation.Dispose();
+        }
     }
 
 

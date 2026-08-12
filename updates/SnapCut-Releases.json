@@ -1,5 +1,19 @@
 [
   {
+    "tag_name": "v2.8.2",
+    "name": "SnapCut 2.8.2",
+    "body": "- 新增截图工具栏功能显示配置，不常用按钮可长期隐藏，取消和完成始终保留。\n- 复杂截图翻译改为分批并发、限时拆分重试和翻译来源自动回退，并保护技术标识、路径与产品名称。\n- 新增选中文字离线翻译窗口和独立快捷键；翻译目标语言、自定义颜色、调色板与箭头样式会跨重启保留。\n- 长截图新增自动/手动滚轮模式并加固边界、固定底栏、反向滚动和高频输入下的稳定性。\n- 录屏检测到持续黑帧时会停止并显示明确提示。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.8.2",
+    "published_at": "2026-08-12T12:00:00+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.2/SnapCut-Update.json" },
+      { "name": "SnapCut-Setup-2.8.2-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.2/SnapCut-Setup-2.8.2-win-x64.exe" },
+      { "name": "SnapCut-Portable-2.8.2-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.2/SnapCut-Portable-2.8.2-win-x64.zip" }
+    ]
+  },
+  {
     "tag_name": "v2.8.1",
     "name": "SnapCut 2.8.1",
     "body": "- 支持将 F1-F24 设为不带修饰键的单键快捷键。\n- 修复截图翻译中英文未翻译、字符图标误识别为数字、中文或产品标识被错误覆盖的问题。\n- 优化 OCR 文字框与逐行译文的对应关系。\n- 离线翻译未产生有效译文时自动回退到下一翻译方式，不再把原文返回误判为成功。",

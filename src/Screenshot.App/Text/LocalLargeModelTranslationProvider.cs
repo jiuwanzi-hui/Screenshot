@@ -173,7 +173,7 @@ public sealed class LocalLargeModelTranslationProvider : ITranslationProvider
                      "-f", promptPath,
                      "-n", outputTokenLimit.ToString(CultureInfo.InvariantCulture),
                      "-c", "4096",
-                     "-t", HeavyWorkloadBudget.CpuThreadCount
+                     "-t", HeavyWorkloadBudget.BurstCpuThreadCount
                          .ToString(CultureInfo.InvariantCulture),
                      "--temp", "0",
                      "--conversation",
@@ -193,7 +193,9 @@ public sealed class LocalLargeModelTranslationProvider : ITranslationProvider
 
         try
         {
-            process.PriorityClass = ProcessPriorityClass.BelowNormal;
+            // Translation is a user-blocking burst: run at normal priority so
+            // the borrowed cores actually finish the job quickly.
+            process.PriorityClass = ProcessPriorityClass.Normal;
         }
         catch (Exception exception) when (
             exception is InvalidOperationException or

@@ -48,6 +48,69 @@ public sealed class ControlledScrollCaptureStateTests
         Assert.Equal(ControlledScrollCaptureState.ReturningDownToStart, state);
     }
 
+    [Theory]
+    [InlineData(
+        ControlledScrollCaptureState.PreparingPauseDown,
+        ControlledScrollCaptureState.PreparingReturnFromDown)]
+    [InlineData(
+        ControlledScrollCaptureState.PreparingPauseUpFirst,
+        ControlledScrollCaptureState.PreparingReturnFromUp)]
+    public void ImmediateFirstClickDoesNotPreventDoubleClickReversal(
+        ControlledScrollCaptureState state,
+        ControlledScrollCaptureState expected)
+    {
+        Assert.Equal(
+            expected,
+            Apply(state, ScrollCapturePointerAction.DoubleClick));
+    }
+
+    [Theory]
+    [InlineData(ControlledScrollCaptureState.WaitingToStart, true)]
+    [InlineData(ControlledScrollCaptureState.PausedDown, true)]
+    [InlineData(ControlledScrollCaptureState.PausedUp, true)]
+    [InlineData(ControlledScrollCaptureState.BottomReached, true)]
+    [InlineData(ControlledScrollCaptureState.TopReached, true)]
+    [InlineData(ControlledScrollCaptureState.ScrollingDown, false)]
+    [InlineData(ControlledScrollCaptureState.ScrollingUp, false)]
+    [InlineData(ControlledScrollCaptureState.ScrollingUpFirst, false)]
+    [InlineData(ControlledScrollCaptureState.ScrollingDownSecond, false)]
+    [InlineData(ControlledScrollCaptureState.ReturningToStart, false)]
+    [InlineData(ControlledScrollCaptureState.ReturningDownToStart, false)]
+    [InlineData(ControlledScrollCaptureState.PreparingPauseDown, false)]
+    [InlineData(ControlledScrollCaptureState.PreparingPauseUp, false)]
+    public void ClickDeferralOnlyAppliesToIdleStates(
+        ControlledScrollCaptureState state,
+        bool expectedDeferral)
+    {
+        // Motion states deliver the click immediately so pausing feels
+        // instant; idle states keep the double-click disambiguation window
+        // because there a click and a double-click start different motions.
+        Assert.Equal(
+            expectedDeferral,
+            ScrollCaptureService.ShouldDeferControlledPointerClicks(state));
+    }
+
+    [Theory]
+    [InlineData(62, 62, 1.0, true)]
+    [InlineData(62, 86, 1.0, true)]
+    [InlineData(62, 90, 0.98, false)]
+    [InlineData(62, 100, 1.0, false)]
+    public void StableInitialCrossingCanConfirmWithoutFurtherWheelTravel(
+        int previousRows,
+        int currentRows,
+        double confidence,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            ScrollCaptureService.IsControlledInitialCrossingStable(
+                previousRows,
+                1170,
+                currentRows,
+                1170,
+                confidence));
+    }
+
     [Fact]
     public void InputFailureRemainsInTheCaptureUiForExplicitCompletion()
     {
@@ -228,6 +291,44 @@ public sealed class ControlledScrollCaptureStateTests
     }
 
     [Theory]
+    [InlineData(true, 82, true)]
+    [InlineData(true, 0, false)]
+    [InlineData(true, null, false)]
+    [InlineData(false, 165, false)]
+    public void InputDistanceIsCommittedOnlyAfterVisibleMovement(
+        bool frameLocated,
+        int? movementRows,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            ScrollCaptureService.ShouldAdvanceControlledInputAnchor(
+                frameLocated,
+                movementRows));
+    }
+
+    [Theory]
+    [InlineData("movement-cap-veto", 311, 15, 24, 155)]
+    [InlineData("movement-cap-veto", 426, 55, 24, 213)]
+    [InlineData("no-candidate", 311, 15, 24, null)]
+    [InlineData(null, 311, 15, 24, null)]
+    public void OnlyMovementCapRetriesReceiveABoundedReanchorAllowance(
+        string? rejectReason,
+        int frameHeight,
+        int? expectedRows,
+        int minimumOverlapRows,
+        int? expected)
+    {
+        Assert.Equal(
+            expected,
+            ScrollCaptureService.GetControlledRetryMaximumMovementRows(
+                rejectReason,
+                frameHeight,
+                expectedRows,
+                minimumOverlapRows));
+    }
+
+    [Theory]
     [InlineData(0, 2)]
     [InlineData(20, 2)]
     [InlineData(100, 52)]
@@ -240,6 +341,24 @@ public sealed class ControlledScrollCaptureStateTests
             expectedMinimum,
             ScrollCaptureService.GetControlledMinimumReturnMagnitude(
                 outboundPixels));
+    }
+
+    [Theory]
+    [InlineData(440, 350, 837, 215)]
+    [InlineData(350, 350, 837, 0)]
+    [InlineData(440, 350, 0, 90)]
+    public void InitialCrossingUsesImageCalibratedInputScale(
+        long returnInput,
+        long outboundInput,
+        int outboundVisualRows,
+        long expectedRows)
+    {
+        Assert.Equal(
+            expectedRows,
+            ScrollCaptureService.GetControlledExpectedCrossingRows(
+                returnInput,
+                outboundInput,
+                outboundVisualRows));
     }
 
     [Theory]
@@ -278,6 +397,81 @@ public sealed class ControlledScrollCaptureStateTests
             ScrollCaptureService.GetControlledResumeMaximumMovementRows(
                 frameHeight,
                 expectedRows,
+                minimumOverlapRows));
+    }
+
+    [Theory]
+    [InlineData(314, 20, 294)]
+    [InlineData(423, 20, 403)]
+    public void PauseSettleAllowsFullMatchableInertia(
+        int frameHeight,
+        int minimumOverlapRows,
+        int expectedMaximum)
+    {
+        Assert.Equal(
+            expectedMaximum,
+            ScrollCaptureService.GetControlledSettleMaximumMovementRows(
+                frameHeight,
+                minimumOverlapRows));
+        Assert.True(
+            expectedMaximum >
+            ScrollCaptureService.GetControlledResumeMaximumMovementRows(
+                frameHeight,
+                expectedRows: null,
+                minimumOverlapRows));
+    }
+
+    [Theory]
+    [InlineData(175, 1.000, 220, 1.000, true)]
+    [InlineData(82, 0.983, 175, 1.000, true)]
+    [InlineData(220, 1.000, 175, 1.000, false)]
+    [InlineData(175, 0.900, 220, 1.000, false)]
+    [InlineData(175, 1.000, 220, 0.950, false)]
+    public void ConsecutiveDecisiveOverlapsConfirmAnInertiaGlideCrossing(
+        int previousRows,
+        double previousConfidence,
+        int currentRows,
+        double currentConfidence,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            ScrollCaptureService.IsControlledInitialCrossingGlide(
+                previousRows,
+                previousConfidence,
+                currentRows,
+                currentConfidence));
+    }
+
+    [Fact]
+    public void AligningSettledStateStartsTheCaptureLeg()
+    {
+        Assert.Equal(
+            ControlledScrollCaptureState.ScrollingUp,
+            ScrollCaptureService.GetControlledSettledState(
+                ControlledScrollCaptureState.AligningUpwardStart));
+        Assert.Equal(
+            ControlledScrollCaptureState.ScrollingDownSecond,
+            ScrollCaptureService.GetControlledSettledState(
+                ControlledScrollCaptureState.AligningDownwardStart));
+    }
+
+    [Theory]
+    [InlineData(307, null, 20, 102)]
+    [InlineData(307, 80, 20, 104)]
+    [InlineData(307, 165, 20, 189)]
+    [InlineData(307, 400, 20, 287)]
+    public void InitialAlignmentHonorsTheConfirmedCrossingWithoutLosingOverlap(
+        int frameHeight,
+        int? confirmedCrossingRows,
+        int minimumOverlapRows,
+        int expectedMaximum)
+    {
+        Assert.Equal(
+            expectedMaximum,
+            ScrollCaptureService.GetControlledInitialAlignmentMaximumMovementRows(
+                frameHeight,
+                confirmedCrossingRows,
                 minimumOverlapRows));
     }
 
@@ -431,6 +625,27 @@ public sealed class ControlledScrollCaptureStateTests
     }
 
     [Theory]
+    [InlineData(true, false, 0, true)]
+    [InlineData(true, true, 0, true)]
+    [InlineData(false, true, 0, false)]
+    [InlineData(false, true, 1, false)]
+    [InlineData(false, true, 2, true)]
+    [InlineData(false, false, 4, false)]
+    public void LooseInitialFingerprintNeedsAStablePhysicalBoundary(
+        bool isStrictInitialViewport,
+        bool isLooseInitialViewport,
+        int stationarySamples,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            ScrollCaptureService.IsControlledInitialViewportReached(
+                isStrictInitialViewport,
+                isLooseInitialViewport,
+                stationarySamples));
+    }
+
+    [Theory]
     [InlineData(ControlledScrollCaptureState.ScrollingDown, ScrollCaptureDirection.Down)]
     [InlineData(ControlledScrollCaptureState.ScrollingDownSecond, ScrollCaptureDirection.Down)]
     [InlineData(ControlledScrollCaptureState.ScrollingUp, ScrollCaptureDirection.Up)]
@@ -461,11 +676,83 @@ public sealed class ControlledScrollCaptureStateTests
     {
         Assert.Equal(20, ControlledScrollDriver.TickIntervalMilliseconds);
         Assert.Equal(5, ControlledScrollDriver.CapturePixelsPerTick);
+        Assert.Equal(12, ControlledScrollDriver.MaximumCaptureStepsPerFrame);
         Assert.Equal(
             250,
             (1000 * ControlledScrollDriver.CapturePixelsPerTick) /
             ControlledScrollDriver.TickIntervalMilliseconds);
         Assert.Equal(0, ControlledScrollDriver.PresentationSettleMilliseconds);
+    }
+
+    [Fact]
+    public void AutomaticAndManualModesUseIndependentAlgorithmTypes()
+    {
+        Assert.NotEqual(
+            typeof(ControlledScrollDriver),
+            typeof(ManualScrollDriver));
+        Assert.NotEqual(
+            typeof(AutomaticScrollCaptureComposerCore),
+            typeof(ScrollCaptureComposer));
+        Assert.NotEqual(
+            typeof(AutomaticImageOverlapMatcher),
+            typeof(ImageOverlapMatcher));
+        Assert.NotEqual(
+            typeof(AutomaticViewportFingerprint),
+            typeof(ViewportFingerprint));
+
+        var automaticComposerFieldTypes =
+            typeof(ControlledScrollCaptureComposer)
+                .GetFields(System.Reflection.BindingFlags.Instance |
+                    System.Reflection.BindingFlags.NonPublic)
+                .Select(field => field.FieldType)
+                .ToArray();
+        Assert.Contains(
+            typeof(AutomaticScrollCaptureComposerCore),
+            automaticComposerFieldTypes);
+        Assert.DoesNotContain(
+            typeof(ScrollCaptureComposer),
+            automaticComposerFieldTypes);
+    }
+
+    [Fact]
+    public async Task ManualDriverQueuesRapidWheelInputWithoutDroppingNotches()
+    {
+        await using var driver = CreateManualInputDriver();
+
+        for (var index = 0; index < 10; index++)
+        {
+            driver.QueueCaptureInput(-120);
+        }
+
+        Assert.True(driver.HasPendingCaptureInput);
+        Assert.Equal(ScrollCaptureDirection.Down, driver.PendingCaptureDirection);
+        Assert.Equal(
+            10 * ManualScrollDriver.MaximumCaptureStepsPerFrame,
+            driver.PendingCaptureStepCount);
+    }
+
+    [Fact]
+    public async Task ManualDriverReversalDiscardsOnlyUnexecutedOldDirection()
+    {
+        await using var driver = CreateManualInputDriver();
+        driver.QueueCaptureInput(-360);
+
+        driver.QueueCaptureInput(120);
+
+        Assert.Equal(ScrollCaptureDirection.Up, driver.PendingCaptureDirection);
+        Assert.Equal(
+            ManualScrollDriver.MaximumCaptureStepsPerFrame,
+            driver.PendingCaptureStepCount);
+    }
+
+    private static ManualScrollDriver CreateManualInputDriver()
+    {
+        return new ManualScrollDriver(
+            new ScrollCaptureTarget(
+                new IntPtr(1),
+                new IntPtr(1),
+                new ScreenRegion(0, 0, 100, 100),
+                SupportsVerticalScroll: true));
     }
 
     private static ControlledScrollCaptureState Apply(

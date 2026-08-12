@@ -1,5 +1,6 @@
 using System.IO;
 using System.Globalization;
+using System.Drawing;
 using ScreenRecorderLib;
 using Screenshot.App.Core;
 using WinForms = System.Windows.Forms;
@@ -37,6 +38,8 @@ internal sealed class RegionVideoRecorder : IDisposable
     private readonly Recorder _recorder;
     private readonly TaskCompletionSource<RegionVideoRecordingResult> _completion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly CancellationTokenSource _blackFrameDetectionCancellation = new();
+    private string? _forcedFailureMessage;
     private bool _disposed;
 
     public RegionVideoRecorder(
@@ -66,6 +69,7 @@ internal sealed class RegionVideoRecorder : IDisposable
 
         var recordingSource = new DisplayRecordingSource(deviceName)
         {
+            RecorderApi = RecorderApi.DesktopDuplication,
             SourceRect = new ScreenRect(
                 sourceRegion.X,
                 sourceRegion.Y,
@@ -161,6 +165,8 @@ internal sealed class RegionVideoRecorder : IDisposable
             {
                 _recorder.Record(_outputPath);
                 State = RegionVideoRecorderState.Recording;
+                _ = DetectPersistentBlackFramesAsync(
+                    _blackFrameDetectionCancellation.Token);
             }
             catch (Exception exception)
             {
@@ -255,9 +261,11 @@ internal sealed class RegionVideoRecorder : IDisposable
             }
 
             _disposed = true;
+            _blackFrameDetectionCancellation.Cancel();
             _recorder.OnRecordingComplete -= OnRecordingComplete;
             _recorder.OnRecordingFailed -= OnRecordingFailed;
             _recorder.Dispose();
+            _blackFrameDetectionCancellation.Dispose();
         }
     }
 
@@ -324,18 +332,38 @@ internal sealed class RegionVideoRecorder : IDisposable
 
     private void OnRecordingComplete(object? sender, RecordingCompleteEventArgs e)
     {
+        string? forcedFailure;
         lock (_sync)
         {
-            State = RegionVideoRecorderState.Completed;
-            _completion.TrySetResult(new RegionVideoRecordingResult(
-                string.IsNullOrWhiteSpace(e.FilePath) ? _outputPath : e.FilePath,
-                ErrorMessage: null));
+            if (State == RegionVideoRecorderState.Failed)
+            {
+                return;
+            }
+
+            forcedFailure = _forcedFailureMessage;
+            if (forcedFailure is not null)
+            {
+                // Complete outside this branch through the common failure path
+                // so the partial file is removed and the UI receives one event.
+            }
+            else
+            {
+                State = RegionVideoRecorderState.Completed;
+                _completion.TrySetResult(new RegionVideoRecordingResult(
+                    string.IsNullOrWhiteSpace(e.FilePath) ? _outputPath : e.FilePath,
+                    ErrorMessage: null));
+            }
+        }
+
+        if (forcedFailure is not null)
+        {
+            CompleteWithFailure(forcedFailure);
         }
     }
 
     private void OnRecordingFailed(object? sender, RecordingFailedEventArgs e)
     {
-        CompleteWithFailure(e.Error);
+        CompleteWithFailure(_forcedFailureMessage ?? e.Error);
     }
 
     private void CompleteWithFailure(string? errorMessage)
@@ -343,16 +371,137 @@ internal sealed class RegionVideoRecorder : IDisposable
         var message = string.IsNullOrWhiteSpace(errorMessage)
             ? "系统未能完成视频录制。"
             : errorMessage.Trim();
+        var notify = false;
         lock (_sync)
         {
+            if (State == RegionVideoRecorderState.Completed ||
+                State == RegionVideoRecorderState.Failed)
+            {
+                return;
+            }
+
             State = RegionVideoRecorderState.Failed;
-            _completion.TrySetResult(new RegionVideoRecordingResult(
+            notify = _completion.TrySetResult(new RegionVideoRecordingResult(
                 FilePath: null,
                 ErrorMessage: message));
         }
 
         TryDeleteIncompleteFile();
-        Failed?.Invoke(message);
+        if (notify)
+        {
+            Failed?.Invoke(message);
+        }
+    }
+
+    private async Task DetectPersistentBlackFramesAsync(
+        CancellationToken cancellationToken)
+    {
+        const int requiredBlackSamples = 3;
+        try
+        {
+            await Task.Delay(1000, cancellationToken);
+            for (var sample = 0; sample < requiredBlackSamples; sample++)
+            {
+                lock (_sync)
+                {
+                    if (_disposed || State != RegionVideoRecorderState.Recording)
+                    {
+                        return;
+                    }
+                }
+
+                using var snapshot = new MemoryStream();
+                if (!_recorder.TakeSnapshot(snapshot) || snapshot.Length == 0)
+                {
+                    return;
+                }
+
+                snapshot.Position = 0;
+                using var bitmap = new Bitmap(snapshot);
+                if (!IsNearlyBlackFrame(bitmap))
+                {
+                    return;
+                }
+
+                if (sample + 1 < requiredBlackSamples)
+                {
+                    await Task.Delay(550, cancellationToken);
+                }
+            }
+
+            StopForPersistentBlackFrames();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+            // Black-frame detection is protective only. Snapshot support must
+            // never interrupt an otherwise valid recording.
+        }
+    }
+
+    private void StopForPersistentBlackFrames()
+    {
+        const string message =
+            "录制画面持续为黑色，可能是播放器硬件加速或受版权保护内容。" +
+            "请关闭播放器硬件加速后重试；受保护的视频无法录制。";
+        lock (_sync)
+        {
+            if (_disposed || State != RegionVideoRecorderState.Recording)
+            {
+                return;
+            }
+
+            _forcedFailureMessage = message;
+            State = RegionVideoRecorderState.Stopping;
+            try
+            {
+                _recorder.Stop();
+            }
+            catch
+            {
+                CompleteWithFailure(message);
+            }
+        }
+    }
+
+    internal static bool IsNearlyBlackFrame(Bitmap bitmap)
+    {
+        ArgumentNullException.ThrowIfNull(bitmap);
+        if (bitmap.Width == 0 || bitmap.Height == 0)
+        {
+            return true;
+        }
+
+        const int samplesPerAxis = 12;
+        var brightSamples = 0;
+        var maximumLuminance = 0;
+        for (var yIndex = 0; yIndex < samplesPerAxis; yIndex++)
+        {
+            var y = Math.Min(
+                bitmap.Height - 1,
+                (int)((yIndex + 0.5) * bitmap.Height / samplesPerAxis));
+            for (var xIndex = 0; xIndex < samplesPerAxis; xIndex++)
+            {
+                var x = Math.Min(
+                    bitmap.Width - 1,
+                    (int)((xIndex + 0.5) * bitmap.Width / samplesPerAxis));
+                var color = bitmap.GetPixel(x, y);
+                var luminance = (color.R * 299 + color.G * 587 + color.B * 114) /
+                                1000;
+                maximumLuminance = Math.Max(maximumLuminance, luminance);
+                if (luminance >= 10)
+                {
+                    brightSamples++;
+                }
+            }
+        }
+
+        // Be deliberately conservative: normal dark scenes and black-themed
+        // applications contain controls, subtitles or highlights. Protected
+        // capture surfaces are uniformly close to RGB(0,0,0).
+        return maximumLuminance < 18 && brightSamples <= 1;
     }
 
     private void TryDeleteIncompleteFile()

@@ -8,6 +8,28 @@ namespace Screenshot.App.Tests;
 public sealed class ScrollCaptureServiceTests
 {
     [Fact]
+    public void ActiveSamplingUsesACadenceFloorAndEarlyBackpressure()
+    {
+        Assert.Equal(
+            32,
+            ScrollCaptureService.GetActiveSampleDelayMilliseconds(
+                configuredDelayMilliseconds: 1,
+                elapsedSinceWheel: TimeSpan.FromMilliseconds(20)));
+        Assert.Equal(
+            16,
+            ScrollCaptureService.GetActiveSampleDelayMilliseconds(
+                configuredDelayMilliseconds: 1,
+                elapsedSinceWheel: TimeSpan.FromMilliseconds(120)));
+        Assert.Equal(
+            80,
+            ScrollCaptureService.GetActiveSampleDelayMilliseconds(
+                configuredDelayMilliseconds: 80,
+                elapsedSinceWheel: TimeSpan.Zero));
+        Assert.Equal(7, ScrollCaptureService.GetBackpressureThreshold(62));
+        Assert.Equal(4, ScrollCaptureService.GetBackpressureThreshold(8));
+    }
+
+    [Fact]
     public async Task ManualCaptureReturnsCanceledResult()
     {
         var completionSource = new TaskCompletionSource(
