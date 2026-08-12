@@ -1,0 +1,65 @@
+<Window x:Class="Screenshot.App.Editor.ThemeColorPickerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="选择颜色"
+        Width="288"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="{DynamicResource AppPanelBackgroundBrush}"
+        Foreground="{DynamicResource AppControlForegroundBrush}"
+        WindowStyle="None"
+        Activated="OnWindowActivated"
+        Deactivated="OnWindowDeactivated">
+    <Border Padding="12"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            Background="{DynamicResource AppPanelBackgroundBrush}">
+        <StackPanel>
+            <TextBlock FontSize="14" FontWeight="SemiBold" Text="选择颜色" />
+            <TextBlock x:Name="RecentColorsLabel"
+                       Margin="0,10,0,3"
+                       FontSize="11"
+                       Foreground="{DynamicResource AppTextSecondaryBrush}"
+                       Text="最近使用" />
+            <UniformGrid x:Name="RecentColorsPanel" Columns="8" />
+            <TextBlock Margin="0,10,0,3"
+                       FontSize="11"
+                       Foreground="{DynamicResource AppTextSecondaryBrush}"
+                       Text="常用颜色" />
+            <UniformGrid Margin="0,10,0,10" Columns="8">
+                <Button Tag="#EF4444" Background="#EF4444" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#F97316" Background="#F97316" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#FACC15" Background="#FACC15" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#84CC16" Background="#84CC16" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#22C55E" Background="#22C55E" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#14B8A6" Background="#14B8A6" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#0EA5E9" Background="#0EA5E9" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#3B82F6" Background="#3B82F6" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#6366F1" Background="#6366F1" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#8B5CF6" Background="#8B5CF6" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#D946EF" Background="#D946EF" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#EC4899" Background="#EC4899" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#F8FAFC" Background="#F8FAFC" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#CBD5E1" Background="#CBD5E1" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#64748B" Background="#64748B" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#111827" Background="#111827" Click="OnSwatchClick" Style="{StaticResource ColorSwatch}" />
+            </UniformGrid>
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="34" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Margin="0,0,8,0" Background="{Binding PreviewBrush}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" />
+                <TextBox x:Name="HexTextBox" Grid.Column="1" Height="30" Padding="8,4" MaxLength="9" KeyDown="OnHexTextBoxKeyDown" Text="#2EAFA5" />
+            </Grid>
+        </StackPanel>
+    </Border>
+    <Window.Resources>
+        <Style x:Key="ColorSwatch" TargetType="Button">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Margin" Value="2" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+    </Window.Resources>
+</Window>

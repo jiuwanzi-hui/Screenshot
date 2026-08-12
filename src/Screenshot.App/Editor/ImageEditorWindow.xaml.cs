@@ -11,8 +11,6 @@ using WpfButton = System.Windows.Controls.Button;
 using WpfColor = System.Windows.Media.Color;
 using WpfColorConverter = System.Windows.Media.ColorConverter;
 using WpfRadioButton = System.Windows.Controls.RadioButton;
-using WinForms = System.Windows.Forms;
-using DrawingColor = System.Drawing.Color;
 
 namespace Screenshot.App.Editor;
 
@@ -293,34 +291,22 @@ public partial class ImageEditorWindow : Window
     private void OnCustomColorClick(object sender, RoutedEventArgs e)
     {
         var seedColor = _customColor ?? _selectedColor;
-        using var dialog = new WinForms.ColorDialog
+        var picker = new ThemeColorPickerWindow(seedColor, _customColorPalette)
         {
-            AllowFullOpen = true,
-            FullOpen = true,
-            AnyColor = true,
-            Color = DrawingColor.FromArgb(
-                seedColor.A,
-                seedColor.R,
-                seedColor.G,
-                seedColor.B),
-            CustomColors = _customColorPalette.ToArray(),
+            Owner = this,
         };
+        picker.ColorSelected += (_, color) => ApplyCustomColor(color);
+        picker.Show();
+    }
 
-        if (dialog.ShowDialog() != WinForms.DialogResult.OK)
-        {
-            return;
-        }
-
-        var color = WpfColor.FromArgb(
-            dialog.Color.A,
-            dialog.Color.R,
-            dialog.Color.G,
-            dialog.Color.B);
+    private void ApplyCustomColor(WpfColor color)
+    {
         var brush = new SolidColorBrush(color);
         brush.Freeze();
         _selectedColor = color;
         _customColor = color;
-        _customColorPalette = NormalizeCustomColorPalette(dialog.CustomColors);
+        _customColorPalette = NormalizeCustomColorPalette(_customColorPalette.Append(
+            color.R << 16 | color.G << 8 | color.B));
         CustomColorButton.Background = brush;
         UpdateSelectedColorButton(CustomColorButton);
         EditorCanvas.SelectColor(color);
