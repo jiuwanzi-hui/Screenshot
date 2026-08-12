@@ -115,6 +115,7 @@ public sealed class ApplicationUpdateService : IDisposable
     private readonly string _updatesDirectory;
     private readonly string _releaseHistoryCachePath;
     private readonly string? _bundledReleaseHistoryPath;
+    private readonly bool _probeMirrorAssets;
 
     public ApplicationUpdateService(
         HttpClient? httpClient = null,
@@ -131,6 +132,7 @@ public sealed class ApplicationUpdateService : IDisposable
             Timeout = TimeSpan.FromMinutes(10),
         };
         _ownsHttpClient = httpClient is null;
+        _probeMirrorAssets = manifestUri is null;
         _sources = manifestUri is null
             ?
             [
@@ -903,6 +905,10 @@ public sealed class ApplicationUpdateService : IDisposable
         }
 
         var update = ValidateManifest(manifest, source.Mirror);
+        if (_probeMirrorAssets)
+        {
+            update = await SelectAvailableMirrorAsync(update, cancellationToken);
+        }
         if (ComparableVersion(update.Version).CompareTo(ComparableVersion(currentVersion)) <= 0)
         {
             return new ApplicationUpdateCheckResult(
@@ -915,6 +921,52 @@ public sealed class ApplicationUpdateService : IDisposable
             true,
             update,
             $"发现新版本 {NormalizeVersion(update.Version)}（{GetMirrorName(source.Mirror)}）。");
+    }
+
+    private async Task<ApplicationUpdateInfo> SelectAvailableMirrorAsync(
+        ApplicationUpdateInfo update,
+        CancellationToken cancellationToken)
+    {
+        // A manifest can exist on Gitee before its large binary attachments finish
+        // processing. Probe both package URLs so the first successful source is
+        // also the source used by the update button.
+        var giteeAvailable = await IsAssetAvailableAsync(update.Installer.GiteeDownloadUri, cancellationToken) &&
+                             await IsAssetAvailableAsync(update.Portable.GiteeDownloadUri, cancellationToken);
+        var githubAvailable = await IsAssetAvailableAsync(update.Installer.GitHubDownloadUri, cancellationToken) &&
+                              await IsAssetAvailableAsync(update.Portable.GitHubDownloadUri, cancellationToken);
+
+        var mirror = giteeAvailable
+            ? ApplicationUpdateMirror.Gitee
+            : githubAvailable
+                ? ApplicationUpdateMirror.GitHub
+                : update.PreferredMirror;
+        return update with
+        {
+            PreferredMirror = mirror,
+            Installer = update.Installer with { PreferredMirror = mirror },
+            Portable = update.Portable with { PreferredMirror = mirror },
+        };
+    }
+
+    private async Task<bool> IsAssetAvailableAsync(Uri uri, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Head, uri);
+            using var response = await _httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+            return (int)response.StatusCode is >= 200 and < 400;
+        }
+        catch (HttpRequestException)
+        {
+            return false;
+        }
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
     }
 
     private async Task<UpdateManifest?> ReadManifestAsync(
