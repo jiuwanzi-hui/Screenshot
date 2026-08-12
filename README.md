@@ -1,4 +1,4 @@
-# SnapCut · 简截
+﻿# SnapCut · 简截
 
 [简体中文](#简体中文) | [English](#english)
 
@@ -36,14 +36,14 @@ SnapCut（简截）是一款以 Windows 10/11 正式版为主的轻量截图工�
 
 下载最新的 x64 自包含版本。2.3.0 起发布附件统一使用 `SnapCut-Setup-*` 和 `SnapCut-Portable-*`；同时保留旧清单入口，2.1.0 及之后版本仍可在程序内在线更新：
 
-- [安装版 SnapCut Setup 2.8.2（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.8.2-win-x64.exe)
-- [免安装版 SnapCut Portable 2.8.2（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.8.2-win-x64.zip)
-- [安装版 SnapCut Setup 2.8.2（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.8.2/SnapCut-Setup-2.8.2-win-x64.exe)
-- [免安装版 SnapCut Portable 2.8.2（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.8.2/SnapCut-Portable-2.8.2-win-x64.zip)
+- [安装版 SnapCut Setup 2.8.3（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.8.3-win-x64.exe)
+- [免安装版 SnapCut Portable 2.8.3（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.8.3-win-x64.zip)
+- [安装版 SnapCut Setup 2.8.3（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.8.3/SnapCut-Setup-2.8.3-win-x64.exe)
+- [免安装版 SnapCut Portable 2.8.3（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.8.3/SnapCut-Portable-2.8.3-win-x64.zip)
 
-免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET 或 Visual C++ 运行库。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.8.2 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET 或 Visual C++ 运行库。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.8.3 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
 
-2.8.2 新增截图工具栏功能显示配置，不常用的绘图、录屏、保存、长截图、OCR、翻译、钉图及撤销/重做按钮可长期隐藏，取消和完成始终保留。复杂截图翻译改为分批并发处理、限时拆分重试和翻译来源自动回退，并保护技术标识、路径与产品名称，提升大面积混排页面的速度和准确性；新增选中文字离线翻译窗口与独立快捷键。翻译目标语言、自定义颜色、调色板和箭头样式会跨重启保留。长截图新增自动/手动滚轮模式并加固边界、固定底栏、反向滚动和高频输入下的拼接稳定性；录屏在持续黑帧时会明确停止并提示。
+2.8.3 完善截图取色模式：支持放大镜、快捷复制提示、主题化颜色面板、色相/饱和度/亮度/透明度调节和 HEX 输入；常用颜色槽支持逐个保存覆盖，并兼容回显旧版 Windows 调色板配置。取色和颜色调节流程减少重复保存，提升拖动流畅度。
 
 2.8.1 支持将 `F1-F24` 设为不带修饰键的单键快捷键。修复截图翻译中英文未翻译、字符图标误识别为数字、中文或产品标识被错误覆盖的问题；优化 OCR 文字框与逐行译文的对应关系。离线翻译未产生有效译文时会自动回退到下一翻译方式，避免把原文返回误判为成功。
 
@@ -160,14 +160,14 @@ SnapCut is primarily a lightweight Windows 10/11 capture utility. It combines re
 
 Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-*` and `SnapCut-Portable-*` starting with 2.3.0. The legacy manifest endpoint remains available so versions 2.1.0 and later continue to update in-app:
 
-- [SnapCut Setup 2.8.2 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.8.2-win-x64.exe)
-- [SnapCut Portable 2.8.2 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.8.2-win-x64.zip)
-- [SnapCut Setup 2.8.2 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.8.2/SnapCut-Setup-2.8.2-win-x64.exe)
-- [SnapCut Portable 2.8.2 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.8.2/SnapCut-Portable-2.8.2-win-x64.zip)
+- [SnapCut Setup 2.8.3 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.8.3-win-x64.exe)
+- [SnapCut Portable 2.8.3 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.8.3-win-x64.zip)
+- [SnapCut Setup 2.8.3 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.8.3/SnapCut-Setup-2.8.3-win-x64.exe)
+- [SnapCut Portable 2.8.3 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.8.3/SnapCut-Portable-2.8.3-win-x64.zip)
 
-Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET or Visual C++ runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.8.2 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET or Visual C++ runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.8.3 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
 
-Version 2.8.2 adds persistent capture-toolbar visibility settings while always keeping Cancel and Confirm available. Complex screenshot translation now uses concurrent batches, bounded split retries, provider fallback, and protection for technical tokens, paths, and product names; it also adds an offline selected-text translation window with a dedicated hotkey. The translation target, custom colors, palette, and arrow style persist across restarts. Scrolling capture gains automatic/manual-wheel modes and stronger boundary, fixed-footer, reverse-motion, and high-frequency input handling. Recording now stops with a clear message when persistent black frames are detected.
+Version 2.8.3 improves screen color picking with a magnifier, copy confirmation, themed color controls, HSV/alpha sliders, HEX input, and individually saved palette slots compatible with legacy Windows color settings. Color adjustments avoid repeated persistence work for smoother dragging.
 
 Version 2.8.1 allows `F1-F24` to be assigned as single-key shortcuts without modifiers. It fixes untranslated English, icon glyphs being misread as digits, and Chinese or product identifiers being incorrectly overwritten in screenshot translation, while improving OCR box alignment and line-by-line translated overlays. An offline provider that returns no effective translation now falls back to the next provider instead of treating unchanged source text as success.
 
@@ -254,3 +254,4 @@ pwsh ./build-macos.ps1 -Runtime osx-arm64 -Version 0.1.0
 ```
 
 See [SnapCut.Mac](src/SnapCut.Mac/README.md) for permissions, signing, packaging, and real-Mac validation requirements. No signed or Apple-notarized macOS binary is published yet.
+
