@@ -8,6 +8,7 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using Screenshot.App.Core;
 using Screenshot.App.Infrastructure;
@@ -34,6 +35,7 @@ internal sealed class ReleaseHistoryItemViewModel
 
 public partial class MainWindow : Window, IDisposable
 {
+    private const string CreatorProfileUrl = "https://b23.tv/ZzD0zPS";
     private static readonly Version MinimumAutomaticRollbackVersion = new(2, 0, 0);
     private readonly SettingsStore _settingsStore;
     private readonly IStartupRegistrationService _startupRegistrationService;
@@ -41,6 +43,7 @@ public partial class MainWindow : Window, IDisposable
     private readonly ITranslationCredentialStore _translationCredentialStore;
     private readonly SettingsViewModel _settingsViewModel;
     private readonly DispatcherTimer _settingsApplyTimer;
+    private readonly DispatcherTimer _idleMemoryTrimTimer;
     private readonly HttpClient _modelCatalogHttpClient;
     private readonly bool _ownsModelCatalogHttpClient;
     private readonly ApplicationUpdateService _applicationUpdateService;
@@ -115,6 +118,11 @@ public partial class MainWindow : Window, IDisposable
             Interval = TimeSpan.FromMilliseconds(400),
         };
         _settingsApplyTimer.Tick += OnSettingsApplyTimerTick;
+        _idleMemoryTrimTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(15),
+        };
+        _idleMemoryTrimTimer.Tick += OnIdleMemoryTrimTimerTick;
 
         InitializeComponent();
         WindowPlacementService.Track(this, WindowPlacementKeys.Settings);
@@ -238,6 +246,37 @@ public partial class MainWindow : Window, IDisposable
         }
 
         Activate();
+        ScheduleIdleMemoryTrim();
+    }
+
+    private void ScheduleIdleMemoryTrim()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _idleMemoryTrimTimer.Stop();
+        _idleMemoryTrimTimer.Start();
+    }
+
+    private void OnIdleMemoryTrimTimerTick(object? sender, EventArgs e)
+    {
+        _idleMemoryTrimTimer.Stop();
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (IsVisible &&
+            (Volatile.Read(ref _automaticUpdateCheckInProgress) != 0 ||
+             Volatile.Read(ref _onlineAvailabilityCheckInProgress) != 0))
+        {
+            _idleMemoryTrimTimer.Start();
+            return;
+        }
+
+        _ = Task.Run(Core.MemoryFootprint.TrimAfterHeavyOperation);
     }
 
     public void OpenTranslationModelSettings(string? targetLanguage = null)
@@ -299,6 +338,8 @@ public partial class MainWindow : Window, IDisposable
         EndHotKeyCapture(restoreRegistrations: true);
         _settingsApplyTimer.Stop();
         _settingsApplyTimer.Tick -= OnSettingsApplyTimerTick;
+        _idleMemoryTrimTimer.Stop();
+        _idleMemoryTrimTimer.Tick -= OnIdleMemoryTrimTimerTick;
         Activated -= OnSettingsWindowActivated;
         Dispose();
         base.OnClosed(e);
@@ -345,10 +386,7 @@ public partial class MainWindow : Window, IDisposable
             e.Cancel = true;
             Hide();
             ApplyPendingTaskbarVisibility();
-            // Entering tray residency is the moment the footprint matters.
-            _ = Dispatcher.BeginInvoke(
-                System.Windows.Threading.DispatcherPriority.ApplicationIdle,
-                Core.MemoryFootprint.TrimAfterHeavyOperation);
+            ScheduleIdleMemoryTrim();
         }
         else if (ApplicationClosePolicy.ShouldExitApplication(
                      _exitRequested,
@@ -457,6 +495,46 @@ public partial class MainWindow : Window, IDisposable
         await CheckForUpdatesAsync(showBusyState: true);
     }
 
+    private void OnOpenCreatorProfileClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _ = Process.Start(new ProcessStartInfo(CreatorProfileUrl)
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or Win32Exception)
+        {
+            _ = System.Windows.MessageBox.Show(
+                this,
+                $"无法打开作者主页：{exception.Message}",
+                "SnapCut",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private void OnCreatorProfileMouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        SetCreatorProfileTransform(1.002, -0.5);
+    }
+
+    private void OnCreatorProfileMouseLeave(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        SetCreatorProfileTransform(1, 0);
+    }
+
+    private void SetCreatorProfileTransform(
+        double scale,
+        double y)
+    {
+        CreatorProfileScale.ScaleX = scale;
+        CreatorProfileScale.ScaleY = scale;
+        CreatorProfileTranslate.Y = y;
+    }
+
     private async Task CheckForUpdatesOnOpenAsync()
     {
         if (_disposed ||
@@ -472,6 +550,7 @@ public partial class MainWindow : Window, IDisposable
         finally
         {
             Volatile.Write(ref _automaticUpdateCheckInProgress, 0);
+            ScheduleIdleMemoryTrim();
         }
     }
 
@@ -1798,6 +1877,7 @@ public partial class MainWindow : Window, IDisposable
             Interlocked.Exchange(
                 ref _onlineAvailabilityCheckInProgress,
                 0);
+            ScheduleIdleMemoryTrim();
         }
     }
 

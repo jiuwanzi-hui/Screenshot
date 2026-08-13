@@ -1,5 +1,5 @@
 #ifndef AppVersion
-  #define AppVersion "2.8.4"
+  #define AppVersion "2.9.0"
 #endif
 
 #define AppName "SnapCut"

@@ -26,10 +26,8 @@ internal static class MemoryFootprint
             GC.Collect(2, GCCollectionMode.Aggressive, blocking: true, compacting: true);
             GC.WaitForPendingFinalizers();
             GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
-            _ = NativeMethods.SetProcessWorkingSetSize(
-                NativeMethods.GetCurrentProcess(),
-                new IntPtr(-1),
-                new IntPtr(-1));
+            _ = NativeMethods.EmptyWorkingSet(
+                NativeMethods.GetCurrentProcess());
         }
         catch (Exception)
         {
@@ -42,11 +40,8 @@ internal static class MemoryFootprint
         [DllImport("kernel32.dll")]
         public static extern IntPtr GetCurrentProcess();
 
-        [DllImport("kernel32.dll")]
+        [DllImport("psapi.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool SetProcessWorkingSetSize(
-            IntPtr process,
-            IntPtr minimumWorkingSetSize,
-            IntPtr maximumWorkingSetSize);
+        public static extern bool EmptyWorkingSet(IntPtr process);
     }
 }
