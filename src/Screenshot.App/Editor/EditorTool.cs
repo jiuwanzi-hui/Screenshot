@@ -6,6 +6,7 @@ public enum EditorTool
     Ellipse,
     Arrow,
     Emoji,
+    Number,
     Brush,
     Mosaic,
     Text,

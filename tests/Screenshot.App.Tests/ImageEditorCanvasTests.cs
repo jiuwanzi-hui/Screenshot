@@ -15,6 +15,112 @@ namespace Screenshot.App.Tests;
 public sealed class ImageEditorCanvasTests
 {
     [Fact]
+    public void NumberAnnotationsAreRenumberedAfterDeletingAnEarlierMarker()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var bitmap = new Bitmap(140, 90, PixelFormat.Format32bppPArgb);
+            using var image = new CapturedImage((Bitmap)bitmap.Clone());
+            var editor = new ImageEditorCanvas();
+            editor.Initialize(image, displayWidth: 140, displayHeight: 90);
+            var documentField = typeof(ImageEditorCanvas).GetField(
+                "_document",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var selectedField = typeof(ImageEditorCanvas).GetField(
+                "_selectedAnnotationIndex",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var labelMethod = typeof(ImageEditorCanvas).GetMethod(
+                "GetNumberLabel",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(documentField);
+            Assert.NotNull(selectedField);
+            Assert.NotNull(labelMethod);
+
+            var document = Assert.IsType<EditorDocument>(documentField.GetValue(editor));
+            var first = new NumberAnnotation(new WpfPoint(10, 10), 28, System.Windows.Media.Colors.Red);
+            var second = new NumberAnnotation(new WpfPoint(50, 10), 28, System.Windows.Media.Colors.Red);
+            var third = new NumberAnnotation(new WpfPoint(90, 10), 28, System.Windows.Media.Colors.Red);
+            document.Add(first);
+            document.Add(second);
+            document.Add(third);
+
+            Assert.Equal("1", Assert.IsType<string>(labelMethod.Invoke(editor, [first])));
+            Assert.Equal("2", Assert.IsType<string>(labelMethod.Invoke(editor, [second])));
+            Assert.Equal("3", Assert.IsType<string>(labelMethod.Invoke(editor, [third])));
+
+            selectedField.SetValue(editor, 1);
+            Assert.True(editor.DeleteSelectedAnnotation());
+            Assert.Equal("1", Assert.IsType<string>(labelMethod.Invoke(editor, [first])));
+            Assert.Equal("2", Assert.IsType<string>(labelMethod.Invoke(editor, [third])));
+        });
+    }
+
+    [Fact]
+    public void NumberAnnotationCanMoveAndResize()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var bitmap = new Bitmap(140, 90, PixelFormat.Format32bppPArgb);
+            using var image = new CapturedImage((Bitmap)bitmap.Clone());
+            var editor = new ImageEditorCanvas();
+            editor.Initialize(image, displayWidth: 140, displayHeight: 90);
+            var documentField = typeof(ImageEditorCanvas).GetField(
+                "_document",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var selectedField = typeof(ImageEditorCanvas).GetField(
+                "_selectedAnnotationIndex",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var originalField = typeof(ImageEditorCanvas).GetField(
+                "_annotationEditOriginal",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var startField = typeof(ImageEditorCanvas).GetField(
+                "_annotationEditStartPoint",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var editingField = typeof(ImageEditorCanvas).GetField(
+                "_isEditingAnnotation",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var handleField = typeof(ImageEditorCanvas).GetField(
+                "_activeAnnotationHandle",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var updateMethod = typeof(ImageEditorCanvas).GetMethod(
+                "UpdateAnnotationEdit",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(documentField);
+            Assert.NotNull(selectedField);
+            Assert.NotNull(originalField);
+            Assert.NotNull(startField);
+            Assert.NotNull(editingField);
+            Assert.NotNull(handleField);
+            Assert.NotNull(updateMethod);
+
+            var number = new NumberAnnotation(
+                new WpfPoint(20, 20),
+                28,
+                System.Windows.Media.Colors.Red);
+            var document = Assert.IsType<EditorDocument>(documentField.GetValue(editor));
+            document.Add(number);
+            selectedField.SetValue(editor, 0);
+            originalField.SetValue(editor, number);
+            startField.SetValue(editor, new WpfPoint(30, 30));
+            editingField.SetValue(editor, true);
+            handleField.SetValue(editor, -1);
+
+            updateMethod.Invoke(editor, [new WpfPoint(40, 45)]);
+            var moved = Assert.IsType<NumberAnnotation>(Assert.Single(document.Annotations));
+            Assert.Equal(new WpfPoint(30, 35), moved.Position);
+            Assert.Equal(28, moved.Size);
+
+            originalField.SetValue(editor, moved);
+            startField.SetValue(editor, new WpfPoint(40, 45));
+            handleField.SetValue(editor, 8);
+            updateMethod.Invoke(editor, [new WpfPoint(56, 61)]);
+            var resized = Assert.IsType<NumberAnnotation>(Assert.Single(document.Annotations));
+            Assert.Equal(new WpfPoint(30, 35), resized.Position);
+            Assert.Equal(44, resized.Size);
+        });
+    }
+
+    [Fact]
     public void EllipseCanBeSelectedDeletedAndRestoredByUndo()
     {
         WpfTestHost.Invoke(() =>

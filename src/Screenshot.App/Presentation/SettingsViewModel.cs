@@ -645,6 +645,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             [CaptureToolbarFeature.Shape] = "矩形 / 椭圆",
             [CaptureToolbarFeature.Arrow] = "箭头",
             [CaptureToolbarFeature.Emoji] = "表情",
+            [CaptureToolbarFeature.Number] = "序号",
             [CaptureToolbarFeature.Brush] = "画笔",
             [CaptureToolbarFeature.Text] = "文字",
             [CaptureToolbarFeature.Mosaic] = "马赛克",

@@ -168,7 +168,7 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(
             FloatingCaptureClickBehavior.ShowSelection,
             loadResult.Settings.FloatingCaptureClickBehavior);
-        Assert.Equal(6, loadResult.Settings.SettingsVersion);
+        Assert.Equal(7, loadResult.Settings.SettingsVersion);
         Assert.Equal(
             Enum.GetValues<CaptureToolbarFeature>(),
             loadResult.Settings.VisibleCaptureToolbarFeatures);
@@ -212,12 +212,13 @@ public sealed class SettingsStoreTests : IDisposable
             ],
         }).Normalize();
 
-        Assert.Equal(6, normalized.SettingsVersion);
+        Assert.Equal(7, normalized.SettingsVersion);
         Assert.Equal(
             [
                 CaptureToolbarFeature.TextRecognition,
                 CaptureToolbarFeature.Translation,
                 CaptureToolbarFeature.CopyRecognizedText,
+                CaptureToolbarFeature.Number,
             ],
             normalized.VisibleCaptureToolbarFeatures);
     }
@@ -232,8 +233,32 @@ public sealed class SettingsStoreTests : IDisposable
         }).Normalize();
 
         Assert.Equal(
-            [CaptureToolbarFeature.Save],
+            [CaptureToolbarFeature.Save, CaptureToolbarFeature.Number],
             normalized.VisibleCaptureToolbarFeatures);
+    }
+
+    [Fact]
+    public void UpgradeEnablesNumberToolOnceAndPreservesLaterOptOut()
+    {
+        var upgraded = (AppSettings.CreateDefault() with
+        {
+            SettingsVersion = 6,
+            VisibleCaptureToolbarFeatures = [CaptureToolbarFeature.Save],
+        }).Normalize();
+
+        Assert.Equal(7, upgraded.SettingsVersion);
+        Assert.Equal(
+            [CaptureToolbarFeature.Save, CaptureToolbarFeature.Number],
+            upgraded.VisibleCaptureToolbarFeatures);
+
+        var optedOut = (upgraded with
+        {
+            VisibleCaptureToolbarFeatures = [CaptureToolbarFeature.Save],
+        }).Normalize();
+
+        Assert.Equal(
+            [CaptureToolbarFeature.Save],
+            optedOut.VisibleCaptureToolbarFeatures);
     }
 
     [Fact]
