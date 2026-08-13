@@ -2011,7 +2011,82 @@
                                Text="源码公开与长期维护不易，感谢每一份支持。你的鼓励会用于后续功能升级和 macOS 版本开发。"
                                TextWrapping="Wrap" />
 
-                    <Border Margin="0,26,0,0"
+                    <Border x:Name="CreatorProfileGlowHost"
+                            Margin="0,22,0,0"
+                            Padding="2"
+                            CornerRadius="10"
+                            MouseEnter="OnCreatorProfileMouseEnter"
+                            MouseLeave="OnCreatorProfileMouseLeave"
+                            RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform x:Name="CreatorProfileScale" ScaleX="1" ScaleY="1" />
+                                <TranslateTransform x:Name="CreatorProfileTranslate" X="0" Y="0" />
+                            </TransformGroup>
+                        </Border.RenderTransform>
+                        <Border.Background>
+                            <LinearGradientBrush x:Name="CreatorProfileGlowBrush"
+                                                 StartPoint="0,0"
+                                                 EndPoint="1,1">
+                                <GradientStop Color="#2EAFA5" Offset="0" />
+                                <GradientStop Color="#6D7BFF" Offset="0.28" />
+                                <GradientStop Color="#E0529F" Offset="0.55" />
+                                <GradientStop Color="#F6C85F" Offset="0.78" />
+                                <GradientStop Color="#2EAFA5" Offset="1" />
+                            </LinearGradientBrush>
+                        </Border.Background>
+                        <Border x:Name="CreatorProfileCard"
+                                Padding="18"
+                                Background="{DynamicResource AppPanelBackgroundBrush}"
+                                CornerRadius="8"
+                                ClipToBounds="True">
+                            <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="72" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse Width="64"
+                                             Height="64"
+                                             VerticalAlignment="Center"
+                                             Stroke="{DynamicResource AppAccentBrush}"
+                                             StrokeThickness="2">
+                                        <Ellipse.Fill>
+                                            <ImageBrush ImageSource="/SnapCut;component/Assets/CreatorAvatar.jpg"
+                                                        Stretch="UniformToFill" />
+                                        </Ellipse.Fill>
+                                    </Ellipse>
+                                    <StackPanel Grid.Column="1"
+                                                Margin="14,0,18,0"
+                                                VerticalAlignment="Center">
+                                        <TextBlock FontSize="17"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                                   Text="九万字__" />
+                                        <TextBlock Margin="0,5,0,0"
+                                                   FontSize="12"
+                                                   Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                                   Text="SnapCut 作者 · 哔哩哔哩个人空间"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Margin="0,5,0,0"
+                                                   FontSize="11"
+                                                   Foreground="{DynamicResource AppMutedTextBrush}"
+                                                   Text="欢迎反馈使用体验与功能建议"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <Button Grid.Column="2"
+                                            MinWidth="124"
+                                            Padding="16,9"
+                                            VerticalAlignment="Center"
+                                            Click="OnOpenCreatorProfileClick"
+                                            Content="访问 B 站主页"
+                                            Style="{StaticResource SecondaryButton}"
+                                            ToolTip="在默认浏览器中打开九万字__的个人空间" />
+                            </Grid>
+                        </Border>
+                    </Border>
+
+                    <Border Margin="0,18,0,0"
                             Padding="24"
                             Background="{DynamicResource AppPanelBackgroundBrush}"
                             BorderBrush="{DynamicResource AppBorderBrush}"
@@ -2065,6 +2140,7 @@
                                                Text="后续计划：支持 macOS"
                                                TextWrapping="Wrap" />
                                 </Border>
+
                             </StackPanel>
                         </Grid>
                     </Border>

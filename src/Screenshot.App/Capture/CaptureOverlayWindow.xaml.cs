@@ -938,8 +938,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         _isColorPickerActive = true;
-        _windowSnapTimer.Stop();
-        HideWindowSnap();
+        _windowSnapTimer.Start();
         CaptureSurface.Cursor = System.Windows.Input.Cursors.Cross;
         ColorPickerPanel.Visibility = Visibility.Visible;
         ColorPickerPanel.UpdateLayout();
@@ -948,6 +947,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         CaptureSurface.Focus();
         UpdateColorPicker(CaptureSurface.PointFromScreen(
             new WpfPoint(WinForms.Cursor.Position.X, WinForms.Cursor.Position.Y)));
+        UpdateWindowSnap(
+            WinForms.Cursor.Position.X,
+            WinForms.Cursor.Position.Y);
     }
 
     private void OnCaptureWindowTextInput(object sender, TextCompositionEventArgs e)

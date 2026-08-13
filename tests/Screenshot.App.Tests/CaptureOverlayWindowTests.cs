@@ -16,6 +16,50 @@ namespace Screenshot.App.Tests;
 public sealed class CaptureOverlayWindowTests
 {
     [Fact]
+    public void ColorPickerKeepsWindowSnappingActive()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var pinnedImageManager = new PinnedImageManager();
+            var overlay = CaptureOverlayWindow.ShowInteractive(new CaptureOverlayOptions
+            {
+                SaveDirectory = Path.GetTempPath(),
+                KeepHistory = false,
+                HistoryLimit = 0,
+                HistoryService = new CaptureHistoryService(),
+                PinnedImageManager = pinnedImageManager,
+                StartOcrAsync = image =>
+                {
+                    image.Dispose();
+                    return Task.CompletedTask;
+                },
+            });
+
+            try
+            {
+                var enterColorPicker = typeof(CaptureOverlayWindow).GetMethod(
+                    "EnterColorPicker",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var snapTimerField = typeof(CaptureOverlayWindow).GetField(
+                    "_windowSnapTimer",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+
+                Assert.NotNull(enterColorPicker);
+                var snapTimer = Assert.IsType<System.Windows.Threading.DispatcherTimer>(
+                    snapTimerField?.GetValue(overlay));
+
+                enterColorPicker.Invoke(overlay, null);
+
+                Assert.True(snapTimer.IsEnabled);
+            }
+            finally
+            {
+                overlay.Close();
+            }
+        });
+    }
+
+    [Fact]
     public void ToolbarConfigurationHidesFeaturesButKeepsExitActions()
     {
         WpfTestHost.Invoke(() =>
