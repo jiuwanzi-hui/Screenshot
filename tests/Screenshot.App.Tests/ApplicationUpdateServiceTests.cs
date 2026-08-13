@@ -108,6 +108,27 @@ public sealed class ApplicationUpdateServiceTests
     }
 
     [Fact]
+    public async Task ChoosesNewerGitHubManifestWhenGiteeRespondsFirstWithOldVersion()
+    {
+        var package = Encoding.UTF8.GetBytes("package");
+        var handler = new DivergedUpdateManifestHandler(
+            CreateManifest("2.8.2", package),
+            CreateManifest("2.9.0", package));
+        using var client = new HttpClient(handler);
+        using var service = new ApplicationUpdateService(
+            client,
+            updatesDirectory: CreateTemporaryPath());
+
+        var result = await service.CheckAsync(new Version(2, 8, 2));
+
+        Assert.True(result.IsSuccess, result.Message);
+        Assert.NotNull(result.AvailableUpdate);
+        Assert.Equal(new Version(2, 9, 0), result.AvailableUpdate.Version);
+        Assert.Contains("2.9.0", result.Message);
+        Assert.Equal(2, handler.ManifestRequestCount);
+    }
+
+    [Fact]
     public async Task LoadsFormalReleaseHistoryWithDatesNotesAndVerifiedPackages()
     {
         var package = Encoding.UTF8.GetBytes("package");
@@ -671,6 +692,56 @@ public sealed class ApplicationUpdateServiceTests
                 Content = new StringContent(content, Encoding.UTF8, "application/json"),
                 RequestMessage = request,
             });
+        }
+    }
+
+    private sealed class DivergedUpdateManifestHandler(
+        string giteeManifest,
+        string githubManifest) : HttpMessageHandler
+    {
+        public int ManifestRequestCount { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var uri = request.RequestUri!;
+            if (request.Method == HttpMethod.Head)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    RequestMessage = request,
+                };
+            }
+
+            if (!uri.AbsolutePath.EndsWith(
+                    "/SnapCut-Update.json",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return new HttpResponseMessage(HttpStatusCode.NotFound)
+                {
+                    RequestMessage = request,
+                };
+            }
+
+            ManifestRequestCount++;
+            var isGitee = string.Equals(
+                uri.Host,
+                "gitee.com",
+                StringComparison.OrdinalIgnoreCase);
+            if (!isGitee)
+            {
+                await Task.Delay(80, cancellationToken);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    isGitee ? giteeManifest : githubManifest,
+                    Encoding.UTF8,
+                    "application/json"),
+                RequestMessage = request,
+            };
         }
     }
 

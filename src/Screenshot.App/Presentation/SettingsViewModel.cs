@@ -652,6 +652,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             [CaptureToolbarFeature.Save] = "保存图片",
             [CaptureToolbarFeature.ScrollCapture] = "长截图",
             [CaptureToolbarFeature.TextRecognition] = "文字识别",
+            [CaptureToolbarFeature.CopyRecognizedText] = "文字识别并复制",
             [CaptureToolbarFeature.Translation] = "翻译",
             [CaptureToolbarFeature.PinImage] = "钉图",
             [CaptureToolbarFeature.UndoRedo] = "撤销 / 重做",

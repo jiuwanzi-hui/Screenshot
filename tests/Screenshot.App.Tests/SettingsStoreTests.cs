@@ -168,6 +168,7 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(
             FloatingCaptureClickBehavior.ShowSelection,
             loadResult.Settings.FloatingCaptureClickBehavior);
+        Assert.Equal(6, loadResult.Settings.SettingsVersion);
         Assert.Equal(
             Enum.GetValues<CaptureToolbarFeature>(),
             loadResult.Settings.VisibleCaptureToolbarFeatures);
@@ -195,6 +196,43 @@ public sealed class SettingsStoreTests : IDisposable
 
         Assert.Equal(
             [CaptureToolbarFeature.Text, CaptureToolbarFeature.Save],
+            normalized.VisibleCaptureToolbarFeatures);
+    }
+
+    [Fact]
+    public void LegacyToolbarSplitsCopyTextFromVisibleTextRecognition()
+    {
+        var normalized = (AppSettings.CreateDefault() with
+        {
+            SettingsVersion = 5,
+            VisibleCaptureToolbarFeatures =
+            [
+                CaptureToolbarFeature.TextRecognition,
+                CaptureToolbarFeature.Translation,
+            ],
+        }).Normalize();
+
+        Assert.Equal(6, normalized.SettingsVersion);
+        Assert.Equal(
+            [
+                CaptureToolbarFeature.TextRecognition,
+                CaptureToolbarFeature.Translation,
+                CaptureToolbarFeature.CopyRecognizedText,
+            ],
+            normalized.VisibleCaptureToolbarFeatures);
+    }
+
+    [Fact]
+    public void LegacyToolbarDoesNotEnableCopyTextWhenRecognitionWasHidden()
+    {
+        var normalized = (AppSettings.CreateDefault() with
+        {
+            SettingsVersion = 5,
+            VisibleCaptureToolbarFeatures = [CaptureToolbarFeature.Save],
+        }).Normalize();
+
+        Assert.Equal(
+            [CaptureToolbarFeature.Save],
             normalized.VisibleCaptureToolbarFeatures);
     }
 

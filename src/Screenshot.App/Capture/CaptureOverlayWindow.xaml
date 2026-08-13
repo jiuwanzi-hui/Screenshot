@@ -450,6 +450,23 @@
                        MouseMove="OnSelectionRectangleMouseMove"
                        MouseLeftButtonUp="OnSelectionRectangleMouseLeftButtonUp" />
 
+            <Border x:Name="SelectionSizeBadge"
+                    Padding="7,3"
+                    Panel.ZIndex="105"
+                    Background="{DynamicResource ImageEditorToolbarBackgroundBrush}"
+                    BorderBrush="{DynamicResource AppSubtleBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    IsHitTestVisible="False"
+                    Visibility="Collapsed">
+                <TextBlock x:Name="SelectionSizeText"
+                           FontFamily="Consolas"
+                           FontSize="12"
+                           FontWeight="SemiBold"
+                           Foreground="{DynamicResource AppControlForegroundBrush}"
+                           Text="0 × 0" />
+            </Border>
+
             <editor:ImageEditorCanvas x:Name="InlineEditorCanvas"
                                       Panel.ZIndex="50"
                                       Visibility="Collapsed" />
@@ -897,13 +914,7 @@
                                 Style="{StaticResource InlineActionButton}"
                                 ToolTip="识别文字并在原位置选择复制">
                             <Button.ContextMenu>
-                                <ContextMenu Opened="OnOcrContextMenuOpened"
-                                             Style="{StaticResource ThemedContextMenuStyle}">
-                                    <MenuItem x:Name="CopyAllRecognizedTextMenuItem"
-                                              Header="识别并复制全部文字"
-                                              Style="{StaticResource ThemedMenuItemStyle}"
-                                              ToolTipService.ShowOnDisabled="True"
-                                              Click="OnCopyAllRecognizedTextMenuItemClick" />
+                                <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
                                     <MenuItem Header="表格复制"
                                               Style="{StaticResource ThemedMenuItemStyle}"
                                               Click="OnCopyTableMenuItemClick" />
@@ -926,6 +937,17 @@
                                            ToolTip="更多识别功能"
                                            PreviewMouseLeftButtonDown="OnOcrMenuArrowMouseDown" />
                             </Grid>
+                        </Button>
+                        <Button x:Name="CopyRecognizedTextButton"
+                                Click="OnCopyRecognizedTextClick"
+                                Style="{StaticResource InlineActionButton}"
+                                ToolTipService.ShowOnDisabled="True"
+                                ToolTip="识别全部文字、复制到剪贴板并关闭截图">
+                            <TextBlock Foreground="{DynamicResource EditorToolbarIconBrush}"
+                                       FontFamily="Microsoft YaHei UI"
+                                       FontSize="14"
+                                       FontWeight="SemiBold"
+                                       Text="取" />
                         </Button>
                         <Button x:Name="TranslateButton"
                                 Click="OnTranslateClick"

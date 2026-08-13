@@ -260,7 +260,7 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
 
         Assert.Equal(TranslationMode.Automatic, settings.TranslationMode);
         Assert.True(settings.SendTextToOnlineTranslation);
-        Assert.Equal(5, settings.SettingsVersion);
+        Assert.Equal(6, settings.SettingsVersion);
         Assert.Equal(
             [TranslationProviderKind.Online, TranslationProviderKind.Offline],
             settings.TranslationProviderPriority);

@@ -35,15 +35,20 @@ public sealed class CapturePointerContinuation
 
     internal CapturePointerContinuation(
         CapturePointerButton button,
-        DrawingPoint? startScreenPoint = null)
+        DrawingPoint? startScreenPoint = null,
+        bool enterPickerWhenReleasedWithoutSelection = false)
     {
         Button = button;
         StartScreenPoint = startScreenPoint;
+        EnterPickerWhenReleasedWithoutSelection =
+            enterPickerWhenReleasedWithoutSelection;
     }
 
     public CapturePointerButton Button { get; }
 
     internal DrawingPoint? StartScreenPoint { get; }
+
+    internal bool EnterPickerWhenReleasedWithoutSelection { get; }
 
     internal Task WaitForReleaseAsync() => _released.Task;
 
@@ -684,7 +689,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             var cursorPosition = WinForms.Cursor.Position;
             var endPoint = CaptureSurface.PointFromScreen(
                 new WpfPoint(cursorPosition.X, cursorPosition.Y));
-            return CompletePointerSelectionAsync(endPoint);
+            return CompletePointerSelectionCoreAsync(
+                endPoint,
+                enterPickerWhenEmpty:
+                    continuation.EnterPickerWhenReleasedWithoutSelection);
         });
         await completion;
     }
@@ -763,7 +771,14 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         await CompletePointerSelectionAsync(e.GetPosition(CaptureSurface));
     }
 
-    private async Task CompletePointerSelectionAsync(WpfPoint endPoint)
+    private Task CompletePointerSelectionAsync(WpfPoint endPoint) =>
+        CompletePointerSelectionCoreAsync(
+            endPoint,
+            enterPickerWhenEmpty: false);
+
+    private async Task CompletePointerSelectionCoreAsync(
+        WpfPoint endPoint,
+        bool enterPickerWhenEmpty)
     {
         var snappedBounds = _isWindowSnapClickPending
             ? _windowSnapBounds
@@ -788,6 +803,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         if (!HasValidSelection())
         {
             HideSelectionControls();
+            if (enterPickerWhenEmpty && _options is not null)
+            {
+                EnterColorPicker();
+            }
+
             return;
         }
 
@@ -1754,16 +1774,6 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         e.Handled = true;
     }
 
-    private void OnOcrContextMenuOpened(object sender, RoutedEventArgs e)
-    {
-        var reason = GetSpecialContentReason();
-        CopyAllRecognizedTextMenuItem.IsEnabled = reason is null &&
-            !_isQrInitializing;
-        CopyAllRecognizedTextMenuItem.ToolTip = _isQrInitializing
-            ? "正在检测二维码，请稍候"
-            : reason ?? "识别纯文字、复制到剪贴板并关闭截图";
-    }
-
     private string? GetSpecialContentReason()
     {
         if (_inlineQrResult?.IsSuccess == true)
@@ -1779,7 +1789,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         return null;
     }
 
-    private async void OnCopyAllRecognizedTextMenuItemClick(
+    private async void OnCopyRecognizedTextClick(
         object sender,
         RoutedEventArgs e)
     {
@@ -1826,8 +1836,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 image.Bitmap);
             if (GetSpecialContentReason() is { } specialContentReason)
             {
-                CopyAllRecognizedTextMenuItem.IsEnabled = false;
-                CopyAllRecognizedTextMenuItem.ToolTip = specialContentReason;
+                CopyRecognizedTextButton.ToolTip = specialContentReason;
                 await ShowSelectionMessageForAsync(
                     "检测到特殊内容，请分别复制",
                     1500);
@@ -2619,6 +2628,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         SetVisibility(SaveButton, CaptureToolbarFeature.Save);
         SetVisibility(ScrollCaptureButton, CaptureToolbarFeature.ScrollCapture);
         SetVisibility(OcrButton, CaptureToolbarFeature.TextRecognition);
+        SetVisibility(
+            CopyRecognizedTextButton,
+            CaptureToolbarFeature.CopyRecognizedText);
         SetVisibility(TranslateButton, CaptureToolbarFeature.Translation);
         SetVisibility(PinButton, CaptureToolbarFeature.PinImage);
         SetVisibility(InlineUndoButton, CaptureToolbarFeature.UndoRedo);
@@ -2681,6 +2693,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             SaveButton,
             ScrollCaptureButton,
             OcrButton,
+            CopyRecognizedTextButton,
             TranslateButton,
             PinButton,
         }.Any(IsVisible);
@@ -3361,6 +3374,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         SelectionRectangle.Height = bounds.Height;
 
         UpdateSelectionControlPositions(bounds);
+        UpdateSelectionSizeBadge(bounds);
         UpdateSelectionMask(bounds);
 
         if (bounds.Width >= MinimumSelectionEdge &&
@@ -3434,6 +3448,47 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         Canvas.SetLeft(CaptureToolbar, toolbarX);
         Canvas.SetTop(CaptureToolbar, toolbarY);
+    }
+
+    private void UpdateSelectionSizeBadge(Rect bounds)
+    {
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            SelectionSizeBadge.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var physicalBounds = GetPhysicalSelectionBounds();
+        if (physicalBounds.Width <= 0 || physicalBounds.Height <= 0)
+        {
+            SelectionSizeBadge.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        SelectionSizeText.Text = $"{physicalBounds.Width} × {physicalBounds.Height}";
+        SelectionSizeBadge.Visibility = Visibility.Visible;
+        SelectionSizeBadge.Measure(new System.Windows.Size(
+            double.PositiveInfinity,
+            double.PositiveInfinity));
+
+        var badgeWidth = SelectionSizeBadge.DesiredSize.Width;
+        var badgeHeight = SelectionSizeBadge.DesiredSize.Height;
+        var badgeX = Math.Clamp(
+            bounds.X,
+            0,
+            Math.Max(0, CaptureSurface.ActualWidth - badgeWidth));
+        var badgeY = bounds.Y - badgeHeight - 7;
+        if (badgeY < 0)
+        {
+            badgeY = bounds.Bottom + 7;
+        }
+
+        badgeY = Math.Clamp(
+            badgeY,
+            0,
+            Math.Max(0, CaptureSurface.ActualHeight - badgeHeight));
+        Canvas.SetLeft(SelectionSizeBadge, badgeX);
+        Canvas.SetTop(SelectionSizeBadge, badgeY);
     }
 
     private static void SetControlPosition(FrameworkElement control, double centerX, double centerY)
@@ -3557,6 +3612,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         BottomResizeThumb.Visibility = Visibility.Collapsed;
         CaptureToolbar.Visibility = Visibility.Collapsed;
         InlineEditorOptions.Visibility = Visibility.Collapsed;
+        SelectionSizeBadge.Visibility = Visibility.Collapsed;
     }
 
     internal Task SetScrollCaptureSelectionVisibleAsync(

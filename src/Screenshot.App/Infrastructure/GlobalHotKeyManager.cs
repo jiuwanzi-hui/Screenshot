@@ -744,7 +744,9 @@ public sealed class GlobalHotKeyManager : IDisposable
             var continuation = CreateCapturePointerContinuation(
                 virtualKey,
                 pending.Binding.Action,
-                pending.StartPoint);
+                pending.StartPoint,
+                enterPickerWhenReleasedWithoutSelection:
+                    virtualKey == HotKeyGesture.VirtualKeyMouseLeft);
             RaiseHotKeyPressed(
                 pending.Binding.Action,
                 CaptureCurrentScreen(pending.Binding.Action),
@@ -809,7 +811,8 @@ public sealed class GlobalHotKeyManager : IDisposable
     private CapturePointerContinuation? CreateCapturePointerContinuation(
         uint virtualKey,
         HotKeyAction action,
-        NativeMethods.NativePoint startPoint)
+        NativeMethods.NativePoint startPoint,
+        bool enterPickerWhenReleasedWithoutSelection = false)
     {
         var captureButton = GetCapturePointerButton(virtualKey);
         if (!captureButton.HasValue || !OpensCaptureSelection(action))
@@ -819,7 +822,8 @@ public sealed class GlobalHotKeyManager : IDisposable
 
         var continuation = new CapturePointerContinuation(
             captureButton.Value,
-            new System.Drawing.Point(startPoint.X, startPoint.Y));
+            new System.Drawing.Point(startPoint.X, startPoint.Y),
+            enterPickerWhenReleasedWithoutSelection);
         _capturePointerContinuations[virtualKey] = continuation;
         return continuation;
     }
