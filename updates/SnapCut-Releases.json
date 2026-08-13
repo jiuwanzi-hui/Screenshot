@@ -1,5 +1,20 @@
 [
   {
+    "tag_name": "v2.9.2",
+    "name": "SnapCut 2.9.2",
+    "body": "- 新增序号标注工具，点击截图可依次添加 1、2、3 等编号。\n- 删除中间序号后自动补齐编号，并支持拖动位置和缩放大小。\n- 序号颜色跟随当前标注颜色，多位数字会自动适配字号。\n- 设置页可控制序号工具是否显示；升级后默认显示，用户取消后会长期保留选择。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.9.2",
+    "published_at": "2026-08-13T17:30:00+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.2/SnapCut-Update.json" },
+      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.2/Screenshot-Update.json" },
+      { "name": "SnapCut-Setup-2.9.2-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.2/SnapCut-Setup-2.9.2-win-x64.exe" },
+      { "name": "SnapCut-Portable-2.9.2-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.2/SnapCut-Portable-2.9.2-win-x64.zip" }
+    ]
+  },
+  {
     "tag_name": "v2.9.1",
     "name": "SnapCut 2.9.1",
     "body": "- 修复仅使用鼠标左键长按触发截图时的交互：按住拖动可直接框选，不拖动松开后恢复取色与窗口吸附。\n- 框选、移动及调整截图区域时动态显示实际像素分辨率。\n- 将“文字识别并复制”拆分为独立工具栏按钮，可在设置中单独显示或隐藏，并保留旧用户配置。\n- 更新检测会并发检查 Gitee 与 GitHub 并选择最高版本，避免较快返回的旧版清单遮蔽另一源的新版本；下载仍支持双源自动回退。",

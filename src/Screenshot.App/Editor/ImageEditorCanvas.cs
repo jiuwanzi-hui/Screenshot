@@ -4,6 +4,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
+using System.Globalization;
 using Screenshot.App.Capture;
 using Screenshot.App.Core;
 using WpfBrushes = System.Windows.Media.Brushes;
@@ -493,6 +494,18 @@ public sealed class ImageEditorCanvas : Canvas
             return;
         }
 
+        if (_selectedTool == EditorTool.Number)
+        {
+            _document.Add(new NumberAnnotation(
+                point,
+                Math.Max(24, _strokeWidth * 9),
+                _selectedColor));
+            RebuildCanvas();
+            RaiseHistoryChanged();
+            e.Handled = true;
+            return;
+        }
+
         if (_selectedTool == EditorTool.Text)
         {
             StartTextInput(point);
@@ -691,6 +704,15 @@ public sealed class ImageEditorCanvas : Canvas
                         512),
                 }
                 : emoji with { Position = emoji.Position + delta },
+            NumberAnnotation number => _activeAnnotationHandle == 8
+                ? number with
+                {
+                    Size = Math.Clamp(
+                        number.Size + ((delta.X + delta.Y) * 0.5),
+                        12,
+                        512),
+                }
+                : number with { Position = number.Position + delta },
             _ => original,
         };
 
@@ -765,7 +787,8 @@ public sealed class ImageEditorCanvas : Canvas
                 EllipseAnnotation or
                 ArrowAnnotation or
                 TextAnnotation or
-                EmojiAnnotation))
+                EmojiAnnotation or
+                NumberAnnotation))
             {
                 continue;
             }
@@ -802,6 +825,9 @@ public sealed class ImageEditorCanvas : Canvas
                 3).Contains(point),
             EmojiAnnotation emoji => Inflate(
                 GetAnnotationBounds(emoji),
+                3).Contains(point),
+            NumberAnnotation number => Inflate(
+                GetAnnotationBounds(number),
                 3).Contains(point),
             _ => false,
         };
@@ -859,7 +885,7 @@ public sealed class ImageEditorCanvas : Canvas
         {
             if ((handlePoints[index] - point).Length <= 7)
             {
-                return annotation is TextAnnotation or EmojiAnnotation
+                return annotation is TextAnnotation or EmojiAnnotation or NumberAnnotation
                     ? 8
                     : index;
             }
@@ -921,7 +947,7 @@ public sealed class ImageEditorCanvas : Canvas
                 3 or 7 => WpfCursors.SizeWE,
                 _ => WpfCursors.SizeAll,
             },
-            TextAnnotation or EmojiAnnotation => WpfCursors.SizeNWSE,
+            TextAnnotation or EmojiAnnotation or NumberAnnotation => WpfCursors.SizeNWSE,
             ArrowAnnotation => WpfCursors.Cross,
             _ => WpfCursors.SizeAll,
         };
@@ -948,6 +974,12 @@ public sealed class ImageEditorCanvas : Canvas
                 new WpfPoint(
                     emoji.Position.X + (emoji.FontSize / 2),
                     emoji.Position.Y + (emoji.FontSize / 2)),
+            ],
+            NumberAnnotation number =>
+            [
+                new WpfPoint(
+                    number.Position.X + number.Size,
+                    number.Position.Y + number.Size),
             ],
             _ => [],
         };
@@ -1391,6 +1423,11 @@ public sealed class ImageEditorCanvas : Canvas
                 emoji.Position.Y - (emoji.FontSize / 2),
                 emoji.FontSize,
                 emoji.FontSize),
+            NumberAnnotation number => new Rect(
+                number.Position.X,
+                number.Position.Y,
+                number.Size,
+                number.Size),
             TranslationOverlayAnnotation translation => translation.Regions
                 .Select(region => region.Bounds)
                 .Aggregate(Rect.Empty, Rect.Union),
@@ -1469,6 +1506,10 @@ public sealed class ImageEditorCanvas : Canvas
             {
                 Position = emoji.Position + offset,
             },
+            NumberAnnotation number => number with
+            {
+                Position = number.Position + offset,
+            },
             TranslationOverlayAnnotation translation => translation with
             {
                 Regions = translation.Regions.Select(region => region with
@@ -1517,6 +1558,9 @@ public sealed class ImageEditorCanvas : Canvas
                 break;
             case EmojiAnnotation emoji:
                 AddEmojiVisual(emoji);
+                break;
+            case NumberAnnotation number:
+                AddNumberVisual(number, GetNumberLabel(annotation));
                 break;
             case TranslationOverlayAnnotation translation:
                 AddTranslationOverlayVisual(translation);
@@ -1689,6 +1733,57 @@ public sealed class ImageEditorCanvas : Canvas
         SetLeft(image, annotation.Position.X - (annotation.FontSize / 2));
         SetTop(image, annotation.Position.Y - (annotation.FontSize / 2));
         Children.Add(image);
+    }
+
+    private void AddNumberVisual(NumberAnnotation annotation, string label)
+    {
+        var digitCount = Math.Max(1, label.Length);
+        var labelFontSize = Math.Clamp(
+            annotation.Size * (digitCount >= 4 ? 0.28 : digitCount >= 3 ? 0.36 : 0.48),
+            8,
+            annotation.Size * 0.48);
+        var border = new Border
+        {
+            Width = annotation.Size,
+            Height = annotation.Size,
+            CornerRadius = new CornerRadius(annotation.Size / 2),
+            Background = new SolidColorBrush(annotation.Color),
+            BorderBrush = WpfBrushes.White,
+            BorderThickness = new Thickness(Math.Max(1, annotation.Size * 0.06)),
+            IsHitTestVisible = false,
+            Child = new TextBlock
+            {
+                Text = label,
+                Foreground = WpfBrushes.White,
+                FontSize = labelFontSize,
+                FontWeight = FontWeights.Bold,
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+                VerticalAlignment = System.Windows.VerticalAlignment.Center,
+                TextAlignment = TextAlignment.Center,
+            },
+        };
+        SetLeft(border, annotation.Position.X);
+        SetTop(border, annotation.Position.Y);
+        Children.Add(border);
+    }
+
+    private string GetNumberLabel(EditorAnnotation annotation)
+    {
+        var number = 0;
+        foreach (var item in _document.Annotations)
+        {
+            if (item is NumberAnnotation)
+            {
+                number++;
+            }
+
+            if (ReferenceEquals(item, annotation))
+            {
+                break;
+            }
+        }
+
+        return Math.Max(1, number).ToString(CultureInfo.InvariantCulture);
     }
 
     private void AddTranslationOverlayVisual(

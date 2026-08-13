@@ -2621,6 +2621,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         SetVisibility(InlineShapeToolButton, CaptureToolbarFeature.Shape);
         SetVisibility(InlineArrowToolButton, CaptureToolbarFeature.Arrow);
         SetVisibility(InlineEmojiToolButton, CaptureToolbarFeature.Emoji);
+        SetVisibility(InlineNumberToolButton, CaptureToolbarFeature.Number);
         SetVisibility(InlineBrushToolButton, CaptureToolbarFeature.Brush);
         SetVisibility(InlineTextToolButton, CaptureToolbarFeature.Text);
         SetVisibility(InlineMosaicToolButton, CaptureToolbarFeature.Mosaic);
@@ -2643,6 +2644,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             (InlineShapeToolButton, EditorTool.Rectangle),
             (InlineArrowToolButton, EditorTool.Arrow),
             (InlineEmojiToolButton, EditorTool.Emoji),
+            (InlineNumberToolButton, EditorTool.Number),
             (InlineBrushToolButton, EditorTool.Brush),
             (InlineTextToolButton, EditorTool.Text),
             (InlineMosaicToolButton, EditorTool.Mosaic),
@@ -2683,6 +2685,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             InlineShapeToolButton,
             InlineArrowToolButton,
             InlineEmojiToolButton,
+            InlineNumberToolButton,
             InlineBrushToolButton,
             InlineTextToolButton,
             InlineMosaicToolButton,

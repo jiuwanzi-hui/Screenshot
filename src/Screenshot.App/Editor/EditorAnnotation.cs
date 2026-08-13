@@ -40,6 +40,11 @@ public sealed record EmojiAnnotation(
     string Sticker,
     double FontSize) : EditorAnnotation;
 
+public sealed record NumberAnnotation(
+    WpfPoint Position,
+    double Size,
+    WpfColor Color) : EditorAnnotation;
+
 public sealed record TranslatedTextAnnotationRegion(
     WpfRect Bounds,
     string Text,

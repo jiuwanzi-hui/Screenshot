@@ -857,6 +857,24 @@
                                      ToolTip="表情">
                             <editor:EmojiStickerImage Width="21" Height="21" Sticker="😊" />
                         </RadioButton>
+                        <RadioButton x:Name="InlineNumberToolButton"
+                                     GroupName="InlineEditorTool"
+                                     Checked="OnInlineEditorToolSelected"
+                                     Style="{StaticResource InlineToolButton}"
+                                     Tag="Number"
+                                     ToolTip="序号标注">
+                            <Border Width="18"
+                                    Height="18"
+                                    Background="{DynamicResource EditorToolbarIconBrush}"
+                                    CornerRadius="9">
+                                <TextBlock HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           Foreground="{DynamicResource AppPanelBackgroundBrush}"
+                                           FontSize="11"
+                                           FontWeight="Bold"
+                                           Text="1" />
+                            </Border>
+                        </RadioButton>
                         <RadioButton x:Name="InlineBrushToolButton"
                                      GroupName="InlineEditorTool"
                                      Checked="OnInlineEditorToolSelected"

@@ -50,6 +50,7 @@ public enum CaptureToolbarFeature
     Shape,
     Arrow,
     Emoji,
+    Number,
     Brush,
     Text,
     Mosaic,
@@ -112,7 +113,7 @@ public enum OfflineTranslationEngine
 
 public sealed record AppSettings
 {
-    public int SettingsVersion { get; init; } = 6;
+    public int SettingsVersion { get; init; } = 7;
 
     public string SaveDirectory { get; init; } = GetDefaultSaveDirectory();
 
@@ -278,10 +279,15 @@ public sealed record AppSettings
             visibleCaptureToolbarFeatures.Add(
                 CaptureToolbarFeature.CopyRecognizedText);
         }
+        if (SettingsVersion < 7 &&
+            !visibleCaptureToolbarFeatures.Contains(CaptureToolbarFeature.Number))
+        {
+            visibleCaptureToolbarFeatures.Add(CaptureToolbarFeature.Number);
+        }
 
         return this with
         {
-            SettingsVersion = Math.Max(SettingsVersion, 6),
+            SettingsVersion = Math.Max(SettingsVersion, 7),
             Theme = NormalizeTheme(Theme),
             CloseBehavior = Enum.IsDefined(CloseBehavior)
                 ? CloseBehavior

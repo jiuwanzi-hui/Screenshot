@@ -370,6 +370,29 @@
                                 <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="表情" />
                             </Grid>
                         </RadioButton>
+                        <RadioButton Tag="Number"
+                                     Checked="OnToolSelected"
+                                     ToolTip="序号标注"
+                                     Style="{StaticResource GlassTool}">
+                            <Grid VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="17"
+                                        Height="17"
+                                        Background="{DynamicResource ImageEditorToolbarIconBrush}"
+                                        CornerRadius="9">
+                                    <TextBlock HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource ImageEditorToolbarBackgroundBrush}"
+                                               FontSize="10"
+                                               FontWeight="Bold"
+                                               Text="1" />
+                                </Border>
+                                <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="序号" />
+                            </Grid>
+                        </RadioButton>
                         <Separator Width="1"
                                    Height="24"
                                    Margin="5,0,12,0"
