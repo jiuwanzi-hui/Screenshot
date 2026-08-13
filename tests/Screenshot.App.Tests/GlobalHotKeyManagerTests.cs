@@ -453,6 +453,7 @@ public sealed class GlobalHotKeyManagerTests
             Assert.Equal(
                 new System.Drawing.Point(137, 241),
                 continuation.StartScreenPoint);
+            Assert.True(continuation.EnterPickerWhenReleasedWithoutSelection);
         });
     }
 

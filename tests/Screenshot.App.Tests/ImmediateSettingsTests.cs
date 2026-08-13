@@ -344,6 +344,9 @@ public sealed class ImmediateSettingsTests : IDisposable
         Assert.False(Assert.Single(
             viewModel.CaptureToolbarFeatureItems,
             item => item.Feature == CaptureToolbarFeature.Save).IsVisible);
+        Assert.False(Assert.Single(
+            viewModel.CaptureToolbarFeatureItems,
+            item => item.Feature == CaptureToolbarFeature.CopyRecognizedText).IsVisible);
 
         foreach (var item in viewModel.CaptureToolbarFeatureItems)
         {

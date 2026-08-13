@@ -109,6 +109,10 @@ public sealed class ApplicationUpdateService : IDisposable
         "https://gitee.com/wwangyunhui/screenshot/raw/main/updates/SnapCut-Releases.json");
 
     private const long MaximumPackageSize = 500L * 1024 * 1024;
+    private static readonly TimeSpan UpdateSourceCheckTimeout =
+        TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan MirrorAssetProbeTimeout =
+        TimeSpan.FromSeconds(8);
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
     private readonly IReadOnlyList<UpdateSource> _sources;
@@ -175,31 +179,70 @@ public sealed class ApplicationUpdateService : IDisposable
         Version currentVersion,
         CancellationToken cancellationToken = default)
     {
-        var pending = _sources
-            .Select(source => CheckSourceSafelyAsync(
+        var results = await Task.WhenAll(_sources.Select(source =>
+            CheckSourceWithTimeoutAsync(
                 source,
                 currentVersion,
-                cancellationToken))
-            .ToList();
-        var failures = new List<string>();
-        while (pending.Count > 0)
+                cancellationToken)));
+        var availableUpdate = results
+            .Where(result => result.IsSuccess && result.AvailableUpdate is not null)
+            .Select(result => result.AvailableUpdate!)
+            .OrderByDescending(update => ComparableVersion(update.Version))
+            .FirstOrDefault();
+        if (availableUpdate is not null)
         {
-            var completed = await Task.WhenAny(pending);
-            pending.Remove(completed);
-            var result = await completed;
-            if (result.IsSuccess)
+            if (_probeMirrorAssets)
             {
-                return result;
+                availableUpdate = await SelectAvailableMirrorAsync(
+                    availableUpdate,
+                    cancellationToken);
             }
 
-            failures.Add(result.Message);
+            return new ApplicationUpdateCheckResult(
+                true,
+                availableUpdate,
+                $"发现新版本 {NormalizeVersion(availableUpdate.Version)}（{GetMirrorName(availableUpdate.PreferredMirror)}）。");
+        }
+
+        var successful = results.FirstOrDefault(result => result.IsSuccess);
+        if (successful is not null)
+        {
+            return successful;
         }
 
         return new ApplicationUpdateCheckResult(
             false,
             null,
             "Gitee 和 GitHub 更新源均不可用：" +
-            string.Join("；", failures.Distinct(StringComparer.Ordinal)));
+            string.Join(
+                "；",
+                results
+                    .Select(result => result.Message)
+                    .Distinct(StringComparer.Ordinal)));
+    }
+
+    private async Task<ApplicationUpdateCheckResult> CheckSourceWithTimeoutAsync(
+        UpdateSource source,
+        Version currentVersion,
+        CancellationToken cancellationToken)
+    {
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+        timeoutSource.CancelAfter(UpdateSourceCheckTimeout);
+        try
+        {
+            return await CheckSourceSafelyAsync(
+                source,
+                currentVersion,
+                timeoutSource.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new ApplicationUpdateCheckResult(
+                false,
+                null,
+                $"{GetMirrorName(source.Mirror)}：检测超时");
+        }
     }
 
     public async Task<string> DownloadAsync(
@@ -905,10 +948,6 @@ public sealed class ApplicationUpdateService : IDisposable
         }
 
         var update = ValidateManifest(manifest, source.Mirror);
-        if (_probeMirrorAssets)
-        {
-            update = await SelectAvailableMirrorAsync(update, cancellationToken);
-        }
         if (ComparableVersion(update.Version).CompareTo(ComparableVersion(currentVersion)) <= 0)
         {
             return new ApplicationUpdateCheckResult(
@@ -930,10 +969,22 @@ public sealed class ApplicationUpdateService : IDisposable
         // A manifest can exist on Gitee before its large binary attachments finish
         // processing. Probe both package URLs so the first successful source is
         // also the source used by the update button.
-        var giteeAvailable = await IsAssetAvailableAsync(update.Installer.GiteeDownloadUri, cancellationToken) &&
-                             await IsAssetAvailableAsync(update.Portable.GiteeDownloadUri, cancellationToken);
-        var githubAvailable = await IsAssetAvailableAsync(update.Installer.GitHubDownloadUri, cancellationToken) &&
-                              await IsAssetAvailableAsync(update.Portable.GitHubDownloadUri, cancellationToken);
+        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+        timeoutSource.CancelAfter(MirrorAssetProbeTimeout);
+        var giteeTask = AreMirrorAssetsAvailableAsync(
+            update.Installer.GiteeDownloadUri,
+            update.Portable.GiteeDownloadUri,
+            timeoutSource.Token,
+            cancellationToken);
+        var githubTask = AreMirrorAssetsAvailableAsync(
+            update.Installer.GitHubDownloadUri,
+            update.Portable.GitHubDownloadUri,
+            timeoutSource.Token,
+            cancellationToken);
+        await Task.WhenAll(giteeTask, githubTask);
+        var giteeAvailable = await giteeTask;
+        var githubAvailable = await githubTask;
 
         var mirror = giteeAvailable
             ? ApplicationUpdateMirror.Gitee
@@ -946,6 +997,26 @@ public sealed class ApplicationUpdateService : IDisposable
             Installer = update.Installer with { PreferredMirror = mirror },
             Portable = update.Portable with { PreferredMirror = mirror },
         };
+    }
+
+    private async Task<bool> AreMirrorAssetsAvailableAsync(
+        Uri installerUri,
+        Uri portableUri,
+        CancellationToken probeCancellationToken,
+        CancellationToken callerCancellationToken)
+    {
+        try
+        {
+            var results = await Task.WhenAll(
+                IsAssetAvailableAsync(installerUri, probeCancellationToken),
+                IsAssetAvailableAsync(portableUri, probeCancellationToken));
+            return results.All(available => available);
+        }
+        catch (OperationCanceledException) when (
+            !callerCancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
     }
 
     private async Task<bool> IsAssetAvailableAsync(Uri uri, CancellationToken cancellationToken)

@@ -28,6 +28,5 @@ tmp_test_out/
 # Generated diagnostics and publish intermediates
 artifacts/
 
-# Keep only final installer executables in the distribution directory
+# Release binaries are uploaded to GitHub/Gitee Releases, not Git history.
 installer/dist/*
-!installer/dist/*.exe

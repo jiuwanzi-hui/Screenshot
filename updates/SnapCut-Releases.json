@@ -1,5 +1,20 @@
 [
   {
+    "tag_name": "v2.9.1",
+    "name": "SnapCut 2.9.1",
+    "body": "- 修复仅使用鼠标左键长按触发截图时的交互：按住拖动可直接框选，不拖动松开后恢复取色与窗口吸附。\n- 框选、移动及调整截图区域时动态显示实际像素分辨率。\n- 将“文字识别并复制”拆分为独立工具栏按钮，可在设置中单独显示或隐藏，并保留旧用户配置。\n- 更新检测会并发检查 Gitee 与 GitHub 并选择最高版本，避免较快返回的旧版清单遮蔽另一源的新版本；下载仍支持双源自动回退。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v2.9.1",
+    "published_at": "2026-08-13T13:00:17+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.1/SnapCut-Update.json" },
+      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.1/Screenshot-Update.json" },
+      { "name": "SnapCut-Setup-2.9.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.1/SnapCut-Setup-2.9.1-win-x64.exe" },
+      { "name": "SnapCut-Portable-2.9.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.1/SnapCut-Portable-2.9.1-win-x64.zip" }
+    ]
+  },
+  {
     "tag_name": "v2.9.0",
     "name": "SnapCut 2.9.0",
     "body": "- 新增框选区域后双击直接完成截图，并完善截图前取色放大镜、中文输入法状态下按 C 复制、醒目复制提示与自动退出。\n- 截图前取色恢复窗口吸附；编辑颜色面板支持主题适配、点击外部关闭、完整色盘与透明度调节，并长期保留常用颜色和上次选色。\n- 打赏支持页新增作者头像、联系方式与 B 站主页入口，采用轻量多色边框和克制的悬停反馈。\n- 删除高开销粒子与持续动画，优化设置窗口静态工作集；设置窗口和托盘静止时 CPU 保持为 0。\n- 设置页可配置截图工具栏功能显示，隐藏不常用工具的同时始终保留取消与完成操作。",

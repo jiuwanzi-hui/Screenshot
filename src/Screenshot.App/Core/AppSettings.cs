@@ -57,6 +57,7 @@ public enum CaptureToolbarFeature
     Save,
     ScrollCapture,
     TextRecognition,
+    CopyRecognizedText,
     Translation,
     PinImage,
     UndoRedo,
@@ -111,7 +112,7 @@ public enum OfflineTranslationEngine
 
 public sealed record AppSettings
 {
-    public int SettingsVersion { get; init; } = 5;
+    public int SettingsVersion { get; init; } = 6;
 
     public string SaveDirectory { get; init; } = GetDefaultSaveDirectory();
 
@@ -262,9 +263,25 @@ public sealed record AppSettings
         // only as a migration hint for which provider should be tried first.
         var translationProviderPriority = ResolveTranslationProviderPriority();
 
+        var visibleCaptureToolbarFeatures =
+            (VisibleCaptureToolbarFeatures ??
+                defaults.VisibleCaptureToolbarFeatures)
+            .Where(Enum.IsDefined)
+            .Distinct()
+            .ToList();
+        if (SettingsVersion < 6 &&
+            visibleCaptureToolbarFeatures.Contains(
+                CaptureToolbarFeature.TextRecognition) &&
+            !visibleCaptureToolbarFeatures.Contains(
+                CaptureToolbarFeature.CopyRecognizedText))
+        {
+            visibleCaptureToolbarFeatures.Add(
+                CaptureToolbarFeature.CopyRecognizedText);
+        }
+
         return this with
         {
-            SettingsVersion = Math.Max(SettingsVersion, 5),
+            SettingsVersion = Math.Max(SettingsVersion, 6),
             Theme = NormalizeTheme(Theme),
             CloseBehavior = Enum.IsDefined(CloseBehavior)
                 ? CloseBehavior
@@ -279,11 +296,7 @@ public sealed record AppSettings
                 ? ArrowStyle
                 : defaults.ArrowStyle,
             VisibleCaptureToolbarFeatures =
-                (VisibleCaptureToolbarFeatures ??
-                    defaults.VisibleCaptureToolbarFeatures)
-                .Where(Enum.IsDefined)
-                .Distinct()
-                .ToArray(),
+                visibleCaptureToolbarFeatures.ToArray(),
             VideoRecordingCodec = Enum.IsDefined(VideoRecordingCodec)
                 ? VideoRecordingCodec
                 : defaults.VideoRecordingCodec,
