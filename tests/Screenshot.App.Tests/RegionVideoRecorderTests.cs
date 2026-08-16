@@ -7,6 +7,22 @@ namespace Screenshot.App.Tests;
 
 public sealed class RegionVideoRecorderTests
 {
+    [Fact]
+    public void AutomaticRecordingControlsStayCenteredWhenWidthChanges()
+    {
+        var region = new ScreenRegion(100, 100, 800, 600);
+        var workArea = new System.Drawing.Rectangle(0, 0, 1920, 1080);
+
+        var expanded = VideoRecordingControlWindow
+            .CalculateAutomaticControlBounds(region, workArea, 668, 54);
+        var compact = VideoRecordingControlWindow
+            .CalculateAutomaticControlBounds(region, workArea, 216, 54);
+
+        Assert.Equal(100 + ((800 - 668) / 2), expanded.X);
+        Assert.Equal(100 + ((800 - 216) / 2), compact.X);
+        Assert.Equal(region.Y + region.Height + 10, compact.Y);
+    }
+
     [Theory]
     [InlineData(false, false, false, false, false)]
     [InlineData(true, false, true, true, false)]

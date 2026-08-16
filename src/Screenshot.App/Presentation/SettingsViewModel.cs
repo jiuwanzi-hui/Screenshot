@@ -137,6 +137,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private bool _recordMicrophone;
     private VideoRecordingCodec _videoRecordingCodec;
     private int _videoRecordingFrameRate;
+    private VideoRecordingOutputFormat _recordingOutputFormat;
+    private double _captureToolbarPositionXRatio;
+    private double _captureToolbarPositionYRatio;
     private bool _showKeyboardInputInRecording;
     private bool _showMouseInputInRecording;
     private bool _showTaskbarIcon;
@@ -180,6 +183,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _recordMicrophone = settings.RecordMicrophone;
         _videoRecordingCodec = settings.VideoRecordingCodec;
         _videoRecordingFrameRate = settings.VideoRecordingFrameRate;
+        _recordingOutputFormat = settings.RecordingOutputFormat;
+        _captureToolbarPositionXRatio = settings.CaptureToolbarPositionXRatio;
+        _captureToolbarPositionYRatio = settings.CaptureToolbarPositionYRatio;
         _showKeyboardInputInRecording = settings.ShowKeyboardInputInRecording;
         _showMouseInputInRecording = settings.ShowMouseInputInRecording;
         _showTaskbarIcon = settings.ShowTaskbarIcon;
@@ -330,6 +336,24 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         get => _videoRecordingFrameRate;
         set => SetProperty(ref _videoRecordingFrameRate, value);
+    }
+
+    public VideoRecordingOutputFormat RecordingOutputFormat
+    {
+        get => _recordingOutputFormat;
+        set => SetProperty(ref _recordingOutputFormat, value);
+    }
+
+    public double CaptureToolbarPositionXRatio
+    {
+        get => _captureToolbarPositionXRatio;
+        set => SetProperty(ref _captureToolbarPositionXRatio, value);
+    }
+
+    public double CaptureToolbarPositionYRatio
+    {
+        get => _captureToolbarPositionYRatio;
+        set => SetProperty(ref _captureToolbarPositionYRatio, value);
     }
 
     public bool ShowKeyboardInputInRecording
@@ -540,6 +564,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             RecordMicrophone = RecordMicrophone,
             VideoRecordingCodec = VideoRecordingCodec,
             VideoRecordingFrameRate = VideoRecordingFrameRate,
+            RecordingOutputFormat = RecordingOutputFormat,
+            CaptureToolbarPositionXRatio = CaptureToolbarPositionXRatio,
+            CaptureToolbarPositionYRatio = CaptureToolbarPositionYRatio,
             ShowKeyboardInputInRecording = ShowKeyboardInputInRecording,
             ShowMouseInputInRecording = ShowMouseInputInRecording,
             ShowTaskbarIcon = ShowTaskbarIcon,
@@ -592,6 +619,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         RecordMicrophone = settings.RecordMicrophone;
         VideoRecordingCodec = settings.VideoRecordingCodec;
         VideoRecordingFrameRate = settings.VideoRecordingFrameRate;
+        RecordingOutputFormat = settings.RecordingOutputFormat;
+        CaptureToolbarPositionXRatio = settings.CaptureToolbarPositionXRatio;
+        CaptureToolbarPositionYRatio = settings.CaptureToolbarPositionYRatio;
         ShowKeyboardInputInRecording = settings.ShowKeyboardInputInRecording;
         ShowMouseInputInRecording = settings.ShowMouseInputInRecording;
         ShowTaskbarIcon = settings.ShowTaskbarIcon;
@@ -655,6 +685,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             [CaptureToolbarFeature.TextRecognition] = "文字识别",
             [CaptureToolbarFeature.CopyRecognizedText] = "文字识别并复制",
             [CaptureToolbarFeature.Translation] = "翻译",
+            [CaptureToolbarFeature.PrivacyRedaction] = "一键隐私打码",
             [CaptureToolbarFeature.PinImage] = "钉图",
             [CaptureToolbarFeature.UndoRedo] = "撤销 / 重做",
         };

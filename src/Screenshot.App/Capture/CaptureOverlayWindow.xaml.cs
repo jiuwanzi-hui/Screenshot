@@ -105,6 +105,12 @@ public sealed class CaptureOverlayOptions
 
     public Action<int[]>? CustomColorPaletteChanged { get; init; }
 
+    public double ToolbarPositionXRatio { get; init; } = -1;
+
+    public double ToolbarPositionYRatio { get; init; } = -1;
+
+    public Action<double, double>? ToolbarPositionChanged { get; init; }
+
     public CaptureToolbarFeature[] VisibleToolbarFeatures { get; init; } =
         Enum.GetValues<CaptureToolbarFeature>();
 }
@@ -180,6 +186,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private bool _hasVisibleInlineEditorTools;
     private bool _isDisposed;
     private bool _isUpdatingInlineColorPanel;
+    private bool _hasCustomToolbarPosition;
+    private double _toolbarPositionXRatio = -1;
+    private double _toolbarPositionYRatio = -1;
     private WpfColor _inlineColorPanelPreviewColor = WpfColor.FromRgb(0, 127, 115);
     private WpfColor? _inlineCustomColor;
     private int[] _inlineCustomColorPalette = [];
@@ -201,6 +210,15 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             ? new TaskCompletionSource<ScrollCaptureSelection?>(
                 TaskCreationOptions.RunContinuationsAsynchronously)
             : null;
+        _hasCustomToolbarPosition =
+            options is not null &&
+            options.ToolbarPositionXRatio is >= 0 and <= 1 &&
+            options.ToolbarPositionYRatio is >= 0 and <= 1;
+        if (_hasCustomToolbarPosition)
+        {
+            _toolbarPositionXRatio = options!.ToolbarPositionXRatio;
+            _toolbarPositionYRatio = options.ToolbarPositionYRatio;
+        }
         InitializeComponent();
         ApplyThemedContextMenu(InlineShapeToolButton.ContextMenu);
         ApplyThemedContextMenu(InlineArrowToolButton.ContextMenu);
@@ -474,6 +492,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         object sender,
         MouseButtonEventArgs e)
     {
+        if (InlineCustomColorPanel.Visibility == Visibility.Visible &&
+            InlineSharedColorPicker.TryHandlePaletteRightClick(e.OriginalSource))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (TryGetInlineCustomPaletteSlotIndex(e.OriginalSource, out var slotIndex))
         {
             SaveInlineColorToPaletteSlot(slotIndex);
@@ -1964,6 +1989,101 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         await TranslateInlineTextAsync();
     }
 
+    private async void OnPrivacyRedactionClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_options?.RecognizeTextAsync is null ||
+            _isOcrInitializing ||
+            _isActionInProgress ||
+            !HasValidSelection())
+        {
+            return;
+        }
+
+        _isOcrInitializing = true;
+        CaptureToolbar.IsEnabled = false;
+        ShowSelectionMessage("正在检测敏感信息...");
+        try
+        {
+            await EnterInlineEditorForCompletedSelectionAsync();
+            if (!InlineEditorCanvas.HasImage || _isCompleted)
+            {
+                return;
+            }
+
+            var recognition = _inlineOcrResult;
+            if (recognition is not { IsSuccess: true })
+            {
+                using var image = _inlineEditorImage?.Clone() ??
+                    await CaptureCurrentSelectionAsync(restoreOverlay: true);
+                recognition = await _options.RecognizeTextAsync(image);
+                _inlineOcrResult = recognition;
+            }
+
+            if (!recognition.IsSuccess)
+            {
+                await ShowSelectionMessageForAsync(
+                    recognition.ErrorMessage ?? "敏感信息识别失败",
+                    1600);
+                return;
+            }
+
+            var candidates = PrivacyDetectionService.Detect(recognition);
+            if (candidates.Count == 0)
+            {
+                await ShowSelectionMessageForAsync(
+                    "未检测到手机号、邮箱、身份证号、API Key 或 IP 地址",
+                    1700);
+                return;
+            }
+
+            SelectionMessageToast.Visibility = Visibility.Collapsed;
+            var confirmation = new PrivacyRedactionWindow(candidates)
+            {
+                Owner = this,
+                Topmost = true,
+            };
+            if (confirmation.ShowDialog() != true)
+            {
+                CaptureStatusText.Text = "已取消隐私打码。";
+                CaptureStatusText.Visibility = Visibility.Visible;
+                return;
+            }
+
+            var selected = confirmation.SelectedCandidates;
+            if (selected.Count == 0)
+            {
+                CaptureStatusText.Text = "未选择需要打码的项目。";
+                CaptureStatusText.Visibility = Visibility.Visible;
+                return;
+            }
+
+            InlineEditorCanvas.AddMosaicRegions(
+                selected.Select(candidate => candidate.Bounds));
+            CaptureStatusText.Text =
+                $"已添加 {selected.Count} 处隐私马赛克，可撤销或继续编辑。";
+            CaptureStatusText.Visibility = Visibility.Visible;
+        }
+        catch (OperationCanceledException) when (_isCompleted || _isDisposed)
+        {
+        }
+        catch
+        {
+            CaptureStatusText.Text = "隐私信息检测失败，请重试。";
+            CaptureStatusText.Visibility = Visibility.Visible;
+        }
+        finally
+        {
+            _isOcrInitializing = false;
+            if (!_isCompleted)
+            {
+                CaptureToolbar.IsEnabled = true;
+                InlineEditorCanvas.Focus();
+            }
+        }
+    }
+
     private async Task TranslateInlineTextAsync()
     {
         if (_options?.RecognizeTextAsync is null ||
@@ -2633,6 +2753,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             CopyRecognizedTextButton,
             CaptureToolbarFeature.CopyRecognizedText);
         SetVisibility(TranslateButton, CaptureToolbarFeature.Translation);
+        SetVisibility(
+            PrivacyRedactionButton,
+            CaptureToolbarFeature.PrivacyRedaction);
         SetVisibility(PinButton, CaptureToolbarFeature.PinImage);
         SetVisibility(InlineUndoButton, CaptureToolbarFeature.UndoRedo);
         SetVisibility(InlineRedoButton, CaptureToolbarFeature.UndoRedo);
@@ -2698,6 +2821,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             OcrButton,
             CopyRecognizedTextButton,
             TranslateButton,
+            PrivacyRedactionButton,
             PinButton,
         }.Any(IsVisible);
         var hasHistory = IsVisible(InlineUndoButton) || IsVisible(InlineRedoButton);
@@ -2933,38 +3057,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void ShowInlineCustomColorPanel()
     {
-        InlineRecentColorsPanel.Children.Clear();
-        for (var index = 0; index < 8; index++)
-        {
-            var hasColor = index < _inlineCustomColorPalette.Length;
-            var value = hasColor ? _inlineCustomColorPalette[index] : 0;
-            var color = hasColor
-                ? WpfColor.FromRgb((byte)(value >> 16), (byte)(value >> 8), (byte)value)
-                : WpfColor.FromArgb(0, 0, 0, 0);
-            var button = new System.Windows.Controls.Button
-            {
-                Tag = index,
-                Background = new WpfSolidColorBrush(color),
-                BorderBrush = hasColor
-                    ? new WpfSolidColorBrush(WpfColor.FromArgb(0x8A, 0xE1, 0xD8, 0xD0))
-                    : new WpfSolidColorBrush(WpfColor.FromArgb(0x80, 0xA9, 0xCE, 0xCA)),
-                Style = (Style)FindResource("InlineColorSwatch"),
-                ToolTip = hasColor ? "左键使用，右键覆盖" : "左键或右键保存当前颜色",
-            };
-            if (!hasColor)
-            {
-                button.Content = new TextBlock
-                {
-                    Text = "+",
-                    FontSize = 13,
-                    Foreground = WpfBrushes.White,
-                };
-            }
-            button.Click += OnInlineCustomPaletteColorClick;
-            InlineRecentColorsPanel.Children.Add(button);
-        }
-
-        SetInlineColorPanelValues(_inlineCustomColor ?? WpfColor.FromRgb(0, 127, 115));
+        InlineSharedColorPicker.SetState(
+            _inlineCustomColor ?? WpfColor.FromRgb(0, 127, 115),
+            _inlineCustomColorPalette);
         InlineCustomColorPanel.Visibility = Visibility.Visible;
         InlineCustomColorPanel.UpdateLayout();
         var toolbarX = Canvas.GetLeft(CaptureToolbar);
@@ -2983,6 +3078,19 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         Canvas.SetLeft(InlineCustomColorPanel, panelX);
         Canvas.SetTop(InlineCustomColorPanel, panelY);
     }
+
+    private void OnSharedColorCommitted(WpfColor color) =>
+        ApplyInlineCustomColor(color);
+
+    private void OnSharedPaletteChanged(int[] colors)
+    {
+        _inlineCustomColorPalette = NormalizeCustomColorPalette(colors);
+        _options?.CustomColorPaletteChanged?.Invoke(
+            _inlineCustomColorPalette.ToArray());
+    }
+
+    private void OnSharedColorPickerCloseRequested(object? sender, EventArgs e) =>
+        HideInlineCustomColorPanel();
 
     private void HideInlineCustomColorPanel()
     {
@@ -3439,9 +3547,17 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         SetControlPosition(RightResizeThumb, bounds.Right, bounds.Y + (bounds.Height / 2));
         SetControlPosition(BottomResizeThumb, bounds.X + (bounds.Width / 2), bounds.Bottom);
 
+        if (_hasCustomToolbarPosition)
+        {
+            SetCaptureToolbarPosition(
+                _toolbarPositionXRatio * GetToolbarMaximumX(),
+                _toolbarPositionYRatio * GetToolbarMaximumY());
+            return;
+        }
+
         var toolbarX = Math.Min(
             Math.Max(0, bounds.Right - CaptureToolbar.ActualWidth),
-            Math.Max(0, CaptureSurface.ActualWidth - CaptureToolbar.ActualWidth));
+            GetToolbarMaximumX());
         var toolbarY = bounds.Bottom + 10;
 
         if (toolbarY + CaptureToolbar.ActualHeight > CaptureSurface.ActualHeight)
@@ -3449,8 +3565,71 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             toolbarY = Math.Max(0, bounds.Y - CaptureToolbar.ActualHeight - 10);
         }
 
-        Canvas.SetLeft(CaptureToolbar, toolbarX);
-        Canvas.SetTop(CaptureToolbar, toolbarY);
+        SetCaptureToolbarPosition(toolbarX, toolbarY);
+    }
+
+    private void OnCaptureToolbarDragDelta(object sender, DragDeltaEventArgs e)
+    {
+        if (CaptureToolbar.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        HideInlineCustomColorPanel();
+        _hasCustomToolbarPosition = true;
+        var currentX = Canvas.GetLeft(CaptureToolbar);
+        var currentY = Canvas.GetTop(CaptureToolbar);
+        SetCaptureToolbarPosition(
+            (double.IsFinite(currentX) ? currentX : 0) + e.HorizontalChange,
+            (double.IsFinite(currentY) ? currentY : 0) + e.VerticalChange);
+    }
+
+    private void OnCaptureToolbarDragCompleted(
+        object sender,
+        DragCompletedEventArgs e)
+    {
+        if (!_hasCustomToolbarPosition)
+        {
+            return;
+        }
+
+        var maximumX = GetToolbarMaximumX();
+        var maximumY = GetToolbarMaximumY();
+        var xRatio = maximumX <= 0
+            ? 0
+            : Math.Clamp(Canvas.GetLeft(CaptureToolbar) / maximumX, 0, 1);
+        var yRatio = maximumY <= 0
+            ? 0
+            : Math.Clamp(Canvas.GetTop(CaptureToolbar) / maximumY, 0, 1);
+        _toolbarPositionXRatio = xRatio;
+        _toolbarPositionYRatio = yRatio;
+        _options?.ToolbarPositionChanged?.Invoke(xRatio, yRatio);
+    }
+
+    private void OnCaptureToolbarDragHandleDoubleClick(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        _hasCustomToolbarPosition = false;
+        _toolbarPositionXRatio = -1;
+        _toolbarPositionYRatio = -1;
+        _options?.ToolbarPositionChanged?.Invoke(-1, -1);
+        UpdateSelectionControlPositions(GetSelectionBounds());
+        e.Handled = true;
+    }
+
+    private double GetToolbarMaximumX() => Math.Max(
+        0,
+        CaptureSurface.ActualWidth - CaptureToolbar.ActualWidth);
+
+    private double GetToolbarMaximumY() => Math.Max(
+        0,
+        CaptureSurface.ActualHeight - CaptureToolbar.ActualHeight);
+
+    private void SetCaptureToolbarPosition(double x, double y)
+    {
+        Canvas.SetLeft(CaptureToolbar, Math.Clamp(x, 0, GetToolbarMaximumX()));
+        Canvas.SetTop(CaptureToolbar, Math.Clamp(y, 0, GetToolbarMaximumY()));
     }
 
     private void UpdateSelectionSizeBadge(Rect bounds)

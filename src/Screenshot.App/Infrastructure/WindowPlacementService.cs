@@ -17,6 +17,7 @@ internal static class WindowPlacementKeys
     public const string CaptureHistory = "captureHistory";
     public const string CapturePreview = "capturePreview";
     public const string FloatingCapture = "floatingCapture";
+    public const string VideoRecordingControls = "videoRecordingControls";
     public const string TextTranslation = "textTranslation";
 }
 
@@ -93,6 +94,24 @@ internal sealed class WindowPlacementStore
         lock (_sync)
         {
             _file.Windows[key] = placement;
+            return TryWriteFile();
+        }
+    }
+
+    public bool TryRemove(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return false;
+        }
+
+        lock (_sync)
+        {
+            if (!_file.Windows.Remove(key))
+            {
+                return true;
+            }
+
             return TryWriteFile();
         }
     }
@@ -208,7 +227,31 @@ public static class WindowPlacementService
         return Track(window, key, restoreSize: false);
     }
 
+    public static bool EnsureVisible(Window window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        return TryCapture(window, out var placement) &&
+               TryRestore(window, placement);
+    }
+
+    internal static bool TrackPosition(
+        Window window,
+        string key,
+        out Action resetTracking)
+    {
+        return Track(window, key, restoreSize: false, out resetTracking);
+    }
+
     private static bool Track(Window window, string key, bool restoreSize)
+    {
+        return Track(window, key, restoreSize, out _);
+    }
+
+    private static bool Track(
+        Window window,
+        string key,
+        bool restoreSize,
+        out Action resetTracking)
     {
         ArgumentNullException.ThrowIfNull(window);
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
@@ -221,11 +264,18 @@ public static class WindowPlacementService
 
         if (store is null)
         {
+            resetTracking = static () => { };
             return false;
         }
 
         var hasSavedPlacement = store.TryGet(key, out _);
-        new WindowPlacementRegistration(window, key, store, restoreSize).Attach();
+        var registration = new WindowPlacementRegistration(
+            window,
+            key,
+            store,
+            restoreSize);
+        registration.Attach();
+        resetTracking = registration.StopTrackingAndForget;
         return hasSavedPlacement;
     }
 
@@ -308,14 +358,14 @@ public static class WindowPlacementService
         var minimumHeight = Math.Min(120, workArea.Height);
         var width = Math.Clamp(placement.Width, minimumWidth, workArea.Width);
         var height = Math.Clamp(placement.Height, minimumHeight, workArea.Height);
-        var visibleWidth = Math.Min(96, width);
-        var visibleTitleHeight = Math.Min(40, height);
-        var minimumLeft = workArea.Left - width + visibleWidth;
-        var maximumLeft = workArea.Right - visibleWidth;
-        var minimumTop = workArea.Top;
-        var maximumTop = workArea.Bottom - visibleTitleHeight;
-        var left = Math.Clamp(placement.Left, minimumLeft, maximumLeft);
-        var top = Math.Clamp(placement.Top, minimumTop, maximumTop);
+        var left = Math.Clamp(
+            placement.Left,
+            workArea.Left,
+            Math.Max(workArea.Left, workArea.Right - width));
+        var top = Math.Clamp(
+            placement.Top,
+            workArea.Top,
+            Math.Max(workArea.Top, workArea.Bottom - height));
 
         return new WindowPlacementRecord(
             left,
@@ -470,10 +520,24 @@ public static class WindowPlacementService
             _window.SizeChanged += OnBoundsChanged;
             _window.StateChanged += OnStateChanged;
             _window.Closed += OnClosed;
+            if (new WindowInteropHelper(_window).Handle != IntPtr.Zero)
+            {
+                InitializeFromCurrentSource();
+            }
         }
 
         private void OnSourceInitialized(object? sender, EventArgs e)
         {
+            InitializeFromCurrentSource();
+        }
+
+        private void InitializeFromCurrentSource()
+        {
+            if (_sourceInitialized)
+            {
+                return;
+            }
+
             _sourceInitialized = true;
             if (!_store.TryGet(_key, out var placement))
             {
@@ -566,6 +630,17 @@ public static class WindowPlacementService
             _window.SizeChanged -= OnBoundsChanged;
             _window.StateChanged -= OnStateChanged;
             _window.Closed -= OnClosed;
+        }
+
+        public void StopTrackingAndForget()
+        {
+            if (_detached)
+            {
+                return;
+            }
+
+            Detach();
+            _ = _store.TryRemove(_key);
         }
     }
 

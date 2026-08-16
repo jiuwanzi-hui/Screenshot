@@ -9,7 +9,7 @@
     <AssemblyName>SnapCut</AssemblyName>
     <RootNamespace>Screenshot.App</RootNamespace>
     <ApplicationIcon>Assets\Screenshot.ico</ApplicationIcon>
-    <Version>2.9.2</Version>
+    <Version>3.0.0</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Authors>九万字 (jiuwanzi-hui)</Authors>
     <Copyright>Copyright © 2026 九万字 (jiuwanzi-hui). All rights reserved.</Copyright>
@@ -44,6 +44,7 @@
     <PackageReference Include="RapidOcrNet"
                       Version="3.0.0"
                       ExcludeAssets="build" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
     <PackageReference Include="ZXing.Net" Version="0.16.10" />
     <PackageReference Include="ScreenRecorderLib"
                       Version="6.6.0"

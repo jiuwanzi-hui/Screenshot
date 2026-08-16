@@ -49,10 +49,29 @@ public static class HighQualityOcrService
         {
             return OcrRecognitionResult.Failure("文字识别已取消。");
         }
-        catch (Exception)
+        catch (Exception firstException)
         {
-            return OcrRecognitionResult.Failure(
-                "高质量识别模型运行失败，请返回设置重新下载模型。");
+            ResetEngine();
+            try
+            {
+                EnsureEngine(modelManager);
+                return await Task.Run(
+                    () => RecognizeCore(capturedImage, cancellationToken),
+                    cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return OcrRecognitionResult.Failure("文字识别已取消。");
+            }
+            catch (Exception retryException)
+            {
+                ResetEngine();
+                WriteFailureDiagnostics(firstException, retryException);
+                return OcrRecognitionResult.Failure(
+                    $"高质量识别运行失败（{retryException.GetType().Name}），" +
+                    "已自动重试并记录到 ScreenshotData\\Diagnostics\\ocr.log。" +
+                    "可暂时切换 Windows OCR。");
+            }
         }
         finally
         {
@@ -104,9 +123,7 @@ public static class HighQualityOcrService
 
             try
             {
-                _engine?.Dispose();
-                _engine = null;
-                _loadedDirectory = null;
+                ResetEngine();
             }
             finally
             {
@@ -125,18 +142,70 @@ public static class HighQualityOcrService
             return;
         }
 
-        _engine?.Dispose();
+        ResetEngine();
         var engine = new RapidOcr();
-        var modelSet = RapidOcrModelSet.PPOCRv6Small with
+        try
         {
-            DetModelPath = manager.DetectionModelPath,
-            ClsModelPath = manager.ClassificationModelPath,
-            RecModelPath = manager.RecognitionModelPath,
-            KeysPath = manager.DictionaryPath,
-        };
-        engine.InitModels(modelSet, HeavyWorkloadBudget.CpuThreadCount);
+            var modelSet = RapidOcrModelSet.PPOCRv6Small with
+            {
+                DetModelPath = manager.DetectionModelPath,
+                ClsModelPath = manager.ClassificationModelPath,
+                RecModelPath = manager.RecognitionModelPath,
+                KeysPath = manager.DictionaryPath,
+            };
+            engine.InitModels(modelSet, HeavyWorkloadBudget.CpuThreadCount);
+        }
+        catch
+        {
+            engine.Dispose();
+            throw;
+        }
         _engine = engine;
         _loadedDirectory = manager.InstallationDirectory;
+    }
+
+    private static void ResetEngine()
+    {
+        try
+        {
+            _engine?.Dispose();
+        }
+        catch
+        {
+            // Never keep a failed native OCR engine cached.
+        }
+        finally
+        {
+            _engine = null;
+            _loadedDirectory = null;
+        }
+    }
+
+    private static void WriteFailureDiagnostics(
+        Exception firstException,
+        Exception retryException)
+    {
+        try
+        {
+            Directory.CreateDirectory(AppMetadata.DiagnosticsDirectoryPath);
+            var path = Path.Combine(
+                AppMetadata.DiagnosticsDirectoryPath,
+                "ocr.log");
+            if (File.Exists(path) && new FileInfo(path).Length > 512 * 1024)
+            {
+                File.Move(path, path + ".previous", overwrite: true);
+            }
+            File.AppendAllText(
+                path,
+                $"[{DateTimeOffset.Now:O}] PP-OCRv6 failed twice.{Environment.NewLine}" +
+                $"First attempt:{Environment.NewLine}{firstException}{Environment.NewLine}" +
+                $"Retry:{Environment.NewLine}{retryException}{Environment.NewLine}" +
+                new string('-', 72) + Environment.NewLine);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     private static OcrRecognitionResult RecognizeCore(

@@ -193,12 +193,20 @@ public partial class MainWindow : Window, IDisposable
             preferences.ShowKeyboardInput;
         _settingsViewModel.ShowMouseInputInRecording =
             preferences.ShowMouseInput;
+        _settingsViewModel.RecordingOutputFormat = preferences.OutputFormat;
         ApplySettingsImmediately();
     }
 
     internal void SaveArrowStyle(ArrowStyle arrowStyle)
     {
         _settingsViewModel.ArrowStyle = arrowStyle;
+        ApplySettingsImmediately();
+    }
+
+    internal void SaveCaptureToolbarPosition(double xRatio, double yRatio)
+    {
+        _settingsViewModel.CaptureToolbarPositionXRatio = xRatio;
+        _settingsViewModel.CaptureToolbarPositionYRatio = yRatio;
         ApplySettingsImmediately();
     }
 
@@ -245,6 +253,7 @@ public partial class MainWindow : Window, IDisposable
             WindowState = WindowState.Normal;
         }
 
+        _ = WindowPlacementService.EnsureVisible(this);
         Activate();
         ScheduleIdleMemoryTrim();
     }
@@ -291,8 +300,7 @@ public partial class MainWindow : Window, IDisposable
         Dispatcher.BeginInvoke(
             System.Windows.Threading.DispatcherPriority.Input,
             () => DownloadOfflineModelButton?.Focus());
-        Show();
-        Activate();
+        ShowFromTray();
     }
 
     private void OnSettingsWindowActivated(object? sender, EventArgs e)
@@ -1215,25 +1223,26 @@ public partial class MainWindow : Window, IDisposable
         }
 
         var status = _highQualityOcrModelManager.GetStatus();
-        if (status.IsInstalled)
-        {
-            RefreshHighQualityOcrModelStatus();
-            _settingsViewModel.SetStatus("PP-OCRv6 高质量识别模型已经安装。");
-            return;
-        }
+        var isRepair = status.IsInstalled;
 
         var availableSpace = status.AvailableSpace > 0
             ? FormatFileSize(status.AvailableSpace)
             : "无法读取";
+        var confirmationMessage = isRepair
+            ? "将校验 PP-OCRv6 的四个模型文件。只有发现文件损坏时才会重新下载。\n\n" +
+              $"完整模型大小：约 {FormatFileSize(status.InstalledSize)}\n" +
+              $"安装位置：\n{status.InstallationDirectory}\n\n" +
+              "是否开始校验并修复？"
+            : "将下载 PP-OCRv6 Small 多语言识别模型。\n\n" +
+              $"下载流量：{FormatFileSize(status.DownloadSize)}\n" +
+              $"安装占用：约 {FormatFileSize(status.InstalledSize)}\n" +
+              $"磁盘可用：{availableSpace}\n\n" +
+              $"安装位置：\n{status.InstallationDirectory}\n\n" +
+              "模型来自 PaddleOCR / RapidOCR（Apache-2.0），完全本机运行。是否继续？";
         var confirmation = System.Windows.MessageBox.Show(
             this,
-            "将下载 PP-OCRv6 Small 多语言识别模型。\n\n" +
-            $"下载流量：{FormatFileSize(status.DownloadSize)}\n" +
-            $"安装占用：约 {FormatFileSize(status.InstalledSize)}\n" +
-            $"磁盘可用：{availableSpace}\n\n" +
-            $"安装位置：\n{status.InstallationDirectory}\n\n" +
-            "模型来自 PaddleOCR / RapidOCR（Apache-2.0），完全本机运行。是否继续？",
-            "下载高质量识别模型",
+            confirmationMessage,
+            isRepair ? "校验高质量识别模型" : "下载高质量识别模型",
             MessageBoxButton.YesNo,
             MessageBoxImage.Information,
             MessageBoxResult.Yes);
@@ -1263,10 +1272,13 @@ public partial class MainWindow : Window, IDisposable
         {
             var result = await _highQualityOcrModelManager.InstallAsync(
                 progress,
-                _updateCancellationSource.Token);
+                _updateCancellationSource.Token,
+                verifyExistingFiles: isRepair);
             RefreshHighQualityOcrModelStatus();
             _settingsViewModel.SetStatus(result.IsSuccess
-                ? "高质量识别模型安装完成，已可在内容识别中选择。"
+                ? isRepair
+                    ? "高质量识别模型校验完成，模型文件有效。"
+                    : "高质量识别模型安装完成，已可在内容识别中选择。"
                 : result.ErrorMessage ?? "高质量识别模型安装失败。");
         }
         finally
@@ -1315,7 +1327,7 @@ public partial class MainWindow : Window, IDisposable
         HighQualityOcrModelPathText.Text =
             $"安装目录：{status.InstallationDirectory}";
         DownloadHighQualityOcrModelButton.Content = status.IsInstalled
-            ? "模型已安装"
+            ? "校验 / 修复"
             : "下载识别模型";
     }
 

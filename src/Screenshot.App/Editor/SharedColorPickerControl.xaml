@@ -1,0 +1,166 @@
+<UserControl x:Class="Screenshot.App.Editor.SharedColorPickerControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Width="272"
+             Background="Transparent">
+    <UserControl.Resources>
+        <LinearGradientBrush x:Key="HueGradient" StartPoint="0,0.5" EndPoint="1,0.5">
+            <GradientStop Offset="0" Color="#EF4444" />
+            <GradientStop Offset="0.16" Color="#FACC15" />
+            <GradientStop Offset="0.33" Color="#22C55E" />
+            <GradientStop Offset="0.50" Color="#06B6D4" />
+            <GradientStop Offset="0.66" Color="#3B82F6" />
+            <GradientStop Offset="0.83" Color="#A855F7" />
+            <GradientStop Offset="1" Color="#EF4444" />
+        </LinearGradientBrush>
+        <Style x:Key="ColorSwatch" TargetType="Button">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Margin" Value="0,4,5,0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Ellipse x:Name="Swatch" Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}" StrokeThickness="{TemplateBinding BorderThickness}" />
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Swatch" Property="Stroke" Value="#F2FFFC" />
+                                <Setter TargetName="Swatch" Property="StrokeThickness" Value="2" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="ColorSlider" TargetType="Slider">
+            <Setter Property="Height" Value="20" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ImageEditorSliderTrackBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Border Height="5" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="2.5" />
+                            <Track x:Name="PART_Track" Height="18" VerticalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}" IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="5" VerticalAlignment="Center" Background="{DynamicResource AppAccentBrush}" CornerRadius="2.5" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}" IsTabStop="False">
+                                        <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent" /></ControlTemplate></RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="13" Height="13" Background="{DynamicResource AppAccentBrush}" BorderBrush="{DynamicResource ImageEditorSliderThumbBorderBrush}" BorderThickness="2">
+                                        <Thumb.Template><ControlTemplate TargetType="Thumb"><Ellipse Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}" StrokeThickness="{TemplateBinding BorderThickness}" /></ControlTemplate></Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="HueSlider" TargetType="Slider" BasedOn="{StaticResource ColorSlider}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Border Height="5" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="2.5" />
+                            <Track x:Name="PART_Track" Height="18" VerticalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}" IsTabStop="False">
+                                        <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent" /></ControlTemplate></RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}" IsTabStop="False">
+                                        <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent" /></ControlTemplate></RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="13" Height="13" Background="{DynamicResource AppAccentBrush}" BorderBrush="{DynamicResource ImageEditorSliderThumbBorderBrush}" BorderThickness="2">
+                                        <Thumb.Template><ControlTemplate TargetType="Thumb"><Ellipse Fill="{TemplateBinding Background}" Stroke="{TemplateBinding BorderBrush}" StrokeThickness="{TemplateBinding BorderThickness}" /></ControlTemplate></Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Border Padding="10"
+            Background="{DynamicResource ImageEditorToolbarBackgroundBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="6">
+        <StackPanel>
+            <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource AppControlForegroundBrush}" Text="选择颜色" />
+            <TextBlock Margin="0,8,0,3" FontSize="10" Foreground="{DynamicResource AppTextSecondaryBrush}" Text="常用颜色" />
+            <UniformGrid x:Name="RecentColorsPanel" Columns="8" />
+            <TextBlock Margin="0,8,0,3" FontSize="10" Foreground="{DynamicResource AppTextSecondaryBrush}" Text="常用颜色" />
+            <UniformGrid Columns="8">
+                <Button Tag="#EF4444" Background="#EF4444" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#F97316" Background="#F97316" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#FACC15" Background="#FACC15" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#84CC16" Background="#84CC16" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#22C55E" Background="#22C55E" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#14B8A6" Background="#14B8A6" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#0EA5E9" Background="#0EA5E9" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#3B82F6" Background="#3B82F6" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#6366F1" Background="#6366F1" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#8B5CF6" Background="#8B5CF6" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#D946EF" Background="#D946EF" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#EC4899" Background="#EC4899" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#F8FAFC" Background="#F8FAFC" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#CBD5E1" Background="#CBD5E1" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#64748B" Background="#64748B" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+                <Button Tag="#111827" Background="#111827" Click="OnFixedColorClick" Style="{StaticResource ColorSwatch}" />
+            </UniformGrid>
+            <Border x:Name="ColorPreview" Height="42" Margin="0,10,0,0" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" />
+            <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="46" /><ColumnDefinition Width="*" /><ColumnDefinition Width="38" /></Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" FontSize="10" Foreground="{DynamicResource AppTextSecondaryBrush}" Text="色相" />
+                <Slider x:Name="HueSlider" Grid.Column="1" Minimum="0" Maximum="360" Background="{StaticResource HueGradient}" Style="{StaticResource HueSlider}" ValueChanged="OnColorComponentChanged" PreviewMouseLeftButtonUp="OnSliderMouseLeftButtonUp" LostKeyboardFocus="OnSliderLostKeyboardFocus" />
+                <TextBlock x:Name="HueText" Grid.Column="2" VerticalAlignment="Center" FontSize="10" TextAlignment="Right" Foreground="{DynamicResource AppTextSecondaryBrush}" />
+            </Grid>
+            <Grid Margin="0,4,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="46" /><ColumnDefinition Width="*" /><ColumnDefinition Width="38" /></Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" FontSize="10" Foreground="{DynamicResource AppTextSecondaryBrush}" Text="饱和度" />
+                <Slider x:Name="SaturationSlider" Grid.Column="1" Minimum="0" Maximum="100" Style="{StaticResource ColorSlider}" ValueChanged="OnColorComponentChanged" PreviewMouseLeftButtonUp="OnSliderMouseLeftButtonUp" LostKeyboardFocus="OnSliderLostKeyboardFocus" />
+                <TextBlock x:Name="SaturationText" Grid.Column="2" VerticalAlignment="Center" FontSize="10" TextAlignment="Right" Foreground="{DynamicResource AppTextSecondaryBrush}" />
+            </Grid>
+            <Grid Margin="0,4,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="46" /><ColumnDefinition Width="*" /><ColumnDefinition Width="38" /></Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" FontSize="10" Foreground="{DynamicResource AppTextSecondaryBrush}" Text="亮度" />
+                <Slider x:Name="ValueSlider" Grid.Column="1" Minimum="0" Maximum="100" Style="{StaticResource ColorSlider}" ValueChanged="OnColorComponentChanged" PreviewMouseLeftButtonUp="OnSliderMouseLeftButtonUp" LostKeyboardFocus="OnSliderLostKeyboardFocus" />
+                <TextBlock x:Name="ValueText" Grid.Column="2" VerticalAlignment="Center" FontSize="10" TextAlignment="Right" Foreground="{DynamicResource AppTextSecondaryBrush}" />
+            </Grid>
+            <Grid Margin="0,4,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="46" /><ColumnDefinition Width="*" /><ColumnDefinition Width="38" /></Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" FontSize="10" Foreground="{DynamicResource AppTextSecondaryBrush}" Text="透明度" />
+                <Slider x:Name="AlphaSlider" Grid.Column="1" Minimum="0" Maximum="100" Style="{StaticResource ColorSlider}" ValueChanged="OnColorComponentChanged" PreviewMouseLeftButtonUp="OnSliderMouseLeftButtonUp" LostKeyboardFocus="OnSliderLostKeyboardFocus" />
+                <TextBlock x:Name="AlphaText" Grid.Column="2" VerticalAlignment="Center" FontSize="10" TextAlignment="Right" Foreground="{DynamicResource AppTextSecondaryBrush}" />
+            </Grid>
+            <Grid Margin="0,8,0,0">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="46" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                <TextBlock VerticalAlignment="Center" FontSize="10" Foreground="{DynamicResource AppTextSecondaryBrush}" Text="颜色值" />
+                <TextBox x:Name="ColorHexTextBox" Grid.Column="1" Height="30" Padding="8,4" MaxLength="9" FontWeight="SemiBold" Background="{DynamicResource AppInputBackgroundBrush}" BorderBrush="{DynamicResource AppAccentBrush}" Foreground="{DynamicResource AppTextPrimaryBrush}" CaretBrush="{DynamicResource AppTextPrimaryBrush}" PreviewKeyDown="OnHexTextBoxPreviewKeyDown" KeyDown="OnHexTextBoxKeyDown" />
+            </Grid>
+        </StackPanel>
+    </Border>
+</UserControl>

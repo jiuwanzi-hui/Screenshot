@@ -60,6 +60,7 @@ public enum CaptureToolbarFeature
     TextRecognition,
     CopyRecognizedText,
     Translation,
+    PrivacyRedaction,
     PinImage,
     UndoRedo,
 }
@@ -70,13 +71,20 @@ public enum VideoRecordingCodec
     H265,
 }
 
+public enum VideoRecordingOutputFormat
+{
+    Mp4,
+    Gif,
+}
+
 public readonly record struct VideoRecordingPreferences(
     VideoRecordingCodec Codec,
     int FrameRate,
     bool RecordSystemAudio,
     bool RecordMicrophone,
     bool ShowKeyboardInput = false,
-    bool ShowMouseInput = false);
+    bool ShowMouseInput = false,
+    VideoRecordingOutputFormat OutputFormat = VideoRecordingOutputFormat.Mp4);
 
 public enum TranslationMode
 {
@@ -113,7 +121,7 @@ public enum OfflineTranslationEngine
 
 public sealed record AppSettings
 {
-    public int SettingsVersion { get; init; } = 7;
+    public int SettingsVersion { get; init; } = 8;
 
     public string SaveDirectory { get; init; } = GetDefaultSaveDirectory();
 
@@ -127,6 +135,13 @@ public sealed record AppSettings
         VideoRecordingCodec.H264;
 
     public int VideoRecordingFrameRate { get; init; } = 30;
+
+    public VideoRecordingOutputFormat RecordingOutputFormat { get; init; } =
+        VideoRecordingOutputFormat.Mp4;
+
+    public double CaptureToolbarPositionXRatio { get; init; } = -1;
+
+    public double CaptureToolbarPositionYRatio { get; init; } = -1;
 
     public bool ShowKeyboardInputInRecording { get; init; }
 
@@ -260,6 +275,11 @@ public sealed record AppSettings
     public AppSettings Normalize()
     {
         var defaults = CreateDefault();
+        var hasCaptureToolbarPosition =
+            double.IsFinite(CaptureToolbarPositionXRatio) &&
+            double.IsFinite(CaptureToolbarPositionYRatio) &&
+            CaptureToolbarPositionXRatio is >= 0 and <= 1 &&
+            CaptureToolbarPositionYRatio is >= 0 and <= 1;
         // Translation is invoked explicitly by the user. Keep the legacy mode
         // only as a migration hint for which provider should be tried first.
         var translationProviderPriority = ResolveTranslationProviderPriority();
@@ -284,10 +304,17 @@ public sealed record AppSettings
         {
             visibleCaptureToolbarFeatures.Add(CaptureToolbarFeature.Number);
         }
+        if (SettingsVersion < 8 &&
+            !visibleCaptureToolbarFeatures.Contains(
+                CaptureToolbarFeature.PrivacyRedaction))
+        {
+            visibleCaptureToolbarFeatures.Add(
+                CaptureToolbarFeature.PrivacyRedaction);
+        }
 
         return this with
         {
-            SettingsVersion = Math.Max(SettingsVersion, 7),
+            SettingsVersion = Math.Max(SettingsVersion, 8),
             Theme = NormalizeTheme(Theme),
             CloseBehavior = Enum.IsDefined(CloseBehavior)
                 ? CloseBehavior
@@ -306,6 +333,15 @@ public sealed record AppSettings
             VideoRecordingCodec = Enum.IsDefined(VideoRecordingCodec)
                 ? VideoRecordingCodec
                 : defaults.VideoRecordingCodec,
+            RecordingOutputFormat = Enum.IsDefined(RecordingOutputFormat)
+                ? RecordingOutputFormat
+                : defaults.RecordingOutputFormat,
+            CaptureToolbarPositionXRatio = hasCaptureToolbarPosition
+                ? CaptureToolbarPositionXRatio
+                : -1,
+            CaptureToolbarPositionYRatio = hasCaptureToolbarPosition
+                ? CaptureToolbarPositionYRatio
+                : -1,
             VideoRecordingFrameRate = VideoRecordingFrameRate is 24 or 30 or 60
                 ? VideoRecordingFrameRate
                 : defaults.VideoRecordingFrameRate,

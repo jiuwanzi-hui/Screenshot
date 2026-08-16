@@ -18,6 +18,7 @@ public static class AppMetadata
     public const string DiagnosticsDirectoryName = "Diagnostics";
     public const string HistoryCacheDirectoryName = "HistoryCache";
     public const string UpdatesDirectoryName = "Updates";
+    public const string PinnedImagesDirectoryName = "PinnedImages";
     public const string ReleaseHistoryCacheFileName = "release-history-cache.json";
     public const string TranslationModelsDirectoryName = "TranslationModels";
     public const string HighQualityOcrModelDirectoryName = "PP-OCRv6-Small";
@@ -67,6 +68,10 @@ public static class AppMetadata
     public static string UpdatesDirectoryPath => Path.Combine(
         DataDirectoryPath,
         UpdatesDirectoryName);
+
+    public static string PinnedImagesDirectoryPath => Path.Combine(
+        DataDirectoryPath,
+        PinnedImagesDirectoryName);
 
     public static string ReleaseHistoryCachePath => Path.Combine(
         UpdatesDirectoryPath,

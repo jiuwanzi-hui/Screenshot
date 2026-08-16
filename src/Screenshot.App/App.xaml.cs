@@ -108,7 +108,14 @@ public partial class App : System.Windows.Application, IDisposable
         _pinnedImageManager = new PinnedImageManager(
             RecognizePinnedImageAsync,
             TranslatePinnedImageAsync,
-            () => _ = Dispatcher.BeginInvoke(ShowMainWindow));
+            () => _ = Dispatcher.BeginInvoke(ShowMainWindow),
+            () => _currentSettings,
+            colorText => _mainWindow?.SaveCustomStrokeColor(colorText),
+            colors => _mainWindow?.SaveCustomColorPalette(colors),
+            arrowStyle => _mainWindow?.SaveArrowStyle(arrowStyle));
+        _pinnedImageManager.DisplayStateChanged +=
+            OnPinnedImageDisplayStateChanged;
+        _pinnedImageManager.RestorePersisted();
         _regionCaptureCoordinator = new RegionCaptureCoordinator(
             () => _currentSettings,
             _captureHistoryService,
@@ -120,7 +127,8 @@ public partial class App : System.Windows.Application, IDisposable
             preferences => _mainWindow?.SaveVideoRecordingPreferences(preferences),
             arrowStyle => _mainWindow?.SaveArrowStyle(arrowStyle),
             colorText => _mainWindow?.SaveCustomStrokeColor(colorText),
-            colors => _mainWindow?.SaveCustomColorPalette(colors));
+            colors => _mainWindow?.SaveCustomColorPalette(colors),
+            (x, y) => _mainWindow?.SaveCaptureToolbarPosition(x, y));
         _regionCaptureCoordinator.CaptureStateChanged += OnCaptureStateChanged;
 
         if (dataMigrationResult.Warning is not null)
@@ -151,7 +159,10 @@ public partial class App : System.Windows.Application, IDisposable
         _trayIconService.ScrollCaptureRequested += OnScrollCaptureRequested;
         _trayIconService.VideoRecordingRequested += OnVideoRecordingRequested;
         _trayIconService.HistoryRequested += OnHistoryRequested;
+        _trayIconService.HidePinnedImagesRequested += OnHidePinnedImagesRequested;
+        _trayIconService.ShowPinnedImagesRequested += OnShowPinnedImagesRequested;
         _trayIconService.ExitRequested += OnExitRequested;
+        UpdatePinnedImageTrayCommands();
         _trayIconService.SetVisible(_currentSettings.ShowNotificationIcon);
         UpdateFloatingCaptureWindow();
 
@@ -248,6 +259,28 @@ public partial class App : System.Windows.Application, IDisposable
     private void OnExitRequested(object? sender, EventArgs e)
     {
         _ = Dispatcher.BeginInvoke(ExitApplication);
+    }
+
+    private void OnHidePinnedImagesRequested(object? sender, EventArgs e)
+    {
+        _ = Dispatcher.BeginInvoke(() => _pinnedImageManager?.HideAll());
+    }
+
+    private void OnShowPinnedImagesRequested(object? sender, EventArgs e)
+    {
+        _ = Dispatcher.BeginInvoke(() => _pinnedImageManager?.ShowAll());
+    }
+
+    private void OnPinnedImageDisplayStateChanged(object? sender, EventArgs e)
+    {
+        UpdatePinnedImageTrayCommands();
+    }
+
+    private void UpdatePinnedImageTrayCommands()
+    {
+        _trayIconService?.UpdatePinnedImageCommands(
+            _pinnedImageManager is { Count: > 0 },
+            _pinnedImageManager?.HasHiddenWindows == true);
     }
 
     private void OnUpdateInstallationStarted(object? sender, EventArgs e)
@@ -832,6 +865,8 @@ public partial class App : System.Windows.Application, IDisposable
         _trayIconService.ScrollCaptureRequested -= OnScrollCaptureRequested;
         _trayIconService.VideoRecordingRequested -= OnVideoRecordingRequested;
         _trayIconService.HistoryRequested -= OnHistoryRequested;
+        _trayIconService.HidePinnedImagesRequested -= OnHidePinnedImagesRequested;
+        _trayIconService.ShowPinnedImagesRequested -= OnShowPinnedImagesRequested;
         _trayIconService.ExitRequested -= OnExitRequested;
         _trayIconService.Dispose();
         _trayIconService = null;
@@ -856,6 +891,8 @@ public partial class App : System.Windows.Application, IDisposable
             return;
         }
 
+        _pinnedImageManager.DisplayStateChanged -=
+            OnPinnedImageDisplayStateChanged;
         _pinnedImageManager.Dispose();
         _pinnedImageManager = null;
     }

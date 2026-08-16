@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
 using Screenshot.App.Capture;
@@ -89,6 +90,8 @@ public sealed class CaptureOverlayWindowTests
 
             try
             {
+                Assert.IsType<SharedColorPickerControl>(
+                    overlay.FindName("InlineSharedColorPicker"));
                 Assert.Equal(
                     Visibility.Collapsed,
                     Assert.IsType<RadioButton>(
@@ -313,6 +316,8 @@ public sealed class CaptureOverlayWindowTests
                         return Task.CompletedTask;
                     },
                     InitialSelection = expected,
+                    ToolbarPositionXRatio = 0.25,
+                    ToolbarPositionYRatio = 0.75,
                 });
 
             try
@@ -329,6 +334,24 @@ public sealed class CaptureOverlayWindowTests
                 var toolbar = Assert.IsType<Border>(
                     overlay.FindName("CaptureToolbar"));
                 Assert.Equal(Visibility.Visible, toolbar.Visibility);
+                Assert.IsType<Thumb>(
+                    overlay.FindName("CaptureToolbarDragHandle"));
+                var surface = Assert.IsAssignableFrom<FrameworkElement>(
+                    overlay.FindName("CaptureSurface"));
+                var maximumToolbarX = Math.Max(
+                    0,
+                    surface.ActualWidth - toolbar.ActualWidth);
+                var maximumToolbarY = Math.Max(
+                    0,
+                    surface.ActualHeight - toolbar.ActualHeight);
+                Assert.InRange(
+                    Canvas.GetLeft(toolbar),
+                    (maximumToolbarX * 0.25) - 1,
+                    (maximumToolbarX * 0.25) + 1);
+                Assert.InRange(
+                    Canvas.GetTop(toolbar),
+                    (maximumToolbarY * 0.75) - 1,
+                    (maximumToolbarY * 0.75) + 1);
             }
             finally
             {

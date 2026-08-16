@@ -70,6 +70,101 @@
         <SolidColorBrush x:Key="ImageEditorSliderThumbBorderBrush" Color="#F8FFFE" />
         <SolidColorBrush x:Key="ImageEditorSwatchBorderBrush" Color="#6E898B" />
         <SolidColorBrush x:Key="ImageEditorSwatchHoverBorderBrush" Color="#1F3034" />
+        <Style x:Key="VideoTrimSlider" TargetType="Slider">
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Cursor" Value="Arrow" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Border Height="5"
+                                    Background="{DynamicResource ImageEditorSliderTrackBrush}"
+                                    CornerRadius="2.5" />
+                            <Track x:Name="PART_Track"
+                                   Height="18"
+                                   VerticalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                                  IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="5"
+                                                        VerticalAlignment="Center"
+                                                        Background="{DynamicResource AppAccentBrush}"
+                                                        CornerRadius="2.5" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                                  IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="16"
+                                           Height="16"
+                                           Background="{DynamicResource AppAccentBrush}"
+                                           BorderBrush="{DynamicResource ImageEditorSliderThumbBorderBrush}"
+                                           BorderThickness="2"
+                                           Cursor="Hand">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse Fill="{TemplateBinding Background}"
+                                                         Stroke="{TemplateBinding BorderBrush}"
+                                                         StrokeThickness="{TemplateBinding BorderThickness}" />
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="VideoTrimTimelineHandle" TargetType="Thumb">
+            <Setter Property="Width" Value="14" />
+            <Setter Property="Height" Value="104" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ImageEditorSliderThumbBorderBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Grid>
+                            <Border Width="3"
+                                    HorizontalAlignment="Center"
+                                    Background="{TemplateBinding Background}"
+                                    CornerRadius="1.5" />
+                            <Border Width="14"
+                                    Height="28"
+                                    VerticalAlignment="Top"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4">
+                                <Grid Width="6" HorizontalAlignment="Center">
+                                    <Border Width="1"
+                                            Margin="0,7,0,7"
+                                            HorizontalAlignment="Left"
+                                            Background="{DynamicResource ImageEditorSliderThumbBorderBrush}" />
+                                    <Border Width="1"
+                                            Margin="0,7,0,7"
+                                            HorizontalAlignment="Right"
+                                            Background="{DynamicResource ImageEditorSliderThumbBorderBrush}" />
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style TargetType="Button">
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Padding" Value="10,3" />

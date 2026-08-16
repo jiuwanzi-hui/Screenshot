@@ -1,5 +1,7 @@
 using System.IO;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using Screenshot.App.Capture;
 using Screenshot.App.Core;
@@ -11,6 +13,42 @@ namespace Screenshot.App.Tests;
 [Collection(GlobalInputTestGroup.Name)]
 public sealed class ImageEditorWindowTests
 {
+    [Fact]
+    public void SharedColorPickerUsesLeftClickAndRightClickPaletteBehavior()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var picker = new SharedColorPickerControl();
+            var committed = new List<System.Windows.Media.Color>();
+            int[]? savedPalette = null;
+            var closeRequests = 0;
+            picker.ColorCommitted += color => committed.Add(color);
+            picker.PaletteChanged += colors => savedPalette = colors;
+            picker.CloseRequested += (_, _) => closeRequests++;
+            picker.SetState(
+                System.Windows.Media.Color.FromRgb(0, 255, 0),
+                [0x2F80ED]);
+            var panel = Assert.IsType<UniformGrid>(
+                picker.FindName("RecentColorsPanel"));
+
+            Assert.True(picker.TryHandlePaletteRightClick(panel.Children[0]));
+            Assert.NotNull(savedPalette);
+            Assert.Equal(0x00FF00, savedPalette![0]);
+            Assert.Empty(committed);
+            Assert.Equal(0, closeRequests);
+
+            panel = Assert.IsType<UniformGrid>(
+                picker.FindName("RecentColorsPanel"));
+            Assert.IsType<Button>(panel.Children[0]).RaiseEvent(
+                new RoutedEventArgs(Button.ClickEvent));
+
+            Assert.Equal(
+                System.Windows.Media.Color.FromRgb(0, 255, 0),
+                Assert.Single(committed));
+            Assert.Equal(1, closeRequests);
+        });
+    }
+
     [Fact]
     public void CropRectangleClampsAllFourEdgesAndKeepsOnePixel()
     {
@@ -35,7 +73,7 @@ public sealed class ImageEditorWindowTests
     }
 
     [Fact]
-    public void CropWindowLoadsAndUpdatesAllFourEdges()
+    public void CropWindowUsesASelectionRectangleInsteadOfEdgeSliders()
     {
         WpfTestHost.Invoke(() =>
         {
@@ -45,25 +83,20 @@ public sealed class ImageEditorWindowTests
             {
                 window.Show();
                 window.UpdateLayout();
-                var leftSlider = Assert.IsType<System.Windows.Controls.Slider>(
-                    window.FindName("LeftCropSlider"));
-                var topSlider = Assert.IsType<System.Windows.Controls.Slider>(
-                    window.FindName("TopCropSlider"));
-                var rightSlider = Assert.IsType<System.Windows.Controls.Slider>(
-                    window.FindName("RightCropSlider"));
-                var bottomSlider = Assert.IsType<System.Windows.Controls.Slider>(
-                    window.FindName("BottomCropSlider"));
-                Assert.NotNull(leftSlider.Style);
-                Assert.Same(leftSlider.Style, topSlider.Style);
-                Assert.Same(leftSlider.Style, rightSlider.Style);
-                Assert.Same(leftSlider.Style, bottomSlider.Style);
-                leftSlider.Value = 2;
-                topSlider.Value = 3;
-                rightSlider.Value = 4;
-                bottomSlider.Value = 5;
-
+                Assert.IsType<System.Windows.Controls.Grid>(
+                    window.FindName("CropInteractionSurface"));
+                Assert.IsType<System.Windows.Shapes.Rectangle>(
+                    window.FindName("CropSelection"));
+                Assert.IsType<System.Windows.Shapes.Path>(
+                    window.FindName("CropMask"));
+                Assert.IsType<System.Windows.Controls.Primitives.Thumb>(
+                    window.FindName("CropMoveThumb"));
+                Assert.IsType<System.Windows.Controls.Primitives.Thumb>(
+                    window.FindName("CropBottomRightThumb"));
+                Assert.Null(window.FindName("LeftCropSlider"));
+                Assert.Equal(new Int32Rect(0, 0, 20, 20), window.SelectedCropRect);
                 Assert.Equal(
-                    "14 x 12 px",
+                    "20 x 20 px",
                     Assert.IsType<System.Windows.Controls.TextBlock>(
                         window.FindName("CropSizeText")).Text);
             }
@@ -75,37 +108,68 @@ public sealed class ImageEditorWindowTests
     }
 
     [Fact]
-    public void CropWindowFitsWidePreviewWithoutHorizontalScrolling()
+    public void SelectionRectangleMapsDirectlyToSourcePixels()
     {
-        WpfTestHost.Invoke(() =>
-        {
-            using var image = new CapturedImage(
-                new System.Drawing.Bitmap(1200, 2400));
-            var window = new ImageCropWindow(image.Preview);
-            try
-            {
-                window.Show();
-                window.UpdateLayout();
-                var scrollViewer = Assert.IsType<System.Windows.Controls.ScrollViewer>(
-                    window.FindName("CropPreviewScrollViewer"));
-                var preview = Assert.IsType<System.Windows.Controls.Image>(
-                    window.FindName("CropPreviewImage"));
+        Assert.Equal(
+            new Int32Rect(250, 200, 500, 400),
+            ImageCropWindow.CalculateCropRectFromSelection(
+                new Rect(10, 20, 400, 240),
+                new Rect(110, 80, 200, 120),
+                pixelWidth: 1000,
+                pixelHeight: 800));
+    }
 
-                Assert.Equal(
-                    System.Windows.Controls.ScrollBarVisibility.Disabled,
-                    scrollViewer.HorizontalScrollBarVisibility);
-                Assert.Equal(0, scrollViewer.ScrollableWidth, precision: 3);
-                Assert.True(scrollViewer.ViewportWidth > 0);
-                Assert.InRange(
-                    preview.ActualWidth,
-                    1,
-                    scrollViewer.ViewportWidth + 1);
-            }
-            finally
-            {
-                window.Close();
-            }
-        });
+    [Fact]
+    public void ExistingCropSelectionCanMoveAndResizeWithinTheImage()
+    {
+        var bounds = new Rect(0, 0, 400, 300);
+        var selection = new Rect(100, 80, 160, 120);
+
+        Assert.Equal(
+            new Rect(130, 60, 160, 120),
+            ImageCropWindow.AdjustSelectionRect(
+                selection,
+                bounds,
+                "Move",
+                horizontalChange: 30,
+                verticalChange: -20));
+        Assert.Equal(
+            new Rect(80, 80, 180, 150),
+            ImageCropWindow.AdjustSelectionRect(
+                selection,
+                bounds,
+                "BottomLeft",
+                horizontalChange: -20,
+                verticalChange: 30));
+    }
+
+    [Fact]
+    public void MovingCropSelectionPreservesItsPixelDimensions()
+    {
+        var cropRect = new Int32Rect(100, 80, 400, 300);
+        var moved = ImageCropWindow.MoveCropRectWithoutResizing(
+            cropRect,
+            new Rect(10, 20, 500, 400),
+            new Rect(135, 130, 200, 150),
+            pixelWidth: 1000,
+            pixelHeight: 800);
+
+        Assert.Equal(new Int32Rect(250, 220, 400, 300), moved);
+    }
+
+    [Fact]
+    public void CropHandlesRemainFullyClickableAtImageCorners()
+    {
+        var bounds = new Rect(0, 0, 400, 300);
+
+        Assert.Equal(
+            new Point(0, 0),
+            ImageCropWindow.CalculateVisibleHandlePosition(
+                bounds, 0, 0, 12, 12));
+        Assert.Equal(
+            new Point(388, 288),
+            ImageCropWindow.CalculateVisibleHandlePosition(
+                bounds, 400, 300, 12, 12));
     }
 
     [Fact]

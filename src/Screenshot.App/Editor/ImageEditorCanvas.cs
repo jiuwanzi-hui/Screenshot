@@ -259,6 +259,54 @@ public sealed class ImageEditorCanvas : Canvas
         RaiseHistoryChanged();
     }
 
+    public void AddMosaicRegions(IEnumerable<Rect> regions)
+    {
+        ArgumentNullException.ThrowIfNull(regions);
+        if (_capturedImage is null)
+        {
+            return;
+        }
+
+        CommitPendingText();
+        var added = false;
+        foreach (var rawRegion in regions)
+        {
+            var region = Rect.Intersect(
+                rawRegion,
+                new Rect(0, 0, _capturedImage.Bitmap.Width,
+                    _capturedImage.Bitmap.Height));
+            if (region.IsEmpty || region.Width < 1 || region.Height < 1)
+            {
+                continue;
+            }
+
+            var padding = Math.Clamp(region.Height * 0.16, 2, 8);
+            region.Inflate(padding, padding);
+            region.Intersect(new Rect(
+                0,
+                0,
+                _capturedImage.Bitmap.Width,
+                _capturedImage.Bitmap.Height));
+            var centerY = region.Top + (region.Height / 2);
+            _document.Add(new MosaicAnnotation(
+                [
+                    new WpfPoint(region.Left, centerY),
+                    new WpfPoint(region.Right, centerY),
+                ],
+                Math.Max(8, region.Height),
+                Math.Clamp((int)Math.Round(region.Height / 3), 8, 20)));
+            added = true;
+        }
+
+        if (!added)
+        {
+            return;
+        }
+
+        RebuildCanvas();
+        RaiseHistoryChanged();
+    }
+
     public void SetTranslationOverlayVisible(bool isVisible)
     {
         if (!HasTranslationOverlay ||

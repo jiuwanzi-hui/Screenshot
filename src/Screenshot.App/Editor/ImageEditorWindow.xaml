@@ -451,6 +451,12 @@
                                     Style="{StaticResource GlassButton}">
                                 <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74E;" />
                             </Button>
+                            <Button x:Name="ApplyButton"
+                                    Click="OnApplyClick"
+                                    Content="应用"
+                                    ToolTip="将编辑结果应用回钉图"
+                                    Visibility="Collapsed"
+                                    Style="{StaticResource GlassButton}" />
                         </StackPanel>
                     </DockPanel>
 

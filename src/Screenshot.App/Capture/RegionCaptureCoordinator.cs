@@ -1,4 +1,5 @@
 using System.Net.Http;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Threading;
 using Screenshot.App.Core;
@@ -22,6 +23,7 @@ public sealed class RegionCaptureCoordinator
     private readonly Action<ArrowStyle>? _arrowStyleChanged;
     private readonly Action<string>? _customStrokeColorChanged;
     private readonly Action<int[]>? _customColorPaletteChanged;
+    private readonly Action<double, double>? _captureToolbarPositionChanged;
     private bool _isCaptureInProgress;
     private bool _isRecordingInProgress;
     private ScreenRegion? _lastOrdinaryCaptureRegion;
@@ -37,7 +39,8 @@ public sealed class RegionCaptureCoordinator
         Action<VideoRecordingPreferences>? videoRecordingPreferencesChanged = null,
         Action<ArrowStyle>? arrowStyleChanged = null,
         Action<string>? customStrokeColorChanged = null,
-        Action<int[]>? customColorPaletteChanged = null)
+        Action<int[]>? customColorPaletteChanged = null,
+        Action<double, double>? captureToolbarPositionChanged = null)
     {
         ArgumentNullException.ThrowIfNull(settingsProvider);
         ArgumentNullException.ThrowIfNull(historyService);
@@ -57,6 +60,7 @@ public sealed class RegionCaptureCoordinator
         _arrowStyleChanged = arrowStyleChanged;
         _customStrokeColorChanged = customStrokeColorChanged;
         _customColorPaletteChanged = customColorPaletteChanged;
+        _captureToolbarPositionChanged = captureToolbarPositionChanged;
     }
 
     public Task RequestCaptureAsync(
@@ -320,6 +324,11 @@ public sealed class RegionCaptureCoordinator
                     CustomStrokeColorChanged = _customStrokeColorChanged,
                     CustomColorPalette = settings.CustomColorPalette,
                     CustomColorPaletteChanged = _customColorPaletteChanged,
+                    ToolbarPositionXRatio =
+                        settings.CaptureToolbarPositionXRatio,
+                    ToolbarPositionYRatio =
+                        settings.CaptureToolbarPositionYRatio,
+                    ToolbarPositionChanged = _captureToolbarPositionChanged,
                 },
                 initialScreenSnapshot);
         }
@@ -913,10 +922,43 @@ public sealed class RegionCaptureCoordinator
                 settings.VideoRecordingFrameRate,
                 settings.ShowKeyboardInputInRecording,
                 settings.ShowMouseInputInRecording,
+                settings.RecordingOutputFormat,
                 _videoRecordingPreferencesChanged);
             if (result.IsSuccess)
             {
-                _statusReporter($"视频已保存：{result.FilePath}");
+                var completedSettings = _settingsProvider();
+                if (result.OpenEditor)
+                {
+                    _statusReporter($"视频已保存：{result.FilePath}");
+                    new VideoPostProcessWindow(result.FilePath!).Show();
+                }
+                else if (completedSettings.RecordingOutputFormat ==
+                    VideoRecordingOutputFormat.Gif)
+                {
+                    _statusReporter("正在生成 GIF 动图...");
+                    try
+                    {
+                        var duration = await VideoPostProcessingService
+                            .GetDurationAsync(result.FilePath!);
+                        var gifPath = await VideoPostProcessingService
+                            .ExportAnimatedImageAsync(
+                                result.FilePath!,
+                                TimeSpan.Zero,
+                                duration,
+                                AnimatedImageFormat.Gif);
+                        File.Delete(result.FilePath!);
+                        _statusReporter($"GIF 已保存：{gifPath}");
+                    }
+                    catch (Exception exception)
+                    {
+                        _statusReporter(
+                            $"GIF 生成失败，已保留 MP4：{exception.Message}");
+                    }
+                }
+                else
+                {
+                    _statusReporter($"视频已保存：{result.FilePath}");
+                }
             }
             else if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
             {
