@@ -115,7 +115,8 @@ public sealed class ImmediateSettingsTests : IDisposable
                         RecordSystemAudio: false,
                         RecordMicrophone: true,
                         ShowKeyboardInput: true,
-                        ShowMouseInput: true));
+                        ShowMouseInput: true,
+                        OutputFormat: VideoRecordingOutputFormat.Gif));
             }
             finally
             {
@@ -131,6 +132,9 @@ public sealed class ImmediateSettingsTests : IDisposable
         Assert.True(loaded.Settings.RecordMicrophone);
         Assert.True(loaded.Settings.ShowKeyboardInputInRecording);
         Assert.True(loaded.Settings.ShowMouseInputInRecording);
+        Assert.Equal(
+            VideoRecordingOutputFormat.Gif,
+            loaded.Settings.RecordingOutputFormat);
     }
 
     private static string GetGroupTitle(MainWindow window, string groupName)

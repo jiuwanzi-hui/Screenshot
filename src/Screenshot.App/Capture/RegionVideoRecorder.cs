@@ -19,7 +19,8 @@ internal enum RegionVideoRecorderState
 
 internal sealed record RegionVideoRecordingResult(
     string? FilePath,
-    string? ErrorMessage)
+    string? ErrorMessage,
+    bool OpenEditor = false)
 {
     public bool IsSuccess =>
         !string.IsNullOrWhiteSpace(FilePath) &&

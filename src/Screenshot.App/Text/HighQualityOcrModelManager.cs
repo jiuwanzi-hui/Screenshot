@@ -102,12 +102,17 @@ public sealed class HighQualityOcrModelManager : IDisposable
 
     public async Task<(bool IsSuccess, string? ErrorMessage)> InstallAsync(
         IProgress<ModelDownloadProgress>? progress,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool verifyExistingFiles = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         await _installationLock.WaitAsync(cancellationToken);
         try
         {
+            if (verifyExistingFiles)
+            {
+                await RemoveInvalidFilesAsync(cancellationToken);
+            }
             var downloader = new ResumableModelDownloader(_httpClient);
             await downloader.DownloadAsync(
                 ModelFiles,
@@ -129,6 +134,29 @@ public sealed class HighQualityOcrModelManager : IDisposable
         finally
         {
             _installationLock.Release();
+        }
+    }
+
+    private async Task RemoveInvalidFilesAsync(CancellationToken cancellationToken)
+    {
+        var root = InstallationDirectory.TrimEnd(Path.DirectorySeparatorChar) +
+                   Path.DirectorySeparatorChar;
+        foreach (var file in ModelFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!ResumableModelDownloader.IsFileComplete(root, file))
+            {
+                continue;
+            }
+
+            var path = Path.Combine(InstallationDirectory, file.FileName);
+            if (!await ResumableModelDownloader.HasExpectedHashAsync(
+                    path,
+                    file.Sha256,
+                    cancellationToken))
+            {
+                File.Delete(path);
+            }
         }
     }
 

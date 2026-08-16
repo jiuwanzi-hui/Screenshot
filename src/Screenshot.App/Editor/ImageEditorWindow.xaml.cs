@@ -21,6 +21,7 @@ public partial class ImageEditorWindow : Window
     private readonly Action<ArrowStyle>? _arrowStyleChanged;
     private readonly Action<string>? _customStrokeColorChanged;
     private readonly Action<int[]>? _customColorPaletteChanged;
+    private readonly Action<BitmapSource>? _appliedImage;
     private ArrowStyle _arrowStyle;
     private EditorTool _selectedTool = EditorTool.Rectangle;
     private WpfColor _selectedColor = WpfColor.FromRgb(46, 175, 165);
@@ -39,7 +40,8 @@ public partial class ImageEditorWindow : Window
         string? customStrokeColor = null,
         Action<string>? customStrokeColorChanged = null,
         int[]? customColorPalette = null,
-        Action<int[]>? customColorPaletteChanged = null)
+        Action<int[]>? customColorPaletteChanged = null,
+        Action<BitmapSource>? appliedImage = null)
     {
         ArgumentNullException.ThrowIfNull(capturedImage);
         ArgumentException.ThrowIfNullOrWhiteSpace(saveDirectory);
@@ -53,8 +55,12 @@ public partial class ImageEditorWindow : Window
         _customStrokeColorChanged = customStrokeColorChanged;
         _customColorPalette = NormalizeCustomColorPalette(customColorPalette);
         _customColorPaletteChanged = customColorPaletteChanged;
+        _appliedImage = appliedImage;
 
         InitializeComponent();
+        ApplyButton.Visibility = _appliedImage is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         ApplyThemedContextMenu(ShapeToolButton.ContextMenu);
         ApplyThemedContextMenu(ArrowToolButton.ContextMenu);
         EditorCanvas.SelectArrowStyle(
@@ -535,6 +541,25 @@ public partial class ImageEditorWindow : Window
         catch
         {
             StatusText.Text = "保存失败，请检查保存位置和权限。";
+        }
+    }
+
+    private void OnApplyClick(object sender, RoutedEventArgs e)
+    {
+        if (!_isInitialized || _appliedImage is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var renderedImage = EditorCanvas.RenderEditedImage();
+            _appliedImage(renderedImage);
+            Close();
+        }
+        catch
+        {
+            StatusText.Text = "无法应用编辑结果，请重试。";
         }
     }
 

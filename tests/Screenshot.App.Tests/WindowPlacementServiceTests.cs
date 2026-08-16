@@ -47,6 +47,23 @@ public sealed class WindowPlacementServiceTests : IDisposable
     }
 
     [Fact]
+    public void StoreCanForgetAWindowPlacement()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var path = Path.Combine(_testDirectory, "window-placements.json");
+        var placement = new WindowPlacementRecord(10, 20, 310, 220, false);
+        var store = new WindowPlacementStore(path);
+
+        Assert.True(store.TrySave(WindowPlacementKeys.VideoRecordingControls, placement));
+        Assert.True(store.TryRemove(WindowPlacementKeys.VideoRecordingControls));
+
+        var reloadedStore = new WindowPlacementStore(path);
+        Assert.False(reloadedStore.TryGet(
+            WindowPlacementKeys.VideoRecordingControls,
+            out _));
+    }
+
+    [Fact]
     public void VisiblePlacementIsNotMoved()
     {
         var placement = new WindowPlacementRecord(
@@ -89,8 +106,8 @@ public sealed class WindowPlacementServiceTests : IDisposable
 
         Assert.Equal(1920, constrained.Width);
         Assert.Equal(1040, constrained.Height);
-        Assert.InRange(constrained.Left, -1824, 1824);
-        Assert.InRange(constrained.Top, 0, 1000);
+        Assert.Equal(0, constrained.Left);
+        Assert.Equal(0, constrained.Top);
         Assert.True(constrained.IsMaximized);
     }
 
@@ -204,6 +221,64 @@ public sealed class WindowPlacementServiceTests : IDisposable
                 Assert.InRange(restored.Top, expectedTop - 2, expectedTop + 2);
                 Assert.InRange(restored.ActualWidth, 39, 41);
                 Assert.InRange(restored.ActualHeight, 39, 41);
+                restored.Close();
+            }
+            finally
+            {
+                WindowPlacementService.ResetForTests();
+            }
+        });
+    }
+
+    [Fact]
+    public void PositionTrackingCanStartAfterWindowSourceIsInitialized()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var path = Path.Combine(_testDirectory, "late-position.json");
+
+        WpfTestHost.Invoke(() =>
+        {
+            var workArea = SystemParameters.WorkArea;
+            var expectedLeft = workArea.Left + 84;
+            var expectedTop = workArea.Top + 76;
+            WindowPlacementService.Initialize(path);
+
+            try
+            {
+                var first = new Window
+                {
+                    Width = 240,
+                    Height = 80,
+                    WindowStartupLocation = WindowStartupLocation.Manual,
+                };
+                first.Show();
+                Assert.False(WindowPlacementService.TrackPosition(
+                    first,
+                    "lateTrackedWindow"));
+                first.Left = expectedLeft;
+                first.Top = expectedTop;
+                first.UpdateLayout();
+                first.Close();
+
+                var restored = new Window
+                {
+                    Width = 240,
+                    Height = 80,
+                    WindowStartupLocation = WindowStartupLocation.Manual,
+                };
+                Assert.True(WindowPlacementService.TrackPosition(
+                    restored,
+                    "lateTrackedWindow"));
+                restored.Show();
+                restored.UpdateLayout();
+                Assert.InRange(
+                    restored.Left,
+                    expectedLeft - 2,
+                    expectedLeft + 2);
+                Assert.InRange(
+                    restored.Top,
+                    expectedTop - 2,
+                    expectedTop + 2);
                 restored.Close();
             }
             finally

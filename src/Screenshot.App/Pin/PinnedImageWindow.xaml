@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:editor="clr-namespace:Screenshot.App.Editor"
         mc:Ignorable="d"
         Title="钉图"
         MinWidth="260"
@@ -159,6 +160,23 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="PinnedCropHandle" TargetType="Thumb">
+            <Setter Property="Width" Value="12" />
+            <Setter Property="Height" Value="12" />
+            <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Panel.ZIndex" Value="30" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{DynamicResource ImageEditorSliderThumbBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="3" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         </ResourceDictionary>
     </Window.Resources>
     <Border x:Name="PinnedShell"
@@ -171,6 +189,18 @@
             <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
                 <MenuItem Click="OnOpenSettingsClick"
                           Header="打开设置"
+                          Style="{StaticResource ThemedMenuItemStyle}" />
+                <Separator />
+                <MenuItem x:Name="RestoreMenuItem"
+                          Click="OnRestoreClick"
+                          Header="重启后恢复此钉图"
+                          Style="{StaticResource ThemedMenuItemStyle}" />
+                <MenuItem x:Name="GroupMenuItem"
+                          Click="OnGroupClick"
+                          Header="加入钉图编组"
+                          Style="{StaticResource ThemedMenuItemStyle}" />
+                <MenuItem Click="OnHideAllClick"
+                          Header="隐藏全部钉图"
                           Style="{StaticResource ThemedMenuItemStyle}" />
                 <MenuItem Click="OnCloseFromContextMenuClick"
                           Header="关闭钉图"
@@ -203,6 +233,23 @@
                                 Margin="0,0,4,0"
                                 VerticalAlignment="Center"
                                 Orientation="Horizontal">
+                        <Button x:Name="CropButton"
+                                Click="OnCropClick"
+                                Style="{StaticResource PinnedCloseButton}"
+                                ToolTip="框选裁剪">
+                            <TextBlock FontFamily="Segoe MDL2 Assets"
+                                       FontSize="14"
+                                       Text="&#xE7A8;" />
+                        </Button>
+                        <Button x:Name="EditButton"
+                                Margin="3,0,5,0"
+                                Click="OnEditClick"
+                                Style="{StaticResource PinnedCloseButton}"
+                                ToolTip="标注编辑">
+                            <TextBlock FontFamily="Segoe MDL2 Assets"
+                                       FontSize="14"
+                                       Text="&#xE70F;" />
+                        </Button>
                         <Button Click="OnCopyClick"
                                 Content="复制"
                                 Style="{StaticResource PinnedCommandButton}"
@@ -244,6 +291,7 @@
                     CornerRadius="0,0,7,7"
                     Cursor="SizeAll"
                     ClipToBounds="True"
+                    PreviewMouseWheel="OnImageMouseWheel"
                     MouseLeftButtonDown="OnImageMouseLeftButtonDown">
                 <Grid x:Name="ImageViewport"
                       SizeChanged="OnImageViewportSizeChanged">
@@ -251,39 +299,80 @@
                            Source="{Binding Preview}"
                            Stretch="Uniform" />
                     <Canvas x:Name="TextOverlay"
-                            Background="Transparent" />
+                            Panel.ZIndex="20"
+                            Background="{x:Null}" />
+                    <Grid x:Name="InlineEditorViewport"
+                          Panel.ZIndex="10"
+                          Background="{DynamicResource ImageEditorViewportBackgroundBrush}"
+                          Visibility="Collapsed">
+                        <Border x:Name="InlineEditorFrame"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Background="{DynamicResource ImageEditorViewportBackgroundBrush}"
+                                ClipToBounds="True">
+                            <editor:ImageEditorCanvas x:Name="InlineEditorCanvas"
+                                                      HorizontalAlignment="Left"
+                                                      VerticalAlignment="Top" />
+                        </Border>
+                    </Grid>
+                    <Canvas x:Name="CropOverlay"
+                            Panel.ZIndex="40"
+                            Visibility="Collapsed"
+                            Background="Transparent"
+                            Cursor="Cross"
+                            MouseLeftButtonDown="OnCropMouseLeftButtonDown"
+                            MouseLeftButtonUp="OnCropMouseLeftButtonUp"
+                            MouseMove="OnCropMouseMove">
+                        <Path x:Name="CropMask" Fill="#99000000" IsHitTestVisible="False" />
+                        <Rectangle x:Name="CropSelection"
+                                   Fill="Transparent"
+                                   Stroke="{DynamicResource AppAccentBrush}"
+                                   StrokeDashArray="5,3"
+                                   StrokeThickness="2"
+                                   IsHitTestVisible="False" />
+                        <Thumb x:Name="CropMoveThumb" Tag="Move" Opacity="0" Cursor="SizeAll" DragDelta="OnCropHandleDragDelta" />
+                        <Thumb x:Name="CropTopLeftThumb" Tag="TopLeft" Cursor="SizeNWSE" Style="{StaticResource PinnedCropHandle}" DragDelta="OnCropHandleDragDelta" />
+                        <Thumb x:Name="CropTopRightThumb" Tag="TopRight" Cursor="SizeNESW" Style="{StaticResource PinnedCropHandle}" DragDelta="OnCropHandleDragDelta" />
+                        <Thumb x:Name="CropBottomLeftThumb" Tag="BottomLeft" Cursor="SizeNESW" Style="{StaticResource PinnedCropHandle}" DragDelta="OnCropHandleDragDelta" />
+                        <Thumb x:Name="CropBottomRightThumb" Tag="BottomRight" Cursor="SizeNWSE" Style="{StaticResource PinnedCropHandle}" DragDelta="OnCropHandleDragDelta" />
+                    </Canvas>
                 </Grid>
             </Border>
 
-            <Thumb Grid.Row="1"
+            <Thumb x:Name="WindowResizeLeftThumb"
+                   Grid.Row="1"
                    Width="8"
                    HorizontalAlignment="Left"
                    Cursor="SizeWE"
                    DragDelta="OnResizeEdgeDragDelta"
                    Style="{StaticResource InvisibleResizeThumb}"
                    Tag="Left" />
-            <Thumb Grid.Row="1"
+            <Thumb x:Name="WindowResizeRightThumb"
+                   Grid.Row="1"
                    Width="8"
                    HorizontalAlignment="Right"
                    Cursor="SizeWE"
                    DragDelta="OnResizeEdgeDragDelta"
                    Style="{StaticResource InvisibleResizeThumb}"
                    Tag="Right" />
-            <Thumb Grid.Row="1"
+            <Thumb x:Name="WindowResizeTopThumb"
+                   Grid.Row="1"
                    Height="8"
                    VerticalAlignment="Top"
                    Cursor="SizeNS"
                    DragDelta="OnResizeEdgeDragDelta"
                    Style="{StaticResource InvisibleResizeThumb}"
                    Tag="Top" />
-            <Thumb Grid.Row="1"
+            <Thumb x:Name="WindowResizeBottomThumb"
+                   Grid.Row="1"
                    Height="8"
                    VerticalAlignment="Bottom"
                    Cursor="SizeNS"
                    DragDelta="OnResizeEdgeDragDelta"
                    Style="{StaticResource InvisibleResizeThumb}"
                    Tag="Bottom" />
-            <Thumb Grid.Row="1"
+            <Thumb x:Name="WindowResizeTopLeftThumb"
+                   Grid.Row="1"
                    Width="14"
                    Height="14"
                    HorizontalAlignment="Left"
@@ -292,7 +381,8 @@
                    DragDelta="OnResizeEdgeDragDelta"
                    Style="{StaticResource InvisibleResizeThumb}"
                    Tag="TopLeft" />
-            <Thumb Grid.Row="1"
+            <Thumb x:Name="WindowResizeTopRightThumb"
+                   Grid.Row="1"
                    Width="14"
                    Height="14"
                    HorizontalAlignment="Right"
@@ -301,7 +391,8 @@
                    DragDelta="OnResizeEdgeDragDelta"
                    Style="{StaticResource InvisibleResizeThumb}"
                    Tag="TopRight" />
-            <Thumb Grid.Row="1"
+            <Thumb x:Name="WindowResizeBottomLeftThumb"
+                   Grid.Row="1"
                    Width="14"
                    Height="14"
                    HorizontalAlignment="Left"
@@ -310,7 +401,8 @@
                    DragDelta="OnResizeEdgeDragDelta"
                    Style="{StaticResource InvisibleResizeThumb}"
                    Tag="BottomLeft" />
-            <Thumb Grid.Row="1"
+            <Thumb x:Name="WindowResizeBottomRightThumb"
+                   Grid.Row="1"
                    Width="14"
                    Height="14"
                    HorizontalAlignment="Right"

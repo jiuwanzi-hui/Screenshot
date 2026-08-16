@@ -9,6 +9,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Screenshot.App.Core;
+using Screenshot.App.Infrastructure;
 using DrawingRectangle = System.Drawing.Rectangle;
 using WinForms = System.Windows.Forms;
 
@@ -30,7 +31,7 @@ public partial class VideoRecordingControlWindow : Window
 {
     private static WeakReference<VideoRecordingControlWindow>? _activeWindow;
     private const int TopmostWindow = -1;
-    private const double ActiveControlWidth = 176;
+    private const double ActiveControlWidth = 216;
     private const double RecordingIdleOpacity = 0.62;
     private const double PausedIdleOpacity = 0.86;
     private const uint DoNotResize = 0x0001;
@@ -56,6 +57,8 @@ public partial class VideoRecordingControlWindow : Window
     private bool _allowClose;
     private bool _isCompleting;
     private bool _isInitializingOptions = true;
+    private bool _hasSavedWindowPlacement;
+    private Action _resetWindowPlacement = static () => { };
     private int _feedbackVersion;
 
     private VideoRecordingControlWindow(
@@ -67,6 +70,7 @@ public partial class VideoRecordingControlWindow : Window
         int frameRate,
         bool showKeyboardInput,
         bool showMouseInput,
+        VideoRecordingOutputFormat outputFormat,
         Action<VideoRecordingPreferences>? recordingPreferencesChanged)
     {
         _saveDirectory = saveDirectory;
@@ -77,7 +81,8 @@ public partial class VideoRecordingControlWindow : Window
             recordSystemAudio,
             recordMicrophone,
             showKeyboardInput,
-            showMouseInput);
+            showMouseInput,
+            outputFormat);
         _recorder = new RegionVideoRecorder(
             recordingRegion,
             saveDirectory,
@@ -93,7 +98,13 @@ public partial class VideoRecordingControlWindow : Window
         _elapsedTimer.Tick += OnElapsedTimerTick;
         _recorder.Failed += OnRecorderFailed;
         InitializeComponent();
-        CodecComboBox.SelectedValue = codec.ToString();
+        _hasSavedWindowPlacement = WindowPlacementService.TrackPosition(
+            this,
+            WindowPlacementKeys.VideoRecordingControls,
+            out _resetWindowPlacement);
+        CodecComboBox.SelectedValue = outputFormat == VideoRecordingOutputFormat.Gif
+            ? "Gif"
+            : codec.ToString();
         FrameRateComboBox.SelectedValue =
             RegionVideoRecorder.NormalizeFrameRate(frameRate).ToString(
                 CultureInfo.InvariantCulture);
@@ -102,6 +113,7 @@ public partial class VideoRecordingControlWindow : Window
         InputDisplayModeComboBox.SelectedValue = ResolveInputDisplayMode(
             showKeyboardInput,
             showMouseInput).ToString();
+        UpdateFormatDependentControls();
         _isInitializingOptions = false;
         SourceInitialized += OnSourceInitialized;
     }
@@ -115,6 +127,7 @@ public partial class VideoRecordingControlWindow : Window
         int frameRate,
         bool showKeyboardInput,
         bool showMouseInput,
+        VideoRecordingOutputFormat outputFormat = VideoRecordingOutputFormat.Mp4,
         Action<VideoRecordingPreferences>? recordingPreferencesChanged = null)
     {
         var window = new VideoRecordingControlWindow(
@@ -126,6 +139,7 @@ public partial class VideoRecordingControlWindow : Window
             frameRate,
             showKeyboardInput,
             showMouseInput,
+            outputFormat,
             recordingPreferencesChanged);
         window._frameWindow.Show();
         window.Show();
@@ -174,7 +188,11 @@ public partial class VideoRecordingControlWindow : Window
     {
         var handle = new WindowInteropHelper(this).Handle;
         _ = NativeMethods.SetWindowDisplayAffinity(handle, ExcludeFromCapture);
-        PositionOutsideRecordingRegion(handle);
+        if (!_hasSavedWindowPlacement)
+        {
+            _resetWindowPlacement();
+            PositionOutsideRecordingRegion(handle);
+        }
     }
 
     private void PositionOutsideRecordingRegion(IntPtr handle)
@@ -193,6 +211,27 @@ public partial class VideoRecordingControlWindow : Window
             region.Width,
             region.Height);
         var workArea = WinForms.Screen.FromRectangle(reference).WorkingArea;
+        var destination = CalculateAutomaticControlBounds(
+            region,
+            workArea,
+            width,
+            height);
+        _ = NativeMethods.SetWindowPos(
+            handle,
+            new IntPtr(TopmostWindow),
+            destination.X,
+            destination.Y,
+            0,
+            0,
+            DoNotResize | DoNotActivate | DoNotChangeOwnerZOrder);
+    }
+
+    internal static DrawingRectangle CalculateAutomaticControlBounds(
+        ScreenRegion region,
+        DrawingRectangle workArea,
+        int width,
+        int height)
+    {
         var centeredX = region.X + ((region.Width - width) / 2);
         var centeredY = region.Y + ((region.Height - height) / 2);
         var candidates = new[]
@@ -234,14 +273,7 @@ public partial class VideoRecordingControlWindow : Window
                 height);
         }
 
-        _ = NativeMethods.SetWindowPos(
-            handle,
-            new IntPtr(TopmostWindow),
-            destination.X,
-            destination.Y,
-            0,
-            0,
-            DoNotResize | DoNotActivate | DoNotChangeOwnerZOrder);
+        return destination;
     }
 
     private void OnStartClick(object sender, RoutedEventArgs e)
@@ -271,7 +303,15 @@ public partial class VideoRecordingControlWindow : Window
             PauseButton.ToolTip = "暂停录制";
             StopButton.ToolTip = "结束并保存";
             StopIcon.Data = (Geometry)FindResource("StopIconGeometry");
+            FinishAndEditButton.Visibility = Visibility.Visible;
+            FinishAndEditButton.IsEnabled = true;
             Width = ActiveControlWidth;
+            if (!_hasSavedWindowPlacement)
+            {
+                _ = Dispatcher.BeginInvoke(
+                    DispatcherPriority.Loaded,
+                    RepositionAutomaticControl);
+            }
             UpdateLowProfileOpacity();
         }
         catch (Exception exception)
@@ -325,16 +365,24 @@ public partial class VideoRecordingControlWindow : Window
             return;
         }
 
+        UpdateFormatDependentControls();
         _recordingPreferencesChanged?.Invoke(GetRecordingPreferences());
     }
 
     private VideoRecordingPreferences GetRecordingPreferences()
     {
-        var codec = Enum.TryParse<VideoRecordingCodec>(
-            CodecComboBox.SelectedValue as string,
-            ignoreCase: true,
-            out var parsedCodec)
-            ? parsedCodec
+        var formatValue = CodecComboBox.SelectedValue as string;
+        var outputFormat = string.Equals(
+            formatValue,
+            "Gif",
+            StringComparison.OrdinalIgnoreCase)
+            ? VideoRecordingOutputFormat.Gif
+            : VideoRecordingOutputFormat.Mp4;
+        var codec = string.Equals(
+            formatValue,
+            nameof(VideoRecordingCodec.H265),
+            StringComparison.OrdinalIgnoreCase)
+            ? VideoRecordingCodec.H265
             : VideoRecordingCodec.H264;
         var frameRate = int.TryParse(
             FrameRateComboBox.SelectedValue as string,
@@ -355,7 +403,24 @@ public partial class VideoRecordingControlWindow : Window
             SystemAudioCheckBox.IsChecked == true,
             MicrophoneCheckBox.IsChecked == true,
             ShowsKeyboardInput(inputDisplayMode),
-            ShowsMouseInput(inputDisplayMode));
+            ShowsMouseInput(inputDisplayMode),
+            outputFormat);
+    }
+
+    private void UpdateFormatDependentControls()
+    {
+        var isGif = string.Equals(
+            CodecComboBox.SelectedValue as string,
+            "Gif",
+            StringComparison.OrdinalIgnoreCase);
+        SystemAudioCheckBox.IsEnabled = !isGif;
+        MicrophoneCheckBox.IsEnabled = !isGif;
+        SystemAudioCheckBox.ToolTip = isGif
+            ? "GIF 不包含声音；切换回 MP4 后保留原选择"
+            : "录制电脑正在播放的声音";
+        MicrophoneCheckBox.ToolTip = isGif
+            ? "GIF 不包含声音；切换回 MP4 后保留原选择"
+            : "录制系统默认麦克风";
     }
 
     internal static RecordingInputDisplayMode ResolveInputDisplayMode(
@@ -408,10 +473,15 @@ public partial class VideoRecordingControlWindow : Window
             return;
         }
 
-        await StopAndCloseAsync();
+        await StopAndCloseAsync(openEditor: false);
     }
 
-    private async Task StopAndCloseAsync()
+    private async void OnFinishAndEditClick(object sender, RoutedEventArgs e)
+    {
+        await StopAndCloseAsync(openEditor: true);
+    }
+
+    private async Task StopAndCloseAsync(bool openEditor = false)
     {
         if (_isCompleting)
         {
@@ -422,6 +492,7 @@ public partial class VideoRecordingControlWindow : Window
         StartButton.IsEnabled = false;
         PauseButton.IsEnabled = false;
         StopButton.IsEnabled = false;
+        FinishAndEditButton.IsEnabled = false;
         _elapsed.Stop();
         _elapsedTimer.Stop();
         DisposeInputFeedback();
@@ -440,7 +511,7 @@ public partial class VideoRecordingControlWindow : Window
         RecordingStatusText.Text = SuccessfulCompletionMessage;
         RecordingStatusText.ToolTip = result.FilePath;
         await Task.Delay(SuccessfulCompletionHoldDuration);
-        CloseWithResult(result);
+        CloseWithResult(result with { OpenEditor = openEditor });
     }
 
     private void OnRecorderFailed(string errorMessage)
@@ -465,6 +536,7 @@ public partial class VideoRecordingControlWindow : Window
         StartButton.IsEnabled = false;
         PauseButton.IsEnabled = false;
         StopButton.IsEnabled = false;
+        FinishAndEditButton.IsEnabled = false;
         RecordingStatusText.Text = "录制失败";
         EnterCompletionUi();
         RecordingStatusText.ToolTip = errorMessage;
@@ -488,7 +560,56 @@ public partial class VideoRecordingControlWindow : Window
             e.Source is not System.Windows.Controls.Primitives.ButtonBase &&
             e.Source is not System.Windows.Controls.ComboBox)
         {
+            if (e.ClickCount >= 2)
+            {
+                ResetControlPosition();
+                e.Handled = true;
+                return;
+            }
+
+            EnsureManualPositionTracking();
             DragMove();
+        }
+    }
+
+    private void EnsureManualPositionTracking()
+    {
+        if (_hasSavedWindowPlacement)
+        {
+            return;
+        }
+
+        _hasSavedWindowPlacement = WindowPlacementService.TrackPosition(
+            this,
+            WindowPlacementKeys.VideoRecordingControls,
+            out _resetWindowPlacement);
+        // A missing stored position is expected here. Tracking is active now,
+        // and the drag immediately below will save the user's coordinates.
+        _hasSavedWindowPlacement = true;
+    }
+
+    private void ResetControlPosition()
+    {
+        _resetWindowPlacement();
+        _hasSavedWindowPlacement = false;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero)
+        {
+            PositionOutsideRecordingRegion(handle);
+        }
+    }
+
+    private void RepositionAutomaticControl()
+    {
+        if (_hasSavedWindowPlacement)
+        {
+            return;
+        }
+
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero)
+        {
+            PositionOutsideRecordingRegion(handle);
         }
     }
 
@@ -528,6 +649,7 @@ public partial class VideoRecordingControlWindow : Window
         StartButton.Visibility = Visibility.Collapsed;
         PauseButton.Visibility = Visibility.Collapsed;
         StopButton.Visibility = Visibility.Collapsed;
+        FinishAndEditButton.Visibility = Visibility.Collapsed;
         System.Windows.Controls.Grid.SetColumnSpan(RecordingStatusPanel, 3);
         Opacity = 1;
     }

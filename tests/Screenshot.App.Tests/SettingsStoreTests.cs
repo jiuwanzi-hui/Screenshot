@@ -32,6 +32,8 @@ public sealed class SettingsStoreTests : IDisposable
             RecordMicrophone = true,
             VideoRecordingCodec = VideoRecordingCodec.H265,
             VideoRecordingFrameRate = 60,
+            CaptureToolbarPositionXRatio = 0.2,
+            CaptureToolbarPositionYRatio = 0.75,
             VideoRecordingHotKey = "Ctrl+Alt+R",
             TextTranslationHotKey = "Ctrl+Alt+T",
             ShowKeyboardInputInRecording = true,
@@ -89,6 +91,8 @@ public sealed class SettingsStoreTests : IDisposable
             VideoRecordingCodec.H265,
             loadResult.Settings.VideoRecordingCodec);
         Assert.Equal(60, loadResult.Settings.VideoRecordingFrameRate);
+        Assert.Equal(0.2, loadResult.Settings.CaptureToolbarPositionXRatio);
+        Assert.Equal(0.75, loadResult.Settings.CaptureToolbarPositionYRatio);
         Assert.Equal("Ctrl+Alt+R", loadResult.Settings.VideoRecordingHotKey);
         Assert.Equal("Ctrl+Alt+T", loadResult.Settings.TextTranslationHotKey);
         Assert.True(loadResult.Settings.ShowKeyboardInputInRecording);
@@ -168,7 +172,7 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(
             FloatingCaptureClickBehavior.ShowSelection,
             loadResult.Settings.FloatingCaptureClickBehavior);
-        Assert.Equal(7, loadResult.Settings.SettingsVersion);
+        Assert.Equal(8, loadResult.Settings.SettingsVersion);
         Assert.Equal(
             Enum.GetValues<CaptureToolbarFeature>(),
             loadResult.Settings.VisibleCaptureToolbarFeatures);
@@ -200,6 +204,19 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void InvalidCaptureToolbarPositionReturnsToAutomaticPlacement()
+    {
+        var normalized = (AppSettings.CreateDefault() with
+        {
+            CaptureToolbarPositionXRatio = 0.4,
+            CaptureToolbarPositionYRatio = 2,
+        }).Normalize();
+
+        Assert.Equal(-1, normalized.CaptureToolbarPositionXRatio);
+        Assert.Equal(-1, normalized.CaptureToolbarPositionYRatio);
+    }
+
+    [Fact]
     public void LegacyToolbarSplitsCopyTextFromVisibleTextRecognition()
     {
         var normalized = (AppSettings.CreateDefault() with
@@ -212,13 +229,14 @@ public sealed class SettingsStoreTests : IDisposable
             ],
         }).Normalize();
 
-        Assert.Equal(7, normalized.SettingsVersion);
+        Assert.Equal(8, normalized.SettingsVersion);
         Assert.Equal(
             [
                 CaptureToolbarFeature.TextRecognition,
                 CaptureToolbarFeature.Translation,
                 CaptureToolbarFeature.CopyRecognizedText,
                 CaptureToolbarFeature.Number,
+                CaptureToolbarFeature.PrivacyRedaction,
             ],
             normalized.VisibleCaptureToolbarFeatures);
     }
@@ -233,12 +251,16 @@ public sealed class SettingsStoreTests : IDisposable
         }).Normalize();
 
         Assert.Equal(
-            [CaptureToolbarFeature.Save, CaptureToolbarFeature.Number],
+            [
+                CaptureToolbarFeature.Save,
+                CaptureToolbarFeature.Number,
+                CaptureToolbarFeature.PrivacyRedaction,
+            ],
             normalized.VisibleCaptureToolbarFeatures);
     }
 
     [Fact]
-    public void UpgradeEnablesNumberToolOnceAndPreservesLaterOptOut()
+    public void UpgradeEnablesNewToolsOnceAndPreservesLaterOptOut()
     {
         var upgraded = (AppSettings.CreateDefault() with
         {
@@ -246,9 +268,13 @@ public sealed class SettingsStoreTests : IDisposable
             VisibleCaptureToolbarFeatures = [CaptureToolbarFeature.Save],
         }).Normalize();
 
-        Assert.Equal(7, upgraded.SettingsVersion);
+        Assert.Equal(8, upgraded.SettingsVersion);
         Assert.Equal(
-            [CaptureToolbarFeature.Save, CaptureToolbarFeature.Number],
+            [
+                CaptureToolbarFeature.Save,
+                CaptureToolbarFeature.Number,
+                CaptureToolbarFeature.PrivacyRedaction,
+            ],
             upgraded.VisibleCaptureToolbarFeatures);
 
         var optedOut = (upgraded with

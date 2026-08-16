@@ -523,14 +523,17 @@
 
             <Border x:Name="InlineCustomColorPanel"
                     Width="272"
-                    Padding="10"
+                    Padding="0"
                     Panel.ZIndex="150"
-                    Background="{DynamicResource ImageEditorToolbarBackgroundBrush}"
-                    BorderBrush="{DynamicResource AppBorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="6"
+                    Background="Transparent"
+                    BorderThickness="0"
                     Visibility="Collapsed">
-                <StackPanel>
+                <Grid>
+                <editor:SharedColorPickerControl x:Name="InlineSharedColorPicker"
+                                                 ColorCommitted="OnSharedColorCommitted"
+                                                 PaletteChanged="OnSharedPaletteChanged"
+                                                 CloseRequested="OnSharedColorPickerCloseRequested" />
+                <StackPanel Visibility="Collapsed">
                     <TextBlock FontSize="13"
                                FontWeight="SemiBold"
                                Foreground="{DynamicResource AppControlForegroundBrush}"
@@ -640,6 +643,7 @@
                                  KeyDown="OnInlineColorHexTextBoxKeyDown" />
                     </Grid>
                 </StackPanel>
+                </Grid>
             </Border>
 
             <Border x:Name="SelectionMessageToast"
@@ -779,6 +783,29 @@
                     Visibility="Collapsed">
                 <StackPanel>
                     <StackPanel x:Name="InlineEditorTools" Orientation="Horizontal">
+                        <Thumb x:Name="CaptureToolbarDragHandle"
+                               Width="18"
+                               Height="30"
+                               Margin="-7,0,5,0"
+                               Cursor="SizeAll"
+                               DragDelta="OnCaptureToolbarDragDelta"
+                               DragCompleted="OnCaptureToolbarDragCompleted"
+                               MouseDoubleClick="OnCaptureToolbarDragHandleDoubleClick"
+                               ToolTip="拖动调整工具栏位置；双击恢复自动位置">
+                            <Thumb.Template>
+                                <ControlTemplate TargetType="Thumb">
+                                    <Border Background="Transparent"
+                                            CornerRadius="4">
+                                        <TextBlock HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"
+                                                   FontFamily="Segoe MDL2 Assets"
+                                                   FontSize="13"
+                                                   Foreground="{DynamicResource ImageEditorMutedTextBrush}"
+                                                   Text="&#xE712;" />
+                                    </Border>
+                                </ControlTemplate>
+                            </Thumb.Template>
+                        </Thumb>
                         <RadioButton x:Name="InlineShapeToolButton"
                                      GroupName="InlineEditorTool"
                                      Checked="OnInlineEditorToolSelected"
@@ -977,6 +1004,16 @@
                                        FontSize="14"
                                        FontWeight="SemiBold"
                                        Text="译" />
+                        </Button>
+                        <Button x:Name="PrivacyRedactionButton"
+                                Click="OnPrivacyRedactionClick"
+                                Style="{StaticResource InlineActionButton}"
+                                ToolTip="识别敏感信息，确认后批量打码">
+                            <TextBlock Foreground="{DynamicResource EditorToolbarIconBrush}"
+                                       FontFamily="Microsoft YaHei UI"
+                                       FontSize="14"
+                                       FontWeight="SemiBold"
+                                       Text="隐" />
                         </Button>
                         <Button x:Name="PinButton"
                                 Click="OnPinClick"

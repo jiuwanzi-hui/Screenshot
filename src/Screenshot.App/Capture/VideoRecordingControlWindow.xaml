@@ -1,7 +1,7 @@
 <Window x:Class="Screenshot.App.Capture.VideoRecordingControlWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Width="626"
+        Width="668"
         Height="54"
         AllowsTransparency="True"
         Background="Transparent"
@@ -66,6 +66,8 @@
             BorderBrush="{DynamicResource AppBorderBrush}"
             BorderThickness="1"
             CornerRadius="7"
+            Cursor="SizeAll"
+            ToolTip="拖动调整位置；双击恢复自动位置"
             MouseLeftButtonDown="OnControlSurfaceMouseLeftButtonDown">
         <Border.Effect>
             <DropShadowEffect BlurRadius="15"
@@ -103,7 +105,7 @@
                         VerticalAlignment="Center"
                         Orientation="Horizontal">
                 <ComboBox x:Name="CodecComboBox"
-                          Width="104"
+                          Width="118"
                           Height="28"
                           Padding="6,1"
                           Margin="0,0,5,0"
@@ -113,6 +115,7 @@
                           ToolTip="视频格式与编码">
                     <ComboBoxItem Content="MP4 · H.264" Tag="H264" />
                     <ComboBoxItem Content="MP4 · H.265" Tag="H265" />
+                    <ComboBoxItem Content="GIF（无声音）" Tag="Gif" />
                 </ComboBox>
                 <ComboBox x:Name="FrameRateComboBox"
                           Width="66"
@@ -202,6 +205,17 @@
                           StrokeLineJoin="Round"
                           StrokeThickness="1.8"
                           Stretch="Uniform" />
+                </Button>
+                <Button x:Name="FinishAndEditButton"
+                        Click="OnFinishAndEditClick"
+                        IsEnabled="False"
+                        Visibility="Collapsed"
+                        Style="{StaticResource RecordingControlButton}"
+                        ToolTip="结束录制并打开裁剪与导出">
+                    <TextBlock FontFamily="Segoe MDL2 Assets"
+                               FontSize="15"
+                               Foreground="{DynamicResource EditorToolbarIconBrush}"
+                               Text="&#xE70F;" />
                 </Button>
             </StackPanel>
         </Grid>

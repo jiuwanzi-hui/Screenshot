@@ -63,6 +63,35 @@ public sealed class TrayIconServiceTests
         Assert.True(requested);
     }
 
+    [Fact]
+    public void PinnedImageCommandsMatchCurrentVisibilityState()
+    {
+        using var tray = new TrayIconService(AppTheme.AuroraMist);
+        var items = tray.ContextMenuForTesting.Items
+            .OfType<System.Windows.Forms.ToolStripMenuItem>()
+            .ToArray();
+        var hide = Assert.Single(items.Where(item => item.Text == "隐藏所有钉图"));
+        var show = Assert.Single(items.Where(item => item.Text == "显示所有钉图"));
+
+        tray.UpdatePinnedImageCommands(
+            hasPinnedImages: false,
+            hasHiddenPinnedImages: false);
+        Assert.False(hide.Available);
+        Assert.False(show.Available);
+
+        tray.UpdatePinnedImageCommands(
+            hasPinnedImages: true,
+            hasHiddenPinnedImages: false);
+        Assert.True(hide.Available);
+        Assert.False(show.Available);
+
+        tray.UpdatePinnedImageCommands(
+            hasPinnedImages: true,
+            hasHiddenPinnedImages: true);
+        Assert.False(hide.Available);
+        Assert.True(show.Available);
+    }
+
     private static double GetContrastRatio(
         System.Drawing.Color foreground,
         System.Drawing.Color background)
