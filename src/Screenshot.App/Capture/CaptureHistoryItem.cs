@@ -4,7 +4,7 @@ using System.Windows.Media.Imaging;
 namespace Screenshot.App.Capture;
 
 /// <summary>
-/// One session-history entry. Only the small detached thumbnail stays in
+/// One screenshot-history entry. Only the small detached thumbnail stays in
 /// memory: the full image is offloaded to a PNG in the history cache
 /// directory as soon as the background encode finishes, because holding a
 /// full-resolution bitmap per entry kept hundreds of megabytes resident in
@@ -22,10 +22,26 @@ public sealed class CaptureHistoryItem
         BitmapSource fullImage,
         DateTimeOffset capturedAt,
         int pixelWidth,
-        int pixelHeight)
+        int pixelHeight,
+        string? imagePath = null)
     {
         Thumbnail = thumbnail;
         _pendingImage = fullImage;
+        _imagePath = imagePath;
+        CapturedAt = capturedAt;
+        PixelWidth = pixelWidth;
+        PixelHeight = pixelHeight;
+    }
+
+    internal CaptureHistoryItem(
+        BitmapSource thumbnail,
+        string imagePath,
+        DateTimeOffset capturedAt,
+        int pixelWidth,
+        int pixelHeight)
+    {
+        Thumbnail = thumbnail;
+        _imagePath = imagePath;
         CapturedAt = capturedAt;
         PixelWidth = pixelWidth;
         PixelHeight = pixelHeight;
@@ -42,6 +58,17 @@ public sealed class CaptureHistoryItem
     public bool IsCopied { get; private set; }
 
     public string? SavedPath { get; private set; }
+
+    internal string? ImagePath
+    {
+        get
+        {
+            lock (_imageSync)
+            {
+                return _imagePath;
+            }
+        }
+    }
 
     public void MarkCopied()
     {

@@ -771,27 +771,9 @@
                     <TextBlock Style="{StaticResource GeneralGroupTitle}"
                                Text="截图工具栏" />
                     <TextBlock Style="{StaticResource GeneralGroupDescription}"
-                               Text="选择框选完成后显示的功能；取消和完成始终保留" />
-                    <ItemsControl Margin="0,12,0,0"
-                                  ItemsSource="{Binding CaptureToolbarFeatureItems}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <UniformGrid Columns="3" />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <CheckBox MinHeight="30"
-                                          Margin="0,3,12,3"
-                                          FontSize="13"
-                                          Foreground="{DynamicResource AppTextPrimaryBrush}"
-                                          IsChecked="{Binding IsVisible, UpdateSourceTrigger=PropertyChanged}"
-                                          Checked="OnImmediateSettingChanged"
-                                          Unchecked="OnImmediateSettingChanged"
-                                          Content="{Binding Label}" />
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
+                               Text="长按功能按钮可拖拽；配置普通截图与钉图共用的工具顺序、显隐和行数" />
+                    <local:CaptureToolbarLayoutEditor Margin="0,12,0,0"
+                                                      LayoutChanged="OnCaptureToolbarLayoutChanged" />
                 </StackPanel>
 
                 <Border Style="{StaticResource GeneralGroupSeparator}" />
@@ -942,7 +924,7 @@
                     <TextBlock Style="{StaticResource GeneralGroupTitle}"
                                Text="截图记录" />
                     <TextBlock Style="{StaticResource GeneralGroupDescription}"
-                               Text="本次运行的历史保留方式" />
+                               Text="可选择只保留本次运行，或跨重启保留最近 100 张" />
                     <CheckBox MinHeight="30"
                               Margin="0,14,0,0"
                               FontSize="14"
@@ -950,7 +932,16 @@
                               IsChecked="{Binding KeepHistory}"
                               Checked="OnImmediateSettingChanged"
                               Unchecked="OnImmediateSettingChanged"
-                              Content="保留本次运行的截图历史" />
+                              Content="保留截图历史" />
+                    <CheckBox MinHeight="30"
+                              Margin="0,6,0,0"
+                              FontSize="14"
+                              Foreground="{DynamicResource AppTextPrimaryBrush}"
+                              IsChecked="{Binding PersistHistoryAcrossRestarts}"
+                              IsEnabled="{Binding KeepHistory}"
+                              Checked="OnImmediateSettingChanged"
+                              Unchecked="OnImmediateSettingChanged"
+                              Content="重启后继续保留（最多 100 张）" />
                 </StackPanel>
               </StackPanel>
             </ScrollViewer>
@@ -2153,11 +2144,47 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <TextBlock Grid.Row="2"
-                       VerticalAlignment="Center"
-                       Foreground="{DynamicResource AppTextSecondaryBrush}"
-                       Text="{Binding StatusMessage}"
-                       TextTrimming="CharacterEllipsis" />
+            <Border Grid.Row="2"
+                    Margin="0,12,16,0"
+                    Padding="0"
+                    Background="{DynamicResource AppPanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    ToolTip="{Binding StatusMessage}">
+                <Grid MinHeight="38">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="3" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Background="{DynamicResource AppAccentBrush}"
+                            CornerRadius="5,0,0,5" />
+                    <TextBlock Grid.Column="1"
+                               Margin="11,0,0,0"
+                               VerticalAlignment="Center"
+                               FontFamily="Segoe MDL2 Assets"
+                               FontSize="14"
+                               Foreground="{DynamicResource AppAccentForegroundBrush}"
+                               Text="&#xE946;" />
+                    <TextBlock Grid.Column="2"
+                               Margin="7,0,0,0"
+                               VerticalAlignment="Center"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="日志输出" />
+                    <TextBlock Grid.Column="3"
+                               Margin="12,0,12,0"
+                               VerticalAlignment="Center"
+                               FontSize="12"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               Text="{Binding StatusMessage}"
+                               TextTrimming="CharacterEllipsis" />
+                </Grid>
+            </Border>
         </Grid>
       </Grid>
     </Border>

@@ -80,4 +80,16 @@ public sealed class SettingsValidationTests
             OfflineTranslationEngine.Mozilla,
             normalized.OfflineTranslationEngine);
     }
+
+    [Fact]
+    public void PersistentHistoryRequiresScreenshotHistoryToBeEnabled()
+    {
+        var normalized = (AppSettings.CreateDefault() with
+        {
+            KeepHistory = false,
+            PersistHistoryAcrossRestarts = true,
+        }).Normalize();
+
+        Assert.False(normalized.PersistHistoryAcrossRestarts);
+    }
 }

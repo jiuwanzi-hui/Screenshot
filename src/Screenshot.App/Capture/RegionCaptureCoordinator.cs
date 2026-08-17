@@ -319,6 +319,9 @@ public sealed class RegionCaptureCoordinator
                     ArrowStyle = settings.ArrowStyle,
                     VisibleToolbarFeatures =
                         settings.VisibleCaptureToolbarFeatures.ToArray(),
+                    ToolbarFeatureOrder =
+                        settings.CaptureToolbarFeatureOrder.ToArray(),
+                    ToolbarRows = settings.CaptureToolbarRows,
                     ArrowStyleChanged = _arrowStyleChanged,
                     CustomStrokeColor = settings.CustomStrokeColor,
                     CustomStrokeColorChanged = _customStrokeColorChanged,

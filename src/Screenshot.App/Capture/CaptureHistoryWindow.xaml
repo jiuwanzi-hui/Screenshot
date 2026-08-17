@@ -185,7 +185,8 @@
                                 Click="OnClearScreenshotHistoryClick"
                                 Content="全部清空"
                                 Style="{StaticResource HistoryDeleteButton}" />
-                        <TextBlock VerticalAlignment="Center"
+                        <TextBlock x:Name="ScreenshotHistoryScopeText"
+                                   VerticalAlignment="Center"
                                    Foreground="{DynamicResource AppTextSecondaryBrush}"
                                    Text="本次运行" />
                     </DockPanel>

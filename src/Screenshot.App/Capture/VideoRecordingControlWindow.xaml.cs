@@ -8,8 +8,11 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Microsoft.Win32;
 using Screenshot.App.Core;
 using Screenshot.App.Infrastructure;
+using Screenshot.App.Presentation;
+using DrawingPoint = System.Drawing.Point;
 using DrawingRectangle = System.Drawing.Rectangle;
 using WinForms = System.Windows.Forms;
 
@@ -35,9 +38,9 @@ public partial class VideoRecordingControlWindow : Window
     private const double RecordingIdleOpacity = 0.62;
     private const double PausedIdleOpacity = 0.86;
     private const uint DoNotResize = 0x0001;
+    private const uint DoNotMove = 0x0002;
     private const uint DoNotActivate = 0x0010;
     private const uint DoNotChangeOwnerZOrder = 0x0200;
-    private const uint ExcludeFromCapture = 0x00000011;
     private const int ControlGap = 10;
     internal const string SuccessfulCompletionMessage = "录制完成，已保存";
     internal static readonly TimeSpan SuccessfulCompletionHoldDuration =
@@ -59,6 +62,10 @@ public partial class VideoRecordingControlWindow : Window
     private bool _isInitializingOptions = true;
     private bool _hasSavedWindowPlacement;
     private Action _resetWindowPlacement = static () => { };
+    private readonly ToolbarDragHintBehavior _toolbarDragHint;
+    private bool _isControlSurfaceDragging;
+    private DrawingPoint _controlPointerStart;
+    private DrawingRectangle _controlWindowStart;
     private int _feedbackVersion;
 
     private VideoRecordingControlWindow(
@@ -98,6 +105,9 @@ public partial class VideoRecordingControlWindow : Window
         _elapsedTimer.Tick += OnElapsedTimerTick;
         _recorder.Failed += OnRecorderFailed;
         InitializeComponent();
+        _toolbarDragHint = new ToolbarDragHintBehavior(
+            ControlSurface,
+            ControlSurface);
         _hasSavedWindowPlacement = WindowPlacementService.TrackPosition(
             this,
             WindowPlacementKeys.VideoRecordingControls,
@@ -116,6 +126,7 @@ public partial class VideoRecordingControlWindow : Window
         UpdateFormatDependentControls();
         _isInitializingOptions = false;
         SourceInitialized += OnSourceInitialized;
+        SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
     }
 
     internal static async Task<RegionVideoRecordingResult> ShowSessionAsync(
@@ -143,6 +154,8 @@ public partial class VideoRecordingControlWindow : Window
             recordingPreferencesChanged);
         window._frameWindow.Show();
         window.Show();
+        window.UpdateLayout();
+        window.EnsureControlVisibleAndTopmost();
         _activeWindow = new WeakReference<VideoRecordingControlWindow>(window);
         try
         {
@@ -187,12 +200,15 @@ public partial class VideoRecordingControlWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         var handle = new WindowInteropHelper(this).Handle;
-        _ = NativeMethods.SetWindowDisplayAffinity(handle, ExcludeFromCapture);
         if (!_hasSavedWindowPlacement)
         {
             _resetWindowPlacement();
             PositionOutsideRecordingRegion(handle);
         }
+
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            EnsureControlVisibleAndTopmost);
     }
 
     private void PositionOutsideRecordingRegion(IntPtr handle)
@@ -306,12 +322,13 @@ public partial class VideoRecordingControlWindow : Window
             FinishAndEditButton.Visibility = Visibility.Visible;
             FinishAndEditButton.IsEnabled = true;
             Width = ActiveControlWidth;
-            if (!_hasSavedWindowPlacement)
-            {
-                _ = Dispatcher.BeginInvoke(
-                    DispatcherPriority.Loaded,
-                    RepositionAutomaticControl);
-            }
+            _ = Dispatcher.BeginInvoke(
+                DispatcherPriority.Loaded,
+                () =>
+                {
+                    RepositionAutomaticControl();
+                    EnsureControlVisibleAndTopmost();
+                });
             UpdateLowProfileOpacity();
         }
         catch (Exception exception)
@@ -556,19 +573,97 @@ public partial class VideoRecordingControlWindow : Window
         object sender,
         MouseButtonEventArgs e)
     {
-        if (e.LeftButton == MouseButtonState.Pressed &&
-            e.Source is not System.Windows.Controls.Primitives.ButtonBase &&
-            e.Source is not System.Windows.Controls.ComboBox)
+        if (e.LeftButton != MouseButtonState.Pressed ||
+            !ToolbarDragInteraction.IsBlankSurface(
+                e.OriginalSource as DependencyObject,
+                ControlSurface))
         {
-            if (e.ClickCount >= 2)
-            {
-                ResetControlPosition();
-                e.Handled = true;
-                return;
-            }
+            return;
+        }
 
-            EnsureManualPositionTracking();
-            DragMove();
+        if (e.ClickCount >= 2)
+        {
+            FinishControlSurfaceDrag(ensureVisible: false);
+            ResetControlPosition();
+            e.Handled = true;
+            return;
+        }
+
+        if (!MonitorGeometryService.TryGetWindowBounds(this, out var bounds))
+        {
+            return;
+        }
+
+        EnsureManualPositionTracking();
+        _isControlSurfaceDragging = true;
+        _controlPointerStart = WinForms.Cursor.Position;
+        _controlWindowStart = bounds;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            _isControlSurfaceDragging = false;
+            return;
+        }
+
+        _ = NativeMethods.SetCapture(handle);
+        if (NativeMethods.GetCapture() != handle)
+        {
+            _isControlSurfaceDragging = false;
+            return;
+        }
+
+        e.Handled = true;
+    }
+
+    private void OnControlSurfaceMouseMove(
+        object sender,
+        System.Windows.Input.MouseEventArgs e)
+    {
+        if (!_isControlSurfaceDragging)
+        {
+            return;
+        }
+
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            FinishControlSurfaceDrag();
+            return;
+        }
+
+        var current = WinForms.Cursor.Position;
+        var targetX = _controlWindowStart.Left +
+            current.X - _controlPointerStart.X;
+        var targetY = _controlWindowStart.Top +
+            current.Y - _controlPointerStart.Y;
+        _ = MonitorGeometryService.TryMoveWindow(this, targetX, targetY);
+        e.Handled = true;
+    }
+
+    private void OnControlSurfaceMouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (!_isControlSurfaceDragging)
+        {
+            return;
+        }
+
+        FinishControlSurfaceDrag();
+        e.Handled = true;
+    }
+
+    private void FinishControlSurfaceDrag(bool ensureVisible = true)
+    {
+        _isControlSurfaceDragging = false;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero && NativeMethods.GetCapture() == handle)
+        {
+            _ = NativeMethods.ReleaseCapture();
+        }
+
+        if (ensureVisible)
+        {
+            EnsureControlVisibleAndTopmost();
         }
     }
 
@@ -611,6 +706,45 @@ public partial class VideoRecordingControlWindow : Window
         {
             PositionOutsideRecordingRegion(handle);
         }
+    }
+
+    private void EnsureControlVisibleAndTopmost()
+    {
+        if (!IsLoaded)
+        {
+            return;
+        }
+
+        _ = WindowPlacementService.EnsureVisible(this);
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _ = NativeMethods.SetWindowPos(
+            handle,
+            new IntPtr(TopmostWindow),
+            0,
+            0,
+            0,
+            0,
+            DoNotMove |
+            DoNotResize |
+            DoNotActivate |
+            DoNotChangeOwnerZOrder);
+    }
+
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Loaded,
+            EnsureControlVisibleAndTopmost);
     }
 
     private void OnWindowMouseEnter(
@@ -746,6 +880,7 @@ public partial class VideoRecordingControlWindow : Window
             _inputMonitor?.SetPaused(false);
         }
         _frameWindow.Show();
+        EnsureControlVisibleAndTopmost();
     }
 
     private void OnWindowKeyDown(
@@ -788,6 +923,9 @@ public partial class VideoRecordingControlWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        FinishControlSurfaceDrag(ensureVisible: false);
+        _toolbarDragHint.Detach();
+        SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
         _elapsedTimer.Stop();
         _elapsedTimer.Tick -= OnElapsedTimerTick;
         _recorder.Failed -= OnRecorderFailed;
@@ -820,10 +958,14 @@ public partial class VideoRecordingControlWindow : Window
             int Bottom);
 
         [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr SetCapture(IntPtr windowHandle);
+
+        [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool SetWindowDisplayAffinity(
-            IntPtr window,
-            uint affinity);
+        public static extern bool ReleaseCapture();
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetCapture();
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

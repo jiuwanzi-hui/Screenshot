@@ -9,6 +9,13 @@ namespace Screenshot.App.Presentation;
 
 public sealed record SettingOption(string Value, string Label);
 
+public enum CaptureToolbarFeatureGroup
+{
+    Annotation,
+    Action,
+    History,
+}
+
 public sealed class CaptureToolbarFeatureItem : INotifyPropertyChanged
 {
     private bool _isVisible;
@@ -16,10 +23,14 @@ public sealed class CaptureToolbarFeatureItem : INotifyPropertyChanged
     public CaptureToolbarFeatureItem(
         CaptureToolbarFeature feature,
         string label,
+        string glyph,
+        CaptureToolbarFeatureGroup group,
         bool isVisible)
     {
         Feature = feature;
         Label = label;
+        Glyph = glyph;
+        Group = group;
         _isVisible = isVisible;
     }
 
@@ -28,6 +39,10 @@ public sealed class CaptureToolbarFeatureItem : INotifyPropertyChanged
     public CaptureToolbarFeature Feature { get; }
 
     public string Label { get; }
+
+    public string Glyph { get; }
+
+    public CaptureToolbarFeatureGroup Group { get; }
 
     public bool IsVisible
     {
@@ -148,12 +163,14 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private FloatingCaptureClickBehavior _floatingCaptureClickBehavior;
     private ScrollCaptureMode _scrollCaptureMode;
     private ArrowStyle _arrowStyle;
+    private CaptureToolbarRowCount _captureToolbarRows;
     private string _customStrokeColor;
     private int[] _customColorPalette;
     private bool _launchAtStartup;
     private WindowCloseBehavior _closeBehavior;
     private AppTheme _theme;
     private bool _keepHistory;
+    private bool _persistHistoryAcrossRestarts;
     private string _regionCaptureHotKey;
     private string _videoRecordingHotKey;
     private string _scrollCaptureHotKey;
@@ -194,13 +211,17 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _floatingCaptureClickBehavior = settings.FloatingCaptureClickBehavior;
         _scrollCaptureMode = settings.ScrollCaptureMode;
         _arrowStyle = settings.ArrowStyle;
-        SetCaptureToolbarFeatures(settings.VisibleCaptureToolbarFeatures);
+        _captureToolbarRows = settings.CaptureToolbarRows;
+        SetCaptureToolbarFeatures(
+            settings.VisibleCaptureToolbarFeatures,
+            settings.CaptureToolbarFeatureOrder);
         _customStrokeColor = settings.CustomStrokeColor;
         _customColorPalette = settings.CustomColorPalette.ToArray();
         _launchAtStartup = settings.LaunchAtStartup;
         _closeBehavior = settings.CloseBehavior;
         _theme = settings.Theme;
         _keepHistory = settings.KeepHistory;
+        _persistHistoryAcrossRestarts = settings.PersistHistoryAcrossRestarts;
         _regionCaptureHotKey = settings.RegionCaptureHotKey;
         _videoRecordingHotKey = settings.VideoRecordingHotKey;
         _scrollCaptureHotKey = settings.ScrollCaptureHotKey;
@@ -301,6 +322,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public ObservableCollection<CaptureToolbarFeatureItem>
         CaptureToolbarFeatureItems { get; } = [];
+
+    public CaptureToolbarRowCount CaptureToolbarRows
+    {
+        get => _captureToolbarRows;
+        set => SetProperty(ref _captureToolbarRows, value);
+    }
 
     public string SaveDirectory
     {
@@ -438,6 +465,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         get => _keepHistory;
         set => SetProperty(ref _keepHistory, value);
+    }
+
+    public bool PersistHistoryAcrossRestarts
+    {
+        get => _persistHistoryAcrossRestarts;
+        set => SetProperty(ref _persistHistoryAcrossRestarts, value);
     }
 
     public string RegionCaptureHotKey
@@ -579,12 +612,18 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
                 .Where(item => item.IsVisible)
                 .Select(item => item.Feature)
                 .ToArray(),
+            CaptureToolbarFeatureOrder = CaptureToolbarFeatureItems
+                .Select(item => item.Feature)
+                .ToArray(),
+            CaptureToolbarRows = CaptureToolbarRows,
             CustomStrokeColor = CustomStrokeColor,
             CustomColorPalette = CustomColorPalette.ToArray(),
             LaunchAtStartup = LaunchAtStartup,
             CloseBehavior = CloseBehavior,
             Theme = Theme,
             KeepHistory = KeepHistory,
+            PersistHistoryAcrossRestarts = PersistHistoryAcrossRestarts,
+            HistoryLimit = AppSettings.MaximumHistoryItems,
             RegionCaptureHotKey = RegionCaptureHotKey,
             VideoRecordingHotKey = VideoRecordingHotKey,
             ScrollCaptureHotKey = ScrollCaptureHotKey,
@@ -630,13 +669,17 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         FloatingCaptureClickBehavior = settings.FloatingCaptureClickBehavior;
         ScrollCaptureMode = settings.ScrollCaptureMode;
         ArrowStyle = settings.ArrowStyle;
-        SetCaptureToolbarFeatures(settings.VisibleCaptureToolbarFeatures);
+        CaptureToolbarRows = settings.CaptureToolbarRows;
+        SetCaptureToolbarFeatures(
+            settings.VisibleCaptureToolbarFeatures,
+            settings.CaptureToolbarFeatureOrder);
         CustomStrokeColor = settings.CustomStrokeColor;
         CustomColorPalette = settings.CustomColorPalette.ToArray();
         LaunchAtStartup = settings.LaunchAtStartup;
         CloseBehavior = settings.CloseBehavior;
         Theme = settings.Theme;
         KeepHistory = settings.KeepHistory;
+        PersistHistoryAcrossRestarts = settings.PersistHistoryAcrossRestarts;
         RegionCaptureHotKey = settings.RegionCaptureHotKey;
         VideoRecordingHotKey = settings.VideoRecordingHotKey;
         ScrollCaptureHotKey = settings.ScrollCaptureHotKey;
@@ -666,37 +709,88 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         StatusMessage = message;
     }
 
+    public bool MoveCaptureToolbarFeature(
+        CaptureToolbarFeature source,
+        CaptureToolbarFeature target,
+        bool insertAfter = false)
+    {
+        var sourceItem = CaptureToolbarFeatureItems.FirstOrDefault(
+            item => item.Feature == source);
+        var targetItem = CaptureToolbarFeatureItems.FirstOrDefault(
+            item => item.Feature == target);
+        if (sourceItem is null || targetItem is null ||
+            sourceItem.Group != targetItem.Group ||
+            ReferenceEquals(sourceItem, targetItem))
+        {
+            return false;
+        }
+
+        var sourceIndex = CaptureToolbarFeatureItems.IndexOf(sourceItem);
+        var targetIndex = CaptureToolbarFeatureItems.IndexOf(targetItem);
+        var insertionIndex = targetIndex + (insertAfter ? 1 : 0);
+        if (sourceIndex < insertionIndex)
+        {
+            insertionIndex--;
+        }
+
+        if (sourceIndex == insertionIndex)
+        {
+            return false;
+        }
+
+        CaptureToolbarFeatureItems.Move(sourceIndex, insertionIndex);
+        return true;
+    }
+
     private void SetCaptureToolbarFeatures(
-        IEnumerable<CaptureToolbarFeature>? visibleFeatures)
+        IEnumerable<CaptureToolbarFeature>? visibleFeatures,
+        IEnumerable<CaptureToolbarFeature>? orderedFeatures)
     {
         var visible = (visibleFeatures ?? []).ToHashSet();
-        var labels = new Dictionary<CaptureToolbarFeature, string>
+        var metadata = new Dictionary<
+            CaptureToolbarFeature,
+            (string Label, string Glyph, CaptureToolbarFeatureGroup Group)>
         {
-            [CaptureToolbarFeature.Shape] = "矩形 / 椭圆",
-            [CaptureToolbarFeature.Arrow] = "箭头",
-            [CaptureToolbarFeature.Emoji] = "表情",
-            [CaptureToolbarFeature.Number] = "序号",
-            [CaptureToolbarFeature.Brush] = "画笔",
-            [CaptureToolbarFeature.Text] = "文字",
-            [CaptureToolbarFeature.Mosaic] = "马赛克",
-            [CaptureToolbarFeature.VideoRecording] = "录屏",
-            [CaptureToolbarFeature.Save] = "保存图片",
-            [CaptureToolbarFeature.ScrollCapture] = "长截图",
-            [CaptureToolbarFeature.TextRecognition] = "文字识别",
-            [CaptureToolbarFeature.CopyRecognizedText] = "文字识别并复制",
-            [CaptureToolbarFeature.Translation] = "翻译",
-            [CaptureToolbarFeature.PrivacyRedaction] = "一键隐私打码",
-            [CaptureToolbarFeature.PinImage] = "钉图",
-            [CaptureToolbarFeature.UndoRedo] = "撤销 / 重做",
+            [CaptureToolbarFeature.Shape] = ("矩形 / 椭圆", "□", CaptureToolbarFeatureGroup.Annotation),
+            [CaptureToolbarFeature.Arrow] = ("箭头", "→", CaptureToolbarFeatureGroup.Annotation),
+            [CaptureToolbarFeature.Emoji] = ("表情", "😊", CaptureToolbarFeatureGroup.Annotation),
+            [CaptureToolbarFeature.Number] = ("序号", "1", CaptureToolbarFeatureGroup.Annotation),
+            [CaptureToolbarFeature.Brush] = ("画笔", "✎", CaptureToolbarFeatureGroup.Annotation),
+            [CaptureToolbarFeature.Text] = ("文字", "T", CaptureToolbarFeatureGroup.Annotation),
+            [CaptureToolbarFeature.Mosaic] = ("马赛克", "▦", CaptureToolbarFeatureGroup.Annotation),
+            [CaptureToolbarFeature.VideoRecording] = ("录屏", "●", CaptureToolbarFeatureGroup.Action),
+            [CaptureToolbarFeature.Save] = ("保存图片", "▣", CaptureToolbarFeatureGroup.Action),
+            [CaptureToolbarFeature.ScrollCapture] = ("长截图", "↕", CaptureToolbarFeatureGroup.Action),
+            [CaptureToolbarFeature.TextRecognition] = ("文字识别", "文", CaptureToolbarFeatureGroup.Action),
+            [CaptureToolbarFeature.CopyRecognizedText] = ("文字识别并复制", "取", CaptureToolbarFeatureGroup.Action),
+            [CaptureToolbarFeature.Translation] = ("翻译", "译", CaptureToolbarFeatureGroup.Action),
+            [CaptureToolbarFeature.PrivacyRedaction] = ("一键隐私打码", "隐", CaptureToolbarFeatureGroup.Action),
+            [CaptureToolbarFeature.PinImage] = ("钉图", "⌖", CaptureToolbarFeatureGroup.Action),
+            [CaptureToolbarFeature.UndoRedo] = ("撤销 / 重做", "↶", CaptureToolbarFeatureGroup.History),
         };
+
+        var order = (orderedFeatures ?? Enum.GetValues<CaptureToolbarFeature>())
+            .Where(Enum.IsDefined)
+            .Distinct()
+            .ToList();
+        foreach (var feature in Enum.GetValues<CaptureToolbarFeature>())
+        {
+            if (!order.Contains(feature))
+            {
+                order.Add(feature);
+            }
+        }
 
         if (CaptureToolbarFeatureItems.Count == 0)
         {
-            foreach (var feature in Enum.GetValues<CaptureToolbarFeature>())
+            foreach (var feature in order)
             {
+                var (label, glyph, group) = metadata[feature];
                 CaptureToolbarFeatureItems.Add(new CaptureToolbarFeatureItem(
                     feature,
-                    labels[feature],
+                    label,
+                    glyph,
+                    group,
                     visible.Contains(feature)));
             }
 
@@ -706,6 +800,17 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         foreach (var item in CaptureToolbarFeatureItems)
         {
             item.IsVisible = visible.Contains(item.Feature);
+        }
+
+        for (var targetIndex = 0; targetIndex < order.Count; targetIndex++)
+        {
+            var item = CaptureToolbarFeatureItems.First(
+                candidate => candidate.Feature == order[targetIndex]);
+            var currentIndex = CaptureToolbarFeatureItems.IndexOf(item);
+            if (currentIndex != targetIndex)
+            {
+                CaptureToolbarFeatureItems.Move(currentIndex, targetIndex);
+            }
         }
     }
 

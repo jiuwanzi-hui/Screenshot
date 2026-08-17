@@ -340,6 +340,13 @@ public sealed class ImmediateSettingsTests : IDisposable
                 CaptureToolbarFeature.Shape,
                 CaptureToolbarFeature.Translation,
             ],
+            CaptureToolbarFeatureOrder =
+            [
+                CaptureToolbarFeature.Text,
+                CaptureToolbarFeature.Shape,
+                CaptureToolbarFeature.Translation,
+            ],
+            CaptureToolbarRows = CaptureToolbarRowCount.Two,
         });
 
         Assert.True(Assert.Single(
@@ -351,6 +358,17 @@ public sealed class ImmediateSettingsTests : IDisposable
         Assert.False(Assert.Single(
             viewModel.CaptureToolbarFeatureItems,
             item => item.Feature == CaptureToolbarFeature.CopyRecognizedText).IsVisible);
+        Assert.Equal(
+            CaptureToolbarFeature.Text,
+            viewModel.CaptureToolbarFeatureItems[0].Feature);
+        Assert.Equal(CaptureToolbarRowCount.Two, viewModel.CaptureToolbarRows);
+
+        Assert.True(viewModel.MoveCaptureToolbarFeature(
+            CaptureToolbarFeature.Shape,
+            CaptureToolbarFeature.Text));
+        Assert.False(viewModel.MoveCaptureToolbarFeature(
+            CaptureToolbarFeature.Shape,
+            CaptureToolbarFeature.Translation));
 
         foreach (var item in viewModel.CaptureToolbarFeatureItems)
         {
@@ -360,6 +378,15 @@ public sealed class ImmediateSettingsTests : IDisposable
         Assert.Equal(
             [CaptureToolbarFeature.PinImage],
             viewModel.CreateSettings().VisibleCaptureToolbarFeatures);
+        Assert.Equal(
+            CaptureToolbarFeature.Shape,
+            viewModel.CreateSettings().CaptureToolbarFeatureOrder[0]);
+        Assert.Equal(
+            CaptureToolbarFeature.Text,
+            viewModel.CreateSettings().CaptureToolbarFeatureOrder[1]);
+        Assert.Equal(
+            CaptureToolbarRowCount.Two,
+            viewModel.CreateSettings().CaptureToolbarRows);
     }
 
     [Fact]

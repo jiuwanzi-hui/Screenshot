@@ -1,18 +1,23 @@
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using Screenshot.App.Core;
 using Screenshot.App.Editor;
 using Screenshot.App.Infrastructure;
+using Screenshot.App.Presentation;
 using WpfButton = System.Windows.Controls.Button;
 using WpfColor = System.Windows.Media.Color;
 using WpfColorConverter = System.Windows.Media.ColorConverter;
+using WpfMouseEventArgs = System.Windows.Input.MouseEventArgs;
 using WpfRadioButton = System.Windows.Controls.RadioButton;
 using DrawingPoint = System.Drawing.Point;
 using DrawingRectangle = System.Drawing.Rectangle;
 using DrawingSize = System.Drawing.Size;
+using WinForms = System.Windows.Forms;
 
 namespace Screenshot.App.Pin;
 
@@ -42,6 +47,10 @@ public partial class PinnedImageEditorToolbarWindow : Window
     private bool _hasCustomPosition;
     private int _customOffsetX;
     private int _customOffsetY;
+    private bool _isToolbarSurfaceDragging;
+    private DrawingPoint _toolbarSurfacePointerStart;
+    private DrawingRectangle _toolbarSurfaceWindowStart;
+    private readonly ToolbarDragHintBehavior _toolbarDragHint;
     private bool _isClosing;
 
     public PinnedImageEditorToolbarWindow(
@@ -57,8 +66,14 @@ public partial class PinnedImageEditorToolbarWindow : Window
         _customColorPaletteChanged = customColorPaletteChanged;
         _arrowStyleChanged = arrowStyleChanged;
         InitializeComponent();
+        _toolbarDragHint = new ToolbarDragHintBehavior(
+            ToolbarSurface,
+            ToolbarSurface);
         ApplyPreferences(settings);
         ApplyToolbarFeatureVisibility(settings?.VisibleCaptureToolbarFeatures);
+        ApplyToolbarLayout(
+            settings?.CaptureToolbarFeatureOrder,
+            settings?.CaptureToolbarRows ?? CaptureToolbarRowCount.One);
         ApplyThemedContextMenu(ShapeToolButton.ContextMenu);
         ApplyThemedContextMenu(ArrowToolButton.ContextMenu);
         Owner = attachedWindow;
@@ -202,8 +217,20 @@ public partial class PinnedImageEditorToolbarWindow : Window
             Math.Clamp(y, workArea.Top, Math.Max(workArea.Top, workArea.Bottom - toolbarSize.Height)));
     }
 
+    internal static DrawingPoint CalculateDraggedPosition(
+        DrawingRectangle windowStart,
+        DrawingPoint pointerStart,
+        DrawingPoint pointerCurrent)
+    {
+        return new DrawingPoint(
+            windowStart.Left + pointerCurrent.X - pointerStart.X,
+            windowStart.Top + pointerCurrent.Y - pointerStart.Y);
+    }
+
     protected override void OnClosed(EventArgs e)
     {
+        _toolbarDragHint.Detach();
+        FinishToolbarSurfaceDrag();
         _isClosing = true;
         Loaded -= OnLoaded;
         _attachedWindow.LocationChanged -= OnAttachedWindowBoundsChanged;
@@ -464,13 +491,100 @@ public partial class PinnedImageEditorToolbarWindow : Window
     private void OnCancelClick(object sender, RoutedEventArgs e) =>
         CancelRequested?.Invoke(this, EventArgs.Empty);
 
-    private void OnDragHandleDragDelta(object sender, DragDeltaEventArgs e) =>
-        MoveToolbar(e.HorizontalChange, e.VerticalChange);
-
-    private void OnDragHandleMouseDoubleClick(object sender, MouseButtonEventArgs e)
+    private void OnToolbarSurfaceMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
     {
-        ResetPosition();
+        if (e.LeftButton != MouseButtonState.Pressed ||
+            !ToolbarDragInteraction.IsBlankSurface(
+                e.OriginalSource as DependencyObject,
+                ToolbarSurface))
+        {
+            return;
+        }
+
+        if (e.ClickCount >= 2)
+        {
+            ResetPosition();
+            e.Handled = true;
+            return;
+        }
+
+        if (!MonitorGeometryService.TryGetWindowBounds(this, out var bounds))
+        {
+            return;
+        }
+
+        _hasCustomPosition = true;
+        _isToolbarSurfaceDragging = true;
+        _toolbarSurfacePointerStart = WinForms.Cursor.Position;
+        _toolbarSurfaceWindowStart = bounds;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            _isToolbarSurfaceDragging = false;
+            return;
+        }
+
+        _ = NativeMethods.SetCapture(handle);
+        if (NativeMethods.GetCapture() != handle)
+        {
+            _isToolbarSurfaceDragging = false;
+            return;
+        }
+
         e.Handled = true;
+    }
+
+    private void OnToolbarSurfaceMouseMove(
+        object sender,
+        WpfMouseEventArgs e)
+    {
+        if (!_isToolbarSurfaceDragging)
+        {
+            return;
+        }
+
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            FinishToolbarSurfaceDrag();
+            return;
+        }
+
+        var position = CalculateDraggedPosition(
+            _toolbarSurfaceWindowStart,
+            _toolbarSurfacePointerStart,
+            WinForms.Cursor.Position);
+        _ = MonitorGeometryService.TryMoveWindow(this, position.X, position.Y);
+        e.Handled = true;
+    }
+
+    private void OnToolbarSurfaceMouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (!_isToolbarSurfaceDragging)
+        {
+            return;
+        }
+
+        FinishToolbarSurfaceDrag();
+        e.Handled = true;
+    }
+
+    private void FinishToolbarSurfaceDrag()
+    {
+        _isToolbarSurfaceDragging = false;
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero && NativeMethods.GetCapture() == handle)
+        {
+            _ = NativeMethods.ReleaseCapture();
+        }
+
+        if (MonitorGeometryService.TryGetWindowBounds(this, out var bounds))
+        {
+            RememberCustomOffset(bounds.Left, bounds.Top, bounds.Size);
+        }
     }
 
     private void OnShapeMenuArrowMouseDown(object sender, MouseButtonEventArgs e)
@@ -520,6 +634,19 @@ public partial class PinnedImageEditorToolbarWindow : Window
         menu.PlacementTarget = target;
         menu.Placement = PlacementMode.Bottom;
         menu.IsOpen = true;
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern IntPtr SetCapture(IntPtr windowHandle);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool ReleaseCapture();
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetCapture();
     }
 
     private void ApplyPreferences(AppSettings? settings)
@@ -598,6 +725,167 @@ public partial class PinnedImageEditorToolbarWindow : Window
                 : Visibility.Collapsed;
         }
     }
+
+    private void ApplyToolbarLayout(
+        IEnumerable<CaptureToolbarFeature>? configuredOrder,
+        CaptureToolbarRowCount rowCount)
+    {
+        var featureElements = new Dictionary<
+            CaptureToolbarFeature,
+            FrameworkElement[]>
+        {
+            [CaptureToolbarFeature.Shape] = [ShapeToolButton],
+            [CaptureToolbarFeature.Arrow] = [ArrowToolButton],
+            [CaptureToolbarFeature.Emoji] = [EmojiToolButton],
+            [CaptureToolbarFeature.Number] = [NumberToolButton],
+            [CaptureToolbarFeature.Brush] = [BrushToolButton],
+            [CaptureToolbarFeature.Text] = [TextToolButton],
+            [CaptureToolbarFeature.Mosaic] = [MosaicToolButton],
+            [CaptureToolbarFeature.Save] = [SaveButton],
+            [CaptureToolbarFeature.TextRecognition] = [OcrButton],
+            [CaptureToolbarFeature.CopyRecognizedText] = [CopyTextButton],
+            [CaptureToolbarFeature.Translation] = [TranslateActionButton],
+            [CaptureToolbarFeature.PrivacyRedaction] = [PrivacyButton],
+            [CaptureToolbarFeature.UndoRedo] = [UndoButton],
+        };
+        var order = (configuredOrder ?? Enum.GetValues<CaptureToolbarFeature>())
+            .Where(Enum.IsDefined)
+            .Distinct()
+            .ToList();
+        foreach (var feature in Enum.GetValues<CaptureToolbarFeature>())
+        {
+            if (!order.Contains(feature))
+            {
+                order.Add(feature);
+            }
+        }
+
+        var annotationFeatures = new HashSet<CaptureToolbarFeature>
+        {
+            CaptureToolbarFeature.Shape,
+            CaptureToolbarFeature.Arrow,
+            CaptureToolbarFeature.Emoji,
+            CaptureToolbarFeature.Number,
+            CaptureToolbarFeature.Brush,
+            CaptureToolbarFeature.Text,
+            CaptureToolbarFeature.Mosaic,
+        };
+        var actionFeatures = new HashSet<CaptureToolbarFeature>
+        {
+            CaptureToolbarFeature.Save,
+            CaptureToolbarFeature.TextRecognition,
+            CaptureToolbarFeature.CopyRecognizedText,
+            CaptureToolbarFeature.Translation,
+            CaptureToolbarFeature.PrivacyRedaction,
+        };
+        var tokens = new List<FrameworkElement>();
+        AddFeatures(annotationFeatures);
+        tokens.Add(ToolActionSeparator);
+        AddFeatures(actionFeatures);
+        tokens.Add(ActionHistorySeparator);
+        tokens.Add(CropToolButton);
+        AddFeatures(new HashSet<CaptureToolbarFeature>
+        {
+            CaptureToolbarFeature.UndoRedo,
+        });
+        tokens.Add(HistoryFinishSeparator);
+        tokens.Add(CancelEditButton);
+        tokens.Add(EditApplyButton);
+
+        EditToolsRow1.Children.Clear();
+        EditToolsRow2.Children.Clear();
+        RestoreSeparatorLayout();
+        if (rowCount != CaptureToolbarRowCount.Two)
+        {
+            AddToolbarRow(EditToolsRow1, tokens);
+            EditToolsRow2.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var split = FindToolbarRowSplit(tokens);
+        AddToolbarRow(EditToolsRow1, tokens.Take(split));
+        AddToolbarRow(EditToolsRow2, tokens.Skip(split));
+        EditToolsRow2.Visibility = Visibility.Visible;
+        return;
+
+        void AddFeatures(IReadOnlySet<CaptureToolbarFeature> group)
+        {
+            foreach (var feature in order.Where(group.Contains))
+            {
+                if (featureElements.TryGetValue(feature, out var elements))
+                {
+                    tokens.AddRange(elements);
+                }
+            }
+        }
+    }
+
+    private int FindToolbarRowSplit(IReadOnlyList<FrameworkElement> elements)
+    {
+        var visibleCount = elements.Count(
+            element => element.Visibility == Visibility.Visible &&
+                !IsToolbarSeparator(element));
+        var target = Math.Max(1, (visibleCount + 1) / 2);
+        var seen = 0;
+        for (var index = 0; index < elements.Count; index++)
+        {
+            if (elements[index].Visibility == Visibility.Visible &&
+                !IsToolbarSeparator(elements[index]))
+            {
+                seen++;
+            }
+
+            if (seen >= target)
+            {
+                return index + 1;
+            }
+        }
+
+        return elements.Count;
+    }
+
+    private void AddToolbarRow(
+        System.Windows.Controls.Panel row,
+        IEnumerable<FrameworkElement> rowElements)
+    {
+        var elements = rowElements.ToList();
+        var firstVisible = elements.FindIndex(
+            element => element.Visibility == Visibility.Visible);
+        var lastVisible = elements.FindLastIndex(
+            element => element.Visibility == Visibility.Visible);
+        for (var index = 0; index < elements.Count; index++)
+        {
+            var element = elements[index];
+            row.Children.Add(element);
+            if (IsToolbarSeparator(element) &&
+                (index == firstVisible || index == lastVisible))
+            {
+                element.Width = 0;
+                element.Margin = new Thickness(0);
+                element.Opacity = 0;
+            }
+        }
+    }
+
+    private void RestoreSeparatorLayout()
+    {
+        foreach (var separator in new[]
+                 {
+                     ToolActionSeparator,
+                     ActionHistorySeparator,
+                     HistoryFinishSeparator,
+                 })
+        {
+            separator.ClearValue(WidthProperty);
+            separator.ClearValue(MarginProperty);
+            separator.ClearValue(OpacityProperty);
+        }
+    }
+
+    private bool IsToolbarSeparator(FrameworkElement element) =>
+        ReferenceEquals(element, ToolActionSeparator) ||
+        ReferenceEquals(element, ActionHistorySeparator) ||
+        ReferenceEquals(element, HistoryFinishSeparator);
 
     private void UpdateToolbarSeparators()
     {

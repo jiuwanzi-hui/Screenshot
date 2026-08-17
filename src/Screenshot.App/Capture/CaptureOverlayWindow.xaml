@@ -774,38 +774,19 @@
 
             <Border x:Name="CaptureToolbar"
                     Panel.ZIndex="100"
-                    Cursor="Arrow"
+                    Cursor="SizeAll"
                     Padding="12,10"
                     Background="{DynamicResource AppPanelBackgroundBrush}"
                     BorderBrush="{DynamicResource AppBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="8"
+                    PreviewMouseLeftButtonDown="OnCaptureToolbarSurfaceMouseLeftButtonDown"
+                    PreviewMouseLeftButtonUp="OnCaptureToolbarSurfaceMouseLeftButtonUp"
+                    PreviewMouseMove="OnCaptureToolbarSurfaceMouseMove"
                     Visibility="Collapsed">
                 <StackPanel>
-                    <StackPanel x:Name="InlineEditorTools" Orientation="Horizontal">
-                        <Thumb x:Name="CaptureToolbarDragHandle"
-                               Width="18"
-                               Height="30"
-                               Margin="-7,0,5,0"
-                               Cursor="SizeAll"
-                               DragDelta="OnCaptureToolbarDragDelta"
-                               DragCompleted="OnCaptureToolbarDragCompleted"
-                               MouseDoubleClick="OnCaptureToolbarDragHandleDoubleClick"
-                               ToolTip="拖动调整工具栏位置；双击恢复自动位置">
-                            <Thumb.Template>
-                                <ControlTemplate TargetType="Thumb">
-                                    <Border Background="Transparent"
-                                            CornerRadius="4">
-                                        <TextBlock HorizontalAlignment="Center"
-                                                   VerticalAlignment="Center"
-                                                   FontFamily="Segoe MDL2 Assets"
-                                                   FontSize="13"
-                                                   Foreground="{DynamicResource ImageEditorMutedTextBrush}"
-                                                   Text="&#xE712;" />
-                                    </Border>
-                                </ControlTemplate>
-                            </Thumb.Template>
-                        </Thumb>
+                    <StackPanel x:Name="InlineEditorTools">
+                    <StackPanel x:Name="InlineEditorToolsRow1" Orientation="Horizontal">
                         <RadioButton x:Name="InlineShapeToolButton"
                                      GroupName="InlineEditorTool"
                                      Checked="OnInlineEditorToolSelected"
@@ -1066,6 +1047,11 @@
                                   Stroke="{DynamicResource EditorToolbarConfirmIconBrush}"
                                   Style="{StaticResource InlineIconPath}" />
                         </Button>
+                    </StackPanel>
+                    <StackPanel x:Name="InlineEditorToolsRow2"
+                                Margin="0,6,0,0"
+                                Orientation="Horizontal"
+                                Visibility="Collapsed" />
                     </StackPanel>
 
                     <Grid Margin="0,6,0,0">

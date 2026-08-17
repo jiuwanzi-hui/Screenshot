@@ -1644,6 +1644,16 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
+    private void OnCaptureToolbarLayoutChanged(object? sender, EventArgs e)
+    {
+        if (!IsLoaded || _isApplyingSettings)
+        {
+            return;
+        }
+
+        ApplySettingsImmediately();
+    }
+
     private void OnMouseLongPressDurationChanged(
         object sender,
         RoutedPropertyChangedEventArgs<double> e)
