@@ -65,6 +65,12 @@ public enum CaptureToolbarFeature
     UndoRedo,
 }
 
+public enum CaptureToolbarRowCount
+{
+    One = 1,
+    Two = 2,
+}
+
 public enum VideoRecordingCodec
 {
     H264,
@@ -121,7 +127,9 @@ public enum OfflineTranslationEngine
 
 public sealed record AppSettings
 {
-    public int SettingsVersion { get; init; } = 8;
+    public const int MaximumHistoryItems = 100;
+
+    public int SettingsVersion { get; init; } = 9;
 
     public string SaveDirectory { get; init; } = GetDefaultSaveDirectory();
 
@@ -163,6 +171,12 @@ public sealed record AppSettings
 
     public CaptureToolbarFeature[] VisibleCaptureToolbarFeatures { get; init; } =
         Enum.GetValues<CaptureToolbarFeature>();
+
+    public CaptureToolbarFeature[] CaptureToolbarFeatureOrder { get; init; } =
+        Enum.GetValues<CaptureToolbarFeature>();
+
+    public CaptureToolbarRowCount CaptureToolbarRows { get; init; } =
+        CaptureToolbarRowCount.One;
 
     public bool LaunchAtStartup { get; init; }
 
@@ -239,7 +253,9 @@ public sealed record AppSettings
 
     public bool KeepHistory { get; init; }
 
-    public int HistoryLimit { get; init; } = 20;
+    public bool PersistHistoryAcrossRestarts { get; init; }
+
+    public int HistoryLimit { get; init; } = MaximumHistoryItems;
 
     public bool SendTextToOnlineTranslation { get; init; }
 
@@ -312,9 +328,22 @@ public sealed record AppSettings
                 CaptureToolbarFeature.PrivacyRedaction);
         }
 
+        var captureToolbarFeatureOrder =
+            (CaptureToolbarFeatureOrder ?? defaults.CaptureToolbarFeatureOrder)
+            .Where(Enum.IsDefined)
+            .Distinct()
+            .ToList();
+        foreach (var feature in Enum.GetValues<CaptureToolbarFeature>())
+        {
+            if (!captureToolbarFeatureOrder.Contains(feature))
+            {
+                captureToolbarFeatureOrder.Add(feature);
+            }
+        }
+
         return this with
         {
-            SettingsVersion = Math.Max(SettingsVersion, 8),
+            SettingsVersion = Math.Max(SettingsVersion, 9),
             Theme = NormalizeTheme(Theme),
             CloseBehavior = Enum.IsDefined(CloseBehavior)
                 ? CloseBehavior
@@ -330,6 +359,10 @@ public sealed record AppSettings
                 : defaults.ArrowStyle,
             VisibleCaptureToolbarFeatures =
                 visibleCaptureToolbarFeatures.ToArray(),
+            CaptureToolbarFeatureOrder = captureToolbarFeatureOrder.ToArray(),
+            CaptureToolbarRows = Enum.IsDefined(CaptureToolbarRows)
+                ? CaptureToolbarRows
+                : defaults.CaptureToolbarRows,
             VideoRecordingCodec = Enum.IsDefined(VideoRecordingCodec)
                 ? VideoRecordingCodec
                 : defaults.VideoRecordingCodec,
@@ -398,7 +431,12 @@ public sealed record AppSettings
                 ? OfflineTranslationEngine
                 : defaults.OfflineTranslationEngine,
             SendTextToOnlineTranslation = true,
-            HistoryLimit = Math.Clamp(HistoryLimit, 0, 100),
+            PersistHistoryAcrossRestarts =
+                KeepHistory && PersistHistoryAcrossRestarts,
+            HistoryLimit = Math.Clamp(
+                HistoryLimit,
+                0,
+                MaximumHistoryItems),
         };
     }
 

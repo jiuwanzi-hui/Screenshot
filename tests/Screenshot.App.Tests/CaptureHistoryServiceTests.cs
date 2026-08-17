@@ -1,4 +1,5 @@
 using Screenshot.App.Capture;
+using Screenshot.App.Core;
 using System.Reflection;
 using System.IO;
 
@@ -6,6 +7,61 @@ namespace Screenshot.App.Tests;
 
 public sealed class CaptureHistoryServiceTests
 {
+    [Fact]
+    public void RestoresPersistedScreenshotsAndKeepsOnlyTheNewestHundred()
+    {
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            $"snapcut-persistent-history-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+
+        try
+        {
+            for (var index = 0;
+                 index < AppSettings.MaximumHistoryItems + 1;
+                 index++)
+            {
+                var path = Path.Combine(
+                    directory,
+                    $"history-20260817-120000-{index:D3}.png");
+                using var bitmap = new System.Drawing.Bitmap(2, 2);
+                bitmap.SetPixel(
+                    0,
+                    0,
+                    System.Drawing.Color.FromArgb(index % 255, 10, 20));
+                bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+                File.SetLastWriteTimeUtc(
+                    path,
+                    new DateTime(2026, 8, 17, 0, 0, 0, DateTimeKind.Utc)
+                        .AddSeconds(index));
+            }
+
+            var history = new CaptureHistoryService(directory);
+            history.ConfigurePersistence(enabled: true);
+            CaptureHistoryService.PruneCacheDirectory(int.MaxValue, directory);
+            Assert.Equal(
+                AppSettings.MaximumHistoryItems,
+                Directory.EnumerateFiles(directory, "*.png").Count());
+            var restored = history.LoadPersistedItems(int.MaxValue);
+            history.MergePersistedItems(restored, int.MaxValue);
+
+            Assert.Equal(AppSettings.MaximumHistoryItems, restored.Count);
+            Assert.Equal(AppSettings.MaximumHistoryItems, history.Items.Count);
+            Assert.Equal(2, history.Items[0].PixelWidth);
+            Assert.Equal(2, history.Items[0].PixelHeight);
+            using var image = history.Items[0].CreateCapturedImage();
+            Assert.Equal(2, image.Bitmap.Width);
+            Assert.True(SpinWait.SpinUntil(
+                () => Directory.EnumerateFiles(directory, "*.png").Count() ==
+                    AppSettings.MaximumHistoryItems,
+                TimeSpan.FromSeconds(3)));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact]
     public void KeepsOnlyTheConfiguredNumberOfHistoryItems()
     {

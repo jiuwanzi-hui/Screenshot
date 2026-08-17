@@ -220,9 +220,21 @@ public sealed class PinnedImageManagerTests
             -16);
 
         Assert.Equal(464, position.Y);
+        Assert.Equal(260, position.X);
         Assert.Equal(2, (position.Y + 6) - (480 - 12));
         Assert.True(position.X >= 0);
         Assert.True(position.X + 600 <= 1920);
+    }
+
+    [Fact]
+    public void PinnedToolbarDragTracksThePointerInScreenPixels()
+    {
+        var position = PinnedImageEditorToolbarWindow.CalculateDraggedPosition(
+            new System.Drawing.Rectangle(400, 300, 600, 84),
+            new System.Drawing.Point(700, 500),
+            new System.Drawing.Point(745, 468));
+
+        Assert.Equal(new System.Drawing.Point(445, 268), position);
     }
 
     [Fact]
@@ -257,6 +269,13 @@ public sealed class PinnedImageManagerTests
 
             var toolbar = Assert.IsType<PinnedImageEditorToolbarWindow>(
                 pin.EditorToolbar);
+            var toolbarSurface = Assert.IsType<System.Windows.Controls.Border>(
+                toolbar.FindName("ToolbarSurface"));
+            Assert.Null(toolbar.FindName("DragHandle"));
+            Assert.Equal(
+                System.Windows.Input.Cursors.SizeAll,
+                toolbarSurface.Cursor);
+            Assert.Null(toolbarSurface.ToolTip);
             Assert.Equal(
                 System.Windows.Media.Color.FromRgb(0xF2, 0xC9, 0x4C),
                 toolbar.SelectedColor);
@@ -343,9 +362,18 @@ public sealed class PinnedImageManagerTests
                 VisibleCaptureToolbarFeatures =
                 [
                     CaptureToolbarFeature.Shape,
+                    CaptureToolbarFeature.Arrow,
                     CaptureToolbarFeature.Save,
                     CaptureToolbarFeature.UndoRedo,
                 ],
+                CaptureToolbarFeatureOrder =
+                [
+                    CaptureToolbarFeature.Arrow,
+                    CaptureToolbarFeature.Shape,
+                    CaptureToolbarFeature.Save,
+                    CaptureToolbarFeature.UndoRedo,
+                ],
+                CaptureToolbarRows = CaptureToolbarRowCount.Two,
             };
             var historyToolbar = new PinnedImageEditorToolbarWindow(
                 pin,
@@ -360,6 +388,20 @@ public sealed class PinnedImageManagerTests
                     System.Windows.Visibility.Visible,
                     Assert.IsType<System.Windows.Controls.Border>(
                         historyToolbar.FindName("ActionHistorySeparator")).Visibility);
+                var firstRow = Assert.IsType<System.Windows.Controls.StackPanel>(
+                    historyToolbar.FindName("EditToolsRow1"));
+                var secondRow = Assert.IsType<System.Windows.Controls.StackPanel>(
+                    historyToolbar.FindName("EditToolsRow2"));
+                Assert.Equal(System.Windows.Visibility.Visible, secondRow.Visibility);
+                var arrangedElements = firstRow.Children
+                    .Cast<System.Windows.FrameworkElement>()
+                    .Concat(secondRow.Children.Cast<System.Windows.FrameworkElement>())
+                    .ToList();
+                Assert.True(
+                    arrangedElements.IndexOf(Assert.IsType<System.Windows.Controls.RadioButton>(
+                        historyToolbar.FindName("ArrowToolButton"))) <
+                    arrangedElements.IndexOf(Assert.IsType<System.Windows.Controls.RadioButton>(
+                        historyToolbar.FindName("ShapeToolButton"))));
             }
             finally
             {

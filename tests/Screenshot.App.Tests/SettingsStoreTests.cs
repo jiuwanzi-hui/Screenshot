@@ -49,6 +49,8 @@ public sealed class SettingsStoreTests : IDisposable
             CloseBehavior = WindowCloseBehavior.ExitApplication,
             MouseLongPressMilliseconds = 1150,
             MouseSideButtonsUseLongPress = true,
+            KeepHistory = true,
+            PersistHistoryAcrossRestarts = true,
             OcrEngine = OcrEngineMode.PaddleOcrV6,
             OfflineTranslationQuality = OfflineTranslationQuality.Ultra,
             OfflineTranslationEngine = OfflineTranslationEngine.QwenLargeModel,
@@ -57,6 +59,12 @@ public sealed class SettingsStoreTests : IDisposable
                 CaptureToolbarFeature.Text,
                 CaptureToolbarFeature.Save,
             ],
+            CaptureToolbarFeatureOrder =
+            [
+                CaptureToolbarFeature.Save,
+                CaptureToolbarFeature.Text,
+            ],
+            CaptureToolbarRows = CaptureToolbarRowCount.Two,
         };
 
         store.Save(settings);
@@ -80,6 +88,11 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(settings.CloseBehavior, loadResult.Settings.CloseBehavior);
         Assert.Equal(1150, loadResult.Settings.MouseLongPressMilliseconds);
         Assert.True(loadResult.Settings.MouseSideButtonsUseLongPress);
+        Assert.True(loadResult.Settings.KeepHistory);
+        Assert.True(loadResult.Settings.PersistHistoryAcrossRestarts);
+        Assert.Equal(
+            AppSettings.MaximumHistoryItems,
+            loadResult.Settings.HistoryLimit);
         Assert.Equal(OcrEngineMode.PaddleOcrV6, loadResult.Settings.OcrEngine);
         Assert.Equal(Path.GetFullPath(settings.SaveDirectory), loadResult.Settings.SaveDirectory);
         Assert.Equal(
@@ -106,6 +119,15 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(
             [CaptureToolbarFeature.Text, CaptureToolbarFeature.Save],
             loadResult.Settings.VisibleCaptureToolbarFeatures);
+        Assert.Equal(
+            CaptureToolbarFeature.Save,
+            loadResult.Settings.CaptureToolbarFeatureOrder[0]);
+        Assert.Equal(
+            CaptureToolbarFeature.Text,
+            loadResult.Settings.CaptureToolbarFeatureOrder[1]);
+        Assert.Equal(
+            CaptureToolbarRowCount.Two,
+            loadResult.Settings.CaptureToolbarRows);
     }
 
     [Fact]
@@ -172,7 +194,7 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(
             FloatingCaptureClickBehavior.ShowSelection,
             loadResult.Settings.FloatingCaptureClickBehavior);
-        Assert.Equal(8, loadResult.Settings.SettingsVersion);
+        Assert.Equal(9, loadResult.Settings.SettingsVersion);
         Assert.Equal(
             Enum.GetValues<CaptureToolbarFeature>(),
             loadResult.Settings.VisibleCaptureToolbarFeatures);
@@ -196,11 +218,27 @@ public sealed class SettingsStoreTests : IDisposable
                 (CaptureToolbarFeature)999,
                 CaptureToolbarFeature.Save,
             ],
+            CaptureToolbarFeatureOrder =
+            [
+                CaptureToolbarFeature.Text,
+                CaptureToolbarFeature.Text,
+                (CaptureToolbarFeature)999,
+            ],
+            CaptureToolbarRows = (CaptureToolbarRowCount)999,
         }).Normalize();
 
         Assert.Equal(
             [CaptureToolbarFeature.Text, CaptureToolbarFeature.Save],
             normalized.VisibleCaptureToolbarFeatures);
+        Assert.Equal(
+            CaptureToolbarFeature.Text,
+            normalized.CaptureToolbarFeatureOrder[0]);
+        Assert.Equal(
+            Enum.GetValues<CaptureToolbarFeature>().Length,
+            normalized.CaptureToolbarFeatureOrder.Length);
+        Assert.Equal(
+            CaptureToolbarRowCount.One,
+            normalized.CaptureToolbarRows);
     }
 
     [Fact]
@@ -229,7 +267,7 @@ public sealed class SettingsStoreTests : IDisposable
             ],
         }).Normalize();
 
-        Assert.Equal(8, normalized.SettingsVersion);
+        Assert.Equal(9, normalized.SettingsVersion);
         Assert.Equal(
             [
                 CaptureToolbarFeature.TextRecognition,
@@ -268,7 +306,7 @@ public sealed class SettingsStoreTests : IDisposable
             VisibleCaptureToolbarFeatures = [CaptureToolbarFeature.Save],
         }).Normalize();
 
-        Assert.Equal(8, upgraded.SettingsVersion);
+        Assert.Equal(9, upgraded.SettingsVersion);
         Assert.Equal(
             [
                 CaptureToolbarFeature.Save,

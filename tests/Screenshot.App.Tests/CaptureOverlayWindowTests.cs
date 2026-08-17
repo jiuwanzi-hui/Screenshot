@@ -16,6 +16,25 @@ namespace Screenshot.App.Tests;
 
 public sealed class CaptureOverlayWindowTests
 {
+    [Theory]
+    [InlineData(200, 400, 240, 1000, 280)]
+    [InlineData(20, 100, 240, 1000, 0)]
+    [InlineData(850, 100, 240, 1000, 760)]
+    public void AutomaticToolbarPositionIsCenteredAndClamped(
+        double selectionX,
+        double selectionWidth,
+        double toolbarWidth,
+        double surfaceWidth,
+        double expectedX)
+    {
+        var x = CaptureOverlayWindow.CalculateAutomaticToolbarX(
+            new Rect(selectionX, 100, selectionWidth, 200),
+            toolbarWidth,
+            surfaceWidth);
+
+        Assert.Equal(expectedX, x);
+    }
+
     [Fact]
     public void ColorPickerKeepsWindowSnappingActive()
     {
@@ -128,6 +147,71 @@ public sealed class CaptureOverlayWindowTests
                     Visibility.Visible,
                     Assert.IsType<Border>(
                         overlay.FindName("HistoryFinishSeparator")).Visibility);
+            }
+            finally
+            {
+                overlay.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void ToolbarLayoutUsesSavedOrderAndRowCount()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var pinnedImageManager = new PinnedImageManager();
+            var overlay = CaptureOverlayWindow.ShowInteractive(
+                new CaptureOverlayOptions
+                {
+                    SaveDirectory = Path.GetTempPath(),
+                    KeepHistory = false,
+                    HistoryLimit = 0,
+                    HistoryService = new CaptureHistoryService(),
+                    PinnedImageManager = pinnedImageManager,
+                    StartOcrAsync = image =>
+                    {
+                        image.Dispose();
+                        return Task.CompletedTask;
+                    },
+                    VisibleToolbarFeatures =
+                    [
+                        CaptureToolbarFeature.Shape,
+                        CaptureToolbarFeature.Arrow,
+                        CaptureToolbarFeature.Text,
+                        CaptureToolbarFeature.Save,
+                        CaptureToolbarFeature.UndoRedo,
+                    ],
+                    ToolbarFeatureOrder =
+                    [
+                        CaptureToolbarFeature.Text,
+                        CaptureToolbarFeature.Arrow,
+                        CaptureToolbarFeature.Shape,
+                        CaptureToolbarFeature.Save,
+                        CaptureToolbarFeature.UndoRedo,
+                    ],
+                    ToolbarRows = CaptureToolbarRowCount.Two,
+                });
+
+            try
+            {
+                var firstRow = Assert.IsType<StackPanel>(
+                    overlay.FindName("InlineEditorToolsRow1"));
+                var secondRow = Assert.IsType<StackPanel>(
+                    overlay.FindName("InlineEditorToolsRow2"));
+                Assert.Equal(Visibility.Visible, secondRow.Visibility);
+                var arrangedElements = firstRow.Children
+                    .Cast<FrameworkElement>()
+                    .Concat(secondRow.Children.Cast<FrameworkElement>())
+                    .ToList();
+                var text = Assert.IsType<RadioButton>(
+                    overlay.FindName("InlineTextToolButton"));
+                var arrow = Assert.IsType<RadioButton>(
+                    overlay.FindName("InlineArrowToolButton"));
+                var shape = Assert.IsType<RadioButton>(
+                    overlay.FindName("InlineShapeToolButton"));
+                Assert.True(arrangedElements.IndexOf(text) < arrangedElements.IndexOf(arrow));
+                Assert.True(arrangedElements.IndexOf(arrow) < arrangedElements.IndexOf(shape));
             }
             finally
             {
@@ -334,8 +418,9 @@ public sealed class CaptureOverlayWindowTests
                 var toolbar = Assert.IsType<Border>(
                     overlay.FindName("CaptureToolbar"));
                 Assert.Equal(Visibility.Visible, toolbar.Visibility);
-                Assert.IsType<Thumb>(
-                    overlay.FindName("CaptureToolbarDragHandle"));
+                Assert.Null(overlay.FindName("CaptureToolbarDragHandle"));
+                Assert.Equal(System.Windows.Input.Cursors.SizeAll, toolbar.Cursor);
+                Assert.Null(toolbar.ToolTip);
                 var surface = Assert.IsAssignableFrom<FrameworkElement>(
                     overlay.FindName("CaptureSurface"));
                 var maximumToolbarX = Math.Max(

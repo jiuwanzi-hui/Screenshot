@@ -11,7 +11,10 @@
         ShowInTaskbar="False"
         SizeToContent="WidthAndHeight"
         Topmost="True"
-        WindowStyle="None">
+        WindowStyle="None"
+        PreviewMouseLeftButtonDown="OnToolbarSurfaceMouseLeftButtonDown"
+        PreviewMouseLeftButtonUp="OnToolbarSurfaceMouseLeftButtonUp"
+        PreviewMouseMove="OnToolbarSurfaceMouseMove">
     <Window.Resources>
         <Geometry x:Key="UndoIconGeometry">M 8,4 L 3,9 L 8,14 M 3,9 L 11,9 C 15,9 18,11.5 18,16</Geometry>
         <Geometry x:Key="RectangleIconGeometry">M 2,2 H 16 V 16 H 2 Z</Geometry>
@@ -180,39 +183,21 @@
         </Style>
     </Window.Resources>
 
-    <Border Margin="6"
+    <Border x:Name="ToolbarSurface"
+            Margin="6"
             Padding="10,8"
             Background="{DynamicResource AppPanelBackgroundBrush}"
             BorderBrush="{DynamicResource AppBorderBrush}"
             BorderThickness="1"
-            CornerRadius="8">
+            CornerRadius="8"
+            Cursor="SizeAll">
         <Border.Effect>
             <DropShadowEffect BlurRadius="10" Direction="0" Opacity="0.42" ShadowDepth="0" Color="#000000" />
         </Border.Effect>
         <Grid>
             <StackPanel x:Name="EditPanel">
-                <StackPanel Orientation="Horizontal">
-                    <Thumb x:Name="DragHandle"
-                           Width="20"
-                           Height="32"
-                           Margin="-5,0,5,0"
-                           Cursor="SizeAll"
-                           DragDelta="OnDragHandleDragDelta"
-                           MouseDoubleClick="OnDragHandleMouseDoubleClick"
-                           ToolTip="拖动工具栏；双击恢复吸附位置">
-                        <Thumb.Template>
-                            <ControlTemplate TargetType="Thumb">
-                                <Border Background="Transparent" CornerRadius="4">
-                                    <TextBlock HorizontalAlignment="Center"
-                                               VerticalAlignment="Center"
-                                               FontFamily="Segoe MDL2 Assets"
-                                               FontSize="13"
-                                               Foreground="{DynamicResource ImageEditorMutedTextBrush}"
-                                               Text="&#xE712;" />
-                                </Border>
-                            </ControlTemplate>
-                        </Thumb.Template>
-                    </Thumb>
+                <StackPanel x:Name="EditTools">
+                <StackPanel x:Name="EditToolsRow1" Orientation="Horizontal">
                     <RadioButton x:Name="ShapeToolButton" GroupName="PinnedEditorTool" Tag="Rectangle" Checked="OnToolChecked" Style="{StaticResource ToolbarToggle}" ToolTip="矩形/椭圆">
                         <RadioButton.ContextMenu>
                             <ContextMenu>
@@ -281,7 +266,7 @@
                         <Path Data="{StaticResource UndoIconGeometry}" Style="{StaticResource ToolbarIconPath}" />
                     </Button>
                     <Border x:Name="HistoryFinishSeparator" Style="{StaticResource ToolbarSeparator}" />
-                    <Button Click="OnCancelClick" Style="{StaticResource ToolbarButton}" ToolTip="取消编辑">
+                    <Button x:Name="CancelEditButton" Click="OnCancelClick" Style="{StaticResource ToolbarButton}" ToolTip="取消编辑">
                         <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{DynamicResource EditorToolbarCancelIconBrush}" Text="&#xE711;" />
                     </Button>
                     <Button x:Name="EditApplyButton"
@@ -293,7 +278,16 @@
                         <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{DynamicResource EditorToolbarConfirmIconBrush}" Text="&#xE73E;" />
                     </Button>
                 </StackPanel>
-                <StackPanel x:Name="ColorOptions" Margin="0,6,0,0" Orientation="Horizontal">
+                <StackPanel x:Name="EditToolsRow2"
+                            Margin="0,6,0,0"
+                            Orientation="Horizontal"
+                            Visibility="Collapsed" />
+                </StackPanel>
+                <StackPanel x:Name="ColorOptions"
+                            Margin="0,6,0,0"
+                            Background="Transparent"
+                            Cursor="SizeAll"
+                            Orientation="Horizontal">
                     <Button x:Name="RedColorButton" Background="#D64545" BorderBrush="#F2FFFC" BorderThickness="2" Tag="#D64545" Click="OnColorClick" Style="{StaticResource ColorSwatch}" ToolTip="红色" />
                     <Button x:Name="CyanColorButton" Background="#007F73" BorderBrush="#00695F" Tag="#007F73" Click="OnColorClick" Style="{StaticResource ColorSwatch}" ToolTip="青绿" />
                     <Button x:Name="DarkColorButton" Background="#25313A" BorderBrush="#1C252D" Tag="#25313A" Click="OnColorClick" Style="{StaticResource ColorSwatch}" ToolTip="黑色" />
@@ -319,21 +313,6 @@
             </StackPanel>
 
             <StackPanel x:Name="CropPanel" Visibility="Collapsed" Orientation="Horizontal">
-                <Thumb Width="20"
-                       Height="32"
-                       Margin="-5,0,5,0"
-                       Cursor="SizeAll"
-                       DragDelta="OnDragHandleDragDelta"
-                       MouseDoubleClick="OnDragHandleMouseDoubleClick"
-                       ToolTip="拖动工具栏；双击恢复吸附位置">
-                    <Thumb.Template>
-                        <ControlTemplate TargetType="Thumb">
-                            <Border Background="Transparent">
-                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe MDL2 Assets" FontSize="13" Foreground="{DynamicResource ImageEditorMutedTextBrush}" Text="&#xE712;" />
-                            </Border>
-                        </ControlTemplate>
-                    </Thumb.Template>
-                </Thumb>
                 <TextBlock Margin="0,0,12,0" VerticalAlignment="Center" Foreground="{DynamicResource AppTextPrimaryBrush}" Text="裁剪范围" />
                 <TextBlock x:Name="CropSizeText" Width="112" VerticalAlignment="Center" FontFamily="Consolas" Foreground="{DynamicResource AppTextSecondaryBrush}" />
                 <Button Width="52" Click="OnCancelClick" Content="取消" Style="{StaticResource ToolbarButton}" />

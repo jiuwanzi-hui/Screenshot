@@ -19,6 +19,8 @@ public partial class App : System.Windows.Application, IDisposable
     private RegionCaptureCoordinator? _regionCaptureCoordinator;
     private CaptureHistoryService? _captureHistoryService;
     private CaptureHistoryWindow? _captureHistoryWindow;
+    private bool _isCaptureHistoryRestoreStarted;
+    private bool _isCaptureHistoryRestored;
     private FloatingCaptureWindow? _floatingCaptureWindow;
     private TextTranslationWindow? _textTranslationWindow;
     private PinnedImageManager? _pinnedImageManager;
@@ -67,6 +69,18 @@ public partial class App : System.Windows.Application, IDisposable
             loadedSettings,
             settingsStore,
             credentialStore);
+        var persistCaptureHistory =
+            _currentSettings.KeepHistory &&
+            _currentSettings.PersistHistoryAcrossRestarts;
+        if (!persistCaptureHistory)
+        {
+            CaptureHistoryService.CleanCacheDirectory();
+        }
+        else
+        {
+            _ = Task.Run(() => CaptureHistoryService.PruneCacheDirectory(
+                AppSettings.MaximumHistoryItems));
+        }
         if (dataMigrationResult.Migrated)
         {
             settingsStore.Save(_currentSettings);
@@ -105,6 +119,7 @@ public partial class App : System.Windows.Application, IDisposable
         _mainWindow.TextTranslationRequested += OnTextTranslationRequested;
         _mainWindow.ConfigureTaskbarVisibility(_currentSettings.ShowTaskbarIcon);
         _captureHistoryService = new CaptureHistoryService();
+        _captureHistoryService.ConfigurePersistence(persistCaptureHistory);
         _pinnedImageManager = new PinnedImageManager(
             RecognizePinnedImageAsync,
             TranslatePinnedImageAsync,
@@ -171,10 +186,6 @@ public partial class App : System.Windows.Application, IDisposable
             ShowMainWindow();
         }
 
-        // History cache files are session-scoped; sweep leftovers from earlier
-        // runs, then return the startup allocation burst to the OS so the tray
-        // idle starts small instead of holding the WPF warm-up garbage.
-        _ = Task.Run(CaptureHistoryService.CleanCacheDirectory);
         _ = Dispatcher.BeginInvoke(
             System.Windows.Threading.DispatcherPriority.ApplicationIdle,
             Core.MemoryFootprint.TrimAfterHeavyOperation);
@@ -316,12 +327,68 @@ public partial class App : System.Windows.Application, IDisposable
     private void OnSettingsSaved(object? sender, SettingsSavedEventArgs e)
     {
         _currentSettings = e.Settings;
+        var persistCaptureHistory =
+            e.Settings.KeepHistory &&
+            e.Settings.PersistHistoryAcrossRestarts;
+        _captureHistoryService?.ConfigurePersistence(persistCaptureHistory);
+        _captureHistoryWindow?.UpdatePersistenceScope(persistCaptureHistory);
+        if (persistCaptureHistory && _captureHistoryWindow is not null)
+        {
+            BeginCaptureHistoryRestore();
+        }
         _themeManager?.Apply(e.Settings.Theme);
         _trayIconService?.SetVisible(e.Settings.ShowNotificationIcon);
         _captureHistoryWindow?.UpdateDirectories(
             e.Settings.SaveDirectory,
             e.Settings.VideoSaveDirectory);
         UpdateFloatingCaptureWindow();
+    }
+
+    private async Task RestoreCaptureHistoryAsync(
+        CaptureHistoryService historyService)
+    {
+        try
+        {
+            var items = await Task.Run(() => historyService.LoadPersistedItems(
+                AppSettings.MaximumHistoryItems));
+            await Dispatcher.InvokeAsync(() =>
+            {
+                if (!historyService.PersistsAcrossRestarts)
+                {
+                    return;
+                }
+
+                historyService.MergePersistedItems(
+                    items,
+                    AppSettings.MaximumHistoryItems);
+                _isCaptureHistoryRestored = true;
+            });
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or ArgumentException
+                or NotSupportedException)
+        {
+            _mainWindow?.ShowStatus($"无法恢复截图历史：{exception.Message}");
+        }
+        finally
+        {
+            _isCaptureHistoryRestoreStarted = false;
+        }
+    }
+
+    private void BeginCaptureHistoryRestore()
+    {
+        if (_captureHistoryService is not { PersistsAcrossRestarts: true } history ||
+            _isCaptureHistoryRestoreStarted ||
+            _isCaptureHistoryRestored)
+        {
+            return;
+        }
+
+        _isCaptureHistoryRestoreStarted = true;
+        _ = RestoreCaptureHistoryAsync(history);
     }
 
     private void OnThemeChanged(object? sender, AppTheme theme)
@@ -640,6 +707,7 @@ public partial class App : System.Windows.Application, IDisposable
 
         try
         {
+            BeginCaptureHistoryRestore();
             if (_captureHistoryWindow is null)
             {
                 _captureHistoryWindow = new CaptureHistoryWindow(

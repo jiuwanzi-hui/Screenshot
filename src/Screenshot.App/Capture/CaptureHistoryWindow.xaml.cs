@@ -43,6 +43,7 @@ public partial class CaptureHistoryWindow : Window
         _captureHistoryService.Items.CollectionChanged += OnHistoryItemsChanged;
         _videoHistoryService.Items.CollectionChanged += OnHistoryItemsChanged;
         RefreshVideoHistory(updateStatus: false);
+        UpdatePersistenceScope(historyService.PersistsAcrossRestarts);
         UpdateEmptyStates();
         ShowHistorySection(showVideo: false, updateStatus: false);
     }
@@ -73,6 +74,13 @@ public partial class CaptureHistoryWindow : Window
 
         _videoDirectory = nextVideoDirectory;
         RefreshVideoHistory(updateStatus: false);
+    }
+
+    public void UpdatePersistenceScope(bool persistsAcrossRestarts)
+    {
+        ScreenshotHistoryScopeText.Text = persistsAcrossRestarts
+            ? "跨重启 · 最近 100 张"
+            : "本次运行";
     }
 
     protected override void OnActivated(EventArgs e)
