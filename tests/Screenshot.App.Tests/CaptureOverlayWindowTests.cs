@@ -588,6 +588,108 @@ public sealed class CaptureOverlayWindowTests
     }
 
     [Fact]
+    public async Task RightButtonUpCancelsLongLeftHoldCaptureWithoutClickThrough()
+    {
+        CaptureOverlayWindow? overlay = null;
+        CapturePointerContinuation? continuation = null;
+        PinnedImageManager? pinnedImageManager = null;
+        var captureClosed = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        try
+        {
+            WpfTestHost.Invoke(() =>
+            {
+                var cursor = System.Windows.Forms.Cursor.Position;
+                continuation = new CapturePointerContinuation(
+                    CapturePointerButton.Left,
+                    cursor,
+                    enterPickerWhenReleasedWithoutSelection: true);
+                pinnedImageManager = new PinnedImageManager();
+                overlay = CaptureOverlayWindow.ShowInteractive(
+                    new CaptureOverlayOptions
+                    {
+                        SaveDirectory = Path.GetTempPath(),
+                        KeepHistory = false,
+                        HistoryLimit = 0,
+                        HistoryService = new CaptureHistoryService(),
+                        PinnedImageManager = pinnedImageManager,
+                        StartOcrAsync = image =>
+                        {
+                            image.Dispose();
+                            return Task.CompletedTask;
+                        },
+                        InitialPointerContinuation = continuation,
+                        CaptureClosed = () => captureClosed.TrySetResult(),
+                    });
+
+                var selectionStartField = typeof(CaptureOverlayWindow).GetField(
+                    "_selectionStartPoint",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var updateSelection = typeof(CaptureOverlayWindow).GetMethod(
+                    "UpdateSelectionBounds",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var selectionStart = Assert.IsType<Point>(
+                    selectionStartField?.GetValue(overlay));
+                updateSelection!.Invoke(
+                    overlay,
+                    [new Rect(selectionStart, new Point(
+                        selectionStart.X + 120,
+                        selectionStart.Y + 80))]);
+            });
+
+            continuation!.NotifyReleased();
+            await overlay!.ContinuedSelectionReleaseTask.WaitAsync(
+                TimeSpan.FromSeconds(5));
+
+            WpfTestHost.Invoke(() =>
+            {
+                var surface = Assert.IsType<Grid>(
+                    overlay.FindName("CaptureSurface"));
+                var downMethod = typeof(CaptureOverlayWindow).GetMethod(
+                    "OnCaptureSurfacePreviewMouseRightButtonDown",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var upMethod = typeof(CaptureOverlayWindow).GetMethod(
+                    "OnCaptureSurfacePreviewMouseRightButtonUp",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var down = new MouseButtonEventArgs(
+                    Mouse.PrimaryDevice,
+                    Environment.TickCount,
+                    MouseButton.Right)
+                {
+                    RoutedEvent = UIElement.PreviewMouseRightButtonDownEvent,
+                };
+
+                downMethod!.Invoke(overlay, [surface, down]);
+
+                Assert.True(down.Handled);
+                Assert.True(overlay.IsVisible);
+                Assert.True(surface.IsMouseCaptured);
+
+                var up = new MouseButtonEventArgs(
+                    Mouse.PrimaryDevice,
+                    Environment.TickCount,
+                    MouseButton.Right)
+                {
+                    RoutedEvent = UIElement.PreviewMouseRightButtonUpEvent,
+                };
+                upMethod!.Invoke(overlay, [surface, up]);
+                Assert.True(up.Handled);
+            });
+            await captureClosed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            WpfTestHost.Invoke(() => Assert.False(overlay.IsVisible));
+        }
+        finally
+        {
+            WpfTestHost.Invoke(() =>
+            {
+                overlay?.Close();
+                pinnedImageManager?.Dispose();
+            });
+        }
+    }
+
+    [Fact]
     public async Task LongLeftHoldCanContinueDraggingBeforeRelease()
     {
         CaptureOverlayWindow? overlay = null;

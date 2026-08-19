@@ -827,6 +827,20 @@
                               Checked="OnImmediateSettingChanged"
                               Unchecked="OnImmediateSettingChanged"
                               Content="开机时启动 SnapCut" />
+                    <CheckBox x:Name="RequestAdministratorPrivilegesCheckBox"
+                              MinHeight="30"
+                              Margin="0,8,0,0"
+                              FontSize="14"
+                              Foreground="{DynamicResource AppTextPrimaryBrush}"
+                              IsChecked="{Binding RequestAdministratorPrivileges}"
+                              Checked="OnImmediateSettingChanged"
+                              Unchecked="OnImmediateSettingChanged"
+                              Content="下次真正启动时请求管理员权限" />
+                    <TextBlock Margin="26,2,0,0"
+                               FontSize="12"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               TextWrapping="Wrap"
+                               Text="点击右上角关闭只会最小化到后台；请使用“退出程序”后再启动。包括开机启动；拒绝 Windows 提示后仍以普通权限运行，高权限窗口中的鼠标截图快捷键可能不可用。" />
                 </StackPanel>
 
                 <Border Style="{StaticResource GeneralGroupSeparator}" />
@@ -2065,14 +2079,22 @@
                                                    Text="欢迎反馈使用体验与功能建议"
                                                    TextWrapping="Wrap" />
                                     </StackPanel>
-                                    <Button Grid.Column="2"
-                                            MinWidth="124"
-                                            Padding="16,9"
-                                            VerticalAlignment="Center"
-                                            Click="OnOpenCreatorProfileClick"
-                                            Content="访问 B 站主页"
-                                            Style="{StaticResource SecondaryButton}"
-                                            ToolTip="在默认浏览器中打开九万字__的个人空间" />
+                                    <StackPanel Grid.Column="2"
+                                                VerticalAlignment="Center">
+                                        <Button MinWidth="124"
+                                                Padding="16,9"
+                                                Click="OnOpenCreatorProfileClick"
+                                                Content="访问 B 站主页"
+                                                Style="{StaticResource SecondaryButton}"
+                                                ToolTip="在默认浏览器中打开九万字__的个人空间" />
+                                        <Button Margin="0,8,0,0"
+                                                MinWidth="124"
+                                                Padding="16,9"
+                                                Click="OnOpenGithubRepositoryClick"
+                                                Content="GitHub 项目"
+                                                Style="{StaticResource SecondaryButton}"
+                                                ToolTip="在默认浏览器中打开 SnapCut GitHub 项目" />
+                                    </StackPanel>
                             </Grid>
                         </Border>
                     </Border>

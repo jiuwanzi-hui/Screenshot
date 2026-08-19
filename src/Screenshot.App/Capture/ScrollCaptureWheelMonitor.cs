@@ -175,6 +175,28 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
             var hookData = Marshal.PtrToStructure<LowLevelMouseHookData>(
                 hookDataPointer);
 
+            if (_controlledCaptureInput)
+            {
+                // Automatic capture owns the physical wheel for its entire
+                // lifetime. The pointer can move onto the progress window or
+                // just outside the selection after the start click; limiting
+                // this check to the capture region lets the underlying page
+                // scroll and breaks frame alignment. Synthetic wheel packets
+                // emitted by the controlled driver must continue downstream.
+                if (IsControlledWheelInput(
+                        hookData.Flags,
+                        hookData.ExtraInformation))
+                {
+                    return NativeMethods.CallNextHookEx(
+                        _hookHandle,
+                        hookCode,
+                        message,
+                        hookDataPointer);
+                }
+
+                return new IntPtr(1);
+            }
+
             ScreenRegion captureRegion;
             lock (_captureRegionSync)
             {
@@ -183,23 +205,6 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
 
             if (captureRegion.Contains(hookData.Point.X, hookData.Point.Y))
             {
-                if (_controlledCaptureInput)
-                {
-                    // Programmatic wheel input must reach the target. Physical
-                    // wheel input is blocked so it cannot violate the one-way
-                    // controlled capture sequence or outrun the stitcher.
-                    if ((hookData.Flags & InjectedMouseEvent) == 0)
-                    {
-                        return new IntPtr(1);
-                    }
-
-                    return NativeMethods.CallNextHookEx(
-                        _hookHandle,
-                        hookCode,
-                        message,
-                        hookDataPointer);
-                }
-
                 if (_throttledWheelInput &&
                     (hookData.Flags & InjectedMouseEvent) == 0)
                 {
@@ -515,6 +520,16 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
         var value = unchecked((uint)extraInformation.ToInt64());
         return (value & MousePointerSignatureMask) == MousePointerSignature &&
                (value & MousePointerTouchFlag) != 0;
+    }
+
+    internal static bool IsControlledWheelInput(
+        uint flags,
+        IntPtr extraInformation)
+    {
+        _ = flags;
+        return extraInformation == new IntPtr(
+                   ForegroundWindowCaptureService
+                       .ControlledWheelInputSignature);
     }
 
     private delegate IntPtr HookProcedure(

@@ -172,6 +172,16 @@ internal sealed class ControlledScrollDriver : IAsyncDisposable
                     continue;
                 }
 
+                // Do not take the system pointer away from the live preview.
+                // The capture resumes automatically when the pointer returns
+                // to the selected viewport, while Edit/Complete/Cancel remain
+                // stable and clickable outside it.
+                if (!ForegroundWindowCaptureService
+                        .IsPointerInsideCaptureRegion(_target))
+                {
+                    continue;
+                }
+
                 if (!fastReturn && _remainingCaptureStepBudget <= 0)
                 {
                     _backpressureWaitTicksSinceFrame++;

@@ -83,6 +83,12 @@ public static class ScrollCaptureService
     // Chat UIs keep the fingerprint "moving" forever. Cap Aligning* so a
     // confirmed return cannot strand the capture on "正在对齐初始位置".
     private const int ControlledAlignmentMaxSettleAttempts = 8;
+    // Precision touchpads and touch screens can move the target without
+    // producing a low-level WM_MOUSEWHEEL packet. Keep the fallback sparse;
+    // it is only enabled for manual capture and only becomes a motion signal
+    // when the existing overlap matcher can identify a direction.
+    private const int ManualViewportMotionProbeDelayMilliseconds = 120;
+    private const int ManualViewportMotionSignalCooldownMilliseconds = 240;
 
     public static async Task<ScrollCaptureResult> CaptureOnWheelAsync(
         ScrollCaptureTarget target,
@@ -92,6 +98,7 @@ public static class ScrollCaptureService
         Func<bool, CancellationToken, Task>? setPreviewVisibilityAsync = null,
         Action<ScrollCapturePreviewState>? previewChanged = null,
         bool throttleWheelInput = false,
+        bool enableViewportMotionFallback = false,
         Bitmap? initialFrame = null,
         CancellationToken cancellationToken = default)
     {
@@ -113,6 +120,7 @@ public static class ScrollCaptureService
         Channel<QueuedScrollFrame>? activeFrameQueue = null;
         Task? activeFrameProcessor = null;
         ManualScrollDriver? throttledScrollDriver = null;
+        Bitmap? lastMotionProbeFrame = null;
 
         try
         {
@@ -128,6 +136,11 @@ public static class ScrollCaptureService
                        setPreviewVisibilityAsync,
                        cancellationToken))
             {
+                if (enableViewportMotionFallback)
+                {
+                    lastMotionProbeFrame = new Bitmap(capturedInitialFrame);
+                }
+
                 frameGate.Accept(capturedInitialFrame);
                 frameDump.SaveInitial(capturedInitialFrame);
                 _ = await Task.Run(
@@ -170,6 +183,11 @@ public static class ScrollCaptureService
             var nextSample = Task.Delay(
                 options.FrameDelayMilliseconds,
                 cancellationToken);
+            var nextMotionProbe = enableViewportMotionFallback
+                ? Task.Delay(
+                    ManualViewportMotionProbeDelayMilliseconds,
+                    cancellationToken)
+                : Task.Delay(Timeout.Infinite, cancellationToken);
             var activeFrameCapacity = GetActiveFrameQueueCapacity(
                 target.CaptureRegion);
             // Start pacing before a large high-resolution queue is a quarter
@@ -213,6 +231,7 @@ public static class ScrollCaptureService
                 var completedTask = await Task.WhenAny(
                     completionRequested,
                     nextWheelEvent,
+                    nextMotionProbe,
                     nextSample);
 
                 if (completedTask == completionRequested)
@@ -439,6 +458,58 @@ public static class ScrollCaptureService
                     continue;
                 }
 
+                if (completedTask == nextMotionProbe)
+                {
+                    try
+                    {
+                        using var probeFrame = await CaptureFrameAsync(
+                            target,
+                            null,
+                            cancellationToken);
+                        var previousProbeFrame = lastMotionProbeFrame;
+                        lastMotionProbeFrame = new Bitmap(probeFrame);
+
+                        var probeElapsed = lastWheelEventTimestamp == 0L
+                            ? TimeSpan.MaxValue
+                            : Stopwatch.GetElapsedTime(lastWheelEventTimestamp);
+                        if (previousProbeFrame is not null &&
+                            probeElapsed.TotalMilliseconds >=
+                                ManualViewportMotionSignalCooldownMilliseconds &&
+                            TryInferViewportDirection(
+                                previousProbeFrame,
+                                probeFrame,
+                                options,
+                                out var inferredDirection))
+                        {
+                            var inferredWheelDelta = inferredDirection ==
+                                ScrollCaptureDirection.Up
+                                ? 120
+                                : -120;
+                            motionTracker.AddDelta(inferredWheelDelta);
+                            activeDirection = inferredDirection;
+                            lastWheelEventTimestamp = Stopwatch.GetTimestamp();
+                            boundaryDetector.ObserveWheel(
+                                inferredDirection,
+                                lastWheelEventTimestamp,
+                                inferredWheelDelta);
+                            diagnostics.Record(
+                                "viewport-motion-fallback",
+                                ("direction", inferredDirection.ToString()),
+                                ("wheelDelta", inferredWheelDelta));
+                        }
+
+                        previousProbeFrame?.Dispose();
+                    }
+                    finally
+                    {
+                        nextMotionProbe = Task.Delay(
+                            ManualViewportMotionProbeDelayMilliseconds,
+                            cancellationToken);
+                    }
+
+                    continue;
+                }
+
                 var elapsedSinceWheel = lastWheelEventTimestamp == 0L
                     ? TimeSpan.MaxValue
                     : Stopwatch.GetElapsedTime(lastWheelEventTimestamp);
@@ -624,6 +695,8 @@ public static class ScrollCaptureService
                 }
             }
 
+            lastMotionProbeFrame?.Dispose();
+
             diagnostics.FlushInBackground();
         }
     }
@@ -719,6 +792,61 @@ public static class ScrollCaptureService
         {
             return ScrollCaptureResult.Failure("滚动截图失败。");
         }
+    }
+
+    private static bool TryInferViewportDirection(
+        Bitmap previousFrame,
+        Bitmap currentFrame,
+        ScrollCaptureOptions options,
+        out ScrollCaptureDirection direction)
+    {
+        direction = default;
+        if (previousFrame.Width != currentFrame.Width ||
+            previousFrame.Height != currentFrame.Height)
+        {
+            return false;
+        }
+
+        // The existing matcher is used only as an input adapter here. The
+        // normal composer still receives the same wheel direction and runs the
+        // unchanged manual stitching path.
+        var downMatch = ImageOverlapMatcher.FindVerticalOverlap(
+            previousFrame,
+            currentFrame,
+            options.MinimumOverlapRows,
+            options.MinimumOverlapConfidence,
+            options.MinimumNewRows);
+        var upMatch = ImageOverlapMatcher.FindVerticalOverlap(
+            currentFrame,
+            previousFrame,
+            options.MinimumOverlapRows,
+            options.MinimumOverlapConfidence,
+            options.MinimumNewRows);
+
+        if (downMatch is null && upMatch is null)
+        {
+            return false;
+        }
+
+        if (upMatch is null ||
+            (downMatch is not null &&
+             downMatch.Confidence >= upMatch.Confidence + 0.02))
+        {
+            direction = ScrollCaptureDirection.Down;
+            return true;
+        }
+
+        if (downMatch is null ||
+            upMatch.Confidence >= downMatch.Confidence + 0.02)
+        {
+            direction = ScrollCaptureDirection.Up;
+            return true;
+        }
+
+        // A near tie is ambiguous (for example a repeated list row). Let the
+        // next probe establish a decisive direction instead of feeding a
+        // potentially wrong motion signal into the capture pipeline.
+        return false;
     }
 
     public static async Task<ScrollCaptureResult> CaptureControlledAsync(

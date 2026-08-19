@@ -63,4 +63,24 @@ public sealed class ScrollCaptureWheelMonitorTests
                 new IntPtr(unchecked((int)extraInformation))));
     }
 
+    [Theory]
+    [InlineData(0u, true, false)]
+    [InlineData(0u, false, true)]
+    [InlineData(1u, false, true)]
+    [InlineData(1u, true, false)]
+    public void OnlyOurMarkedInjectedWheelIsAllowed(
+        uint flags,
+        bool useForeignMarker,
+        bool expected)
+    {
+        var marker = useForeignMarker
+            ? new IntPtr(unchecked((long)0x53454E4445524C57))
+            : new IntPtr(
+                ForegroundWindowCaptureService.ControlledWheelInputSignature);
+
+        Assert.Equal(
+            expected,
+            ScrollCaptureWheelMonitor.IsControlledWheelInput(flags, marker));
+    }
+
 }

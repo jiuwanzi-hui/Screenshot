@@ -167,6 +167,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private string _customStrokeColor;
     private int[] _customColorPalette;
     private bool _launchAtStartup;
+    private bool _requestAdministratorPrivileges;
     private WindowCloseBehavior _closeBehavior;
     private AppTheme _theme;
     private bool _keepHistory;
@@ -218,6 +219,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _customStrokeColor = settings.CustomStrokeColor;
         _customColorPalette = settings.CustomColorPalette.ToArray();
         _launchAtStartup = settings.LaunchAtStartup;
+        _requestAdministratorPrivileges = settings.RequestAdministratorPrivileges;
         _closeBehavior = settings.CloseBehavior;
         _theme = settings.Theme;
         _keepHistory = settings.KeepHistory;
@@ -449,6 +451,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _launchAtStartup, value);
     }
 
+    public bool RequestAdministratorPrivileges
+    {
+        get => _requestAdministratorPrivileges;
+        set => SetProperty(ref _requestAdministratorPrivileges, value);
+    }
+
     public WindowCloseBehavior CloseBehavior
     {
         get => _closeBehavior;
@@ -619,6 +627,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             CustomStrokeColor = CustomStrokeColor,
             CustomColorPalette = CustomColorPalette.ToArray(),
             LaunchAtStartup = LaunchAtStartup,
+            RequestAdministratorPrivileges = RequestAdministratorPrivileges,
             CloseBehavior = CloseBehavior,
             Theme = Theme,
             KeepHistory = KeepHistory,
@@ -676,6 +685,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         CustomStrokeColor = settings.CustomStrokeColor;
         CustomColorPalette = settings.CustomColorPalette.ToArray();
         LaunchAtStartup = settings.LaunchAtStartup;
+        RequestAdministratorPrivileges = settings.RequestAdministratorPrivileges;
         CloseBehavior = settings.CloseBehavior;
         Theme = settings.Theme;
         KeepHistory = settings.KeepHistory;
