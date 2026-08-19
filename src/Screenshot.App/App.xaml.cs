@@ -56,9 +56,41 @@ public partial class App : System.Windows.Application, IDisposable
             return;
         }
 
+        var settingsStore = new SettingsStore();
+        var elevationLaunchService = new ElevationLaunchService();
+        var elevationSettings = settingsStore.Load().Settings;
+        var elevationResult = new ElevationLaunchResult(
+            RelaunchStarted: false,
+            Warning: null);
+        if (elevationLaunchService.ShouldRequestElevation(elevationSettings, e.Args))
+        {
+            // Release the per-session instance event before the elevated child
+            // starts, otherwise it would be treated as a second app instance.
+            _singleInstanceCoordinator.Dispose();
+            _singleInstanceCoordinator = null;
+            elevationResult = elevationLaunchService.TryRelaunchElevated(
+                elevationSettings,
+                e.Args);
+            if (elevationResult.RelaunchStarted)
+            {
+                Shutdown();
+                return;
+            }
+
+            _singleInstanceCoordinator = SingleInstanceCoordinator.TryAcquire(
+                "Screenshot.App",
+                () => _ = Dispatcher.BeginInvoke(ShowMainWindow),
+                signalExistingInstance: !startInBackground);
+            if (_singleInstanceCoordinator is null)
+            {
+                Shutdown();
+                return;
+            }
+        }
+        var elevationWarning = elevationResult.Warning;
+
         var dataMigrationResult = InstalledDataMigration.TryMigrateLegacyData();
         WindowPlacementService.Initialize(AppMetadata.WindowPlacementsPath);
-        var settingsStore = new SettingsStore();
         var isFirstRun = !File.Exists(settingsStore.SettingsPath);
         var loadResult = settingsStore.Load();
         var credentialStore = new DpapiTranslationCredentialStore();
@@ -89,11 +121,11 @@ public partial class App : System.Windows.Application, IDisposable
         _themeManager.ThemeChanged += OnThemeChanged;
         _themeManager.Apply(_currentSettings.Theme);
         var startupRegistrationService = new StartupRegistrationService();
-        var startupWarning = loadResult.Warning is null
+        var startupWarning = elevationWarning ?? (loadResult.Warning is null
             ? SynchronizeStartupRegistration(
                 startupRegistrationService,
                 _currentSettings.LaunchAtStartup)
-            : null;
+            : null);
         _hotKeyManager = new GlobalHotKeyManager();
         _hotKeyManager.HotKeyPressed += OnHotKeyPressed;
         var hotKeyWarning = TryApplyInitialHotKeys(
@@ -181,7 +213,10 @@ public partial class App : System.Windows.Application, IDisposable
         _trayIconService.SetVisible(_currentSettings.ShowNotificationIcon);
         UpdateFloatingCaptureWindow();
 
-        if (!startInBackground || isFirstRun || hotKeyWarning is not null)
+        if (!startInBackground ||
+            isFirstRun ||
+            hotKeyWarning is not null ||
+            elevationWarning is not null)
         {
             ShowMainWindow();
         }

@@ -1,5 +1,20 @@
 [
   {
+    "tag_name": "v3.2.0",
+    "name": "SnapCut 3.2.0",
+    "body": "- 新增可选的 UAC 管理员权限启动；拒绝提示后继续以普通权限运行，并明确提示高权限窗口中的鼠标输入限制。\n- 修复按住鼠标触发框选时覆盖层未及时激活、松开后首击被吞及置顶层级丢失的问题；补充设置页 GitHub 项目入口。\n- 长截图自动滚动在指针离开选区时暂停并在返回后继续，区分程序注入滚轮与真实滚轮输入，并为触控板和触摸屏增加基于视口变化的稀疏兜底检测。\n- 收紧录屏控制条高度和控件尺寸，增加管理员启动、框选激活、滚动输入和触控板兜底回归测试。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v3.2.0",
+    "published_at": "2026-08-19T13:52:00+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.2.0/SnapCut-Update.json" },
+      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.2.0/Screenshot-Update.json" },
+      { "name": "SnapCut-Setup-3.2.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.2.0/SnapCut-Setup-3.2.0-win-x64.exe" },
+      { "name": "SnapCut-Portable-3.2.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.2.0/SnapCut-Portable-3.2.0-win-x64.zip" }
+    ]
+  },
+  {
     "tag_name": "v3.1.0",
     "name": "SnapCut 3.1.0",
     "body": "- 截图工具栏新增可视化布局编辑器：点击控制显隐、长按拖动排序，可选择一行或两行，并实时预览最终效果；普通截图与钉图共享配置。\n- 普通截图、钉图和录屏工具栏支持在非按钮区域直接拖动，双击恢复自动吸附并相对目标区域居中；完善远程控制和分辨率变化时的可见性校正。\n- 截图历史可选择跨重启保存，使用磁盘缓存和轻量缩略图降低运行内存占用，并自动限制为最近 100 张。\n- 优化录屏工具栏尺寸、拖动提示和自动定位，避免远程桌面环境中工具栏移出可见区域。\n- 设置页新增主题化日志输出区域，工具栏布局编辑与实时预览区域支持继续滚动整个设置页面。",

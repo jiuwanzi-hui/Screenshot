@@ -538,6 +538,14 @@ public sealed class RegionCaptureCoordinator
                         wheelDetected: null,
                         (x, y) => progressWindow.ContainsScreenPoint(x, y),
                         CancelFromSelection);
+                    if (captureMode != ScrollCaptureMode.ManualWheel)
+                    {
+                        // Own the physical wheel as soon as the hook exists.
+                        // Otherwise a wheel gesture during target discovery or
+                        // first-frame preparation can leak into the page before
+                        // automatic mode enters its state machine.
+                        wheelMonitor.EnableControlledCaptureInput();
+                    }
                     var latestSelectionRegion = initialRegion;
                     var selectionPreviewRefreshPending = false;
                     scrollSelection.CaptureRegionChanged += region =>
@@ -659,12 +667,12 @@ public sealed class RegionCaptureCoordinator
                             previewChanged: previewState =>
                                 UpdateProgress(progressWindow, previewState),
                             throttleWheelInput: false,
+                            enableViewportMotionFallback: true,
                             initialFrame: firstFrame,
                             cancellationToken: cancellationSource.Token);
                     }
                     else
                     {
-                        wheelMonitor.EnableControlledCaptureInput();
                         // Clicks in motion states mean "pause" and must feel
                         // immediate; only idle states still need the
                         // double-click disambiguation delay.

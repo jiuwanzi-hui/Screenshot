@@ -6,6 +6,11 @@ namespace Screenshot.App.Capture;
 
 public static class ForegroundWindowCaptureService
 {
+    // Low-level mouse hooks mark both SendInput and some remote/touch devices
+    // as injected. Use a private marker so automatic capture can distinguish
+    // its own wheel packets from external input that must remain blocked.
+    internal const long ControlledWheelInputSignature = 0x5343574CL;
+
     public static IntPtr GetForegroundWindowHandle()
     {
         return NativeMethods.GetForegroundWindow();
@@ -340,6 +345,8 @@ public static class ForegroundWindowCaptureService
                     {
                         MouseData = unchecked((uint)normalizedDelta),
                         Flags = NativeMethods.MouseEventWheel,
+                        ExtraInfo = new IntPtr(
+                            ControlledWheelInputSignature),
                     },
                 },
             };
@@ -376,6 +383,16 @@ public static class ForegroundWindowCaptureService
                     attach: false);
             }
         }
+    }
+
+    internal static bool IsPointerInsideCaptureRegion(
+        ScrollCaptureTarget target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        return NativeMethods.GetCursorPos(out var cursorPosition) &&
+               target.CaptureRegion.Contains(
+                   cursorPosition.X,
+                   cursorPosition.Y);
     }
 
     private static bool ScrollWithWheelInputCore(
@@ -435,6 +452,8 @@ public static class ForegroundWindowCaptureService
                     {
                         MouseData = unchecked((uint)wheelDelta),
                         Flags = NativeMethods.MouseEventWheel,
+                        ExtraInfo = new IntPtr(
+                            ControlledWheelInputSignature),
                     },
                 },
             };

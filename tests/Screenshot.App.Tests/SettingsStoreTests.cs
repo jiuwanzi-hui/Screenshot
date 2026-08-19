@@ -26,6 +26,7 @@ public sealed class SettingsStoreTests : IDisposable
         var settings = AppSettings.CreateDefault() with
         {
             LaunchAtStartup = true,
+            RequestAdministratorPrivileges = true,
             SaveDirectory = Path.Combine(_testDirectory, "captures"),
             VideoSaveDirectory = Path.Combine(_testDirectory, "videos"),
             RecordSystemAudio = false,
@@ -72,6 +73,7 @@ public sealed class SettingsStoreTests : IDisposable
 
         Assert.Null(loadResult.Warning);
         Assert.True(loadResult.Settings.LaunchAtStartup);
+        Assert.True(loadResult.Settings.RequestAdministratorPrivileges);
         Assert.True(loadResult.Settings.ShowTaskbarIcon);
         Assert.True(loadResult.Settings.ShowFloatingCaptureButton);
         Assert.Equal(

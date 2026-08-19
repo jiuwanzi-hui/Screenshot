@@ -180,6 +180,14 @@ public sealed record AppSettings
 
     public bool LaunchAtStartup { get; init; }
 
+    /// <summary>
+    /// Requests UAC at the next app launch, including a Windows startup launch.
+    /// A declined request deliberately falls back to the normal process token.
+    /// </summary>
+    // New installations and configurations written by older versions request
+    // elevation by default; an explicit user opt-out remains false.
+    public bool RequestAdministratorPrivileges { get; init; } = true;
+
     public WindowCloseBehavior CloseBehavior { get; init; } =
         WindowCloseBehavior.MinimizeToBackground;
 

@@ -36,6 +36,8 @@ internal sealed class ReleaseHistoryItemViewModel
 public partial class MainWindow : Window, IDisposable
 {
     private const string CreatorProfileUrl = "https://b23.tv/ZzD0zPS";
+    private const string GithubRepositoryUrl =
+        "https://github.com/jiuwanzi-hui/Screenshot";
     private static readonly Version MinimumAutomaticRollbackVersion = new(2, 0, 0);
     private readonly SettingsStore _settingsStore;
     private readonly IStartupRegistrationService _startupRegistrationService;
@@ -518,6 +520,27 @@ public partial class MainWindow : Window, IDisposable
             _ = System.Windows.MessageBox.Show(
                 this,
                 $"无法打开作者主页：{exception.Message}",
+                "SnapCut",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private void OnOpenGithubRepositoryClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _ = Process.Start(new ProcessStartInfo(GithubRepositoryUrl)
+            {
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or Win32Exception)
+        {
+            _ = System.Windows.MessageBox.Show(
+                this,
+                $"无法打开 GitHub 项目：{exception.Message}",
                 "SnapCut",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
@@ -1612,6 +1635,13 @@ public partial class MainWindow : Window, IDisposable
         {
             _settingsViewModel.SetStatus(
                 "任务栏图标将在设置窗口下次打开时更新。");
+        }
+        if (applied &&
+            ReferenceEquals(sender, RequestAdministratorPrivilegesCheckBox) &&
+            RequestAdministratorPrivilegesCheckBox.IsChecked == true)
+        {
+            _settingsViewModel.SetStatus(
+                "管理员权限请求将在 SnapCut 完全退出并再次启动时执行；点击关闭按钮不会退出程序。");
         }
         if (ReferenceEquals(sender, TranslationModelComboBox))
         {

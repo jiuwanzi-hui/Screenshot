@@ -23,6 +23,39 @@ using DrawingPoint = System.Drawing.Point;
 
 namespace Screenshot.App.Capture;
 
+internal static class CaptureInputDiagnostics
+{
+    private static readonly object Sync = new();
+    private static readonly string Path = System.IO.Path.Combine(
+        System.IO.Path.GetTempPath(),
+        "SnapCut-MouseInput.log");
+
+    public static void Write(string message)
+    {
+        try
+        {
+            if (string.Equals(
+                    Environment.GetEnvironmentVariable("SNAPCUT_MOUSE_INPUT_LOG"),
+                    "0",
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            lock (Sync)
+            {
+                System.IO.File.AppendAllText(
+                    Path,
+                    $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz} pid={Environment.ProcessId} {message}{Environment.NewLine}");
+            }
+        }
+        catch
+        {
+            // Diagnostics must never affect capture behavior.
+        }
+    }
+}
+
 public enum CapturePointerButton
 {
     Left,
@@ -46,6 +79,8 @@ public sealed class CapturePointerContinuation
     }
 
     public CapturePointerButton Button { get; }
+
+    internal Guid DiagnosticId { get; } = Guid.NewGuid();
 
     internal DrawingPoint? StartScreenPoint { get; }
 
@@ -414,6 +449,14 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void OnCaptureSurfaceLoaded(object sender, RoutedEventArgs e)
     {
+        if (_initialPointerContinuation is not null)
+        {
+            CaptureInputDiagnostics.Write(
+                $"overlay-loaded continuation={_initialPointerContinuation.DiagnosticId} " +
+                $"button={_initialPointerContinuation.Button} active={IsActive}");
+            ActivateContinuedSelectionWindow("loaded");
+        }
+
         CaptureSurface.Focus();
         Keyboard.Focus(CaptureSurface);
         _windowSnapTimer.Start();
@@ -524,6 +567,14 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return;
         }
 
+        if (_initialPointerContinuation?.Button == CapturePointerButton.Left &&
+            !InlineEditorCanvas.HasImage)
+        {
+            e.Handled = true;
+            CompleteOrDeferForRightButtonUp(deferFinalClose: true);
+            return;
+        }
+
         if (_isColorPickerActive)
         {
             ExitColorPicker();
@@ -562,6 +613,14 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         object sender,
         MouseButtonEventArgs e)
     {
+        if (_initialPointerContinuation is not null)
+        {
+            CaptureInputDiagnostics.Write(
+                $"overlay-wpf-up id={_initialPointerContinuation.DiagnosticId} " +
+                $"key=right selecting={_isSelecting} " +
+                $"continuedButton={_continuedSelectionButton}");
+        }
+
         if (_isSelecting &&
             _continuedSelectionButton == CapturePointerButton.Right)
         {
@@ -693,6 +752,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return;
         }
 
+        CaptureInputDiagnostics.Write(
+            $"overlay-continued-begin id={_initialPointerContinuation.DiagnosticId} " +
+            $"button={_initialPointerContinuation.Button}");
+
         var cursorPosition = _initialPointerContinuation.StartScreenPoint ??
             WinForms.Cursor.Position;
         var startPoint = CaptureSurface.PointFromScreen(
@@ -707,6 +770,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         UpdateSelectionBounds(new Rect(_selectionStartPoint, currentPoint));
         _continuedSelectionReleaseTask = CompleteSelectionWhenTriggerButtonIsReleasedAsync(
             _initialPointerContinuation);
+        CaptureInputDiagnostics.Write(
+            $"overlay-continued-waiting id={_initialPointerContinuation.DiagnosticId} " +
+            $"captured={CaptureSurface.IsMouseCaptured} " +
+            $"selecting={_isSelecting} start={_selectionStartPoint.X:0.##},{_selectionStartPoint.Y:0.##}");
     }
 
     internal Task ContinuedSelectionReleaseTask =>
@@ -716,8 +783,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         CapturePointerContinuation continuation)
     {
         await continuation.WaitForReleaseAsync();
+        CaptureInputDiagnostics.Write(
+            $"overlay-continued-released id={continuation.DiagnosticId} " +
+            $"selecting={_isSelecting} button={_continuedSelectionButton}");
         if (_isCompleted)
         {
+            CaptureInputDiagnostics.Write(
+                $"overlay-continued-stop id={continuation.DiagnosticId} reason=completed");
             return;
         }
 
@@ -726,8 +798,16 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             if (!_isSelecting ||
                 _continuedSelectionButton != continuation.Button)
             {
+                CaptureInputDiagnostics.Write(
+                    $"overlay-continued-stop id={continuation.DiagnosticId} " +
+                    $"reason=state-mismatch selecting={_isSelecting} button={_continuedSelectionButton}");
                 return Task.CompletedTask;
             }
+
+            // Some applications retain foreground activation while the physical
+            // button is held. Re-activate after the real release so the first
+            // editor click is not consumed merely to activate this overlay.
+            ActivateContinuedSelectionWindow("physical-release");
 
             var cursorPosition = WinForms.Cursor.Position;
             var endPoint = CaptureSurface.PointFromScreen(
@@ -738,6 +818,41 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                     continuation.EnterPickerWhenReleasedWithoutSelection);
         });
         await completion;
+        CaptureInputDiagnostics.Write(
+            $"overlay-continued-completed id={continuation.DiagnosticId} " +
+            $"editorImage={InlineEditorCanvas.HasImage} completed={_isCompleted} active={IsActive}");
+    }
+
+    private void ActivateContinuedSelectionWindow(string reason)
+    {
+        var activeBefore = IsActive;
+        var topmostApplied = ReassertOverlayTopmost();
+        var activated = activeBefore || Activate();
+        CaptureSurface.Focus();
+        Keyboard.Focus(CaptureSurface);
+        CaptureInputDiagnostics.Write(
+            $"overlay-activate reason={reason} before={activeBefore} " +
+            $"topmost={topmostApplied} activateResult={activated} after={IsActive} " +
+            $"keyboardFocus={CaptureSurface.IsKeyboardFocusWithin}");
+    }
+
+    private bool ReassertOverlayTopmost()
+    {
+        if (_windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        return NativeMethods.SetWindowPos(
+            _windowHandle,
+            new IntPtr(TopmostWindow),
+            0,
+            0,
+            0,
+            0,
+            DoNotResize |
+            DoNotMove |
+            DoNotChangeOwnerZOrder);
     }
 
     private void BeginPointerSelection(
@@ -766,6 +881,14 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         CaptureSurface.CaptureMouse();
         CaptureSurface.Focus();
+        Mouse.UpdateCursor();
+        if (continuedButton.HasValue)
+        {
+            CaptureInputDiagnostics.Write(
+                $"overlay-pointer-selection id={_initialPointerContinuation?.DiagnosticId} " +
+                $"button={continuedButton} captured={CaptureSurface.IsMouseCaptured} " +
+                $"start={_selectionStartPoint.X:0.##},{_selectionStartPoint.Y:0.##}");
+        }
     }
 
     private void OnCaptureSurfaceMouseMove(object sender, WpfMouseEventArgs e)
@@ -804,6 +927,14 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private async void OnCaptureSurfaceMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        if (_initialPointerContinuation is not null)
+        {
+            CaptureInputDiagnostics.Write(
+                $"overlay-wpf-up id={_initialPointerContinuation.DiagnosticId} " +
+                $"key=left selecting={_isSelecting} " +
+                $"continuedButton={_continuedSelectionButton}");
+        }
+
         if (!_isSelecting ||
             _continuedSelectionButton == CapturePointerButton.Right)
         {
@@ -845,6 +976,12 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         if (!HasValidSelection())
         {
+            if (_initialPointerContinuation is not null)
+            {
+                CaptureInputDiagnostics.Write(
+                    $"overlay-selection-invalid id={_initialPointerContinuation.DiagnosticId} " +
+                    $"end={endPoint.X:0.##},{endPoint.Y:0.##}");
+            }
             HideSelectionControls();
             if (enterPickerWhenEmpty && _options is not null)
             {
@@ -867,6 +1004,12 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         ShowSelectionControls();
+        if (_initialPointerContinuation is not null)
+        {
+            CaptureInputDiagnostics.Write(
+                $"overlay-selection-valid id={_initialPointerContinuation.DiagnosticId} " +
+                $"bounds={GetSelectionBounds()}");
+        }
         await EnterInlineEditorForCompletedSelectionAsync();
     }
 
@@ -1393,6 +1536,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         _isEditorInitializing = true;
+        if (_initialPointerContinuation is not null)
+        {
+            CaptureInputDiagnostics.Write(
+                $"overlay-editor-begin id={_initialPointerContinuation.DiagnosticId}");
+        }
         ClearInlineOcrText();
         CaptureToolbar.IsEnabled = false;
         CapturedImage? image = null;
@@ -1421,11 +1569,27 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             Canvas.SetLeft(InlineEditorCanvas, selectionBounds.X);
             Canvas.SetTop(InlineEditorCanvas, selectionBounds.Y);
             InlineEditorCanvas.Visibility = Visibility.Visible;
-            InlineEditorCanvas.Focus();
             LockSelectionForEditing();
+            var topmostApplied = ReassertOverlayTopmost();
+            _ = Activate();
+            InlineEditorCanvas.Focus();
+            Keyboard.Focus(InlineEditorCanvas);
+            if (_initialPointerContinuation is not null)
+            {
+                CaptureInputDiagnostics.Write(
+                    $"overlay-editor-ready id={_initialPointerContinuation.DiagnosticId} " +
+                    $"topmost={topmostApplied} active={IsActive} " +
+                    $"focused={InlineEditorCanvas.IsKeyboardFocusWithin}");
+            }
         }
-        catch
+        catch (Exception exception)
         {
+            if (_initialPointerContinuation is not null)
+            {
+                CaptureInputDiagnostics.Write(
+                    $"overlay-editor-failed id={_initialPointerContinuation.DiagnosticId} " +
+                    $"error={exception.GetType().Name}:{exception.Message}");
+            }
         }
         finally
         {
