@@ -14,6 +14,8 @@ public sealed class CaptureHistoryService
     private readonly object _pathSync = new();
     private readonly HashSet<string> _knownPaths = new(
         StringComparer.OrdinalIgnoreCase);
+    private int _retentionDays = 7;
+    private int _capacity = 50;
 
     public CaptureHistoryService(string? historyDirectory = null)
     {
@@ -23,12 +25,12 @@ public sealed class CaptureHistoryService
 
     public ObservableCollection<CaptureHistoryItem> Items { get; } = [];
 
-    public bool PersistsAcrossRestarts { get; private set; }
-
-    public void ConfigurePersistence(bool enabled)
+    public void ConfigureRetentionPolicy(int retentionDays, int capacity)
     {
-        PersistsAcrossRestarts = enabled;
-        TrimToCapacity(AppSettings.MaximumHistoryItems);
+        _retentionDays = Math.Clamp(retentionDays, 0, 3650);
+        _capacity = Math.Clamp(capacity, 1, AppSettings.MaximumHistoryItems);
+        TrimExpiredItems();
+        TrimToCapacity(_capacity);
     }
 
     public CaptureHistoryItem? Add(CapturedImage capturedImage, int capacity)
@@ -53,6 +55,7 @@ public sealed class CaptureHistoryService
             imagePath);
         RememberPath(imagePath);
         Items.Insert(0, item);
+        TrimExpiredItems(capturedAt);
         TrimToCapacity(capacity);
         BeginOffload(item, fullImage, imagePath);
         return item;
@@ -86,6 +89,14 @@ public sealed class CaptureHistoryService
 
         foreach (var file in files)
         {
+            if (_retentionDays > 0 &&
+                file.LastWriteTimeUtc < DateTime.UtcNow.Subtract(
+                    TimeSpan.FromDays(_retentionDays)))
+            {
+                DeleteCacheFile(file.FullName);
+                continue;
+            }
+
             if (IsKnownPath(file.FullName))
             {
                 continue;
@@ -131,11 +142,6 @@ public sealed class CaptureHistoryService
         IEnumerable<CaptureHistoryItem> items,
         int capacity)
     {
-        if (!PersistsAcrossRestarts)
-        {
-            return;
-        }
-
         foreach (var item in items)
         {
             var imagePath = item.ImagePath;
@@ -154,6 +160,7 @@ public sealed class CaptureHistoryService
             Items.Insert(insertionIndex, item);
         }
 
+        TrimExpiredItems();
         TrimToCapacity(capacity);
     }
 
@@ -229,10 +236,13 @@ public sealed class CaptureHistoryService
                 {
                     File.Delete(imagePath);
                 }
-                else if (PersistsAcrossRestarts)
+                else
                 {
                     PruneCacheDirectory(
-                        AppSettings.MaximumHistoryItems,
+                        _capacity,
+                        _historyDirectory);
+                    PruneCacheDirectoryByAge(
+                        _retentionDays,
                         _historyDirectory);
                 }
             }
@@ -296,6 +306,50 @@ public sealed class CaptureHistoryService
         }
     }
 
+    internal static void PruneCacheDirectoryByAge(
+        int retentionDays,
+        string? historyDirectory = null,
+        DateTimeOffset? now = null)
+    {
+        if (retentionDays <= 0)
+        {
+            return;
+        }
+
+        var directory = historyDirectory ?? AppMetadata.HistoryCacheDirectoryPath;
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+
+        var cutoff = (now ?? DateTimeOffset.UtcNow).UtcDateTime
+            .Subtract(TimeSpan.FromDays(retentionDays));
+        try
+        {
+            foreach (var file in new DirectoryInfo(directory)
+                         .EnumerateFiles("history-*.png", SearchOption.TopDirectoryOnly)
+                         .Where(file => file.LastWriteTimeUtc < cutoff))
+            {
+                try
+                {
+                    file.Delete();
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
     private void TrimToCapacity(int capacity)
     {
         capacity = Math.Clamp(capacity, 0, AppSettings.MaximumHistoryItems);
@@ -306,6 +360,21 @@ public sealed class CaptureHistoryService
             var imagePath = evicted.MarkRemoved();
             ForgetPath(imagePath);
             DeleteCacheFile(imagePath);
+        }
+    }
+
+    private void TrimExpiredItems(DateTimeOffset? now = null)
+    {
+        if (_retentionDays <= 0)
+        {
+            return;
+        }
+
+        var cutoff = (now ?? DateTimeOffset.Now).Subtract(
+            TimeSpan.FromDays(_retentionDays));
+        foreach (var item in Items.Where(item => item.CapturedAt < cutoff).ToArray())
+        {
+            _ = Remove(item);
         }
     }
 

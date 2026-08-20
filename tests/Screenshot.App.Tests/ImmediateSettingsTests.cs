@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Reflection;
 using Screenshot.App.Core;
 using Screenshot.App.Infrastructure;
 using Screenshot.App.Presentation;
@@ -48,9 +49,133 @@ public sealed class ImmediateSettingsTests : IDisposable
                 Assert.Equal("悬浮截图", GetGroupTitle(
                     window,
                     "GeneralFloatingCaptureGroup"));
-                Assert.Equal("截图记录", GetGroupTitle(
+                Assert.Equal("历史记录", GetGroupTitle(
                     window,
                     "GeneralHistoryGroup"));
+            }
+            finally
+            {
+                window.RequestExit();
+            }
+        });
+    }
+
+    [Fact]
+    public void SavesScreenshotAndVideoRetentionPeriodsIndependently()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var settingsPath = Path.Combine(_testDirectory, "retention-settings.json");
+        var settingsStore = new SettingsStore(settingsPath);
+        var initialSettings = CreateSettings();
+
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                initialSettings,
+                settingsStore,
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+            window.Show();
+            try
+            {
+                var screenshotRetention = Assert.IsType<TextBox>(
+                    window.FindName("ScreenshotHistoryRetentionDaysTextBox"));
+                var screenshotLimit = Assert.IsType<TextBox>(
+                    window.FindName("ScreenshotHistoryLimitTextBox"));
+                var videoRetention = Assert.IsType<TextBox>(
+                    window.FindName("VideoHistoryRetentionDaysTextBox"));
+                var videoLimit = Assert.IsType<TextBox>(
+                    window.FindName("VideoHistoryLimitTextBox"));
+
+                screenshotRetention.Text = "15";
+                screenshotLimit.Text = "40";
+                videoRetention.Text = "30";
+                videoLimit.Text = "60";
+                var applyMethod = typeof(MainWindow).GetMethod(
+                    "ApplySettingsImmediately",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.NotNull(applyMethod);
+                applyMethod.Invoke(window, [null]);
+            }
+            finally
+            {
+                window.RequestExit();
+            }
+        });
+
+        var loaded = settingsStore.Load();
+        Assert.Null(loaded.Warning);
+        Assert.Equal(15, loaded.Settings.ScreenshotHistoryRetentionDays);
+        Assert.Equal(30, loaded.Settings.VideoHistoryRetentionDays);
+        Assert.Equal(40, loaded.Settings.HistoryLimit);
+        Assert.Equal(60, loaded.Settings.VideoHistoryLimit);
+    }
+
+    [Fact]
+    public void RestoresRetentionDaysAfterTogglingKeepAll()
+    {
+        var viewModel = new SettingsViewModel(CreateSettings() with
+        {
+            ScreenshotHistoryRetentionDays = 15,
+            VideoHistoryRetentionDays = 30,
+        });
+
+        viewModel.KeepAllScreenshotHistory = true;
+        viewModel.KeepAllVideoHistory = true;
+        Assert.Equal("15", viewModel.ScreenshotHistoryRetentionDaysText);
+        Assert.Equal("30", viewModel.VideoHistoryRetentionDaysText);
+        Assert.Equal(0, viewModel.CreateSettings().ScreenshotHistoryRetentionDays);
+        Assert.Equal(0, viewModel.CreateSettings().VideoHistoryRetentionDays);
+
+        viewModel.KeepAllScreenshotHistory = false;
+        viewModel.KeepAllVideoHistory = false;
+        Assert.Equal("15", viewModel.ScreenshotHistoryRetentionDaysText);
+        Assert.Equal("30", viewModel.VideoHistoryRetentionDaysText);
+        Assert.Equal(15, viewModel.CreateSettings().ScreenshotHistoryRetentionDays);
+        Assert.Equal(30, viewModel.CreateSettings().VideoHistoryRetentionDays);
+    }
+
+    [Fact]
+    public void KeepAllDisablesBothRetentionEditors()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var settingsStore = new SettingsStore(
+            Path.Combine(_testDirectory, "disabled-retention-settings.json"));
+
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                CreateSettings(),
+                settingsStore,
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+            window.Show();
+            try
+            {
+                var screenshotRetention = Assert.IsType<TextBox>(
+                    window.FindName("ScreenshotHistoryRetentionDaysTextBox"));
+                var screenshotLimit = Assert.IsType<TextBox>(
+                    window.FindName("ScreenshotHistoryLimitTextBox"));
+                var screenshotKeepAll = Assert.IsType<CheckBox>(
+                    window.FindName("KeepAllScreenshotHistoryCheckBox"));
+                var videoRetention = Assert.IsType<TextBox>(
+                    window.FindName("VideoHistoryRetentionDaysTextBox"));
+                var videoLimit = Assert.IsType<TextBox>(
+                    window.FindName("VideoHistoryLimitTextBox"));
+                var videoKeepAll = Assert.IsType<CheckBox>(
+                    window.FindName("KeepAllVideoHistoryCheckBox"));
+
+                screenshotKeepAll.IsChecked = true;
+                videoKeepAll.IsChecked = true;
+
+                Assert.False(screenshotRetention.IsEnabled);
+                Assert.False(screenshotLimit.IsEnabled);
+                Assert.False(videoRetention.IsEnabled);
+                Assert.False(videoLimit.IsEnabled);
             }
             finally
             {

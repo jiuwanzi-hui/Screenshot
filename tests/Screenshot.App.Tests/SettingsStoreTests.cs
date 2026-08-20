@@ -45,13 +45,18 @@ public sealed class SettingsStoreTests : IDisposable
                 FloatingCaptureClickBehavior.CaptureAllScreens,
             ScrollCaptureMode = ScrollCaptureMode.ManualWheel,
             ArrowStyle = ArrowStyle.Hollow,
+            ArrowToolMode = ArrowToolMode.Curved,
+            ShapeToolMode = ShapeToolMode.Ellipse,
+            LastAnnotationTool = AnnotationToolMode.CurvedArrow,
             CustomStrokeColor = "#123456",
             CustomColorPalette = [0x123456, 0xABCDEF],
             CloseBehavior = WindowCloseBehavior.ExitApplication,
             MouseLongPressMilliseconds = 1150,
             MouseSideButtonsUseLongPress = true,
-            KeepHistory = true,
-            PersistHistoryAcrossRestarts = true,
+            ScreenshotHistoryRetentionDays = 15,
+            VideoHistoryRetentionDays = 30,
+            HistoryLimit = 40,
+            VideoHistoryLimit = 60,
             OcrEngine = OcrEngineMode.PaddleOcrV6,
             OfflineTranslationQuality = OfflineTranslationQuality.Ultra,
             OfflineTranslationEngine = OfflineTranslationEngine.QwenLargeModel,
@@ -83,6 +88,11 @@ public sealed class SettingsStoreTests : IDisposable
             ScrollCaptureMode.ManualWheel,
             loadResult.Settings.ScrollCaptureMode);
         Assert.Equal(ArrowStyle.Hollow, loadResult.Settings.ArrowStyle);
+        Assert.Equal(ArrowToolMode.Curved, loadResult.Settings.ArrowToolMode);
+        Assert.Equal(ShapeToolMode.Ellipse, loadResult.Settings.ShapeToolMode);
+        Assert.Equal(
+            AnnotationToolMode.CurvedArrow,
+            loadResult.Settings.LastAnnotationTool);
         Assert.Equal("#123456", loadResult.Settings.CustomStrokeColor);
         Assert.Equal(
             [0x123456, 0xABCDEF],
@@ -90,11 +100,10 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(settings.CloseBehavior, loadResult.Settings.CloseBehavior);
         Assert.Equal(1150, loadResult.Settings.MouseLongPressMilliseconds);
         Assert.True(loadResult.Settings.MouseSideButtonsUseLongPress);
-        Assert.True(loadResult.Settings.KeepHistory);
-        Assert.True(loadResult.Settings.PersistHistoryAcrossRestarts);
-        Assert.Equal(
-            AppSettings.MaximumHistoryItems,
-            loadResult.Settings.HistoryLimit);
+        Assert.Equal(15, loadResult.Settings.ScreenshotHistoryRetentionDays);
+        Assert.Equal(30, loadResult.Settings.VideoHistoryRetentionDays);
+        Assert.Equal(40, loadResult.Settings.HistoryLimit);
+        Assert.Equal(60, loadResult.Settings.VideoHistoryLimit);
         Assert.Equal(OcrEngineMode.PaddleOcrV6, loadResult.Settings.OcrEngine);
         Assert.Equal(Path.GetFullPath(settings.SaveDirectory), loadResult.Settings.SaveDirectory);
         Assert.Equal(
@@ -196,7 +205,7 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(
             FloatingCaptureClickBehavior.ShowSelection,
             loadResult.Settings.FloatingCaptureClickBehavior);
-        Assert.Equal(9, loadResult.Settings.SettingsVersion);
+        Assert.Equal(13, loadResult.Settings.SettingsVersion);
         Assert.Equal(
             Enum.GetValues<CaptureToolbarFeature>(),
             loadResult.Settings.VisibleCaptureToolbarFeatures);
@@ -269,7 +278,7 @@ public sealed class SettingsStoreTests : IDisposable
             ],
         }).Normalize();
 
-        Assert.Equal(9, normalized.SettingsVersion);
+        Assert.Equal(13, normalized.SettingsVersion);
         Assert.Equal(
             [
                 CaptureToolbarFeature.TextRecognition,
@@ -308,7 +317,7 @@ public sealed class SettingsStoreTests : IDisposable
             VisibleCaptureToolbarFeatures = [CaptureToolbarFeature.Save],
         }).Normalize();
 
-        Assert.Equal(9, upgraded.SettingsVersion);
+        Assert.Equal(13, upgraded.SettingsVersion);
         Assert.Equal(
             [
                 CaptureToolbarFeature.Save,
@@ -325,6 +334,20 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(
             [CaptureToolbarFeature.Save],
             optedOut.VisibleCaptureToolbarFeatures);
+    }
+
+    [Fact]
+    public void LegacyAnnotationPreferencesMigrateToTheLastAvailableTool()
+    {
+        var migrated = (AppSettings.CreateDefault() with
+        {
+            SettingsVersion = 11,
+            ArrowToolMode = ArrowToolMode.Curved,
+            ShapeToolMode = ShapeToolMode.Ellipse,
+        }).Normalize();
+
+        Assert.Equal(AnnotationToolMode.CurvedArrow, migrated.LastAnnotationTool);
+        Assert.Equal(13, migrated.SettingsVersion);
     }
 
     [Fact]

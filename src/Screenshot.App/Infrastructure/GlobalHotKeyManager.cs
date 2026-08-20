@@ -165,6 +165,8 @@ public sealed class GlobalHotKeyManager : IDisposable
     private readonly int _mouseHookErrorCode;
     private CapturedImage? _preCapturedScreen;
     private DateTimeOffset _preCapturedAt;
+    private int _preCaptureGeneration;
+    private int _preCaptureCaptureInFlight;
     private TimeSpan _mouseLongPressDuration = TimeSpan.FromMilliseconds(700);
     private bool _mouseSideButtonsUseLongPress;
     private bool _areMouseShortcutsSuspended;
@@ -545,10 +547,10 @@ public sealed class GlobalHotKeyManager : IDisposable
                 return new IntPtr(1);
             }
 
-            if (isKeyDown)
-            {
-                TryPreCaptureTransientUi(keyboardData.VirtualKey);
-            }
+            // Do not start a second full-desktop GDI capture from the low-level
+            // keyboard hook. The interactive capture path owns the single
+            // snapshot; starting another one here can stall desktop input when
+            // the first hotkey wakes the app after an idle period.
         }
 
         return NativeMethods.CallNextHookEx(_keyboardHook, code, wParam, lParam);
@@ -1693,22 +1695,61 @@ public sealed class GlobalHotKeyManager : IDisposable
             return;
         }
 
-        ClearPreCapturedScreen();
-        try
+        if (Interlocked.Exchange(ref _preCaptureCaptureInFlight, 1) != 0)
         {
-            _preCapturedScreen = ScreenCaptureService.Capture(VirtualScreen.GetBounds());
-            _preCapturedAt = DateTimeOffset.UtcNow;
-            _preCaptureExpiryTimer.Stop();
-            _preCaptureExpiryTimer.Start();
-            foreach (var action in candidates)
+            return;
+        }
+
+        var generation = Volatile.Read(ref _preCaptureGeneration);
+        var candidateActions = candidates.ToArray();
+        _ = Task.Run(() =>
+        {
+            CapturedImage? snapshot = null;
+            try
             {
-                _preCapturedActions.Add(action);
+                snapshot = ScreenCaptureService.Capture(VirtualScreen.GetBounds());
             }
-        }
-        catch
-        {
-            ClearPreCapturedScreen();
-        }
+            catch
+            {
+                // The normal capture path will provide a fallback if this
+                // best-effort pre-capture cannot be completed.
+            }
+
+            try
+            {
+                _messageSource.Dispatcher.BeginInvoke(
+                    DispatcherPriority.Background,
+                    new Action(() =>
+                    {
+                        Interlocked.Exchange(ref _preCaptureCaptureInFlight, 0);
+                        if (snapshot is null)
+                        {
+                            return;
+                        }
+
+                        if (generation != Volatile.Read(ref _preCaptureGeneration))
+                        {
+                            snapshot.Dispose();
+                            return;
+                        }
+
+                        ClearPreCapturedScreen();
+                        _preCapturedScreen = snapshot;
+                        _preCapturedAt = DateTimeOffset.UtcNow;
+                        _preCaptureExpiryTimer.Stop();
+                        _preCaptureExpiryTimer.Start();
+                        foreach (var action in candidateActions)
+                        {
+                            _preCapturedActions.Add(action);
+                        }
+                    }));
+            }
+            catch
+            {
+                Interlocked.Exchange(ref _preCaptureCaptureInFlight, 0);
+                snapshot?.Dispose();
+            }
+        });
     }
 
     internal static IReadOnlyList<HotKeyAction> GetPreCaptureActions(
@@ -1788,6 +1829,7 @@ public sealed class GlobalHotKeyManager : IDisposable
 
     private void ClearPreCapturedScreen()
     {
+        Interlocked.Increment(ref _preCaptureGeneration);
         _preCapturedScreen?.Dispose();
         _preCapturedScreen = null;
         _preCapturedActions.Clear();

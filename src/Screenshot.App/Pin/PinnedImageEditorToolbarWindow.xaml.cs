@@ -32,14 +32,21 @@ public partial class PinnedImageEditorToolbarWindow : Window
     private const double VisibleAttachmentGapDip = 2;
     private const double ToolbarOuterMarginDip = 6;
     private const double SinglePinShellInsetDip = 12;
-    private static EditorTool _lastTool = EditorTool.Rectangle;
+    // The active tool belongs to this editor session. The persisted shape and
+    // arrow variants are restored separately when a new toolbar is created.
+    private EditorTool _lastTool = EditorTool.Rectangle;
     private WpfColor _selectedColor = WpfColor.FromRgb(214, 69, 69);
     private static double _lastStrokeWidth = 3;
+    private ArrowToolMode _arrowToolMode = ArrowToolMode.Straight;
+    private ShapeToolMode _shapeToolMode = ShapeToolMode.Rectangle;
 
     private readonly Window _attachedWindow;
     private readonly Action<string>? _customStrokeColorChanged;
     private readonly Action<int[]>? _customColorPaletteChanged;
     private readonly Action<ArrowStyle>? _arrowStyleChanged;
+    private readonly Action<ArrowToolMode>? _arrowToolModeChanged;
+    private readonly Action<ShapeToolMode>? _shapeToolModeChanged;
+    private readonly Action<AnnotationToolMode>? _lastAnnotationToolChanged;
     private int[] _customColorPalette = [];
     private WpfColor? _customColor;
     private ArrowStyle _arrowStyle = ArrowStyle.Filled;
@@ -52,19 +59,26 @@ public partial class PinnedImageEditorToolbarWindow : Window
     private DrawingRectangle _toolbarSurfaceWindowStart;
     private readonly ToolbarDragHintBehavior _toolbarDragHint;
     private bool _isClosing;
+    private bool _isInitializing = true;
 
     public PinnedImageEditorToolbarWindow(
         Window attachedWindow,
         AppSettings? settings = null,
         Action<string>? customStrokeColorChanged = null,
         Action<int[]>? customColorPaletteChanged = null,
-        Action<ArrowStyle>? arrowStyleChanged = null)
+        Action<ArrowStyle>? arrowStyleChanged = null,
+        Action<ArrowToolMode>? arrowToolModeChanged = null,
+        Action<ShapeToolMode>? shapeToolModeChanged = null,
+        Action<AnnotationToolMode>? lastAnnotationToolChanged = null)
     {
         ArgumentNullException.ThrowIfNull(attachedWindow);
         _attachedWindow = attachedWindow;
         _customStrokeColorChanged = customStrokeColorChanged;
         _customColorPaletteChanged = customColorPaletteChanged;
         _arrowStyleChanged = arrowStyleChanged;
+        _arrowToolModeChanged = arrowToolModeChanged;
+        _shapeToolModeChanged = shapeToolModeChanged;
+        _lastAnnotationToolChanged = lastAnnotationToolChanged;
         InitializeComponent();
         _toolbarDragHint = new ToolbarDragHintBehavior(
             ToolbarSurface,
@@ -76,6 +90,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
             settings?.CaptureToolbarRows ?? CaptureToolbarRowCount.One);
         ApplyThemedContextMenu(ShapeToolButton.ContextMenu);
         ApplyThemedContextMenu(ArrowToolButton.ContextMenu);
+        _isInitializing = false;
         Owner = attachedWindow;
         _attachedWindow.LocationChanged += OnAttachedWindowBoundsChanged;
         _attachedWindow.SizeChanged += OnAttachedWindowBoundsChanged;
@@ -123,7 +138,15 @@ public partial class PinnedImageEditorToolbarWindow : Window
         _mode = PinnedImageToolbarMode.Edit;
         EditPanel.Visibility = Visibility.Visible;
         CropPanel.Visibility = Visibility.Collapsed;
+        // Each editor session starts from the shape button. The selected shape
+        // variant is a preference, while the last active tool is not.
+        _lastTool = _shapeToolMode == ShapeToolMode.Ellipse
+            ? EditorTool.Ellipse
+            : EditorTool.Rectangle;
         SelectToolButton(_lastTool);
+        UpdateShapeButtonPresentation();
+        UpdateArrowButtonPresentation();
+        UpdateArrowMenuState();
         StrokeWidthSlider.Value = _lastStrokeWidth;
         StrokeWidthText.Text = $"{_lastStrokeWidth:0.#} px";
         UpdateSelectedColorButton(ResolveSelectedColorButton(_selectedColor));
@@ -229,6 +252,10 @@ public partial class PinnedImageEditorToolbarWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        if (!_isInitializing)
+        {
+            _lastAnnotationToolChanged?.Invoke(ToAnnotationToolMode(_lastTool));
+        }
         _toolbarDragHint.Detach();
         FinishToolbarSurfaceDrag();
         _isClosing = true;
@@ -344,7 +371,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
         var button = tool switch
         {
             EditorTool.Rectangle or EditorTool.Ellipse => ShapeToolButton,
-            EditorTool.Arrow => ArrowToolButton,
+            EditorTool.Arrow or EditorTool.CurvedArrow => ArrowToolButton,
             EditorTool.Emoji => EmojiToolButton,
             EditorTool.Number => NumberToolButton,
             EditorTool.Brush => BrushToolButton,
@@ -354,6 +381,9 @@ public partial class PinnedImageEditorToolbarWindow : Window
         };
         if (tool is EditorTool.Rectangle or EditorTool.Ellipse)
         {
+            _shapeToolMode = tool == EditorTool.Ellipse
+                ? ShapeToolMode.Ellipse
+                : ShapeToolMode.Rectangle;
             ShapeToolButton.Tag = tool.ToString();
             ShapeToolButton.ToolTip = tool == EditorTool.Rectangle
                 ? "矩形/椭圆（当前：矩形）"
@@ -362,17 +392,53 @@ public partial class PinnedImageEditorToolbarWindow : Window
                 tool == EditorTool.Rectangle
                     ? "RectangleIconGeometry"
                     : "EllipseIconGeometry");
+            RectangleShapeMenuItem.IsChecked = tool == EditorTool.Rectangle;
+            EllipseShapeMenuItem.IsChecked = tool == EditorTool.Ellipse;
+        }
+        else if (tool is EditorTool.Arrow or EditorTool.CurvedArrow)
+        {
+            _arrowToolMode = tool == EditorTool.CurvedArrow
+                ? ArrowToolMode.Curved
+                : ArrowToolMode.Straight;
+            ArrowToolButton.Tag = tool.ToString();
+            UpdateArrowButtonPresentation(tool);
+            UpdateArrowMenuState(tool);
         }
         button.IsChecked = true;
     }
 
     private void OnToolChecked(object sender, RoutedEventArgs e)
     {
+        if (_isInitializing)
+        {
+            return;
+        }
+
         if (sender is WpfRadioButton { Tag: string toolName } &&
             Enum.TryParse<EditorTool>(toolName, out var tool))
         {
-            _lastTool = tool;
-            ToolSelected?.Invoke(tool);
+            var selected = sender == ShapeToolButton &&
+                _lastTool is EditorTool.Rectangle or EditorTool.Ellipse
+                ? _lastTool
+                : sender == ArrowToolButton &&
+                    _lastTool is EditorTool.Arrow or EditorTool.CurvedArrow
+                    ? _lastTool
+                    : tool;
+            _lastTool = selected;
+            if (selected is EditorTool.Rectangle or EditorTool.Ellipse)
+            {
+                _shapeToolMode = selected == EditorTool.Ellipse
+                    ? ShapeToolMode.Ellipse
+                    : ShapeToolMode.Rectangle;
+            }
+            else if (selected is EditorTool.Arrow or EditorTool.CurvedArrow)
+            {
+                _arrowToolMode = selected == EditorTool.CurvedArrow
+                    ? ArrowToolMode.Curved
+                    : ArrowToolMode.Straight;
+            }
+            _lastAnnotationToolChanged?.Invoke(ToAnnotationToolMode(selected));
+            ToolSelected?.Invoke(selected);
         }
     }
 
@@ -589,6 +655,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
 
     private void OnShapeMenuArrowMouseDown(object sender, MouseButtonEventArgs e)
     {
+        RectangleShapeMenuItem.IsChecked = _shapeToolMode == ShapeToolMode.Rectangle;
+        EllipseShapeMenuItem.IsChecked = _shapeToolMode == ShapeToolMode.Ellipse;
         OpenContextMenu(ShapeToolButton);
         e.Handled = true;
     }
@@ -602,26 +670,115 @@ public partial class PinnedImageEditorToolbarWindow : Window
         }
 
         _lastTool = tool;
+        _shapeToolMode = tool == EditorTool.Ellipse
+            ? ShapeToolMode.Ellipse
+            : ShapeToolMode.Rectangle;
+        _shapeToolModeChanged?.Invoke(
+            tool == EditorTool.Ellipse
+                ? ShapeToolMode.Ellipse
+                : ShapeToolMode.Rectangle);
+        _lastAnnotationToolChanged?.Invoke(ToAnnotationToolMode(tool));
         SelectToolButton(tool);
         ToolSelected?.Invoke(tool);
     }
 
     private void OnArrowMenuArrowMouseDown(object sender, MouseButtonEventArgs e)
     {
+        UpdateArrowMenuState();
         OpenContextMenu(ArrowToolButton);
         e.Handled = true;
     }
 
-    private void OnArrowMenuItemClick(object sender, RoutedEventArgs e)
+    private void OnArrowVariantMenuItemClick(object sender, RoutedEventArgs e)
     {
-        if (sender is MenuItem { Tag: string styleName } &&
-            Enum.TryParse<ArrowStyle>(styleName, out var style))
+        if (sender is not MenuItem { Tag: string tag })
         {
-            ArrowToolButton.IsChecked = true;
-            _arrowStyle = style;
-            ArrowStyleSelected?.Invoke(style);
-            _arrowStyleChanged?.Invoke(style);
+            return;
         }
+        var parts = tag.Split(',', StringSplitOptions.TrimEntries);
+        if (parts.Length != 2 ||
+            !Enum.TryParse<EditorTool>(parts[0], out var tool) ||
+            !Enum.TryParse<ArrowStyle>(parts[1], out var style) ||
+            tool is not (EditorTool.Arrow or EditorTool.CurvedArrow))
+        {
+            return;
+        }
+
+        _lastTool = tool;
+        _arrowStyle = style;
+        _arrowToolMode = tool == EditorTool.CurvedArrow
+            ? ArrowToolMode.Curved
+            : ArrowToolMode.Straight;
+        SelectToolButton(tool);
+        ToolSelected?.Invoke(tool);
+        ArrowStyleSelected?.Invoke(style);
+        _arrowStyleChanged?.Invoke(style);
+        _arrowToolModeChanged?.Invoke(tool == EditorTool.CurvedArrow
+            ? ArrowToolMode.Curved
+            : ArrowToolMode.Straight);
+        _lastAnnotationToolChanged?.Invoke(ToAnnotationToolMode(tool));
+    }
+
+    private void UpdateArrowMenuState(EditorTool? tool = null)
+    {
+        var selected = tool is EditorTool.Arrow or EditorTool.CurvedArrow
+            ? tool.Value
+            : _arrowToolMode == ArrowToolMode.Curved
+                ? EditorTool.CurvedArrow
+                : EditorTool.Arrow;
+        StraightFilledArrowMenuItem.IsChecked =
+            selected == EditorTool.Arrow && _arrowStyle == ArrowStyle.Filled;
+        StraightHollowArrowMenuItem.IsChecked =
+            selected == EditorTool.Arrow && _arrowStyle == ArrowStyle.Hollow;
+        CurvedFilledArrowMenuItem.IsChecked =
+            selected == EditorTool.CurvedArrow && _arrowStyle == ArrowStyle.Filled;
+        CurvedHollowArrowMenuItem.IsChecked =
+            selected == EditorTool.CurvedArrow && _arrowStyle == ArrowStyle.Hollow;
+    }
+
+    private void UpdateArrowButtonPresentation(EditorTool? tool = null)
+    {
+        var selected = tool is EditorTool.Arrow or EditorTool.CurvedArrow
+            ? tool.Value
+            : _arrowToolMode == ArrowToolMode.Curved
+                ? EditorTool.CurvedArrow
+                : EditorTool.Arrow;
+        var isCurved = selected == EditorTool.CurvedArrow;
+        // The Tag is consumed when the main button is clicked. Keep it aligned
+        // with the restored icon and menu selection so a curved arrow does not
+        // silently turn back into a straight arrow on its first use.
+        ArrowToolButton.Tag = selected.ToString();
+        var key = (isCurved, _arrowStyle) switch
+        {
+            (false, ArrowStyle.Hollow) => "StraightHollowArrowIconGeometry",
+            (true, ArrowStyle.Filled) => "CurvedFilledArrowIconGeometry",
+            (true, ArrowStyle.Hollow) => "CurvedHollowArrowIconGeometry",
+            _ => "StraightFilledArrowIconGeometry",
+        };
+        ArrowToolIcon.Data = (Geometry)FindResource(key);
+        var isHollow = _arrowStyle == ArrowStyle.Hollow;
+        ArrowToolIcon.Fill = isHollow ? System.Windows.Media.Brushes.Transparent : null;
+        ArrowToolIcon.Stroke = isHollow ? null : System.Windows.Media.Brushes.Transparent;
+        ArrowToolIcon.SetResourceReference(
+            isHollow ? System.Windows.Shapes.Path.StrokeProperty : System.Windows.Shapes.Path.FillProperty,
+            "EditorToolbarIconBrush");
+        ArrowToolIcon.StrokeThickness = isHollow ? 1.8 : 0;
+        ArrowToolButton.ToolTip = string.Concat(
+            isCurved ? "弧形" : "直线",
+            _arrowStyle == ArrowStyle.Hollow ? "空心箭头" : "实心箭头");
+    }
+
+    private void UpdateShapeButtonPresentation()
+    {
+        var isEllipse = _shapeToolMode == ShapeToolMode.Ellipse;
+        ShapeToolButton.Tag = isEllipse
+            ? EditorTool.Ellipse.ToString()
+            : EditorTool.Rectangle.ToString();
+        ShapeToolIcon.Data = (Geometry)FindResource(
+            isEllipse ? "EllipseIconGeometry" : "RectangleIconGeometry");
+        ShapeToolButton.ToolTip = isEllipse
+            ? "矩形/椭圆（当前：椭圆）"
+            : "矩形/椭圆（当前：矩形）";
     }
 
     private static void OpenContextMenu(FrameworkElement target)
@@ -657,6 +814,12 @@ public partial class PinnedImageEditorToolbarWindow : Window
         }
 
         _arrowStyle = settings.ArrowStyle;
+        _arrowToolMode = settings.ArrowToolMode;
+        _shapeToolMode = settings.ShapeToolMode;
+        _lastTool = ToEditorTool(
+            AnnotationToolMode.Rectangle,
+            settings.ArrowToolMode,
+            settings.ShapeToolMode);
         _lastStrokeWidth = Math.Clamp(settings.DefaultStrokeWidth, 1, 12);
         _customColorPalette = NormalizeCustomColorPalette(
             settings.CustomColorPalette);
@@ -674,6 +837,42 @@ public partial class PinnedImageEditorToolbarWindow : Window
         brush.Freeze();
         CustomColorButton.Background = brush;
     }
+
+    private static EditorTool ToEditorTool(
+        AnnotationToolMode lastTool,
+        ArrowToolMode arrowToolMode,
+        ShapeToolMode shapeToolMode) =>
+        lastTool switch
+        {
+            AnnotationToolMode.Rectangle or AnnotationToolMode.Ellipse =>
+                shapeToolMode == ShapeToolMode.Ellipse
+                    ? EditorTool.Ellipse
+                    : EditorTool.Rectangle,
+            AnnotationToolMode.StraightArrow or AnnotationToolMode.CurvedArrow =>
+                arrowToolMode == ArrowToolMode.Curved
+                    ? EditorTool.CurvedArrow
+                    : EditorTool.Arrow,
+            AnnotationToolMode.Emoji => EditorTool.Emoji,
+            AnnotationToolMode.Number => EditorTool.Number,
+            AnnotationToolMode.Brush => EditorTool.Brush,
+            AnnotationToolMode.Mosaic => EditorTool.Mosaic,
+            AnnotationToolMode.Text => EditorTool.Text,
+            _ => EditorTool.Rectangle,
+        };
+
+    private static AnnotationToolMode ToAnnotationToolMode(EditorTool tool) =>
+        tool switch
+        {
+            EditorTool.Ellipse => AnnotationToolMode.Ellipse,
+            EditorTool.Arrow => AnnotationToolMode.StraightArrow,
+            EditorTool.CurvedArrow => AnnotationToolMode.CurvedArrow,
+            EditorTool.Emoji => AnnotationToolMode.Emoji,
+            EditorTool.Number => AnnotationToolMode.Number,
+            EditorTool.Brush => AnnotationToolMode.Brush,
+            EditorTool.Mosaic => AnnotationToolMode.Mosaic,
+            EditorTool.Text => AnnotationToolMode.Text,
+            _ => AnnotationToolMode.Rectangle,
+        };
 
     private void ApplyToolbarFeatureVisibility(
         IEnumerable<CaptureToolbarFeature>? configuredFeatures)
@@ -708,7 +907,11 @@ public partial class PinnedImageEditorToolbarWindow : Window
         };
         var selected = editorButtons.FirstOrDefault(item => IsElementVisible(item.Button));
         if (selected.Button is not null &&
-            !editorButtons.Any(item => item.Tool == _lastTool && IsElementVisible(item.Button)))
+            !editorButtons.Any(item =>
+                (item.Tool == _lastTool ||
+                 (item.Tool == EditorTool.Arrow &&
+                  _lastTool == EditorTool.CurvedArrow)) &&
+                IsElementVisible(item.Button)))
         {
             _lastTool = selected.Tool;
         }

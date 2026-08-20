@@ -45,6 +45,31 @@ public enum ArrowStyle
     Hollow,
 }
 
+public enum ArrowToolMode
+{
+    Straight,
+    Curved,
+}
+
+public enum ShapeToolMode
+{
+    Rectangle,
+    Ellipse,
+}
+
+public enum AnnotationToolMode
+{
+    Rectangle,
+    Ellipse,
+    StraightArrow,
+    CurvedArrow,
+    Emoji,
+    Number,
+    Brush,
+    Mosaic,
+    Text,
+}
+
 public enum CaptureToolbarFeature
 {
     Shape,
@@ -129,7 +154,10 @@ public sealed record AppSettings
 {
     public const int MaximumHistoryItems = 100;
 
-    public int SettingsVersion { get; init; } = 9;
+    // Version 13 adds a durable "last annotation tool" preference. Previous
+    // configurations already remember arrow/shape variants, so they can be
+    // upgraded without resetting the toolbar to its default rectangle.
+    public int SettingsVersion { get; init; } = 13;
 
     public string SaveDirectory { get; init; } = GetDefaultSaveDirectory();
 
@@ -168,6 +196,13 @@ public sealed record AppSettings
         ScrollCaptureMode.Automatic;
 
     public ArrowStyle ArrowStyle { get; init; } = ArrowStyle.Filled;
+
+    public ArrowToolMode ArrowToolMode { get; init; } = ArrowToolMode.Straight;
+
+    public ShapeToolMode ShapeToolMode { get; init; } = ShapeToolMode.Rectangle;
+
+    public AnnotationToolMode LastAnnotationTool { get; init; } =
+        AnnotationToolMode.Rectangle;
 
     public CaptureToolbarFeature[] VisibleCaptureToolbarFeatures { get; init; } =
         Enum.GetValues<CaptureToolbarFeature>();
@@ -259,11 +294,21 @@ public sealed record AppSettings
     public OfflineTranslationEngine OfflineTranslationEngine { get; init; } =
         OfflineTranslationEngine.Mozilla;
 
-    public bool KeepHistory { get; init; }
+    public int HistoryLimit { get; init; } = 50;
 
-    public bool PersistHistoryAcrossRestarts { get; init; }
+    public int VideoHistoryLimit { get; init; } = 50;
 
-    public int HistoryLimit { get; init; } = MaximumHistoryItems;
+    /// <summary>
+    /// Number of days to keep persisted screenshot history. Zero disables
+    /// age-based deletion; the configured item limit still applies.
+    /// </summary>
+    public int ScreenshotHistoryRetentionDays { get; init; } = 7;
+
+    /// <summary>
+    /// Number of days to keep recorded videos. Zero disables age-based
+    /// deletion; the configured item limit still applies.
+    /// </summary>
+    public int VideoHistoryRetentionDays { get; init; } = 7;
 
     public bool SendTextToOnlineTranslation { get; init; }
 
@@ -299,6 +344,7 @@ public sealed record AppSettings
     public AppSettings Normalize()
     {
         var defaults = CreateDefault();
+        var requiresHistoryRetentionMigration = SettingsVersion < 11;
         var hasCaptureToolbarPosition =
             double.IsFinite(CaptureToolbarPositionXRatio) &&
             double.IsFinite(CaptureToolbarPositionYRatio) &&
@@ -351,7 +397,7 @@ public sealed record AppSettings
 
         return this with
         {
-            SettingsVersion = Math.Max(SettingsVersion, 9),
+            SettingsVersion = Math.Max(SettingsVersion, 13),
             Theme = NormalizeTheme(Theme),
             CloseBehavior = Enum.IsDefined(CloseBehavior)
                 ? CloseBehavior
@@ -365,6 +411,21 @@ public sealed record AppSettings
             ArrowStyle = Enum.IsDefined(ArrowStyle)
                 ? ArrowStyle
                 : defaults.ArrowStyle,
+            ArrowToolMode = Enum.IsDefined(ArrowToolMode)
+                ? ArrowToolMode
+                : defaults.ArrowToolMode,
+            ShapeToolMode = Enum.IsDefined(ShapeToolMode)
+                ? ShapeToolMode
+                : defaults.ShapeToolMode,
+            LastAnnotationTool = SettingsVersion < 12
+                ? ArrowToolMode == ArrowToolMode.Curved
+                    ? AnnotationToolMode.CurvedArrow
+                    : ShapeToolMode == ShapeToolMode.Ellipse
+                        ? AnnotationToolMode.Ellipse
+                        : AnnotationToolMode.Rectangle
+                : Enum.IsDefined(LastAnnotationTool)
+                    ? LastAnnotationTool
+                    : defaults.LastAnnotationTool,
             VisibleCaptureToolbarFeatures =
                 visibleCaptureToolbarFeatures.ToArray(),
             CaptureToolbarFeatureOrder = captureToolbarFeatureOrder.ToArray(),
@@ -439,13 +500,32 @@ public sealed record AppSettings
                 ? OfflineTranslationEngine
                 : defaults.OfflineTranslationEngine,
             SendTextToOnlineTranslation = true,
-            PersistHistoryAcrossRestarts =
-                KeepHistory && PersistHistoryAcrossRestarts,
             HistoryLimit = Math.Clamp(
-                HistoryLimit,
-                0,
+                requiresHistoryRetentionMigration
+                    ? defaults.HistoryLimit
+                    : HistoryLimit,
+                1,
                 MaximumHistoryItems),
+            VideoHistoryLimit = Math.Clamp(
+                requiresHistoryRetentionMigration
+                    ? defaults.VideoHistoryLimit
+                    : VideoHistoryLimit,
+                1,
+                MaximumHistoryItems),
+            ScreenshotHistoryRetentionDays = NormalizeRetentionDays(
+                requiresHistoryRetentionMigration
+                    ? defaults.ScreenshotHistoryRetentionDays
+                    : ScreenshotHistoryRetentionDays),
+            VideoHistoryRetentionDays = NormalizeRetentionDays(
+                requiresHistoryRetentionMigration
+                    ? defaults.VideoHistoryRetentionDays
+                    : VideoHistoryRetentionDays),
         };
+    }
+
+    private static int NormalizeRetentionDays(int days)
+    {
+        return Math.Clamp(days, 0, 3650);
     }
 
     internal static AppTheme NormalizeTheme(AppTheme theme)

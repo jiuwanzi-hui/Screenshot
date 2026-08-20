@@ -45,7 +45,7 @@ public sealed class PrivacyRedactionWindow : Window
         .Select(item => item.Candidate)
         .ToArray();
 
-    private UIElement BuildContent()
+    private Grid BuildContent()
     {
         var root = new Grid { Margin = new Thickness(22) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -94,7 +94,7 @@ public sealed class PrivacyRedactionWindow : Window
         var panel = new FrameworkElementFactory(typeof(StackPanel));
         panel.SetValue(StackPanel.OrientationProperty, WpfOrientation.Horizontal);
         var kind = new FrameworkElementFactory(typeof(TextBlock));
-        kind.SetValue(FrameworkElement.WidthProperty, 82d);
+        kind.SetValue(FrameworkElement.WidthProperty, 104d);
         kind.SetValue(TextBlock.FontWeightProperty, FontWeights.SemiBold);
         kind.SetBinding(TextBlock.TextProperty,
             new WpfBinding("Candidate.KindLabel"));

@@ -9,7 +9,12 @@ namespace Screenshot.App.Capture;
 
 internal sealed class ScrollCaptureDiagnostics
 {
-    private const int MaximumLogFiles = 20;
+    private const int MaximumLogFiles = 5;
+#if DEBUG
+    private const bool IsDetailedLoggingEnabled = true;
+#else
+    private const bool IsDetailedLoggingEnabled = false;
+#endif
     private readonly ConcurrentQueue<DiagnosticEvent> _events = new();
     private readonly long _startedTimestamp = Stopwatch.GetTimestamp();
     private readonly string _sessionId = DateTime.Now.ToString(
@@ -21,6 +26,11 @@ internal sealed class ScrollCaptureDiagnostics
 
     public void Record(string name, params (string Name, object? Value)[] values)
     {
+        if (!ShouldRecord(name))
+        {
+            return;
+        }
+
         var fields = new Dictionary<string, object?>(
             values.Length,
             StringComparer.Ordinal);
@@ -49,6 +59,11 @@ internal sealed class ScrollCaptureDiagnostics
 
     private void Write(IReadOnlyList<DiagnosticEvent> events)
     {
+        if (events.Count == 0)
+        {
+            return;
+        }
+
         try
         {
             var directory = AppMetadata.DiagnosticsDirectoryPath;
@@ -82,6 +97,14 @@ internal sealed class ScrollCaptureDiagnostics
             // Diagnostics must never affect the screenshot workflow.
         }
     }
+
+    internal static bool ShouldRecord(string name) =>
+        IsDetailedLoggingEnabled || IsError(name);
+
+    private static bool IsError(string name) =>
+        name.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("exception", StringComparison.OrdinalIgnoreCase) ||
+        name.Contains("error", StringComparison.OrdinalIgnoreCase);
 
     private sealed record DiagnosticEvent(
         double ElapsedMilliseconds,

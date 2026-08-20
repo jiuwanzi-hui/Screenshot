@@ -37,7 +37,9 @@ public sealed class CaptureHistoryServiceTests
             }
 
             var history = new CaptureHistoryService(directory);
-            history.ConfigurePersistence(enabled: true);
+            history.ConfigureRetentionPolicy(
+                retentionDays: 0,
+                AppSettings.MaximumHistoryItems);
             CaptureHistoryService.PruneCacheDirectory(int.MaxValue, directory);
             Assert.Equal(
                 AppSettings.MaximumHistoryItems,

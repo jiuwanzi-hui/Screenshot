@@ -223,16 +223,27 @@ public sealed class ImageEditorCanvas : Canvas
             : ArrowStyle.Filled;
         if (!updateSelectedAnnotation ||
             !HasSelectedAnnotation ||
-            _document.Annotations[_selectedAnnotationIndex] is not ArrowAnnotation arrow ||
-            arrow.Style == _arrowStyle)
+            _document.Annotations[_selectedAnnotationIndex] is not
+                (ArrowAnnotation or CurvedArrowAnnotation))
         {
             return;
         }
 
-        _document.ReplaceAt(
-            _selectedAnnotationIndex,
-            arrow,
-            arrow with { Style = _arrowStyle });
+        var current = _document.Annotations[_selectedAnnotationIndex];
+        EditorAnnotation? replacement = current switch
+        {
+            ArrowAnnotation arrow when arrow.Style != _arrowStyle =>
+                arrow with { Style = _arrowStyle },
+            CurvedArrowAnnotation arrow when arrow.Style != _arrowStyle =>
+                arrow with { Style = _arrowStyle },
+            _ => null,
+        };
+        if (replacement is null)
+        {
+            return;
+        }
+
+        _document.ReplaceAt(_selectedAnnotationIndex, current, replacement);
         RebuildCanvas();
         RaiseHistoryChanged();
     }
@@ -607,6 +618,9 @@ public sealed class ImageEditorCanvas : Canvas
             case EditorTool.Arrow:
                 UpdateArrowPreview((Polygon)_drawingPreview, point);
                 break;
+            case EditorTool.CurvedArrow:
+                UpdateCurvedArrowPreview((Polygon)_drawingPreview, point);
+                break;
             case EditorTool.Brush:
             case EditorTool.Mosaic:
                 UpdateBrushPreview((Polyline)_drawingPreview, point);
@@ -734,6 +748,23 @@ public sealed class ImageEditorCanvas : Canvas
                     End = arrow.End + delta,
                 },
             },
+            CurvedArrowAnnotation arrow => _activeAnnotationHandle switch
+            {
+                0 => arrow with
+                {
+                    Points = ReplaceEndpoint(arrow.Points, point, replaceStart: true),
+                },
+                1 => arrow with
+                {
+                    Points = ReplaceEndpoint(arrow.Points, point, replaceStart: false),
+                },
+                _ => arrow with
+                {
+                    Points = arrow.Points
+                        .Select(pathPoint => pathPoint + delta)
+                        .ToArray(),
+                },
+            },
             TextAnnotation text => _activeAnnotationHandle == 8
                 ? text with
                 {
@@ -834,6 +865,7 @@ public sealed class ImageEditorCanvas : Canvas
                 RectangleAnnotation or
                 EllipseAnnotation or
                 ArrowAnnotation or
+                CurvedArrowAnnotation or
                 TextAnnotation or
                 EmojiAnnotation or
                 NumberAnnotation))
@@ -868,6 +900,9 @@ public sealed class ImageEditorCanvas : Canvas
                 point,
                 arrow.Start,
                 arrow.End) <= Math.Max(5, (arrow.StrokeWidth * 2) + 2),
+            CurvedArrowAnnotation arrow => DistanceToPath(
+                point,
+                arrow.Points) <= Math.Max(5, (arrow.StrokeWidth * 2) + 2),
             TextAnnotation text => Inflate(
                 GetTextBounds(text),
                 3).Contains(point),
@@ -996,7 +1031,7 @@ public sealed class ImageEditorCanvas : Canvas
                 _ => WpfCursors.SizeAll,
             },
             TextAnnotation or EmojiAnnotation or NumberAnnotation => WpfCursors.SizeNWSE,
-            ArrowAnnotation => WpfCursors.Cross,
+            ArrowAnnotation or CurvedArrowAnnotation => WpfCursors.Cross,
             _ => WpfCursors.SizeAll,
         };
     }
@@ -1011,6 +1046,8 @@ public sealed class ImageEditorCanvas : Canvas
             EllipseAnnotation ellipse => GetRectangleHandlePoints(
                 ellipse.Bounds),
             ArrowAnnotation arrow => [arrow.Start, arrow.End],
+            CurvedArrowAnnotation arrow when arrow.Points.Count > 1 =>
+                [arrow.Points[0], arrow.Points[^1]],
             TextAnnotation text =>
             [
                 new WpfPoint(
@@ -1155,6 +1192,34 @@ public sealed class ImageEditorCanvas : Canvas
         return (point - closest).Length;
     }
 
+    private static double DistanceToPath(
+        WpfPoint point,
+        IReadOnlyList<WpfPoint> points)
+    {
+        var distance = double.MaxValue;
+        for (var index = 1; index < points.Count; index++)
+        {
+            distance = Math.Min(
+                distance,
+                DistanceToSegment(point, points[index - 1], points[index]));
+        }
+        return distance;
+    }
+
+    private static WpfPoint[] ReplaceEndpoint(
+        IReadOnlyList<WpfPoint> points,
+        WpfPoint endpoint,
+        bool replaceStart)
+    {
+        var replacement = points.ToArray();
+        if (replacement.Length == 0)
+        {
+            return replacement;
+        }
+        replacement[replaceStart ? 0 : replacement.Length - 1] = endpoint;
+        return replacement;
+    }
+
     private void CreateDrawingPreview(WpfPoint point)
     {
         _drawingPreview = _selectedTool switch
@@ -1177,6 +1242,7 @@ public sealed class ImageEditorCanvas : Canvas
                 _selectedColor,
                 _strokeWidth,
                 _arrowStyle),
+            EditorTool.CurvedArrow => CreateCurvedArrowPreview(point),
             EditorTool.Brush => CreateBrushPreview(point),
             EditorTool.Mosaic => CreateMosaicBrushPreview(point),
             _ => null,
@@ -1201,6 +1267,16 @@ public sealed class ImageEditorCanvas : Canvas
             StrokeEndLineCap = PenLineCap.Round,
             Points = new PointCollection(_brushPoints),
         };
+    }
+
+    private Polygon CreateCurvedArrowPreview(WpfPoint point)
+    {
+        _brushPoints = [point];
+        return CreateCurvedArrowPolygon(
+            _brushPoints,
+            _selectedColor,
+            _strokeWidth,
+            _arrowStyle);
     }
 
     private Polyline CreateMosaicBrushPreview(WpfPoint point)
@@ -1248,6 +1324,23 @@ public sealed class ImageEditorCanvas : Canvas
             _strokeWidth);
     }
 
+    private void UpdateCurvedArrowPreview(
+        Polygon polygon,
+        WpfPoint currentPoint)
+    {
+        if (_brushPoints is null ||
+            (_brushPoints.Count > 0 &&
+             (_brushPoints[^1] - currentPoint).Length < 1.5))
+        {
+            return;
+        }
+
+        _brushPoints.Add(currentPoint);
+        polygon.Points = CreateCurvedArrowPoints(
+            _brushPoints,
+            _strokeWidth);
+    }
+
     private void UpdateBrushPreview(Polyline line, WpfPoint currentPoint)
     {
         if (_brushPoints is null)
@@ -1266,6 +1359,7 @@ public sealed class ImageEditorCanvas : Canvas
             EditorTool.Rectangle => CreateRectangleAnnotation(endPoint),
             EditorTool.Ellipse => CreateEllipseAnnotation(endPoint),
             EditorTool.Arrow => CreateArrowAnnotation(endPoint),
+            EditorTool.CurvedArrow => CreateCurvedArrowAnnotation(endPoint),
             EditorTool.Brush => CreateBrushAnnotation(),
             EditorTool.Mosaic => CreateMosaicAnnotation(),
             _ => null,
@@ -1305,6 +1399,29 @@ public sealed class ImageEditorCanvas : Canvas
             ? new ArrowAnnotation(
                 _drawingStartPoint,
                 endPoint,
+                _selectedColor,
+                _strokeWidth,
+                _arrowStyle)
+            : null;
+    }
+
+    private CurvedArrowAnnotation? CreateCurvedArrowAnnotation(
+        WpfPoint endPoint)
+    {
+        if (_brushPoints is null)
+        {
+            return null;
+        }
+
+        if ((_brushPoints[^1] - endPoint).Length >= 1.5)
+        {
+            _brushPoints.Add(endPoint);
+        }
+
+        var points = SmoothPath(_brushPoints);
+        return GetPathLength(points) >= 6
+            ? new CurvedArrowAnnotation(
+                points,
                 _selectedColor,
                 _strokeWidth,
                 _arrowStyle)
@@ -1459,6 +1576,9 @@ public sealed class ImageEditorCanvas : Canvas
             ArrowAnnotation arrow => BoundsFromPoints(
                 [arrow.Start, arrow.End],
                 Math.Max(10, arrow.StrokeWidth * 4) + arrow.StrokeWidth),
+            CurvedArrowAnnotation arrow => BoundsFromPoints(
+                arrow.Points,
+                Math.Max(10, arrow.StrokeWidth * 4) + arrow.StrokeWidth),
             BrushAnnotation brush => BoundsFromPoints(
                 brush.Points,
                 (brush.StrokeWidth / 2) + 1),
@@ -1542,6 +1662,10 @@ public sealed class ImageEditorCanvas : Canvas
                 Start = arrow.Start + offset,
                 End = arrow.End + offset,
             },
+            CurvedArrowAnnotation arrow => arrow with
+            {
+                Points = arrow.Points.Select(point => point + offset).ToArray(),
+            },
             BrushAnnotation brush => brush with
             {
                 Points = brush.Points.Select(point => point + offset).ToArray(),
@@ -1597,6 +1721,9 @@ public sealed class ImageEditorCanvas : Canvas
                 break;
             case ArrowAnnotation arrow:
                 AddArrowVisual(arrow);
+                break;
+            case CurvedArrowAnnotation arrow:
+                AddCurvedArrowVisual(arrow);
                 break;
             case BrushAnnotation brush:
                 AddBrushVisual(brush);
@@ -1663,6 +1790,223 @@ public sealed class ImageEditorCanvas : Canvas
         Children.Add(polygon);
     }
 
+    private void AddCurvedArrowVisual(CurvedArrowAnnotation annotation)
+    {
+        var polygon = CreateCurvedArrowPolygon(
+            annotation.Points,
+            annotation.StrokeColor,
+            annotation.StrokeWidth,
+            annotation.Style);
+        polygon.IsHitTestVisible = false;
+        Children.Add(polygon);
+    }
+
+    private static Polygon CreateCurvedArrowPolygon(
+        IReadOnlyList<WpfPoint> points,
+        WpfColor color,
+        double strokeWidth,
+        ArrowStyle style)
+    {
+        var brush = new SolidColorBrush(color);
+        return new Polygon
+        {
+            Fill = style == ArrowStyle.Hollow
+                ? WpfBrushes.Transparent
+                : brush,
+            Stroke = style == ArrowStyle.Hollow ? brush : null,
+            StrokeThickness = style == ArrowStyle.Hollow
+                ? Math.Max(1.5, strokeWidth * 0.6)
+                : 0,
+            StrokeLineJoin = PenLineJoin.Round,
+            Points = CreateCurvedArrowPoints(points, strokeWidth),
+        };
+    }
+
+    private static PointCollection CreateCurvedArrowPoints(
+        IReadOnlyList<WpfPoint> rawPoints,
+        double strokeWidth)
+    {
+        var points = SmoothPath(rawPoints);
+        if (points.Length < 2)
+        {
+            return points.Length == 0 ? [] : [points[0]];
+        }
+
+        var cumulative = BuildCumulativeLengths(points);
+        var totalLength = cumulative[^1];
+        if (totalLength < 1)
+        {
+            return [points[0], points[^1]];
+        }
+
+        var headLength = Math.Min(
+            Math.Max((totalLength * 0.11) + (strokeWidth * 1.6), 9),
+            Math.Min(44, totalLength * 0.45));
+        var headStartDistance = Math.Max(0, totalLength - headLength);
+        var shaft = SlicePathAtDistance(
+            points,
+            cumulative,
+            headStartDistance);
+        if (shaft.Count < 2)
+        {
+            return CreateTaperedArrowPoints(
+                points[0],
+                points[^1],
+                strokeWidth);
+        }
+
+        var tip = points[^1];
+        var basePoint = shaft[^1];
+        var direction = tip - basePoint;
+        if (direction.Length < 0.5)
+        {
+            direction = points[^1] - points[^2];
+        }
+        if (direction.Length < 0.5)
+        {
+            return CreateTaperedArrowPoints(
+                points[0],
+                tip,
+                strokeWidth);
+        }
+
+        direction.Normalize();
+        var headNormal = new Vector(-direction.Y, direction.X);
+        var headHalfWidth = headLength * 0.36;
+        var baseHalfWidth = Math.Max(
+            1.4,
+            Math.Max(strokeWidth * 1.12, headHalfWidth * 0.24));
+        var tailHalfWidth = Math.Max(1.2, strokeWidth * 0.55);
+        var shaftLength = Math.Max(1, GetPathLength(shaft));
+        var shaftCumulative = BuildCumulativeLengths(shaft);
+        var left = new List<WpfPoint>(shaft.Count);
+        var right = new List<WpfPoint>(shaft.Count);
+
+        for (var index = 0; index < shaft.Count; index++)
+        {
+            var tangent = GetPathTangent(shaft, index);
+            var normal = new Vector(-tangent.Y, tangent.X);
+            var progress = shaftCumulative[index] / shaftLength;
+            var halfWidth = tailHalfWidth +
+                ((baseHalfWidth - tailHalfWidth) * progress);
+            left.Add(shaft[index] + (normal * halfWidth));
+            right.Add(shaft[index] - (normal * halfWidth));
+        }
+
+        var polygon = new PointCollection(left.Count + right.Count + 3);
+        foreach (var point in left)
+        {
+            polygon.Add(point);
+        }
+        polygon.Add(basePoint + (headNormal * headHalfWidth));
+        polygon.Add(tip);
+        polygon.Add(basePoint - (headNormal * headHalfWidth));
+        for (var index = right.Count - 1; index >= 0; index--)
+        {
+            polygon.Add(right[index]);
+        }
+        return polygon;
+    }
+
+    private static WpfPoint[] SmoothPath(IReadOnlyList<WpfPoint> rawPoints)
+    {
+        if (rawPoints.Count < 3)
+        {
+            return rawPoints.ToArray();
+        }
+
+        var filtered = new List<WpfPoint> { rawPoints[0] };
+        foreach (var point in rawPoints.Skip(1))
+        {
+            if ((point - filtered[^1]).Length >= 1.5)
+            {
+                filtered.Add(point);
+            }
+        }
+        if (filtered.Count < 3)
+        {
+            return filtered.ToArray();
+        }
+
+        for (var pass = 0; pass < 2; pass++)
+        {
+            var smoothed = new List<WpfPoint>(filtered.Count * 2)
+            {
+                filtered[0],
+            };
+            for (var index = 0; index < filtered.Count - 1; index++)
+            {
+                var start = filtered[index];
+                var end = filtered[index + 1];
+                smoothed.Add(new WpfPoint(
+                    (start.X * 0.75) + (end.X * 0.25),
+                    (start.Y * 0.75) + (end.Y * 0.25)));
+                smoothed.Add(new WpfPoint(
+                    (start.X * 0.25) + (end.X * 0.75),
+                    (start.Y * 0.25) + (end.Y * 0.75)));
+            }
+            smoothed.Add(filtered[^1]);
+            filtered = smoothed;
+        }
+        return filtered.ToArray();
+    }
+
+    private static double[] BuildCumulativeLengths(
+        IReadOnlyList<WpfPoint> points)
+    {
+        var cumulative = new double[points.Count];
+        for (var index = 1; index < points.Count; index++)
+        {
+            cumulative[index] = cumulative[index - 1] +
+                (points[index] - points[index - 1]).Length;
+        }
+        return cumulative;
+    }
+
+    private static double GetPathLength(IReadOnlyList<WpfPoint> points) =>
+        points.Count < 2 ? 0 : BuildCumulativeLengths(points)[^1];
+
+    private static List<WpfPoint> SlicePathAtDistance(
+        IReadOnlyList<WpfPoint> points,
+        IReadOnlyList<double> cumulative,
+        double distance)
+    {
+        var result = new List<WpfPoint> { points[0] };
+        for (var index = 1; index < points.Count; index++)
+        {
+            if (cumulative[index] < distance)
+            {
+                result.Add(points[index]);
+                continue;
+            }
+
+            var segmentLength = cumulative[index] - cumulative[index - 1];
+            var progress = segmentLength <= 0
+                ? 0
+                : (distance - cumulative[index - 1]) / segmentLength;
+            progress = Math.Clamp(progress, 0, 1);
+            result.Add(points[index - 1] +
+                ((points[index] - points[index - 1]) * progress));
+            break;
+        }
+        return result;
+    }
+
+    private static Vector GetPathTangent(
+        IReadOnlyList<WpfPoint> points,
+        int index)
+    {
+        var start = points[Math.Max(0, index - 1)];
+        var end = points[Math.Min(points.Count - 1, index + 1)];
+        var tangent = end - start;
+        if (tangent.Length < 0.001)
+        {
+            tangent = new Vector(1, 0);
+        }
+        tangent.Normalize();
+        return tangent;
+    }
+
     private static Polygon CreateArrowPolygon(
         WpfPoint start,
         WpfPoint end,
@@ -1678,7 +2022,7 @@ public sealed class ImageEditorCanvas : Canvas
                 : brush,
             Stroke = style == ArrowStyle.Hollow ? brush : null,
             StrokeThickness = style == ArrowStyle.Hollow
-                ? Math.Max(1.5, strokeWidth * 0.55)
+                ? Math.Max(1.5, strokeWidth * 0.6)
                 : 0,
             StrokeLineJoin = PenLineJoin.Round,
             Points = CreateTaperedArrowPoints(start, end, strokeWidth),
@@ -1719,8 +2063,8 @@ public sealed class ImageEditorCanvas : Canvas
         var headHalfWidth = headLength * 0.36;
         var baseHalfWidth = Math.Max(
             1.4,
-            Math.Max(strokeWidth * 0.9, headHalfWidth * 0.22));
-        var tailHalfWidth = Math.Max(0.6, strokeWidth * 0.22);
+            Math.Max(strokeWidth * 1.12, headHalfWidth * 0.24));
+        var tailHalfWidth = Math.Max(1.2, strokeWidth * 0.55);
         var basePoint = end - (direction * headLength);
 
         return

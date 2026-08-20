@@ -82,14 +82,13 @@ public sealed class SettingsValidationTests
     }
 
     [Fact]
-    public void PersistentHistoryRequiresScreenshotHistoryToBeEnabled()
+    public void HistoryDefaultsToSevenDaysAndFiftyItems()
     {
-        var normalized = (AppSettings.CreateDefault() with
-        {
-            KeepHistory = false,
-            PersistHistoryAcrossRestarts = true,
-        }).Normalize();
+        var defaults = AppSettings.CreateDefault().Normalize();
 
-        Assert.False(normalized.PersistHistoryAcrossRestarts);
+        Assert.Equal(7, defaults.ScreenshotHistoryRetentionDays);
+        Assert.Equal(7, defaults.VideoHistoryRetentionDays);
+        Assert.Equal(50, defaults.HistoryLimit);
+        Assert.Equal(50, defaults.VideoHistoryLimit);
     }
 }

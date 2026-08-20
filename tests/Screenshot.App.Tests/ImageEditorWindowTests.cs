@@ -189,6 +189,11 @@ public sealed class ImageEditorWindowTests
             var shapeButton = Assert.IsType<System.Windows.Controls.RadioButton>(
                 window.FindName("ShapeToolButton"));
             Assert.Equal(2, shapeButton.ContextMenu.Items.Count);
+            var arrowButton = Assert.IsType<System.Windows.Controls.RadioButton>(
+                window.FindName("ArrowToolButton"));
+            Assert.Contains(
+                arrowButton.ContextMenu.Items.OfType<System.Windows.Controls.MenuItem>(),
+                item => Equals(item.Tag, "CurvedArrow,Filled"));
             Assert.NotNull(
                 System.Windows.Application.Current.FindResource(
                     typeof(System.Windows.Controls.ContextMenu)));

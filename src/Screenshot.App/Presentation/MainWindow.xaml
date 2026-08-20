@@ -936,26 +936,210 @@
 
                 <StackPanel x:Name="GeneralHistoryGroup">
                     <TextBlock Style="{StaticResource GeneralGroupTitle}"
-                               Text="截图记录" />
+                               Text="历史记录" />
                     <TextBlock Style="{StaticResource GeneralGroupDescription}"
-                               Text="可选择只保留本次运行，或跨重启保留最近 100 张" />
-                    <CheckBox MinHeight="30"
-                              Margin="0,14,0,0"
-                              FontSize="14"
-                              Foreground="{DynamicResource AppTextPrimaryBrush}"
-                              IsChecked="{Binding KeepHistory}"
-                              Checked="OnImmediateSettingChanged"
-                              Unchecked="OnImmediateSettingChanged"
-                              Content="保留截图历史" />
-                    <CheckBox MinHeight="30"
-                              Margin="0,6,0,0"
-                              FontSize="14"
-                              Foreground="{DynamicResource AppTextPrimaryBrush}"
-                              IsChecked="{Binding PersistHistoryAcrossRestarts}"
-                              IsEnabled="{Binding KeepHistory}"
-                              Checked="OnImmediateSettingChanged"
-                              Unchecked="OnImmediateSettingChanged"
-                              Content="重启后继续保留（最多 100 张）" />
+                               Text="超过保留天数或最大数量时，自动删除更早的记录" />
+
+                    <TextBlock Margin="0,15,0,0"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="截图历史" />
+                    <Grid Margin="0,9,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock VerticalAlignment="Center"
+                                   Style="{StaticResource GeneralFieldLabel}"
+                                   Text="保留" />
+                        <TextBox x:Name="ScreenshotHistoryRetentionDaysTextBox"
+                                 Grid.Column="1"
+                                 Width="72"
+                                 Height="34"
+                                 Margin="8,0"
+                                 MaxLength="4"
+                                 Padding="9,3"
+                                 VerticalContentAlignment="Center"
+                                 LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
+                                 TextChanged="OnTextSettingChanged"
+                                 Text="{Binding ScreenshotHistoryRetentionDaysText, UpdateSourceTrigger=PropertyChanged}">
+                            <TextBox.Style>
+                                <Style TargetType="TextBox"
+                                       BasedOn="{StaticResource {x:Type TextBox}}">
+                                    <Setter Property="IsEnabled" Value="True" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding KeepAllScreenshotHistory}" Value="True">
+                                            <Setter Property="IsEnabled" Value="False" />
+                                            <Setter Property="Opacity" Value="0.5" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBox.Style>
+                        </TextBox>
+                        <TextBlock Grid.Column="2"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource GeneralFieldLabel}"
+                                   Text="天" />
+                        <TextBlock Grid.Column="3"
+                                   Margin="18,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource GeneralFieldLabel}"
+                                   Text="最多保留" />
+                        <TextBox x:Name="ScreenshotHistoryLimitTextBox"
+                                 Grid.Column="4"
+                                 Width="72"
+                                 Height="34"
+                                 Margin="8,0"
+                                 MaxLength="3"
+                                 Padding="9,3"
+                                 VerticalContentAlignment="Center"
+                                 LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
+                                 TextChanged="OnTextSettingChanged"
+                                 Text="{Binding ScreenshotHistoryLimitText, UpdateSourceTrigger=PropertyChanged}">
+                            <TextBox.Style>
+                                <Style TargetType="TextBox"
+                                       BasedOn="{StaticResource {x:Type TextBox}}">
+                                    <Setter Property="IsEnabled" Value="True" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding KeepAllScreenshotHistory}" Value="True">
+                                            <Setter Property="IsEnabled" Value="False" />
+                                            <Setter Property="Opacity" Value="0.5" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBox.Style>
+                        </TextBox>
+                        <TextBlock Grid.Column="5"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource GeneralFieldLabel}"
+                                   Text="张（1-100）" />
+                        <CheckBox x:Name="KeepAllScreenshotHistoryCheckBox"
+                                  Grid.Column="6"
+                                  MinHeight="30"
+                                  Margin="18,0,0,0"
+                                  VerticalAlignment="Center"
+                                  FontSize="13"
+                                  Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                  IsChecked="{Binding KeepAllScreenshotHistory}"
+                                  Checked="OnImmediateSettingChanged"
+                                  Unchecked="OnImmediateSettingChanged"
+                                  Content="全部保留" />
+                    </Grid>
+                    <TextBlock Margin="0,7,0,0"
+                               FontSize="12"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               TextWrapping="Wrap"
+                               Text="截图历史会保存本地缓存。保留越多，占用的硬盘空间和缩略图内存越多，打开历史窗口也可能稍慢。" />
+
+                    <TextBlock Margin="0,17,0,0"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="录屏历史" />
+                    <Grid Margin="0,9,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock VerticalAlignment="Center"
+                                   Style="{StaticResource GeneralFieldLabel}"
+                                   Text="保留" />
+                        <TextBox x:Name="VideoHistoryRetentionDaysTextBox"
+                                 Grid.Column="1"
+                                 Width="72"
+                                 Height="34"
+                                 Margin="8,0"
+                                 MaxLength="4"
+                                 Padding="9,3"
+                                 VerticalContentAlignment="Center"
+                                 LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
+                                 TextChanged="OnTextSettingChanged"
+                                 Text="{Binding VideoHistoryRetentionDaysText, UpdateSourceTrigger=PropertyChanged}">
+                            <TextBox.Style>
+                                <Style TargetType="TextBox"
+                                       BasedOn="{StaticResource {x:Type TextBox}}">
+                                    <Setter Property="IsEnabled" Value="True" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding KeepAllVideoHistory}" Value="True">
+                                            <Setter Property="IsEnabled" Value="False" />
+                                            <Setter Property="Opacity" Value="0.5" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBox.Style>
+                        </TextBox>
+                        <TextBlock Grid.Column="2"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource GeneralFieldLabel}"
+                                   Text="天" />
+                        <TextBlock Grid.Column="3"
+                                   Margin="18,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource GeneralFieldLabel}"
+                                   Text="最多保留" />
+                        <TextBox x:Name="VideoHistoryLimitTextBox"
+                                 Grid.Column="4"
+                                 Width="72"
+                                 Height="34"
+                                 Margin="8,0"
+                                 MaxLength="3"
+                                 Padding="9,3"
+                                 VerticalContentAlignment="Center"
+                                 LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
+                                 TextChanged="OnTextSettingChanged"
+                                 Text="{Binding VideoHistoryLimitText, UpdateSourceTrigger=PropertyChanged}">
+                            <TextBox.Style>
+                                <Style TargetType="TextBox"
+                                       BasedOn="{StaticResource {x:Type TextBox}}">
+                                    <Setter Property="IsEnabled" Value="True" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding KeepAllVideoHistory}" Value="True">
+                                            <Setter Property="IsEnabled" Value="False" />
+                                            <Setter Property="Opacity" Value="0.5" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBox.Style>
+                        </TextBox>
+                        <TextBlock Grid.Column="5"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource GeneralFieldLabel}"
+                                   Text="个（1-100）" />
+                        <CheckBox x:Name="KeepAllVideoHistoryCheckBox"
+                                  Grid.Column="6"
+                                  MinHeight="30"
+                                  Margin="18,0,0,0"
+                                  VerticalAlignment="Center"
+                                  FontSize="13"
+                                  Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                  IsChecked="{Binding KeepAllVideoHistory}"
+                                  Checked="OnImmediateSettingChanged"
+                                  Unchecked="OnImmediateSettingChanged"
+                                  Content="全部保留" />
+                    </Grid>
+                    <TextBlock Margin="0,7,0,0"
+                               FontSize="12"
+                               Foreground="{DynamicResource AppDangerBrush}"
+                               TextWrapping="Wrap"
+                               Text="自动清理录屏历史会直接删除视频保存目录中的本地录屏文件，删除后无法在应用内恢复。" />
+                    <TextBlock Margin="0,5,0,0"
+                               FontSize="12"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               TextWrapping="Wrap"
+                               Text="录屏通常占用较多硬盘空间；保留数量越多，历史列表扫描和加载时间也会增加。" />
                 </StackPanel>
               </StackPanel>
             </ScrollViewer>

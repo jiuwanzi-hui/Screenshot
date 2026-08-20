@@ -569,6 +569,96 @@ public sealed class ImageEditorCanvasTests
     }
 
     [Fact]
+    public void CurvedArrowFollowsTheDrawnPathAndEndsAtTheMouseTip()
+    {
+        var createPoints = typeof(ImageEditorCanvas).GetMethod(
+            "CreateCurvedArrowPoints",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(createPoints);
+        WpfPoint[] path =
+        [
+            new(10, 70),
+            new(24, 42),
+            new(52, 20),
+            new(88, 18),
+            new(122, 34),
+            new(142, 62),
+        ];
+
+        var polygon = Assert.IsType<System.Windows.Media.PointCollection>(
+            createPoints.Invoke(null, [path, 4d]));
+
+        Assert.True(polygon.Count > path.Length * 2);
+        Assert.Contains(path[^1], polygon);
+        Assert.True(polygon.Min(point => point.Y) < 25);
+        Assert.True(polygon.Max(point => point.X) >= path[^1].X);
+    }
+
+    [Fact]
+    public void CurvedArrowUsesTheSameFilledAndHollowStylesAsStraightArrow()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var createPolygon = typeof(ImageEditorCanvas).GetMethod(
+                "CreateCurvedArrowPolygon",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.NotNull(createPolygon);
+            WpfPoint[] path = [new(8, 60), new(40, 18), new(92, 44)];
+
+            var filled = Assert.IsType<System.Windows.Shapes.Polygon>(
+                createPolygon.Invoke(
+                    null,
+                    [path, System.Windows.Media.Colors.Red, 4d, ArrowStyle.Filled]));
+            var hollow = Assert.IsType<System.Windows.Shapes.Polygon>(
+                createPolygon.Invoke(
+                    null,
+                    [path, System.Windows.Media.Colors.Red, 4d, ArrowStyle.Hollow]));
+
+            Assert.IsType<System.Windows.Media.SolidColorBrush>(filled.Fill);
+            Assert.Null(filled.Stroke);
+            Assert.Same(WpfBrushes.Transparent, hollow.Fill);
+            Assert.IsType<System.Windows.Media.SolidColorBrush>(hollow.Stroke);
+            Assert.True(hollow.StrokeThickness > 0);
+        });
+    }
+
+    [Fact]
+    public void ChangingSelectedCurvedArrowStyleCanBeUndone()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var bitmap = new Bitmap(120, 90, PixelFormat.Format32bppPArgb);
+            using var image = new CapturedImage((Bitmap)bitmap.Clone());
+            var editor = new ImageEditorCanvas();
+            editor.Initialize(image, displayWidth: 120, displayHeight: 90);
+            var documentField = typeof(ImageEditorCanvas).GetField(
+                "_document",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var selectedField = typeof(ImageEditorCanvas).GetField(
+                "_selectedAnnotationIndex",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(documentField);
+            Assert.NotNull(selectedField);
+            var document = Assert.IsType<EditorDocument>(documentField.GetValue(editor));
+            document.Add(new CurvedArrowAnnotation(
+                [new WpfPoint(10, 70), new WpfPoint(55, 18), new WpfPoint(105, 58)],
+                System.Windows.Media.Colors.Red,
+                4));
+            selectedField.SetValue(editor, 0);
+
+            editor.SelectArrowStyle(ArrowStyle.Hollow);
+
+            var changed = Assert.IsType<CurvedArrowAnnotation>(
+                Assert.Single(document.Annotations));
+            Assert.Equal(ArrowStyle.Hollow, changed.Style);
+            editor.Undo();
+            var restored = Assert.IsType<CurvedArrowAnnotation>(
+                Assert.Single(document.Annotations));
+            Assert.Equal(ArrowStyle.Filled, restored.Style);
+        });
+    }
+
+    [Fact]
     public void ChangingSelectedArrowStyleCanBeUndone()
     {
         WpfTestHost.Invoke(() =>

@@ -210,6 +210,10 @@ public sealed class AppThemeManager : IDisposable
         SetSettingsColor(resources, "AppTextSecondaryBrush", palette.TextSecondary);
         SetSettingsColor(resources, "AppMutedTextBrush", palette.TextSecondary);
         SetSettingsColor(resources, "AppControlForegroundBrush", palette.ControlForeground);
+        SetSettingsColor(
+            resources,
+            "AppDangerBrush",
+            palette.IsDark ? "#FF9B8F" : "#B42318");
         SetSettingsColor(resources, "AppSeparatorBrush", palette.Separator);
         SetSettingsColor(resources, "AppTooltipBackgroundBrush", palette.TooltipBackground);
         SetSettingsColor(resources, "AppTooltipForegroundBrush", palette.TooltipForeground);
@@ -557,6 +561,7 @@ public sealed class AppThemeManager : IDisposable
             ["AppAccentBrush"] = "#2EAFA5",
             ["AppAccentMutedBrush"] = "#BFE8E2",
             ["AppAccentForegroundBrush"] = "#00695F",
+            ["AppDangerBrush"] = "#B42318",
             ["AppSeparatorBrush"] = "#DCE4E8",
             ["AppTooltipBackgroundBrush"] = "#F2F4FBFA",
             ["AppTooltipForegroundBrush"] = "#183F43",
@@ -617,6 +622,7 @@ public sealed class AppThemeManager : IDisposable
             ["AppAccentBrush"] = "#2EAFA5",
             ["AppAccentMutedBrush"] = "#4A2E6762",
             ["AppAccentForegroundBrush"] = "#B5F4ED",
+            ["AppDangerBrush"] = "#FF9B8F",
             ["AppSeparatorBrush"] = "#465C706E",
             ["AppTooltipBackgroundBrush"] = "#F21A2B30",
             ["AppTooltipForegroundBrush"] = "#E4F5F2",

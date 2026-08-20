@@ -17,6 +17,9 @@ public sealed class PinnedImageManager : IDisposable
     private readonly Action<string>? _customStrokeColorChanged;
     private readonly Action<int[]>? _customColorPaletteChanged;
     private readonly Action<ArrowStyle>? _arrowStyleChanged;
+    private readonly Action<ArrowToolMode>? _arrowToolModeChanged;
+    private readonly Action<ShapeToolMode>? _shapeToolModeChanged;
+    private readonly Action<AnnotationToolMode>? _lastAnnotationToolChanged;
     private readonly PinnedImagePersistenceStore _persistenceStore;
     private readonly Dictionary<PinnedImageWindow, (double Left, double Top)>
         _lastPositions = [];
@@ -34,7 +37,10 @@ public sealed class PinnedImageManager : IDisposable
         Func<AppSettings>? settingsProvider = null,
         Action<string>? customStrokeColorChanged = null,
         Action<int[]>? customColorPaletteChanged = null,
-        Action<ArrowStyle>? arrowStyleChanged = null)
+        Action<ArrowStyle>? arrowStyleChanged = null,
+        Action<ArrowToolMode>? arrowToolModeChanged = null,
+        Action<ShapeToolMode>? shapeToolModeChanged = null,
+        Action<AnnotationToolMode>? lastAnnotationToolChanged = null)
     {
         _recognizeTextAsync = recognizeTextAsync;
         _translateTextAsync = translateTextAsync;
@@ -43,6 +49,9 @@ public sealed class PinnedImageManager : IDisposable
         _customStrokeColorChanged = customStrokeColorChanged;
         _customColorPaletteChanged = customColorPaletteChanged;
         _arrowStyleChanged = arrowStyleChanged;
+        _arrowToolModeChanged = arrowToolModeChanged;
+        _shapeToolModeChanged = shapeToolModeChanged;
+        _lastAnnotationToolChanged = lastAnnotationToolChanged;
         _persistenceStore = new PinnedImagePersistenceStore();
         _saveTimer = new DispatcherTimer
         {
@@ -77,7 +86,10 @@ public sealed class PinnedImageManager : IDisposable
                 _settingsProvider,
                 _customStrokeColorChanged,
                 _customColorPaletteChanged,
-                _arrowStyleChanged);
+                _arrowStyleChanged,
+                _arrowToolModeChanged,
+                _shapeToolModeChanged,
+                _lastAnnotationToolChanged);
             AddAndShowWindow(window);
         }
         catch
@@ -111,7 +123,10 @@ public sealed class PinnedImageManager : IDisposable
                 _settingsProvider,
                 _customStrokeColorChanged,
                 _customColorPaletteChanged,
-                _arrowStyleChanged)
+                _arrowStyleChanged,
+                _arrowToolModeChanged,
+                _shapeToolModeChanged,
+                _lastAnnotationToolChanged)
             {
                 PersistenceId = state.Id,
             };

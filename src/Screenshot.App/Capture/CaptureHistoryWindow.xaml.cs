@@ -24,7 +24,11 @@ public partial class CaptureHistoryWindow : Window
     public CaptureHistoryWindow(
         CaptureHistoryService historyService,
         string? saveDirectory = null,
-        string? videoDirectory = null)
+        string? videoDirectory = null,
+        int screenshotRetentionDays = 7,
+        int screenshotLimit = 50,
+        int videoRetentionDays = 7,
+        int videoLimit = 50)
     {
         ArgumentNullException.ThrowIfNull(historyService);
 
@@ -43,7 +47,11 @@ public partial class CaptureHistoryWindow : Window
         _captureHistoryService.Items.CollectionChanged += OnHistoryItemsChanged;
         _videoHistoryService.Items.CollectionChanged += OnHistoryItemsChanged;
         RefreshVideoHistory(updateStatus: false);
-        UpdatePersistenceScope(historyService.PersistsAcrossRestarts);
+        UpdateRetentionPolicy(
+            screenshotRetentionDays,
+            screenshotLimit,
+            videoRetentionDays,
+            videoLimit);
         UpdateEmptyStates();
         ShowHistorySection(showVideo: false, updateStatus: false);
     }
@@ -76,11 +84,22 @@ public partial class CaptureHistoryWindow : Window
         RefreshVideoHistory(updateStatus: false);
     }
 
-    public void UpdatePersistenceScope(bool persistsAcrossRestarts)
+    public void UpdateRetentionPolicy(
+        int screenshotRetentionDays,
+        int screenshotLimit,
+        int videoRetentionDays,
+        int videoLimit)
     {
-        ScreenshotHistoryScopeText.Text = persistsAcrossRestarts
-            ? "跨重启 · 最近 100 张"
-            : "本次运行";
+        ScreenshotHistoryScopeText.Text =
+            $"{FormatRetentionDays(screenshotRetentionDays)} · 最多 {screenshotLimit} 张";
+        HistoryStatusText.Text =
+            $"截图：{FormatRetentionDays(screenshotRetentionDays)} / {screenshotLimit} 张；" +
+            $"录屏：{FormatRetentionDays(videoRetentionDays)} / {videoLimit} 个。";
+    }
+
+    private static string FormatRetentionDays(int days)
+    {
+        return days <= 0 ? "全部保留" : $"保留 {days} 天";
     }
 
     protected override void OnActivated(EventArgs e)

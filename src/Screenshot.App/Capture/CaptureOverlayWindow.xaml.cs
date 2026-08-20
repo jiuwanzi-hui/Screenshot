@@ -131,7 +131,20 @@ public sealed class CaptureOverlayOptions
 
     public ArrowStyle ArrowStyle { get; init; } = ArrowStyle.Filled;
 
+    public ArrowToolMode ArrowToolMode { get; init; } = ArrowToolMode.Straight;
+
     public Action<ArrowStyle>? ArrowStyleChanged { get; init; }
+
+    public Action<ArrowToolMode>? ArrowToolModeChanged { get; init; }
+
+    public ShapeToolMode ShapeToolMode { get; init; } = ShapeToolMode.Rectangle;
+
+    public Action<ShapeToolMode>? ShapeToolModeChanged { get; init; }
+
+    public AnnotationToolMode LastAnnotationTool { get; init; } =
+        AnnotationToolMode.Rectangle;
+
+    public Action<AnnotationToolMode>? LastAnnotationToolChanged { get; init; }
 
     public string CustomStrokeColor { get; init; } = string.Empty;
 
@@ -192,6 +205,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private CapturedImage? _inlineEditorImage;
     private CapturedImage? _screenSnapshot;
     private EditorTool _selectedInlineTool = EditorTool.Rectangle;
+    private ArrowStyle _currentArrowStyle = ArrowStyle.Filled;
+    private ArrowToolMode _currentArrowToolMode = ArrowToolMode.Straight;
+    private ShapeToolMode _currentShapeToolMode = ShapeToolMode.Rectangle;
     private bool _isSelecting;
     private CapturePointerButton? _continuedSelectionButton;
     private Task _continuedSelectionReleaseTask = Task.CompletedTask;
@@ -210,6 +226,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private Rect? _windowSnapBounds;
     private IntPtr _windowHandle;
     private bool _isCompleted;
+    private bool _isInitializing = true;
     private OcrRecognitionResult? _inlineOcrResult;
     private ContentRecognitionResult? _inlineQrResult;
     private ContentRecognitionResult? _inlineTableResult;
@@ -249,6 +266,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         CapturePointerContinuation? initialPointerContinuation = null)
     {
         _options = options;
+        _currentArrowStyle = options?.ArrowStyle ?? ArrowStyle.Filled;
+        _currentArrowToolMode = options?.ArrowToolMode ?? ArrowToolMode.Straight;
+        _currentShapeToolMode = options?.ShapeToolMode ?? ShapeToolMode.Rectangle;
+        _selectedInlineTool = ToEditorTool(
+            AnnotationToolMode.Rectangle,
+            options?.ArrowToolMode ?? ArrowToolMode.Straight,
+            options?.ShapeToolMode ?? ShapeToolMode.Rectangle);
         _isScrollCaptureSelection = isScrollCaptureSelection;
         _initialPointerContinuation =
             initialPointerContinuation ?? options?.InitialPointerContinuation;
@@ -256,28 +280,49 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             ? new TaskCompletionSource<ScrollCaptureSelection?>(
                 TaskCreationOptions.RunContinuationsAsynchronously)
             : null;
-        _hasCustomToolbarPosition =
-            options is not null &&
-            options.ToolbarPositionXRatio is >= 0 and <= 1 &&
-            options.ToolbarPositionYRatio is >= 0 and <= 1;
-        if (_hasCustomToolbarPosition)
-        {
-            _toolbarPositionXRatio = options!.ToolbarPositionXRatio;
-            _toolbarPositionYRatio = options.ToolbarPositionYRatio;
-        }
+        // The capture toolbar starts from the automatic placement on every
+        // capture. Its drag position is intentionally session-local.
+        _hasCustomToolbarPosition = false;
         InitializeComponent();
         _toolbarDragHint = new ToolbarDragHintBehavior(
             CaptureToolbar,
             CaptureToolbar);
         ApplyThemedContextMenu(InlineShapeToolButton.ContextMenu);
         ApplyThemedContextMenu(InlineArrowToolButton.ContextMenu);
+        if (_selectedInlineTool is EditorTool.Arrow or EditorTool.CurvedArrow)
+        {
+            InlineShapeToolButton.IsChecked = false;
+            InlineArrowToolButton.Tag = _selectedInlineTool.ToString();
+            InlineArrowToolButton.IsChecked = true;
+        }
+        else
+        {
+            InlineShapeToolButton.IsChecked = true;
+            InlineShapeToolIcon.Data = (System.Windows.Media.Geometry)FindResource(
+                _currentShapeToolMode == ShapeToolMode.Ellipse
+                    ? "EllipseIconGeometry"
+                    : "RectangleIconGeometry");
+            InlineShapeToolButton.ToolTip = _currentShapeToolMode == ShapeToolMode.Ellipse
+                ? "椭圆"
+                : "矩形";
+        }
+        if (_selectedInlineTool is not (EditorTool.Rectangle or EditorTool.Ellipse or EditorTool.Arrow or EditorTool.CurvedArrow))
+        {
+            GetInlineToolButton(_selectedInlineTool).IsChecked = true;
+        }
+        UpdateInlineShapeButtonPresentation();
+        UpdateInlineShapeMenuState();
+        UpdateInlineArrowMenuState();
+        UpdateInlineArrowButtonPresentation();
         InlineEditorCanvas.SelectArrowStyle(
-            options?.ArrowStyle ?? ArrowStyle.Filled,
+            _currentArrowStyle,
             updateSelectedAnnotation: false);
         ApplySavedInlineCustomColor(options?.CustomStrokeColor);
         _inlineCustomColorPalette = NormalizeCustomColorPalette(
             options?.CustomColorPalette);
         PopulateInlineEmojiPalette();
+        UpdateInlineToolOptionPanels();
+        _isInitializing = false;
         ApplyToolbarFeatureVisibility(options?.VisibleToolbarFeatures);
         ApplyToolbarLayout(
             options?.ToolbarFeatureOrder,
@@ -377,6 +422,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     protected override void OnClosed(EventArgs e)
     {
+        if (!_isInitializing)
+        {
+            _options?.LastAnnotationToolChanged?.Invoke(
+                ToAnnotationToolMode(_selectedInlineTool));
+        }
         _toolbarDragHint.Detach();
         _lifetimeCancellationSource.Cancel();
         _isSelecting = false;
@@ -476,6 +526,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             if (e.Key == Key.Escape)
             {
                 ExitColorPicker();
+                CompleteSelection(result: null);
                 e.Handled = true;
             }
             else if (IsColorCopyKey(e))
@@ -2215,7 +2266,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             if (candidates.Count == 0)
             {
                 await ShowSelectionMessageForAsync(
-                    "未检测到手机号、邮箱、身份证号、API Key 或 IP 地址",
+                    "未检测到支持的敏感信息",
                     1700);
                 return;
             }
@@ -2954,16 +3005,35 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             (InlineTextToolButton, EditorTool.Text),
             (InlineMosaicToolButton, EditorTool.Mosaic),
         };
-        var selected = editorButtons.FirstOrDefault(
-            item => item.Button.Visibility == Visibility.Visible);
+        var selected = editorButtons
+            .FirstOrDefault(item => item.Tool == _selectedInlineTool ||
+                item.Tool == EditorTool.Rectangle &&
+                    _selectedInlineTool == EditorTool.Ellipse ||
+                item.Tool == EditorTool.Arrow &&
+                    _selectedInlineTool == EditorTool.CurvedArrow);
         var selectedButton = selected.Button;
+        if (selectedButton is null || selectedButton.Visibility != Visibility.Visible)
+        {
+            selected = editorButtons.FirstOrDefault(
+                item => item.Button.Visibility == Visibility.Visible);
+            selectedButton = selected.Button;
+        }
         _hasVisibleInlineEditorTools = selectedButton is not null;
         InlineEditorCanvas.SetAnnotationCreationEnabled(
             _hasVisibleInlineEditorTools);
         if (selectedButton is not null)
         {
-            _selectedInlineTool = selected.Tool!;
+            _selectedInlineTool = selected.Tool == EditorTool.Rectangle &&
+                    _currentShapeToolMode == ShapeToolMode.Ellipse
+                ? EditorTool.Ellipse
+                : selected.Tool == EditorTool.Arrow &&
+                    _currentArrowToolMode == ArrowToolMode.Curved
+                    ? EditorTool.CurvedArrow
+                    : selected.Tool;
             selectedButton.IsChecked = true;
+            UpdateInlineShapeMenuState();
+            UpdateInlineArrowButtonPresentation();
+            UpdateInlineArrowMenuState();
         }
         else
         {
@@ -3190,6 +3260,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void OnInlineEditorToolSelected(object sender, RoutedEventArgs e)
     {
+        if (_isInitializing)
+        {
+            return;
+        }
+
         if (sender is not System.Windows.Controls.RadioButton { Tag: string toolName } ||
             !Enum.TryParse<EditorTool>(toolName, out var tool))
         {
@@ -3197,25 +3272,38 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         _selectedInlineTool = tool;
+        if (tool is EditorTool.Rectangle or EditorTool.Ellipse)
+        {
+            _currentShapeToolMode = tool == EditorTool.Ellipse
+                ? ShapeToolMode.Ellipse
+                : ShapeToolMode.Rectangle;
+            UpdateInlineShapeMenuState(tool);
+        }
+        else if (tool is EditorTool.Arrow or EditorTool.CurvedArrow)
+        {
+            _currentArrowToolMode = tool == EditorTool.CurvedArrow
+                ? ArrowToolMode.Curved
+                : ArrowToolMode.Straight;
+            UpdateInlineArrowButtonPresentation(tool);
+            UpdateInlineArrowMenuState(tool);
+        }
         OcrTextOverlay.Visibility = Visibility.Collapsed;
         UpdateInlineStrokeWidthText(InlineStrokeWidthSlider?.Value ?? 3);
 
-        if (InlineEmojiPalette is not null && InlineStrokeOptions is not null)
-        {
-            var isEmoji = tool == EditorTool.Emoji;
-            InlineEmojiPalette.Visibility = isEmoji
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-            InlineStrokeOptions.Visibility = isEmoji
-                ? Visibility.Collapsed
-                : Visibility.Visible;
-        }
+        UpdateInlineToolOptionPanels();
 
         if (InlineEditorCanvas.HasImage)
         {
-            InlineEditorCanvas.SelectTool(tool);
+        InlineEditorCanvas.SelectTool(tool);
             InlineEditorCanvas.Focus();
         }
+        if (tool is EditorTool.Arrow or EditorTool.CurvedArrow)
+        {
+            _options?.ArrowToolModeChanged?.Invoke(tool == EditorTool.CurvedArrow
+                ? ArrowToolMode.Curved
+                : ArrowToolMode.Straight);
+        }
+        _options?.LastAnnotationToolChanged?.Invoke(ToAnnotationToolMode(tool));
     }
 
     private void OnInlineShapeMenuArrowMouseDown(
@@ -3227,6 +3315,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return;
         }
 
+        UpdateInlineShapeMenuState();
         menu.PlacementTarget = InlineShapeToolButton;
         menu.IsOpen = true;
         e.Handled = true;
@@ -3241,27 +3330,49 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return;
         }
 
+        UpdateInlineArrowMenuState();
         menu.PlacementTarget = InlineArrowToolButton;
         menu.IsOpen = true;
         e.Handled = true;
     }
 
-    private void OnInlineArrowStyleMenuItemClick(
+    private void OnInlineArrowVariantMenuItemClick(
         object sender,
         RoutedEventArgs e)
     {
-        if (sender is not System.Windows.Controls.MenuItem { Tag: string styleName } ||
-            !Enum.TryParse<ArrowStyle>(styleName, out var arrowStyle))
+        if (sender is not System.Windows.Controls.MenuItem { Tag: string tag })
+        {
+            return;
+        }
+
+        var parts = tag.Split(',', StringSplitOptions.TrimEntries);
+        if (parts.Length != 2 ||
+            !Enum.TryParse<EditorTool>(parts[0], out var tool) ||
+            !Enum.TryParse<ArrowStyle>(parts[1], out var arrowStyle) ||
+            tool is not (EditorTool.Arrow or EditorTool.CurvedArrow))
         {
             return;
         }
 
         InlineEditorCanvas.SelectArrowStyle(arrowStyle);
+        _currentArrowStyle = arrowStyle;
+        _currentArrowToolMode = tool == EditorTool.CurvedArrow
+            ? ArrowToolMode.Curved
+            : ArrowToolMode.Straight;
+        _selectedInlineTool = tool;
+        InlineArrowToolButton.Tag = tool.ToString();
         InlineArrowToolButton.IsChecked = true;
-        InlineArrowToolButton.ToolTip = arrowStyle == ArrowStyle.Hollow
-            ? "空心箭头"
-            : "实心箭头";
+        UpdateInlineArrowButtonPresentation(tool);
+        UpdateInlineArrowMenuState();
         _options?.ArrowStyleChanged?.Invoke(arrowStyle);
+        _options?.ArrowToolModeChanged?.Invoke(tool == EditorTool.CurvedArrow
+            ? ArrowToolMode.Curved
+            : ArrowToolMode.Straight);
+        _options?.LastAnnotationToolChanged?.Invoke(ToAnnotationToolMode(tool));
+        if (InlineEditorCanvas.HasImage)
+        {
+            InlineEditorCanvas.SelectTool(tool);
+        }
         InlineEditorCanvas.Focus();
     }
 
@@ -3305,6 +3416,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             : "矩形";
         InlineShapeToolButton.IsChecked = true;
         _selectedInlineTool = tool;
+        _currentShapeToolMode = tool == EditorTool.Ellipse
+            ? ShapeToolMode.Ellipse
+            : ShapeToolMode.Rectangle;
+        UpdateInlineShapeMenuState(tool);
         OcrTextOverlay.Visibility = Visibility.Collapsed;
         UpdateInlineStrokeWidthText(InlineStrokeWidthSlider?.Value ?? 3);
         if (InlineEditorCanvas.HasImage)
@@ -3312,6 +3427,131 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             InlineEditorCanvas.SelectTool(tool);
             InlineEditorCanvas.Focus();
         }
+        _options?.ShapeToolModeChanged?.Invoke(tool == EditorTool.Ellipse
+            ? ShapeToolMode.Ellipse
+            : ShapeToolMode.Rectangle);
+        _options?.LastAnnotationToolChanged?.Invoke(ToAnnotationToolMode(tool));
+    }
+
+    private void UpdateInlineShapeMenuState(EditorTool? tool = null)
+    {
+        var selected = tool ?? (_currentShapeToolMode == ShapeToolMode.Ellipse
+            ? EditorTool.Ellipse
+            : EditorTool.Rectangle);
+        InlineRectangleShapeMenuItem.IsChecked = selected == EditorTool.Rectangle;
+        InlineEllipseShapeMenuItem.IsChecked = selected == EditorTool.Ellipse;
+    }
+
+    private void UpdateInlineArrowMenuState(EditorTool? tool = null)
+    {
+        var selected = tool ?? (_currentArrowToolMode == ArrowToolMode.Curved
+            ? EditorTool.CurvedArrow
+            : EditorTool.Arrow);
+        InlineStraightFilledArrowMenuItem.IsChecked =
+            selected == EditorTool.Arrow && _currentArrowStyle == ArrowStyle.Filled;
+        InlineStraightHollowArrowMenuItem.IsChecked =
+            selected == EditorTool.Arrow && _currentArrowStyle == ArrowStyle.Hollow;
+        InlineCurvedFilledArrowMenuItem.IsChecked =
+            selected == EditorTool.CurvedArrow && _currentArrowStyle == ArrowStyle.Filled;
+        InlineCurvedHollowArrowMenuItem.IsChecked =
+            selected == EditorTool.CurvedArrow && _currentArrowStyle == ArrowStyle.Hollow;
+    }
+
+    private void UpdateInlineArrowButtonPresentation(EditorTool? tool = null)
+    {
+        var selected = tool ?? (_currentArrowToolMode == ArrowToolMode.Curved
+            ? EditorTool.CurvedArrow
+            : EditorTool.Arrow);
+        var isCurved = selected == EditorTool.CurvedArrow;
+        InlineArrowToolButton.Tag = selected.ToString();
+        var key = (isCurved, _currentArrowStyle) switch
+        {
+            (false, ArrowStyle.Hollow) => "StraightHollowArrowIconGeometry",
+            (true, ArrowStyle.Filled) => "CurvedFilledArrowIconGeometry",
+            (true, ArrowStyle.Hollow) => "CurvedHollowArrowIconGeometry",
+            _ => "StraightFilledArrowIconGeometry",
+        };
+        InlineArrowToolIcon.Data = (System.Windows.Media.Geometry)FindResource(
+            key);
+        var isHollow = _currentArrowStyle == ArrowStyle.Hollow;
+        InlineArrowToolIcon.Fill = isHollow ? WpfBrushes.Transparent : null;
+        InlineArrowToolIcon.Stroke = isHollow ? null : WpfBrushes.Transparent;
+        InlineArrowToolIcon.SetResourceReference(
+            isHollow ? System.Windows.Shapes.Path.StrokeProperty : System.Windows.Shapes.Path.FillProperty,
+            "EditorToolbarIconBrush");
+        InlineArrowToolIcon.StrokeThickness = isHollow ? 1.8 : 0;
+        InlineArrowToolButton.ToolTip = string.Concat(
+            isCurved ? "弧形" : "直线",
+            _currentArrowStyle == ArrowStyle.Hollow ? "空心箭头" : "实心箭头");
+    }
+
+    private void UpdateInlineShapeButtonPresentation()
+    {
+        var isEllipse = _currentShapeToolMode == ShapeToolMode.Ellipse;
+        InlineShapeToolButton.Tag = isEllipse
+            ? EditorTool.Ellipse.ToString()
+            : EditorTool.Rectangle.ToString();
+        InlineShapeToolIcon.Data = (System.Windows.Media.Geometry)FindResource(
+            isEllipse ? "EllipseIconGeometry" : "RectangleIconGeometry");
+        InlineShapeToolButton.ToolTip = isEllipse ? "椭圆" : "矩形";
+    }
+
+    private static EditorTool ToEditorTool(
+        AnnotationToolMode lastTool,
+        ArrowToolMode arrowToolMode,
+        ShapeToolMode shapeToolMode) =>
+        lastTool switch
+        {
+            AnnotationToolMode.Rectangle or AnnotationToolMode.Ellipse =>
+                shapeToolMode == ShapeToolMode.Ellipse
+                    ? EditorTool.Ellipse
+                    : EditorTool.Rectangle,
+            AnnotationToolMode.StraightArrow or AnnotationToolMode.CurvedArrow =>
+                arrowToolMode == ArrowToolMode.Curved
+                    ? EditorTool.CurvedArrow
+                    : EditorTool.Arrow,
+            AnnotationToolMode.Emoji => EditorTool.Emoji,
+            AnnotationToolMode.Number => EditorTool.Number,
+            AnnotationToolMode.Brush => EditorTool.Brush,
+            AnnotationToolMode.Mosaic => EditorTool.Mosaic,
+            AnnotationToolMode.Text => EditorTool.Text,
+            _ => EditorTool.Rectangle,
+        };
+
+    private static AnnotationToolMode ToAnnotationToolMode(EditorTool tool) =>
+        tool switch
+        {
+            EditorTool.Ellipse => AnnotationToolMode.Ellipse,
+            EditorTool.Arrow => AnnotationToolMode.StraightArrow,
+            EditorTool.CurvedArrow => AnnotationToolMode.CurvedArrow,
+            EditorTool.Emoji => AnnotationToolMode.Emoji,
+            EditorTool.Number => AnnotationToolMode.Number,
+            EditorTool.Brush => AnnotationToolMode.Brush,
+            EditorTool.Mosaic => AnnotationToolMode.Mosaic,
+            EditorTool.Text => AnnotationToolMode.Text,
+            _ => AnnotationToolMode.Rectangle,
+        };
+
+    private System.Windows.Controls.RadioButton GetInlineToolButton(EditorTool tool) => tool switch
+    {
+        EditorTool.Emoji => InlineEmojiToolButton,
+        EditorTool.Number => InlineNumberToolButton,
+        EditorTool.Brush => InlineBrushToolButton,
+        EditorTool.Mosaic => InlineMosaicToolButton,
+        EditorTool.Text => InlineTextToolButton,
+        _ => InlineShapeToolButton,
+    };
+
+    private void UpdateInlineToolOptionPanels()
+    {
+        if (InlineEmojiPalette is null || InlineStrokeOptions is null)
+        {
+            return;
+        }
+
+        var isEmoji = _selectedInlineTool == EditorTool.Emoji;
+        InlineEmojiPalette.Visibility = isEmoji ? Visibility.Visible : Visibility.Collapsed;
+        InlineStrokeOptions.Visibility = isEmoji ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void OnInlineAnnotationSelectionChanged(object? sender, EventArgs e)
@@ -4013,22 +4253,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void SaveCaptureToolbarPosition()
     {
-        if (!_hasCustomToolbarPosition)
-        {
-            return;
-        }
-
-        var maximumX = GetToolbarMaximumX();
-        var maximumY = GetToolbarMaximumY();
-        var xRatio = maximumX <= 0
-            ? 0
-            : Math.Clamp(Canvas.GetLeft(CaptureToolbar) / maximumX, 0, 1);
-        var yRatio = maximumY <= 0
-            ? 0
-            : Math.Clamp(Canvas.GetTop(CaptureToolbar) / maximumY, 0, 1);
-        _toolbarPositionXRatio = xRatio;
-        _toolbarPositionYRatio = yRatio;
-        _options?.ToolbarPositionChanged?.Invoke(xRatio, yRatio);
+        // Toolbar placement is deliberately not persisted. Keep the helper so
+        // the drag lifecycle remains symmetrical and future position changes
+        // stay local to the current capture window.
+        _ = _options;
     }
 
     private void ResetCaptureToolbarPosition()

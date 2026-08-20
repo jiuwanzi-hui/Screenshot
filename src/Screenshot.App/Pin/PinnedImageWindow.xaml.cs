@@ -36,6 +36,9 @@ public partial class PinnedImageWindow : Window
     private readonly Action<string>? _customStrokeColorChanged;
     private readonly Action<int[]>? _customColorPaletteChanged;
     private readonly Action<ArrowStyle>? _arrowStyleChanged;
+    private readonly Action<ArrowToolMode>? _arrowToolModeChanged;
+    private readonly Action<ShapeToolMode>? _shapeToolModeChanged;
+    private readonly Action<AnnotationToolMode>? _lastAnnotationToolChanged;
     private OcrRecognitionResult? _recognition;
     private IReadOnlyList<OcrTextRegion> _displayedRegions = [];
     private IReadOnlyList<OcrTextRegion> _translatedRegions = [];
@@ -58,7 +61,10 @@ public partial class PinnedImageWindow : Window
         Func<AppSettings>? settingsProvider = null,
         Action<string>? customStrokeColorChanged = null,
         Action<int[]>? customColorPaletteChanged = null,
-        Action<ArrowStyle>? arrowStyleChanged = null)
+        Action<ArrowStyle>? arrowStyleChanged = null,
+        Action<ArrowToolMode>? arrowToolModeChanged = null,
+        Action<ShapeToolMode>? shapeToolModeChanged = null,
+        Action<AnnotationToolMode>? lastAnnotationToolChanged = null)
     {
         ArgumentNullException.ThrowIfNull(capturedImage);
 
@@ -69,6 +75,9 @@ public partial class PinnedImageWindow : Window
         _customStrokeColorChanged = customStrokeColorChanged;
         _customColorPaletteChanged = customColorPaletteChanged;
         _arrowStyleChanged = arrowStyleChanged;
+        _arrowToolModeChanged = arrowToolModeChanged;
+        _shapeToolModeChanged = shapeToolModeChanged;
+        _lastAnnotationToolChanged = lastAnnotationToolChanged;
         InitializeComponent();
         DataContext = _capturedImage;
         TranslateButton.IsEnabled = false;
@@ -117,7 +126,10 @@ public partial class PinnedImageWindow : Window
             _settingsProvider?.Invoke(),
             _customStrokeColorChanged,
             _customColorPaletteChanged,
-            _arrowStyleChanged);
+            _arrowStyleChanged,
+            _arrowToolModeChanged,
+            _shapeToolModeChanged,
+            _lastAnnotationToolChanged);
 
     internal BitmapSource Preview => _capturedImage.Preview;
 

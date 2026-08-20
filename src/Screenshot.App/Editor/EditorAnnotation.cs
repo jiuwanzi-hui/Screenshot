@@ -24,6 +24,12 @@ public sealed record ArrowAnnotation(
     double StrokeWidth,
     ArrowStyle Style = ArrowStyle.Filled) : EditorAnnotation;
 
+public sealed record CurvedArrowAnnotation(
+    IReadOnlyList<WpfPoint> Points,
+    WpfColor StrokeColor,
+    double StrokeWidth,
+    ArrowStyle Style = ArrowStyle.Filled) : EditorAnnotation;
+
 public sealed record BrushAnnotation(
     IReadOnlyList<WpfPoint> Points,
     WpfColor StrokeColor,

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.IO;
+using Screenshot.App.Core;
 
 namespace Screenshot.App.Capture;
 
@@ -13,6 +14,8 @@ public enum VideoHistorySortMode
 
 public sealed class VideoHistoryService
 {
+    private static readonly string[] HistoryExtensions = [".mp4", ".gif", ".webp"];
+
     public ObservableCollection<VideoHistoryItem> Items { get; } = [];
 
     public void Refresh(
@@ -29,12 +32,11 @@ public sealed class VideoHistoryService
         try
         {
             var files = Directory
-                .EnumerateFiles(
-                    videoDirectory,
-                    "*.mp4",
-                    SearchOption.TopDirectoryOnly)
+                .EnumerateFiles(videoDirectory, "*", SearchOption.TopDirectoryOnly)
                 .Select(path => new FileInfo(path))
-                .Where(file => file.Exists);
+                .Where(file => file.Exists && HistoryExtensions.Contains(
+                    file.Extension,
+                    StringComparer.OrdinalIgnoreCase));
             var recordings = ApplySort(files, sortMode)
                 .Select(file => new VideoHistoryItem(
                     file.FullName,
@@ -93,6 +95,61 @@ public sealed class VideoHistoryService
 
         File.Delete(item.FilePath);
         return Items.Remove(item);
+    }
+
+    public static void ApplyRetentionPolicy(
+        string? videoDirectory,
+        int retentionDays,
+        int capacity,
+        DateTimeOffset? now = null)
+    {
+        if (string.IsNullOrWhiteSpace(videoDirectory) ||
+            !Directory.Exists(videoDirectory))
+        {
+            return;
+        }
+
+        retentionDays = Math.Clamp(retentionDays, 0, 3650);
+        capacity = Math.Clamp(capacity, 1, AppSettings.MaximumHistoryItems);
+        var cutoff = retentionDays == 0
+            ? DateTime.MinValue
+            : (now ?? DateTimeOffset.UtcNow).UtcDateTime.Subtract(
+                TimeSpan.FromDays(retentionDays));
+        try
+        {
+            var files = new DirectoryInfo(videoDirectory)
+                .EnumerateFiles("*", SearchOption.TopDirectoryOnly)
+                .Where(file => HistoryExtensions.Contains(
+                    file.Extension,
+                    StringComparer.OrdinalIgnoreCase))
+                .OrderByDescending(file => file.LastWriteTimeUtc)
+                .ToArray();
+            for (var index = 0; index < files.Length; index++)
+            {
+                var file = files[index];
+                if (index < capacity && file.LastWriteTimeUtc >= cutoff)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    file.Delete();
+                }
+                catch (IOException)
+                {
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 
     internal static string NormalizeFileName(string requestedName)

@@ -18,8 +18,14 @@
         <ResourceDictionary.MergedDictionaries>
             <ResourceDictionary Source="../Themes/ThemedContextMenus.xaml" />
         </ResourceDictionary.MergedDictionaries>
-        <Geometry x:Key="UndoIconGeometry">M 8,4 L 3,9 L 8,14 M 3,9 L 11,9 C 15,9 18,11.5 18,16</Geometry>
-        <Geometry x:Key="RedoIconGeometry">M 12,4 L 17,9 L 12,14 M 17,9 L 9,9 C 5,9 2,11.5 2,16</Geometry>
+        <Geometry x:Key="UndoIconGeometry">M 8,2 L 2,8 L 8,14 V 11 C 13,11 16,13 17,17 C 17,10 13,6 8,6 Z</Geometry>
+        <Geometry x:Key="RedoIconGeometry">M 12,2 L 18,8 L 12,14 V 11 C 7,11 4,13 3,17 C 3,10 7,6 12,6 Z</Geometry>
+        <Geometry x:Key="RectangleIconGeometry">M 2,2 H 16 V 16 H 2 Z</Geometry>
+        <Geometry x:Key="EllipseIconGeometry">M 9,2 C 13.5,2 17,5.1 17,9 C 17,12.9 13.5,16 9,16 C 4.5,16 1,12.9 1,9 C 1,5.1 4.5,2 9,2 Z</Geometry>
+        <Geometry x:Key="StraightFilledArrowIconGeometry">M 1,7 H 11 V 3 L 18,9 L 11,15 V 11 H 1 Z</Geometry>
+        <Geometry x:Key="StraightHollowArrowIconGeometry">M 2,7 C 1,7 1,11 2,11 H 10 V 15 L 18,9 L 10,3 V 7 Z</Geometry>
+        <Geometry x:Key="CurvedFilledArrowIconGeometry">M 1,4 C 2,11 7,15 13,11 L 11,8 L 18,10 L 14,17 L 13,14 C 5,19 1,13 1,4 Z</Geometry>
+        <Geometry x:Key="CurvedHollowArrowIconGeometry">M 1,4 C 2,11 7,15 13,11 L 11,8 L 18,10 L 14,17 L 13,14 C 5,19 1,13 1,4 Z</Geometry>
         <Style x:Key="GlassButton" TargetType="Button">
             <Setter Property="Height" Value="32" />
             <Setter Property="MinWidth" Value="38" />
@@ -252,14 +258,20 @@
                                      Style="{StaticResource GlassTool}">
                             <RadioButton.ContextMenu>
                                 <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
-                                    <MenuItem Header="矩形"
+                                    <MenuItem x:Name="RectangleShapeMenuItem"
                                               Tag="Rectangle"
+                                              IsCheckable="True"
                                               Style="{StaticResource ThemedMenuItemStyle}"
-                                              Click="OnShapeMenuItemClick" />
-                                    <MenuItem Header="椭圆"
+                                              Click="OnShapeMenuItemClick">
+                                        <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="17" Height="17" Margin="0,0,8,0" Data="{StaticResource RectangleIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.6" /><TextBlock VerticalAlignment="Center" Text="矩形" /></StackPanel></MenuItem.Header>
+                                    </MenuItem>
+                                    <MenuItem x:Name="EllipseShapeMenuItem"
                                               Tag="Ellipse"
+                                              IsCheckable="True"
                                               Style="{StaticResource ThemedMenuItemStyle}"
-                                              Click="OnShapeMenuItemClick" />
+                                              Click="OnShapeMenuItemClick">
+                                        <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="17" Height="17" Margin="0,0,8,0" Data="{StaticResource EllipseIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.6" /><TextBlock VerticalAlignment="Center" Text="椭圆" /></StackPanel></MenuItem.Header>
+                                    </MenuItem>
                                 </ContextMenu>
                             </RadioButton.ContextMenu>
                             <Grid VerticalAlignment="Center">
@@ -268,7 +280,7 @@
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock x:Name="ShapeToolIcon" HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe UI Symbol" FontSize="16" Text="□" TextAlignment="Center" />
+                                <Path x:Name="ShapeToolIcon" Width="17" Height="17" HorizontalAlignment="Center" VerticalAlignment="Center" Data="{StaticResource RectangleIconGeometry}" Fill="Transparent" Stroke="{DynamicResource ImageEditorToolbarIconBrush}" StrokeThickness="1.6" Stretch="Uniform" />
                                 <TextBlock x:Name="ShapeToolLabel" Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="矩形" />
                                 <TextBlock Grid.Column="2"
                                            Margin="5,0,0,0"
@@ -288,14 +300,34 @@
                                      Style="{StaticResource GlassTool}">
                             <RadioButton.ContextMenu>
                                 <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
-                                    <MenuItem Header="实心箭头"
-                                              Tag="Filled"
+                                    <MenuItem x:Name="StraightFilledArrowMenuItem"
+                                              Tag="Arrow,Filled"
+                                              IsCheckable="True"
                                               Style="{StaticResource ThemedMenuItemStyle}"
-                                              Click="OnArrowStyleMenuItemClick" />
-                                    <MenuItem Header="空心箭头"
-                                              Tag="Hollow"
+                                              Click="OnArrowVariantMenuItemClick">
+                                        <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource StraightFilledArrowIconGeometry}" Fill="{DynamicResource AppControlForegroundBrush}" /><TextBlock VerticalAlignment="Center" Text="直线实心箭头" /></StackPanel></MenuItem.Header>
+                                    </MenuItem>
+                                    <MenuItem x:Name="StraightHollowArrowMenuItem"
+                                              Tag="Arrow,Hollow"
+                                              IsCheckable="True"
                                               Style="{StaticResource ThemedMenuItemStyle}"
-                                              Click="OnArrowStyleMenuItemClick" />
+                                              Click="OnArrowVariantMenuItemClick">
+                                        <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource StraightHollowArrowIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" /><TextBlock VerticalAlignment="Center" Text="直线空心箭头" /></StackPanel></MenuItem.Header>
+                                    </MenuItem>
+                                    <MenuItem x:Name="CurvedFilledArrowMenuItem"
+                                              Tag="CurvedArrow,Filled"
+                                              IsCheckable="True"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnArrowVariantMenuItemClick">
+                                        <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource CurvedFilledArrowIconGeometry}" Fill="{DynamicResource AppControlForegroundBrush}" /><TextBlock VerticalAlignment="Center" Text="弧形实心箭头" /></StackPanel></MenuItem.Header>
+                                    </MenuItem>
+                                    <MenuItem x:Name="CurvedHollowArrowMenuItem"
+                                              Tag="CurvedArrow,Hollow"
+                                              IsCheckable="True"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnArrowVariantMenuItemClick">
+                                        <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource CurvedHollowArrowIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" /><TextBlock VerticalAlignment="Center" Text="弧形空心箭头" /></StackPanel></MenuItem.Header>
+                                    </MenuItem>
                                 </ContextMenu>
                             </RadioButton.ContextMenu>
                             <Grid VerticalAlignment="Center">
@@ -304,8 +336,8 @@
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe UI Symbol" FontSize="16" Text="→" TextAlignment="Center" />
-                                <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="箭头" />
+                                <Path x:Name="ArrowToolIcon" Width="17" Height="17" HorizontalAlignment="Center" VerticalAlignment="Center" Data="{StaticResource StraightFilledArrowIconGeometry}" Fill="{DynamicResource ImageEditorToolbarIconBrush}" Stretch="Uniform" />
+                                <TextBlock x:Name="ArrowToolLabel" Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="直线实心" />
                                 <TextBlock Grid.Column="2"
                                            Margin="5,0,0,0"
                                            Padding="3,2"
@@ -317,7 +349,8 @@
                                            PreviewMouseLeftButtonDown="OnArrowMenuArrowMouseDown" />
                             </Grid>
                         </RadioButton>
-                        <RadioButton Tag="Brush"
+                        <RadioButton x:Name="BrushToolButton"
+                                     Tag="Brush"
                                      Checked="OnToolSelected"
                                      ToolTip="自由画笔"
                                      Style="{StaticResource GlassTool}">
@@ -330,7 +363,8 @@
                                 <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="画笔" />
                             </Grid>
                         </RadioButton>
-                        <RadioButton Tag="Mosaic"
+                        <RadioButton x:Name="MosaicToolButton"
+                                     Tag="Mosaic"
                                      Checked="OnToolSelected"
                                      ToolTip="马赛克笔刷"
                                      Style="{StaticResource GlassTool}">
@@ -343,7 +377,8 @@
                                 <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="马赛克" />
                             </Grid>
                         </RadioButton>
-                        <RadioButton Tag="Text"
+                        <RadioButton x:Name="TextToolButton"
+                                     Tag="Text"
                                      Checked="OnToolSelected"
                                      ToolTip="文字标注"
                                      Style="{StaticResource GlassTool}">
@@ -370,7 +405,8 @@
                                 <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="表情" />
                             </Grid>
                         </RadioButton>
-                        <RadioButton Tag="Number"
+                        <RadioButton x:Name="NumberToolButton"
+                                     Tag="Number"
                                      Checked="OnToolSelected"
                                      ToolTip="序号标注"
                                      Style="{StaticResource GlassTool}">
@@ -408,12 +444,9 @@
                             <Viewbox Width="18" Height="18" Stretch="Uniform">
                                 <Path Width="20" Height="20"
                                       Data="{StaticResource UndoIconGeometry}"
-                                      Fill="Transparent"
-                                      Stroke="{DynamicResource ImageEditorToolbarIconBrush}"
-                                      StrokeEndLineCap="Round"
-                                      StrokeLineJoin="Round"
-                                      StrokeStartLineCap="Round"
-                                      StrokeThickness="2" />
+                                      Fill="{DynamicResource ImageEditorToolbarIconBrush}"
+                                      Stroke="Transparent"
+                                      StrokeThickness="0" />
                             </Viewbox>
                         </Button>
                         <Button x:Name="RedoButton"
@@ -423,12 +456,9 @@
                             <Viewbox Width="18" Height="18" Stretch="Uniform">
                                 <Path Width="20" Height="20"
                                       Data="{StaticResource RedoIconGeometry}"
-                                      Fill="Transparent"
-                                      Stroke="{DynamicResource ImageEditorToolbarIconBrush}"
-                                      StrokeEndLineCap="Round"
-                                      StrokeLineJoin="Round"
-                                      StrokeStartLineCap="Round"
-                                      StrokeThickness="2" />
+                                      Fill="{DynamicResource ImageEditorToolbarIconBrush}"
+                                      Stroke="Transparent"
+                                      StrokeThickness="0" />
                             </Viewbox>
                         </Button>
                         </StackPanel>

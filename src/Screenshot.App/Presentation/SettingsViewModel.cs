@@ -163,6 +163,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private FloatingCaptureClickBehavior _floatingCaptureClickBehavior;
     private ScrollCaptureMode _scrollCaptureMode;
     private ArrowStyle _arrowStyle;
+    private ArrowToolMode _arrowToolMode;
+    private ShapeToolMode _shapeToolMode;
+    private AnnotationToolMode _lastAnnotationTool;
     private CaptureToolbarRowCount _captureToolbarRows;
     private string _customStrokeColor;
     private int[] _customColorPalette;
@@ -170,8 +173,14 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private bool _requestAdministratorPrivileges;
     private WindowCloseBehavior _closeBehavior;
     private AppTheme _theme;
-    private bool _keepHistory;
-    private bool _persistHistoryAcrossRestarts;
+    private bool _keepAllScreenshotHistory;
+    private bool _keepAllVideoHistory;
+    private int _screenshotHistoryRetentionDaysBeforeKeepAll;
+    private int _videoHistoryRetentionDaysBeforeKeepAll;
+    private string _screenshotHistoryRetentionDaysText;
+    private string _videoHistoryRetentionDaysText;
+    private string _screenshotHistoryLimitText;
+    private string _videoHistoryLimitText;
     private string _regionCaptureHotKey;
     private string _videoRecordingHotKey;
     private string _scrollCaptureHotKey;
@@ -212,6 +221,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _floatingCaptureClickBehavior = settings.FloatingCaptureClickBehavior;
         _scrollCaptureMode = settings.ScrollCaptureMode;
         _arrowStyle = settings.ArrowStyle;
+        _arrowToolMode = settings.ArrowToolMode;
+        _shapeToolMode = settings.ShapeToolMode;
+        _lastAnnotationTool = settings.LastAnnotationTool;
         _captureToolbarRows = settings.CaptureToolbarRows;
         SetCaptureToolbarFeatures(
             settings.VisibleCaptureToolbarFeatures,
@@ -222,8 +234,22 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _requestAdministratorPrivileges = settings.RequestAdministratorPrivileges;
         _closeBehavior = settings.CloseBehavior;
         _theme = settings.Theme;
-        _keepHistory = settings.KeepHistory;
-        _persistHistoryAcrossRestarts = settings.PersistHistoryAcrossRestarts;
+        _screenshotHistoryRetentionDaysBeforeKeepAll = NormalizeDisplayedRetentionDays(
+            settings.ScreenshotHistoryRetentionDays,
+            AppSettings.CreateDefault().ScreenshotHistoryRetentionDays);
+        _videoHistoryRetentionDaysBeforeKeepAll = NormalizeDisplayedRetentionDays(
+            settings.VideoHistoryRetentionDays,
+            AppSettings.CreateDefault().VideoHistoryRetentionDays);
+        _keepAllScreenshotHistory = settings.ScreenshotHistoryRetentionDays == 0;
+        _keepAllVideoHistory = settings.VideoHistoryRetentionDays == 0;
+        _screenshotHistoryRetentionDaysText = _screenshotHistoryRetentionDaysBeforeKeepAll
+            .ToString(CultureInfo.InvariantCulture);
+        _videoHistoryRetentionDaysText = _videoHistoryRetentionDaysBeforeKeepAll
+            .ToString(CultureInfo.InvariantCulture);
+        _screenshotHistoryLimitText = settings.HistoryLimit.ToString(
+            CultureInfo.InvariantCulture);
+        _videoHistoryLimitText = settings.VideoHistoryLimit.ToString(
+            CultureInfo.InvariantCulture);
         _regionCaptureHotKey = settings.RegionCaptureHotKey;
         _videoRecordingHotKey = settings.VideoRecordingHotKey;
         _scrollCaptureHotKey = settings.ScrollCaptureHotKey;
@@ -433,6 +459,24 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _arrowStyle, value);
     }
 
+    public ArrowToolMode ArrowToolMode
+    {
+        get => _arrowToolMode;
+        set => SetProperty(ref _arrowToolMode, value);
+    }
+
+    public ShapeToolMode ShapeToolMode
+    {
+        get => _shapeToolMode;
+        set => SetProperty(ref _shapeToolMode, value);
+    }
+
+    public AnnotationToolMode LastAnnotationTool
+    {
+        get => _lastAnnotationTool;
+        set => SetProperty(ref _lastAnnotationTool, value);
+    }
+
     public string CustomStrokeColor
     {
         get => _customStrokeColor;
@@ -469,16 +513,80 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _theme, value);
     }
 
-    public bool KeepHistory
+    public bool KeepAllScreenshotHistory
     {
-        get => _keepHistory;
-        set => SetProperty(ref _keepHistory, value);
+        get => _keepAllScreenshotHistory;
+        set
+        {
+            if (_keepAllScreenshotHistory == value)
+            {
+                return;
+            }
+
+            if (value)
+            {
+                _screenshotHistoryRetentionDaysBeforeKeepAll = ParseDisplayedRetentionDays(
+                    ScreenshotHistoryRetentionDaysText,
+                    _screenshotHistoryRetentionDaysBeforeKeepAll);
+            }
+            else
+            {
+                ScreenshotHistoryRetentionDaysText = _screenshotHistoryRetentionDaysBeforeKeepAll
+                    .ToString(CultureInfo.InvariantCulture);
+            }
+
+            SetProperty(ref _keepAllScreenshotHistory, value);
+        }
     }
 
-    public bool PersistHistoryAcrossRestarts
+    public bool KeepAllVideoHistory
     {
-        get => _persistHistoryAcrossRestarts;
-        set => SetProperty(ref _persistHistoryAcrossRestarts, value);
+        get => _keepAllVideoHistory;
+        set
+        {
+            if (_keepAllVideoHistory == value)
+            {
+                return;
+            }
+
+            if (value)
+            {
+                _videoHistoryRetentionDaysBeforeKeepAll = ParseDisplayedRetentionDays(
+                    VideoHistoryRetentionDaysText,
+                    _videoHistoryRetentionDaysBeforeKeepAll);
+            }
+            else
+            {
+                VideoHistoryRetentionDaysText = _videoHistoryRetentionDaysBeforeKeepAll
+                    .ToString(CultureInfo.InvariantCulture);
+            }
+
+            SetProperty(ref _keepAllVideoHistory, value);
+        }
+    }
+
+    public string ScreenshotHistoryRetentionDaysText
+    {
+        get => _screenshotHistoryRetentionDaysText;
+        set => SetProperty(ref _screenshotHistoryRetentionDaysText, value);
+    }
+
+    public string VideoHistoryRetentionDaysText
+    {
+        get => _videoHistoryRetentionDaysText;
+        set => SetProperty(ref _videoHistoryRetentionDaysText, value);
+    }
+
+    public string ScreenshotHistoryLimitText
+    {
+        get => _screenshotHistoryLimitText;
+        set => SetProperty(ref _screenshotHistoryLimitText, value);
+    }
+
+    public string VideoHistoryLimitText
+    {
+        get => _videoHistoryLimitText;
+        set => SetProperty(ref _videoHistoryLimitText, value);
     }
 
     public string RegionCaptureHotKey
@@ -616,6 +724,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             FloatingCaptureClickBehavior = FloatingCaptureClickBehavior,
             ScrollCaptureMode = ScrollCaptureMode,
             ArrowStyle = ArrowStyle,
+            ArrowToolMode = ArrowToolMode,
+            ShapeToolMode = ShapeToolMode,
+            LastAnnotationTool = LastAnnotationTool,
             VisibleCaptureToolbarFeatures = CaptureToolbarFeatureItems
                 .Where(item => item.IsVisible)
                 .Select(item => item.Feature)
@@ -630,9 +741,22 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             RequestAdministratorPrivileges = RequestAdministratorPrivileges,
             CloseBehavior = CloseBehavior,
             Theme = Theme,
-            KeepHistory = KeepHistory,
-            PersistHistoryAcrossRestarts = PersistHistoryAcrossRestarts,
-            HistoryLimit = AppSettings.MaximumHistoryItems,
+            HistoryLimit = ParseHistoryLimit(
+                ScreenshotHistoryLimitText,
+                _baseSettings.HistoryLimit),
+            VideoHistoryLimit = ParseHistoryLimit(
+                VideoHistoryLimitText,
+                _baseSettings.VideoHistoryLimit),
+            ScreenshotHistoryRetentionDays = KeepAllScreenshotHistory
+                ? 0
+                : ParseRetentionDays(
+                    ScreenshotHistoryRetentionDaysText,
+                    _baseSettings.ScreenshotHistoryRetentionDays),
+            VideoHistoryRetentionDays = KeepAllVideoHistory
+                ? 0
+                : ParseRetentionDays(
+                    VideoHistoryRetentionDaysText,
+                    _baseSettings.VideoHistoryRetentionDays),
             RegionCaptureHotKey = RegionCaptureHotKey,
             VideoRecordingHotKey = VideoRecordingHotKey,
             ScrollCaptureHotKey = ScrollCaptureHotKey,
@@ -678,6 +802,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         FloatingCaptureClickBehavior = settings.FloatingCaptureClickBehavior;
         ScrollCaptureMode = settings.ScrollCaptureMode;
         ArrowStyle = settings.ArrowStyle;
+        ArrowToolMode = settings.ArrowToolMode;
+        ShapeToolMode = settings.ShapeToolMode;
+        LastAnnotationTool = settings.LastAnnotationTool;
         CaptureToolbarRows = settings.CaptureToolbarRows;
         SetCaptureToolbarFeatures(
             settings.VisibleCaptureToolbarFeatures,
@@ -688,8 +815,24 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         RequestAdministratorPrivileges = settings.RequestAdministratorPrivileges;
         CloseBehavior = settings.CloseBehavior;
         Theme = settings.Theme;
-        KeepHistory = settings.KeepHistory;
-        PersistHistoryAcrossRestarts = settings.PersistHistoryAcrossRestarts;
+        if (settings.ScreenshotHistoryRetentionDays > 0)
+        {
+            _screenshotHistoryRetentionDaysBeforeKeepAll = settings.ScreenshotHistoryRetentionDays;
+            ScreenshotHistoryRetentionDaysText = settings.ScreenshotHistoryRetentionDays
+                .ToString(CultureInfo.InvariantCulture);
+        }
+        KeepAllScreenshotHistory = settings.ScreenshotHistoryRetentionDays == 0;
+        if (settings.VideoHistoryRetentionDays > 0)
+        {
+            _videoHistoryRetentionDaysBeforeKeepAll = settings.VideoHistoryRetentionDays;
+            VideoHistoryRetentionDaysText = settings.VideoHistoryRetentionDays
+                .ToString(CultureInfo.InvariantCulture);
+        }
+        KeepAllVideoHistory = settings.VideoHistoryRetentionDays == 0;
+        ScreenshotHistoryLimitText = settings.HistoryLimit.ToString(
+            CultureInfo.InvariantCulture);
+        VideoHistoryLimitText = settings.VideoHistoryLimit.ToString(
+            CultureInfo.InvariantCulture);
         RegionCaptureHotKey = settings.RegionCaptureHotKey;
         VideoRecordingHotKey = settings.VideoRecordingHotKey;
         ScrollCaptureHotKey = settings.ScrollCaptureHotKey;
@@ -917,6 +1060,32 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
+    private static int ParseRetentionDays(string text, int fallback)
+    {
+        return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+            ? Math.Clamp(value, 1, 3650)
+            : Math.Max(1, fallback);
+    }
+
+    private static int NormalizeDisplayedRetentionDays(int days, int fallback)
+    {
+        return days > 0 ? days : Math.Max(1, fallback);
+    }
+
+    private static int ParseDisplayedRetentionDays(string text, int fallback)
+    {
+        return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+            ? Math.Clamp(value, 1, 3650)
+            : Math.Clamp(fallback, 1, 3650);
+    }
+
+    private static int ParseHistoryLimit(string text, int fallback)
+    {
+        return int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+            ? Math.Clamp(value, 1, AppSettings.MaximumHistoryItems)
+            : Math.Clamp(fallback, 1, AppSettings.MaximumHistoryItems);
     }
 
     private void SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

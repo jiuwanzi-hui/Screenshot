@@ -1,18 +1,18 @@
 {
-  "version": "3.2.0",
+  "version": "3.3.0",
   "releasePage": "https://github.com/jiuwanzi-hui/Screenshot/releases/latest",
   "installer": {
-    "fileName": "SnapCut-Setup-3.2.0-win-x64.exe",
-    "githubUrl": "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.2.0-win-x64.exe",
-    "giteeUrl": "https://gitee.com/wwangyunhui/screenshot/releases/download/v3.2.0/SnapCut-Setup-3.2.0-win-x64.exe",
-    "size": 65195859,
-    "sha256": "087DD20023F410ECD3A4C759AC5F5613FB2238E1F452388F61BCADB7E274350B"
+    "fileName": "SnapCut-Setup-3.3.0-win-x64.exe",
+    "githubUrl": "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.3.0-win-x64.exe",
+    "giteeUrl": "https://gitee.com/wwangyunhui/screenshot/releases/download/v3.3.0/SnapCut-Setup-3.3.0-win-x64.exe",
+    "size": 65211557,
+    "sha256": "3B4EA7296D9BC3CF5F25BC6E7AFD71A83FBF4FF953622FA105C619486B7FE538"
   },
   "portable": {
-    "fileName": "SnapCut-Portable-3.2.0-win-x64.zip",
-    "githubUrl": "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.2.0-win-x64.zip",
-    "giteeUrl": "https://gitee.com/wwangyunhui/screenshot/releases/download/v3.2.0/SnapCut-Portable-3.2.0-win-x64.zip",
-    "size": 94896551,
-    "sha256": "75DCA9A9E1BDEA489B3D7F8E1D73C123BDDD115817714C7A9C4BECD08AE5C304"
+    "fileName": "SnapCut-Portable-3.3.0-win-x64.zip",
+    "githubUrl": "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.3.0-win-x64.zip",
+    "giteeUrl": "https://gitee.com/wwangyunhui/screenshot/releases/download/v3.3.0/SnapCut-Portable-3.3.0-win-x64.zip",
+    "size": 94930123,
+    "sha256": "F98C4881BD33A2D244CA27BB2BC59BF9A3F954DAC6EB74B74AD643E315969711"
   }
 }

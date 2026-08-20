@@ -55,6 +55,13 @@
                                     Property="Background"
                                     Value="{DynamicResource AppAccentMutedBrush}" />
                         </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="MenuItemBackground"
+                                    Property="Background"
+                                    Value="{DynamicResource AppAccentBrush}" />
+                            <Setter Property="Foreground"
+                                    Value="{DynamicResource ImageEditorToolbarSelectedIconBrush}" />
+                        </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.45" />
                         </Trigger>

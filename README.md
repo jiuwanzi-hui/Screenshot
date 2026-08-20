@@ -36,14 +36,14 @@ SnapCut（简截）是一款以 Windows 10/11 正式版为主的轻量截图工�
 
 下载最新的 x64 自包含版本。2.3.0 起发布附件统一使用 `SnapCut-Setup-*` 和 `SnapCut-Portable-*`；同时保留旧清单入口，2.1.0 及之后版本仍可在程序内在线更新：
 
-- [安装版 SnapCut Setup 3.2.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.2.0-win-x64.exe)
-- [免安装版 SnapCut Portable 3.2.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.2.0-win-x64.zip)
-- [安装版 SnapCut Setup 3.2.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.2.0/SnapCut-Setup-3.2.0-win-x64.exe)
-- [免安装版 SnapCut Portable 3.2.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.2.0/SnapCut-Portable-3.2.0-win-x64.zip)
+- [安装版 SnapCut Setup 3.3.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.3.0-win-x64.exe)
+- [免安装版 SnapCut Portable 3.3.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.3.0-win-x64.zip)
+- [安装版 SnapCut Setup 3.3.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.3.0/SnapCut-Setup-3.3.0-win-x64.exe)
+- [免安装版 SnapCut Portable 3.3.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.3.0/SnapCut-Portable-3.3.0-win-x64.zip)
 
 免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET 或 Visual C++ 运行库。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.8.3 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
 
-3.2.0 聚焦 Windows 输入可靠性与截图流程：新增可选的 UAC 管理员权限启动，可在高权限窗口中继续使用鼠标截图、钉图和组合快捷键，拒绝提示时仍会降级为普通权限；修复首次按住鼠标触发框选时窗口未及时激活、松开后首击被吞和覆盖层层级丢失的问题。长截图自动滚动会在指针离开选区时暂停并在返回后继续，区分程序注入滚轮与真实滚轮输入，并为触控板/触摸屏补充基于视口变化的稀疏兜底检测；录屏控制条进一步收紧高度和控件尺寸，设置页补充 GitHub 项目入口。新增管理员启动、框选激活、滚动输入和触控板兜底相关回归测试。
+3.3.0 完善截图与钉图的连续操作：工具栏布局、形状和箭头变体、常用颜色等偏好会跨重启保留；钉图重开后主按钮、实际绘制工具和下拉高亮保持一致。历史记录可配置数量与保留天数，并在关闭永久保留前先确认新的保留策略。截图界面未选区时按一次 `Esc` 即可退出，空白区域点击行为更清晰；长时间闲置后的首次快捷键唤醒也减少了主线程阻塞。隐私打码补充更多敏感内容识别与确认流程。正式版长截图只记录错误诊断，`crash.log` 限制为 10 MiB，超限后自动重新开始记录。
 
 2.8.3 完善截图取色模式：支持放大镜、快捷复制提示、主题化颜色面板、色相/饱和度/亮度/透明度调节和 HEX 输入；常用颜色槽支持逐个保存覆盖，并兼容回显旧版 Windows 调色板配置。取色和颜色调节流程减少重复保存，提升拖动流畅度。
 
@@ -162,14 +162,14 @@ SnapCut is primarily a lightweight Windows 10/11 capture utility. It combines re
 
 Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-*` and `SnapCut-Portable-*` starting with 2.3.0. The legacy manifest endpoint remains available so versions 2.1.0 and later continue to update in-app:
 
-- [SnapCut Setup 2.8.3 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-2.8.3-win-x64.exe)
-- [SnapCut Portable 2.8.3 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-2.8.3-win-x64.zip)
-- [SnapCut Setup 2.8.3 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.8.3/SnapCut-Setup-2.8.3-win-x64.exe)
-- [SnapCut Portable 2.8.3 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v2.8.3/SnapCut-Portable-2.8.3-win-x64.zip)
+- [SnapCut Setup 3.3.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.3.0-win-x64.exe)
+- [SnapCut Portable 3.3.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.3.0-win-x64.zip)
+- [SnapCut Setup 3.3.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.3.0/SnapCut-Setup-3.3.0-win-x64.exe)
+- [SnapCut Portable 3.3.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.3.0/SnapCut-Portable-3.3.0-win-x64.zip)
 
 Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET or Visual C++ runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.8.3 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
 
-Version 3.2.0 focuses on reliable Windows input and capture flow. It adds optional UAC administrator launch so mouse capture, pinning, and modified shortcuts can continue over elevated windows, while declining the prompt falls back to normal permissions. It fixes first held-mouse selection activation, swallowed first editor clicks, and lost overlay z-order. Controlled scrolling pauses when the pointer leaves the selected viewport and resumes when it returns, distinguishes programmatic wheel packets from physical input, and adds sparse viewport-motion fallback for touchpads and touchscreens. The recording controller is more compact, Settings includes a GitHub project entry, and regression coverage now includes elevation launch, capture activation, controlled scrolling input, and touchpad fallback.
+Version 3.3.0 improves continuity across capture and pinned-image workflows. Toolbar layout, shape and arrow variants, and custom colors now survive restarts; reopening a pinned image keeps the button icon, selected drawing tool, and dropdown state aligned. History supports configurable item and day retention, with a choice of the new retention policy before permanent retention is turned off. A single `Esc` exits an unselected capture, background clicks behave consistently, and first hotkey activation after a long idle period avoids unnecessary UI-thread blocking. Privacy redaction recognizes more sensitive text and has a clearer confirmation flow. Release builds keep only scrolling-capture errors, while `crash.log` is capped at 10 MiB and starts fresh after reaching that limit.
 
 Version 2.8.3 improves screen color picking with a magnifier, copy confirmation, themed color controls, HSV/alpha sliders, HEX input, and individually saved palette slots compatible with legacy Windows color settings. Color adjustments avoid repeated persistence work for smoother dragging.
 

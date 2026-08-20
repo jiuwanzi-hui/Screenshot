@@ -1,5 +1,6 @@
 using System.IO;
 using System.Net.Http;
+using System.Text;
 using System.Windows;
 using Screenshot.App.Capture;
 using Screenshot.App.Core;
@@ -13,6 +14,9 @@ namespace Screenshot.App;
 
 public partial class App : System.Windows.Application, IDisposable
 {
+    internal const long MaximumCrashLogSizeBytes = 10 * 1024 * 1024;
+    private static readonly Encoding CrashLogEncoding = new UTF8Encoding(
+        encoderShouldEmitUTF8Identifier: false);
     private MainWindow? _mainWindow;
     private TrayIconService? _trayIconService;
     private GlobalHotKeyManager? _hotKeyManager;
@@ -34,6 +38,7 @@ public partial class App : System.Windows.Application, IDisposable
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        TrimCrashLogIfOversized();
         DispatcherUnhandledException += OnDispatcherUnhandledException;
 
         if (PortableUpdateRunner.IsUpdateRequest(e.Args))
@@ -101,18 +106,17 @@ public partial class App : System.Windows.Application, IDisposable
             loadedSettings,
             settingsStore,
             credentialStore);
-        var persistCaptureHistory =
-            _currentSettings.KeepHistory &&
-            _currentSettings.PersistHistoryAcrossRestarts;
-        if (!persistCaptureHistory)
+        _ = Task.Run(() =>
         {
-            CaptureHistoryService.CleanCacheDirectory();
-        }
-        else
-        {
-            _ = Task.Run(() => CaptureHistoryService.PruneCacheDirectory(
-                AppSettings.MaximumHistoryItems));
-        }
+            CaptureHistoryService.PruneCacheDirectory(
+                _currentSettings.HistoryLimit);
+            CaptureHistoryService.PruneCacheDirectoryByAge(
+                _currentSettings.ScreenshotHistoryRetentionDays);
+            VideoHistoryService.ApplyRetentionPolicy(
+                _currentSettings.VideoSaveDirectory,
+                _currentSettings.VideoHistoryRetentionDays,
+                _currentSettings.VideoHistoryLimit);
+        });
         if (dataMigrationResult.Migrated)
         {
             settingsStore.Save(_currentSettings);
@@ -151,7 +155,9 @@ public partial class App : System.Windows.Application, IDisposable
         _mainWindow.TextTranslationRequested += OnTextTranslationRequested;
         _mainWindow.ConfigureTaskbarVisibility(_currentSettings.ShowTaskbarIcon);
         _captureHistoryService = new CaptureHistoryService();
-        _captureHistoryService.ConfigurePersistence(persistCaptureHistory);
+        _captureHistoryService.ConfigureRetentionPolicy(
+            _currentSettings.ScreenshotHistoryRetentionDays,
+            _currentSettings.HistoryLimit);
         _pinnedImageManager = new PinnedImageManager(
             RecognizePinnedImageAsync,
             TranslatePinnedImageAsync,
@@ -159,7 +165,10 @@ public partial class App : System.Windows.Application, IDisposable
             () => _currentSettings,
             colorText => _mainWindow?.SaveCustomStrokeColor(colorText),
             colors => _mainWindow?.SaveCustomColorPalette(colors),
-            arrowStyle => _mainWindow?.SaveArrowStyle(arrowStyle));
+            arrowStyle => _mainWindow?.SaveArrowStyle(arrowStyle),
+            arrowToolMode => _mainWindow?.SaveArrowToolMode(arrowToolMode),
+            shapeToolMode => _mainWindow?.SaveShapeToolMode(shapeToolMode),
+            tool => _mainWindow?.SaveLastAnnotationTool(tool));
         _pinnedImageManager.DisplayStateChanged +=
             OnPinnedImageDisplayStateChanged;
         _pinnedImageManager.RestorePersisted();
@@ -173,6 +182,9 @@ public partial class App : System.Windows.Application, IDisposable
             suspended => _hotKeyManager.SetMouseShortcutsSuspended(suspended),
             preferences => _mainWindow?.SaveVideoRecordingPreferences(preferences),
             arrowStyle => _mainWindow?.SaveArrowStyle(arrowStyle),
+            arrowToolMode => _mainWindow?.SaveArrowToolMode(arrowToolMode),
+            shapeToolMode => _mainWindow?.SaveShapeToolMode(shapeToolMode),
+            tool => _mainWindow?.SaveLastAnnotationTool(tool),
             colorText => _mainWindow?.SaveCustomStrokeColor(colorText),
             colors => _mainWindow?.SaveCustomColorPalette(colors),
             (x, y) => _mainWindow?.SaveCaptureToolbarPosition(x, y));
@@ -244,7 +256,7 @@ public partial class App : System.Windows.Application, IDisposable
         try
         {
             Directory.CreateDirectory(Core.AppMetadata.DiagnosticsDirectoryPath);
-            File.AppendAllText(
+            AppendCrashLog(
                 Path.Combine(
                     Core.AppMetadata.DiagnosticsDirectoryPath,
                     "crash.log"),
@@ -261,6 +273,49 @@ public partial class App : System.Windows.Application, IDisposable
         _mainWindow?.ShowStatus(
             "操作出现异常，已记录到 ScreenshotData\\Diagnostics\\crash.log。");
         e.Handled = true;
+    }
+
+    internal static void AppendCrashLog(string path, string entry)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(entry);
+
+        var entrySize = CrashLogEncoding.GetByteCount(entry);
+        var existingSize = File.Exists(path) ? new FileInfo(path).Length : 0;
+        if (existingSize + entrySize > MaximumCrashLogSizeBytes)
+        {
+            File.WriteAllText(path, entry, CrashLogEncoding);
+            return;
+        }
+
+        File.AppendAllText(path, entry, CrashLogEncoding);
+    }
+
+    internal static void TrimCrashLogIfOversized()
+    {
+        TrimCrashLogIfOversized(Path.Combine(
+            Core.AppMetadata.DiagnosticsDirectoryPath,
+            "crash.log"));
+    }
+
+    internal static void TrimCrashLogIfOversized(string path)
+    {
+        try
+        {
+            if (File.Exists(path) &&
+                new FileInfo(path).Length > MaximumCrashLogSizeBytes)
+            {
+                File.WriteAllText(path, string.Empty, CrashLogEncoding);
+            }
+        }
+        catch (IOException)
+        {
+            // Crash-log maintenance must never prevent the app from starting.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Crash-log maintenance must never prevent the app from starting.
+        }
     }
 
     public void Dispose()
@@ -362,15 +417,28 @@ public partial class App : System.Windows.Application, IDisposable
     private void OnSettingsSaved(object? sender, SettingsSavedEventArgs e)
     {
         _currentSettings = e.Settings;
-        var persistCaptureHistory =
-            e.Settings.KeepHistory &&
-            e.Settings.PersistHistoryAcrossRestarts;
-        _captureHistoryService?.ConfigurePersistence(persistCaptureHistory);
-        _captureHistoryWindow?.UpdatePersistenceScope(persistCaptureHistory);
-        if (persistCaptureHistory && _captureHistoryWindow is not null)
+        _captureHistoryService?.ConfigureRetentionPolicy(
+            e.Settings.ScreenshotHistoryRetentionDays,
+            e.Settings.HistoryLimit);
+        _captureHistoryWindow?.UpdateRetentionPolicy(
+            e.Settings.ScreenshotHistoryRetentionDays,
+            e.Settings.HistoryLimit,
+            e.Settings.VideoHistoryRetentionDays,
+            e.Settings.VideoHistoryLimit);
+        if (_captureHistoryWindow is not null)
         {
             BeginCaptureHistoryRestore();
         }
+        _ = Task.Run(() =>
+        {
+            CaptureHistoryService.PruneCacheDirectory(e.Settings.HistoryLimit);
+            CaptureHistoryService.PruneCacheDirectoryByAge(
+                e.Settings.ScreenshotHistoryRetentionDays);
+            VideoHistoryService.ApplyRetentionPolicy(
+                e.Settings.VideoSaveDirectory,
+                e.Settings.VideoHistoryRetentionDays,
+                e.Settings.VideoHistoryLimit);
+        });
         _themeManager?.Apply(e.Settings.Theme);
         _trayIconService?.SetVisible(e.Settings.ShowNotificationIcon);
         _captureHistoryWindow?.UpdateDirectories(
@@ -385,17 +453,12 @@ public partial class App : System.Windows.Application, IDisposable
         try
         {
             var items = await Task.Run(() => historyService.LoadPersistedItems(
-                AppSettings.MaximumHistoryItems));
+                _currentSettings.HistoryLimit));
             await Dispatcher.InvokeAsync(() =>
             {
-                if (!historyService.PersistsAcrossRestarts)
-                {
-                    return;
-                }
-
                 historyService.MergePersistedItems(
                     items,
-                    AppSettings.MaximumHistoryItems);
+                    _currentSettings.HistoryLimit);
                 _isCaptureHistoryRestored = true;
             });
         }
@@ -415,7 +478,7 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void BeginCaptureHistoryRestore()
     {
-        if (_captureHistoryService is not { PersistsAcrossRestarts: true } history ||
+        if (_captureHistoryService is not { } history ||
             _isCaptureHistoryRestoreStarted ||
             _isCaptureHistoryRestored)
         {
@@ -748,7 +811,11 @@ public partial class App : System.Windows.Application, IDisposable
                 _captureHistoryWindow = new CaptureHistoryWindow(
                     _captureHistoryService,
                     _currentSettings.SaveDirectory,
-                    _currentSettings.VideoSaveDirectory);
+                    _currentSettings.VideoSaveDirectory,
+                    _currentSettings.ScreenshotHistoryRetentionDays,
+                    _currentSettings.HistoryLimit,
+                    _currentSettings.VideoHistoryRetentionDays,
+                    _currentSettings.VideoHistoryLimit);
                 _captureHistoryWindow.Closed += OnCaptureHistoryWindowClosed;
                 _captureHistoryWindow.Show();
                 return;

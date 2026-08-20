@@ -29,6 +29,7 @@
         <SolidColorBrush x:Key="AppAccentBrush" Color="#2EAFA5" />
         <SolidColorBrush x:Key="AppAccentMutedBrush" Color="#BFE8E2" />
         <SolidColorBrush x:Key="AppAccentForegroundBrush" Color="#00695F" />
+        <SolidColorBrush x:Key="AppDangerBrush" Color="#B42318" />
         <SolidColorBrush x:Key="AppSeparatorBrush" Color="#DCE4E8" />
         <SolidColorBrush x:Key="AppTooltipBackgroundBrush" Color="#F2F4FBFA" />
         <SolidColorBrush x:Key="AppTooltipForegroundBrush" Color="#183F43" />

@@ -423,20 +423,31 @@ public sealed class CaptureOverlayWindowTests
                 Assert.Null(toolbar.ToolTip);
                 var surface = Assert.IsAssignableFrom<FrameworkElement>(
                     overlay.FindName("CaptureSurface"));
-                var maximumToolbarX = Math.Max(
-                    0,
-                    surface.ActualWidth - toolbar.ActualWidth);
-                var maximumToolbarY = Math.Max(
-                    0,
-                    surface.ActualHeight - toolbar.ActualHeight);
+                var getSelectionBounds = typeof(CaptureOverlayWindow).GetMethod(
+                    "GetSelectionBounds",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var expectedToolbarBounds = Assert.IsType<Rect>(
+                    getSelectionBounds?.Invoke(overlay, parameters: null));
+                var expectedToolbarX =
+                    CaptureOverlayWindow.CalculateAutomaticToolbarX(
+                        expectedToolbarBounds,
+                        toolbar.ActualWidth,
+                        surface.ActualWidth);
+                var expectedToolbarY = expectedToolbarBounds.Bottom + 10;
+                if (expectedToolbarY + toolbar.ActualHeight > surface.ActualHeight)
+                {
+                    expectedToolbarY = Math.Max(
+                        0,
+                        expectedToolbarBounds.Y - toolbar.ActualHeight - 10);
+                }
                 Assert.InRange(
                     Canvas.GetLeft(toolbar),
-                    (maximumToolbarX * 0.25) - 1,
-                    (maximumToolbarX * 0.25) + 1);
+                    expectedToolbarX - 1,
+                    expectedToolbarX + 1);
                 Assert.InRange(
                     Canvas.GetTop(toolbar),
-                    (maximumToolbarY * 0.75) - 1,
-                    (maximumToolbarY * 0.75) + 1);
+                    expectedToolbarY - 1,
+                    expectedToolbarY + 1);
             }
             finally
             {
@@ -1014,6 +1025,11 @@ public sealed class CaptureOverlayWindowTests
                 var shapeButton = Assert.IsType<System.Windows.Controls.RadioButton>(
                     overlay.FindName("InlineShapeToolButton"));
                 Assert.Equal(2, shapeButton.ContextMenu.Items.Count);
+                var arrowButton = Assert.IsType<System.Windows.Controls.RadioButton>(
+                    overlay.FindName("InlineArrowToolButton"));
+                Assert.Contains(
+                    arrowButton.ContextMenu.Items.OfType<MenuItem>(),
+                    item => Equals(item.Tag, "CurvedArrow,Filled"));
                 var ocrButton = Assert.IsType<Button>(
                     overlay.FindName("OcrButton"));
                 Assert.Single(ocrButton.ContextMenu.Items);
@@ -1062,6 +1078,64 @@ public sealed class CaptureOverlayWindowTests
                     overlay.FindName("ActionHistorySeparator"));
                 Assert.Equal(new Thickness(14, 3, 14, 3), separator.Margin);
                 Assert.Equal(2, separator.Width);
+            }
+            finally
+            {
+                overlay.Close();
+            }
+        });
+    }
+
+    [Fact]
+    public void RestoresShapeAndArrowVariantsIndependentlyOfLastActiveTool()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var pinnedImageManager = new PinnedImageManager();
+            var overlay = CaptureOverlayWindow.ShowInteractive(
+                new CaptureOverlayOptions
+                {
+                    SaveDirectory = Path.GetTempPath(),
+                    KeepHistory = false,
+                    HistoryLimit = 0,
+                    HistoryService = new CaptureHistoryService(),
+                    PinnedImageManager = pinnedImageManager,
+                    StartOcrAsync = image =>
+                    {
+                        image.Dispose();
+                        return Task.CompletedTask;
+                    },
+                    ArrowStyle = ArrowStyle.Hollow,
+                    ArrowToolMode = ArrowToolMode.Curved,
+                    ShapeToolMode = ShapeToolMode.Ellipse,
+                    LastAnnotationTool = AnnotationToolMode.Brush,
+                });
+
+            try
+            {
+                var shapeButton = Assert.IsType<RadioButton>(
+                    overlay.FindName("InlineShapeToolButton"));
+                var shapeIcon = Assert.IsType<System.Windows.Shapes.Path>(
+                    overlay.FindName("InlineShapeToolIcon"));
+                Assert.Equal(EditorTool.Ellipse.ToString(), shapeButton.Tag);
+                Assert.Same(
+                    overlay.FindResource("EllipseIconGeometry"),
+                    shapeIcon.Data);
+                var selectedToolField = typeof(CaptureOverlayWindow).GetField(
+                    "_selectedInlineTool",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.Equal(
+                    EditorTool.Ellipse,
+                    selectedToolField?.GetValue(overlay));
+
+                var arrowButton = Assert.IsType<RadioButton>(
+                    overlay.FindName("InlineArrowToolButton"));
+                var arrowIcon = Assert.IsType<System.Windows.Shapes.Path>(
+                    overlay.FindName("InlineArrowToolIcon"));
+                Assert.Equal(EditorTool.CurvedArrow.ToString(), arrowButton.Tag);
+                Assert.Same(
+                    overlay.FindResource("CurvedHollowArrowIconGeometry"),
+                    arrowIcon.Data);
             }
             finally
             {

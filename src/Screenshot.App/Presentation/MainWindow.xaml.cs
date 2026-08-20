@@ -72,6 +72,7 @@ public partial class MainWindow : Window, IDisposable
     private int _offlineModelPlanGeneration;
     private bool _isFolderDialogOpen;
     private bool? _pendingShowInTaskbar;
+    private HistoryRetentionDialog? _activeHistoryRetentionDialog;
     private bool _disposed;
 
     public MainWindow(
@@ -205,11 +206,33 @@ public partial class MainWindow : Window, IDisposable
         ApplySettingsImmediately();
     }
 
+    internal void SaveArrowToolMode(ArrowToolMode mode)
+    {
+        _settingsViewModel.ArrowToolMode = mode;
+        ApplySettingsImmediately();
+    }
+
+    internal void SaveShapeToolMode(ShapeToolMode mode)
+    {
+        _settingsViewModel.ShapeToolMode = mode;
+        ApplySettingsImmediately();
+    }
+
+    internal void SaveLastAnnotationTool(AnnotationToolMode tool)
+    {
+        // The active annotation is a per-window choice. New capture/editor
+        // windows always start from the shape tool, so it is not persisted.
+        _ = _disposed;
+        _ = tool;
+    }
+
     internal void SaveCaptureToolbarPosition(double xRatio, double yRatio)
     {
-        _settingsViewModel.CaptureToolbarPositionXRatio = xRatio;
-        _settingsViewModel.CaptureToolbarPositionYRatio = yRatio;
-        ApplySettingsImmediately();
+        // Capture toolbar placement is intentionally reset to automatic on
+        // every new capture instead of being persisted across sessions.
+        _ = _disposed;
+        _ = xRatio;
+        _ = yRatio;
     }
 
     internal void SaveCustomStrokeColor(string colorText)
@@ -1619,6 +1642,13 @@ public partial class MainWindow : Window, IDisposable
         {
             checkBox.GetBindingExpression(
                 System.Windows.Controls.CheckBox.IsCheckedProperty)?.UpdateSource();
+            if (checkBox.IsChecked != true &&
+                (ReferenceEquals(checkBox, KeepAllScreenshotHistoryCheckBox) ||
+                 ReferenceEquals(checkBox, KeepAllVideoHistoryCheckBox)))
+            {
+                ShowHistoryRetentionDialog(checkBox);
+                return;
+            }
         }
         else if (sender is System.Windows.Controls.ComboBox comboBox)
         {
@@ -1672,6 +1702,98 @@ public partial class MainWindow : Window, IDisposable
                     ? "本机离线翻译已切换为 Qwen 大模型。"
                     : "本机离线翻译已切换为 Mozilla 轻量模型。");
         }
+    }
+
+    private void ShowHistoryRetentionDialog(
+        System.Windows.Controls.CheckBox checkBox)
+    {
+        if (_activeHistoryRetentionDialog is not null)
+        {
+            RestoreKeepAllHistory(checkBox);
+            return;
+        }
+
+        var isScreenshot = ReferenceEquals(
+            checkBox,
+            KeepAllScreenshotHistoryCheckBox);
+        var currentDaysText = isScreenshot
+            ? _settingsViewModel.ScreenshotHistoryRetentionDaysText
+            : _settingsViewModel.VideoHistoryRetentionDaysText;
+        var currentLimitText = isScreenshot
+            ? _settingsViewModel.ScreenshotHistoryLimitText
+            : _settingsViewModel.VideoHistoryLimitText;
+        var fallbackSettings = AppSettings.CreateDefault();
+        var fallbackDays = isScreenshot
+            ? fallbackSettings.ScreenshotHistoryRetentionDays
+            : fallbackSettings.VideoHistoryRetentionDays;
+        var fallbackLimit = isScreenshot
+            ? fallbackSettings.HistoryLimit
+            : fallbackSettings.VideoHistoryLimit;
+        var days = int.TryParse(
+                currentDaysText,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var parsedDays)
+            ? Math.Clamp(parsedDays, 1, 3650)
+            : fallbackDays;
+        var limit = int.TryParse(
+                currentLimitText,
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var parsedLimit)
+            ? Math.Clamp(parsedLimit, 1, AppSettings.MaximumHistoryItems)
+            : fallbackLimit;
+        var historyName = isScreenshot ? "截图历史" : "录屏历史";
+        var dialog = new HistoryRetentionDialog(this, historyName, days, limit);
+        _activeHistoryRetentionDialog = dialog;
+        dialog.Closed += (_, _) => OnHistoryRetentionDialogClosed(dialog, checkBox, isScreenshot);
+        dialog.Show();
+    }
+
+    private void OnHistoryRetentionDialogClosed(
+        HistoryRetentionDialog dialog,
+        System.Windows.Controls.CheckBox checkBox,
+        bool isScreenshot)
+    {
+        _activeHistoryRetentionDialog = null;
+        if (dialog.ConfirmationResult != true)
+        {
+            RestoreKeepAllHistory(checkBox);
+            _settingsViewModel.SetStatus("已取消，仍保留全部历史记录。");
+            return;
+        }
+
+        if (isScreenshot)
+        {
+            _settingsViewModel.ScreenshotHistoryRetentionDaysText =
+                dialog.RetentionDays.ToString(CultureInfo.InvariantCulture);
+            _settingsViewModel.ScreenshotHistoryLimitText =
+                dialog.HistoryLimit.ToString(CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            _settingsViewModel.VideoHistoryRetentionDaysText =
+                dialog.RetentionDays.ToString(CultureInfo.InvariantCulture);
+            _settingsViewModel.VideoHistoryLimitText =
+                dialog.HistoryLimit.ToString(CultureInfo.InvariantCulture);
+        }
+
+        ApplySettingsImmediately();
+    }
+
+    private void RestoreKeepAllHistory(System.Windows.Controls.CheckBox checkBox)
+    {
+        if (ReferenceEquals(checkBox, KeepAllScreenshotHistoryCheckBox))
+        {
+            _settingsViewModel.KeepAllScreenshotHistory = true;
+        }
+        else
+        {
+            _settingsViewModel.KeepAllVideoHistory = true;
+        }
+
+        checkBox.GetBindingExpression(
+            System.Windows.Controls.CheckBox.IsCheckedProperty)?.UpdateTarget();
     }
 
     private void OnCaptureToolbarLayoutChanged(object? sender, EventArgs e)

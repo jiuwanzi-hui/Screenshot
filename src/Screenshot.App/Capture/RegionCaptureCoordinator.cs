@@ -21,6 +21,9 @@ public sealed class RegionCaptureCoordinator
     private readonly Action<VideoRecordingPreferences>?
         _videoRecordingPreferencesChanged;
     private readonly Action<ArrowStyle>? _arrowStyleChanged;
+    private readonly Action<ArrowToolMode>? _arrowToolModeChanged;
+    private readonly Action<ShapeToolMode>? _shapeToolModeChanged;
+    private readonly Action<AnnotationToolMode>? _lastAnnotationToolChanged;
     private readonly Action<string>? _customStrokeColorChanged;
     private readonly Action<int[]>? _customColorPaletteChanged;
     private readonly Action<double, double>? _captureToolbarPositionChanged;
@@ -38,6 +41,9 @@ public sealed class RegionCaptureCoordinator
         Action<bool>? mouseShortcutSuppressionChanged = null,
         Action<VideoRecordingPreferences>? videoRecordingPreferencesChanged = null,
         Action<ArrowStyle>? arrowStyleChanged = null,
+        Action<ArrowToolMode>? arrowToolModeChanged = null,
+        Action<ShapeToolMode>? shapeToolModeChanged = null,
+        Action<AnnotationToolMode>? lastAnnotationToolChanged = null,
         Action<string>? customStrokeColorChanged = null,
         Action<int[]>? customColorPaletteChanged = null,
         Action<double, double>? captureToolbarPositionChanged = null)
@@ -58,6 +64,9 @@ public sealed class RegionCaptureCoordinator
         _mouseShortcutSuppressionChanged = mouseShortcutSuppressionChanged;
         _videoRecordingPreferencesChanged = videoRecordingPreferencesChanged;
         _arrowStyleChanged = arrowStyleChanged;
+        _arrowToolModeChanged = arrowToolModeChanged;
+        _shapeToolModeChanged = shapeToolModeChanged;
+        _lastAnnotationToolChanged = lastAnnotationToolChanged;
         _customStrokeColorChanged = customStrokeColorChanged;
         _customColorPaletteChanged = customColorPaletteChanged;
         _captureToolbarPositionChanged = captureToolbarPositionChanged;
@@ -294,11 +303,27 @@ public sealed class RegionCaptureCoordinator
         {
             await WaitForCaptureChromeToHideAsync();
             var settings = _settingsProvider();
+            // A hotkey can arrive before the low-level pre-capture worker has
+            // finished. Capture the fallback snapshot off the dispatcher so a
+            // cold/idle first wake-up never blocks the UI thread in GDI.
+            if (initialScreenSnapshot is null)
+            {
+                try
+                {
+                    initialScreenSnapshot = await Task.Run(() =>
+                        ScreenCaptureService.Capture(VirtualScreen.GetBounds()));
+                }
+                catch
+                {
+                    // CaptureOverlayWindow keeps its own fallback path when
+                    // the best-effort snapshot cannot be obtained.
+                }
+            }
             CaptureOverlayWindow.ShowInteractive(
                 new CaptureOverlayOptions
                 {
                     SaveDirectory = settings.SaveDirectory,
-                    KeepHistory = settings.KeepHistory,
+                    KeepHistory = true,
                     HistoryLimit = settings.HistoryLimit,
                     HistoryService = _historyService,
                     PinnedImageManager = _pinnedImageManager,
@@ -317,12 +342,18 @@ public sealed class RegionCaptureCoordinator
                         : null,
                     CaptureClosed = OnInteractiveCaptureClosed,
                     ArrowStyle = settings.ArrowStyle,
+                    ArrowToolMode = settings.ArrowToolMode,
+                    ShapeToolMode = settings.ShapeToolMode,
+                    LastAnnotationTool = settings.LastAnnotationTool,
                     VisibleToolbarFeatures =
                         settings.VisibleCaptureToolbarFeatures.ToArray(),
                     ToolbarFeatureOrder =
                         settings.CaptureToolbarFeatureOrder.ToArray(),
                     ToolbarRows = settings.CaptureToolbarRows,
                     ArrowStyleChanged = _arrowStyleChanged,
+                    ArrowToolModeChanged = _arrowToolModeChanged,
+                    ShapeToolModeChanged = _shapeToolModeChanged,
+                    LastAnnotationToolChanged = _lastAnnotationToolChanged,
                     CustomStrokeColor = settings.CustomStrokeColor,
                     CustomStrokeColorChanged = _customStrokeColorChanged,
                     CustomColorPalette = settings.CustomColorPalette,
@@ -722,9 +753,7 @@ public sealed class RegionCaptureCoordinator
                             // seconds even though history encoding itself was
                             // already asynchronous.
                             var editorImage = completedImage;
-                            var historyCloneTask = settings.KeepHistory
-                                ? Task.Run(editorImage.Clone)
-                                : null;
+                            var historyCloneTask = Task.Run(editorImage.Clone);
                             var editor = new ImageEditorWindow(
                                 editorImage,
                                 settings.SaveDirectory,
@@ -733,7 +762,13 @@ public sealed class RegionCaptureCoordinator
                                 settings.CustomStrokeColor,
                                 _customStrokeColorChanged,
                                 settings.CustomColorPalette,
-                                _customColorPaletteChanged);
+                                _customColorPaletteChanged,
+                                arrowToolMode: settings.ArrowToolMode,
+                                arrowToolModeChanged: _arrowToolModeChanged,
+                                shapeToolMode: settings.ShapeToolMode,
+                                shapeToolModeChanged: _shapeToolModeChanged,
+                                lastAnnotationTool: settings.LastAnnotationTool,
+                                lastAnnotationToolChanged: _lastAnnotationToolChanged);
                             editor.Show();
                             completedImage = null;
 
@@ -783,11 +818,9 @@ public sealed class RegionCaptureCoordinator
                         }
                         else
                         {
-                            var historyItem = settings.KeepHistory
-                                ? _historyService.Add(
-                                    completedImage,
-                                    settings.HistoryLimit)
-                                : null;
+                            var historyItem = _historyService.Add(
+                                completedImage,
+                                settings.HistoryLimit);
                             try
                             {
                                 await ClipboardImageService.SetImageAsync(
@@ -841,7 +874,13 @@ public sealed class RegionCaptureCoordinator
                 _settingsProvider().CustomStrokeColor,
                 _customStrokeColorChanged,
                 _settingsProvider().CustomColorPalette,
-                _customColorPaletteChanged);
+                _customColorPaletteChanged,
+                arrowToolMode: _settingsProvider().ArrowToolMode,
+                arrowToolModeChanged: _arrowToolModeChanged,
+                shapeToolMode: _settingsProvider().ShapeToolMode,
+                shapeToolModeChanged: _shapeToolModeChanged,
+                lastAnnotationTool: _settingsProvider().LastAnnotationTool,
+                lastAnnotationToolChanged: _lastAnnotationToolChanged);
             editor.Show();
             preview.Close();
         };
@@ -970,6 +1009,11 @@ public sealed class RegionCaptureCoordinator
                 {
                     _statusReporter($"视频已保存：{result.FilePath}");
                 }
+
+                VideoHistoryService.ApplyRetentionPolicy(
+                    completedSettings.VideoSaveDirectory,
+                    completedSettings.VideoHistoryRetentionDays,
+                    completedSettings.VideoHistoryLimit);
             }
             else if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
             {
