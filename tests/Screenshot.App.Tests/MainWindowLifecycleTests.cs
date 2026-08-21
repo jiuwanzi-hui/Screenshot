@@ -161,6 +161,7 @@ public sealed class MainWindowLifecycleTests
             window.UpdateLayout();
             var captureBox = Assert.IsType<HotKeyCaptureBox>(
                 window.FindName("RegionCaptureHotKeyBox"));
+            captureBox.RequestCapture();
             Assert.True(captureBox.Focus());
             Keyboard.Focus(captureBox);
             Assert.True(window.IsCapturingHotKey);
@@ -171,6 +172,39 @@ public sealed class MainWindowLifecycleTests
             Assert.False(window.IsCapturingHotKey);
             Assert.False(hotKeyManager.IsKeyboardCaptureActive);
             window.ShowFromTray();
+            window.RequestExit();
+        });
+    }
+
+    [Fact]
+    public void FocusingShortcutEditorAloneDoesNotStartCaptureMode()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                AppSettings.CreateDefault(),
+                new SettingsStore(Path.Combine(
+                    Path.GetTempPath(),
+                    "Screenshot.App.Tests",
+                    "hotkey-focus-settings.json")),
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+
+            window.ShowFromTray();
+            var navigation = Assert.IsType<ListBox>(
+                window.FindName("SettingsNavigation"));
+            navigation.SelectedIndex = 1;
+            window.UpdateLayout();
+            var captureBox = Assert.IsType<HotKeyCaptureBox>(
+                window.FindName("RegionCaptureHotKeyBox"));
+
+            Assert.True(captureBox.Focus());
+            Keyboard.Focus(captureBox);
+
+            Assert.False(window.IsCapturingHotKey);
+            Assert.False(hotKeyManager.IsKeyboardCaptureActive);
             window.RequestExit();
         });
     }
@@ -212,6 +246,7 @@ public sealed class MainWindowLifecycleTests
             window.UpdateLayout();
             var captureBox = Assert.IsType<HotKeyCaptureBox>(
                 window.FindName("RegionCaptureHotKeyBox"));
+            captureBox.RequestCapture();
             Assert.True(captureBox.Focus());
             Keyboard.Focus(captureBox);
 

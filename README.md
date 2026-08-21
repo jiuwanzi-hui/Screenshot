@@ -36,12 +36,14 @@ SnapCut（简截）是一款以 Windows 10/11 正式版为主的轻量截图工�
 
 下载最新的 x64 自包含版本。2.3.0 起发布附件统一使用 `SnapCut-Setup-*` 和 `SnapCut-Portable-*`；同时保留旧清单入口，2.1.0 及之后版本仍可在程序内在线更新：
 
-- [安装版 SnapCut Setup 3.3.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.3.0-win-x64.exe)
-- [免安装版 SnapCut Portable 3.3.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.3.0-win-x64.zip)
-- [安装版 SnapCut Setup 3.3.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.3.0/SnapCut-Setup-3.3.0-win-x64.exe)
-- [免安装版 SnapCut Portable 3.3.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.3.0/SnapCut-Portable-3.3.0-win-x64.zip)
+- [安装版 SnapCut Setup 3.4.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.4.0-win-x64.exe)
+- [免安装版 SnapCut Portable 3.4.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.4.0-win-x64.zip)
+- [安装版 SnapCut Setup 3.4.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.0/SnapCut-Setup-3.4.0-win-x64.exe)
+- [免安装版 SnapCut Portable 3.4.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.0/SnapCut-Portable-3.4.0-win-x64.zip)
 
 免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET 或 Visual C++ 运行库。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.8.3 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+
+3.4.0 优化全局输入和截图性能：录屏初始化及内存整理移出界面线程，减少录屏快捷键卡顿和静态内存缓慢上涨；移除输入钩子中的同步磁盘日志与阻塞式菜单截图，延迟截图任务增加代际校验，避免旧画面残留到下一次截图。修复快捷键设置页自动进入录入、资源管理器和托盘菜单右键截图，以及鼠标钉图短按与长按的判定：短按保留原生点击，长按才拦截并触发钉图。
 
 3.3.0 完善截图与钉图的连续操作：工具栏布局、形状和箭头变体、常用颜色等偏好会跨重启保留；钉图重开后主按钮、实际绘制工具和下拉高亮保持一致。历史记录可配置数量与保留天数，并在关闭永久保留前先确认新的保留策略。截图界面未选区时按一次 `Esc` 即可退出，空白区域点击行为更清晰；长时间闲置后的首次快捷键唤醒也减少了主线程阻塞。隐私打码补充更多敏感内容识别与确认流程。正式版长截图只记录错误诊断，`crash.log` 限制为 10 MiB，超限后自动重新开始记录。
 
@@ -162,12 +164,14 @@ SnapCut is primarily a lightweight Windows 10/11 capture utility. It combines re
 
 Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-*` and `SnapCut-Portable-*` starting with 2.3.0. The legacy manifest endpoint remains available so versions 2.1.0 and later continue to update in-app:
 
-- [SnapCut Setup 3.3.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.3.0-win-x64.exe)
-- [SnapCut Portable 3.3.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.3.0-win-x64.zip)
-- [SnapCut Setup 3.3.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.3.0/SnapCut-Setup-3.3.0-win-x64.exe)
-- [SnapCut Portable 3.3.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.3.0/SnapCut-Portable-3.3.0-win-x64.zip)
+- [SnapCut Setup 3.4.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.4.0-win-x64.exe)
+- [SnapCut Portable 3.4.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.4.0-win-x64.zip)
+- [SnapCut Setup 3.4.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.0/SnapCut-Setup-3.4.0-win-x64.exe)
+- [SnapCut Portable 3.4.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.0/SnapCut-Portable-3.4.0-win-x64.zip)
 
 Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET or Visual C++ runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.8.3 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+
+Version 3.4.0 improves global input and capture performance: recording initialization and memory cleanup no longer block the UI thread; synchronous hook logging and blocking menu captures are removed; delayed snapshots use generation checks so stale frames cannot leak into the next capture. Hotkey settings no longer enter capture mode on restored focus. Explorer and tray context-menu capture is fixed, and mouse pinning now preserves native short clicks while intercepting only a long press.
 
 Version 3.3.0 improves continuity across capture and pinned-image workflows. Toolbar layout, shape and arrow variants, and custom colors now survive restarts; reopening a pinned image keeps the button icon, selected drawing tool, and dropdown state aligned. History supports configurable item and day retention, with a choice of the new retention policy before permanent retention is turned off. A single `Esc` exits an unselected capture, background clicks behave consistently, and first hotkey activation after a long idle period avoids unnecessary UI-thread blocking. Privacy redaction recognizes more sensitive text and has a clearer confirmation flow. Release builds keep only scrolling-capture errors, while `crash.log` is capped at 10 MiB and starts fresh after reaching that limit.
 

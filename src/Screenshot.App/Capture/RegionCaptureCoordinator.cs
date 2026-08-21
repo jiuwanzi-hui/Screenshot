@@ -144,7 +144,7 @@ public sealed class RegionCaptureCoordinator
         finally
         {
             SetCaptureInProgress(false);
-            Core.MemoryFootprint.TrimAfterHeavyOperation();
+            _ = Task.Run(Core.MemoryFootprint.TrimAfterHeavyOperation);
         }
 
         if (selection is null)
@@ -989,7 +989,7 @@ public sealed class RegionCaptureCoordinator
         }
         finally
         {
-            Core.MemoryFootprint.TrimAfterHeavyOperation();
+            _ = Task.Run(Core.MemoryFootprint.TrimAfterHeavyOperation);
         }
     }
 

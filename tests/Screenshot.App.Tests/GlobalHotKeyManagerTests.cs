@@ -920,6 +920,41 @@ public sealed class GlobalHotKeyManagerTests
     }
 
     [Fact]
+    public void RightMousePinShortcutSuppressesContextMenuFromButtonDown()
+    {
+        GlobalHotKeyManager? manager = null;
+        using var triggered = new ManualResetEventSlim();
+        WpfTestHost.Invoke(() =>
+        {
+            manager = new GlobalHotKeyManager();
+            Assert.True(manager.Apply(
+            [
+                new HotKeyBinding(
+                    HotKeyAction.PinImage,
+                    new HotKeyGesture(
+                        HotKeyModifiers.None,
+                        HotKeyGesture.VirtualKeyMouseRight)),
+            ]).IsSuccess);
+            manager.HotKeyPressed += (_, _) => triggered.Set();
+
+            Assert.True(manager.ProcessMouseButtonInputForTest(
+                HotKeyGesture.VirtualKeyMouseRight,
+                isButtonDown: true));
+            manager.ProcessPendingMouseHolds(
+                DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1));
+        });
+
+        Assert.True(triggered.Wait(TimeSpan.FromSeconds(2)));
+        WpfTestHost.Invoke(() =>
+        {
+            Assert.False(manager!.ProcessMouseButtonInputForTest(
+                HotKeyGesture.VirtualKeyMouseRight,
+                isButtonDown: false));
+            manager.Dispose();
+        });
+    }
+
+    [Fact]
     public void SuspendedMouseShortcutsPassThroughWithoutTriggering()
     {
         GlobalHotKeyManager? manager = null;

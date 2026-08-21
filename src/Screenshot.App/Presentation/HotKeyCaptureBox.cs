@@ -17,6 +17,7 @@ public sealed class HotKeyCapturedEventArgs : EventArgs
 
 public sealed class HotKeyCaptureBox : WpfTextBox
 {
+    private bool _captureRequested;
     private const uint VirtualKeyBack = 0x08;
     private const uint VirtualKeyEscape = 0x1B;
     private const uint VirtualKeyDelete = 0x2E;
@@ -42,6 +43,17 @@ public sealed class HotKeyCaptureBox : WpfTextBox
     public event EventHandler<HotKeyCapturedEventArgs>? HotKeyCaptured;
 
     public event EventHandler? HotKeyCaptureCanceled;
+
+    public event EventHandler? HotKeyCaptureRequested;
+
+    internal void RequestCapture() => _captureRequested = true;
+
+    internal bool ConsumeCaptureRequest()
+    {
+        var requested = _captureRequested;
+        _captureRequested = false;
+        return requested;
+    }
 
     public void ClearGesture()
     {
@@ -86,15 +98,23 @@ public sealed class HotKeyCaptureBox : WpfTextBox
     protected override void OnGotKeyboardFocus(KeyboardFocusChangedEventArgs e)
     {
         base.OnGotKeyboardFocus(e);
-        SelectAll();
+        if (_captureRequested)
+        {
+            SelectAll();
+        }
     }
 
     protected override void OnPreviewMouseLeftButtonDown(MouseButtonEventArgs e)
     {
+        RequestCapture();
         if (!IsKeyboardFocusWithin)
         {
             Focus();
             e.Handled = true;
+        }
+        else
+        {
+            HotKeyCaptureRequested?.Invoke(this, EventArgs.Empty);
         }
 
         base.OnPreviewMouseLeftButtonDown(e);

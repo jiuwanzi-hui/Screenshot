@@ -25,34 +25,10 @@ namespace Screenshot.App.Capture;
 
 internal static class CaptureInputDiagnostics
 {
-    private static readonly object Sync = new();
-    private static readonly string Path = System.IO.Path.Combine(
-        System.IO.Path.GetTempPath(),
-        "SnapCut-MouseInput.log");
-
-    public static void Write(string message)
+    [System.Diagnostics.Conditional("SNAPCUT_INPUT_DIAGNOSTICS")]
+    public static void Write(string _)
     {
-        try
-        {
-            if (string.Equals(
-                    Environment.GetEnvironmentVariable("SNAPCUT_MOUSE_INPUT_LOG"),
-                    "0",
-                    StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            lock (Sync)
-            {
-                System.IO.File.AppendAllText(
-                    Path,
-                    $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz} pid={Environment.ProcessId} {message}{Environment.NewLine}");
-            }
-        }
-        catch
-        {
-            // Diagnostics must never affect capture behavior.
-        }
+        // Input diagnostics are intentionally removed from production paths.
     }
 }
 

@@ -69,7 +69,7 @@ public partial class VideoRecordingControlWindow : Window
     private int _feedbackVersion;
 
     private VideoRecordingControlWindow(
-        ScreenRegion recordingRegion,
+        RegionVideoRecorder recorder,
         string saveDirectory,
         bool recordSystemAudio,
         bool recordMicrophone,
@@ -80,6 +80,7 @@ public partial class VideoRecordingControlWindow : Window
         VideoRecordingOutputFormat outputFormat,
         Action<VideoRecordingPreferences>? recordingPreferencesChanged)
     {
+        ArgumentNullException.ThrowIfNull(recorder);
         _saveDirectory = saveDirectory;
         _recordingPreferencesChanged = recordingPreferencesChanged;
         _recorderPreferences = new VideoRecordingPreferences(
@@ -90,13 +91,7 @@ public partial class VideoRecordingControlWindow : Window
             showKeyboardInput,
             showMouseInput,
             outputFormat);
-        _recorder = new RegionVideoRecorder(
-            recordingRegion,
-            saveDirectory,
-            recordSystemAudio,
-            recordMicrophone,
-            codec,
-            frameRate);
+        _recorder = recorder;
         _frameWindow = new RecordingRegionFrameWindow(_recorder.Region);
         _elapsedTimer = new DispatcherTimer
         {
@@ -141,17 +136,36 @@ public partial class VideoRecordingControlWindow : Window
         VideoRecordingOutputFormat outputFormat = VideoRecordingOutputFormat.Mp4,
         Action<VideoRecordingPreferences>? recordingPreferencesChanged = null)
     {
-        var window = new VideoRecordingControlWindow(
+        // ScreenRecorderLib may initialize Desktop Duplication, hardware
+        // encoders, and audio devices synchronously. Keep that native work
+        // off WPF's dispatcher so a slow driver cannot freeze the shell.
+        var recorder = await Task.Run(() => new RegionVideoRecorder(
             recordingRegion,
             saveDirectory,
             recordSystemAudio,
             recordMicrophone,
             codec,
-            frameRate,
-            showKeyboardInput,
-            showMouseInput,
-            outputFormat,
-            recordingPreferencesChanged);
+            frameRate));
+        VideoRecordingControlWindow? window = null;
+        try
+        {
+            window = new VideoRecordingControlWindow(
+                recorder,
+                saveDirectory,
+                recordSystemAudio,
+                recordMicrophone,
+                codec,
+                frameRate,
+                showKeyboardInput,
+                showMouseInput,
+                outputFormat,
+                recordingPreferencesChanged);
+        }
+        catch
+        {
+            recorder.Dispose();
+            throw;
+        }
         window._frameWindow.Show();
         window.Show();
         window.UpdateLayout();

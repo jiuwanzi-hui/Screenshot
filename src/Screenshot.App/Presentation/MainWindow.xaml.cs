@@ -128,6 +128,19 @@ public partial class MainWindow : Window, IDisposable
         _idleMemoryTrimTimer.Tick += OnIdleMemoryTrimTimerTick;
 
         InitializeComponent();
+        foreach (var captureBox in new[]
+                 {
+                     RegionCaptureHotKeyBox,
+                     CompleteCaptureHotKeyBox,
+                     VideoRecordingHotKeyBox,
+                     OcrHotKeyBox,
+                     TextTranslationHotKeyBox,
+                     PinHotKeyBox,
+                     OpenSettingsHotKeyBox,
+                 })
+        {
+            captureBox.HotKeyCaptureRequested += OnHotKeyCaptureRequested;
+        }
         WindowPlacementService.Track(this, WindowPlacementKeys.Settings);
         _globalHotKeyManager.HotKeyCaptureInputReceived +=
             OnGlobalHotKeyCaptureInputReceived;
@@ -411,6 +424,11 @@ public partial class MainWindow : Window, IDisposable
         {
             return;
         }
+
+        // The settings window is normally hidden instead of destroyed. Clear
+        // the focused hot-key editor before hiding so WPF does not restore it
+        // and re-enter capture mode the next time the window is shown.
+        Keyboard.ClearFocus();
 
         if (ApplicationClosePolicy.ShouldHideWindow(
                 _exitRequested,
@@ -2164,7 +2182,23 @@ public partial class MainWindow : Window, IDisposable
         object sender,
         KeyboardFocusChangedEventArgs e)
     {
-        if (IsCapturingHotKey || sender is not HotKeyCaptureBox captureBox)
+        if (sender is HotKeyCaptureBox captureBox)
+        {
+            TryBeginHotKeyCapture(captureBox);
+        }
+    }
+
+    private void OnHotKeyCaptureRequested(object? sender, EventArgs e)
+    {
+        if (sender is HotKeyCaptureBox captureBox)
+        {
+            TryBeginHotKeyCapture(captureBox);
+        }
+    }
+
+    private void TryBeginHotKeyCapture(HotKeyCaptureBox captureBox)
+    {
+        if (IsCapturingHotKey || !captureBox.ConsumeCaptureRequest())
         {
             return;
         }
@@ -2213,8 +2247,10 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
+        captureBox.RequestCapture();
         captureBox.Focus();
         Keyboard.Focus(captureBox);
+        TryBeginHotKeyCapture(captureBox);
     }
 
     private void OnClearHotKeyClick(object sender, RoutedEventArgs e)
