@@ -1,5 +1,20 @@
 [
   {
+    "tag_name": "v3.4.1",
+    "name": "SnapCut 3.4.1",
+    "body": "- 优化整图翻译：使用已安装的离线语言路由进行批量翻译，避免无必要的在线请求和逐行重试。\n- 混合语言页面按实际文本占比选择源语言，URL、侧栏短词和技术标识不会导致整张译文被丢弃。\n- 移除整图翻译的全局 9 秒硬截断，改为按批次超时并保留已完成译文。\n- 修复多栏网页和长页面翻译失败、段落布局异常的问题。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v3.4.1",
+    "published_at": "2026-08-21T18:35:38+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.1/SnapCut-Update.json" },
+      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.1/Screenshot-Update.json" },
+      { "name": "SnapCut-Setup-3.4.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.1/SnapCut-Setup-3.4.1-win-x64.exe" },
+      { "name": "SnapCut-Portable-3.4.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.1/SnapCut-Portable-3.4.1-win-x64.zip" }
+    ]
+  },
+  {
     "tag_name": "v3.4.0",
     "name": "SnapCut 3.4.0",
     "body": "- 优化全局输入和截图性能：录屏初始化及内存整理移出界面线程，减少录屏快捷键卡顿和静态内存缓慢上涨。\n- 移除输入钩子中的同步磁盘日志与阻塞式菜单截图，延迟截图任务增加代际校验，避免旧画面残留到下一次截图。\n- 修复快捷键设置页自动进入录入、资源管理器和托盘菜单右键截图，以及鼠标钉图短按与长按的判定：短按保留原生点击，长按才拦截并触发钉图。正式发布包不包含调试或输入追踪日志。",
