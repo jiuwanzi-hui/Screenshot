@@ -257,17 +257,82 @@ public sealed class ImageEditorCanvas : Canvas
                 !string.IsNullOrWhiteSpace(region.Text) &&
                 region.Bounds.Width > 0 &&
                 region.Bounds.Height > 0)
+            .OrderBy(region => region.Bounds.Top)
+            .ThenBy(region => region.Bounds.Left)
             .ToArray();
         if (validRegions.Length == 0)
         {
             return;
         }
 
+        validRegions = MergeOverlappingTranslationRegions(validRegions);
+
         CommitPendingText();
         _isTranslationOverlayVisible = true;
         _document.Add(new TranslationOverlayAnnotation(validRegions));
         RebuildCanvas();
         RaiseHistoryChanged();
+    }
+
+    private static TranslatedTextAnnotationRegion[]
+        MergeOverlappingTranslationRegions(
+            IReadOnlyList<TranslatedTextAnnotationRegion> regions)
+    {
+        var merged = new List<TranslatedTextAnnotationRegion>(regions.Count);
+        foreach (var region in regions)
+        {
+            var current = region;
+            while (merged.Count > 0 &&
+                   ShouldMergeTranslationRegions(merged[^1], current))
+            {
+                current = MergeTranslationRegions(merged[^1], current);
+                merged.RemoveAt(merged.Count - 1);
+            }
+
+            merged.Add(current);
+        }
+
+        return merged.ToArray();
+    }
+
+    private static bool ShouldMergeTranslationRegions(
+        TranslatedTextAnnotationRegion previous,
+        TranslatedTextAnnotationRegion next)
+    {
+        var horizontalOverlap = Math.Max(
+            0,
+            Math.Min(previous.Bounds.Right, next.Bounds.Right) -
+            Math.Max(previous.Bounds.Left, next.Bounds.Left));
+        var verticalOverlap = Math.Max(
+            0,
+            Math.Min(previous.Bounds.Bottom, next.Bounds.Bottom) -
+            Math.Max(previous.Bounds.Top, next.Bounds.Top));
+        var sharedWidth = Math.Min(previous.Bounds.Width, next.Bounds.Width);
+        var sameColumn = horizontalOverlap >= Math.Max(12, sharedWidth * 0.35);
+        var closeInHeight = Math.Abs(previous.Bounds.Height - next.Bounds.Height) <=
+            Math.Max(8, sharedWidth * 0.18);
+        return sameColumn && verticalOverlap > 0 && closeInHeight;
+    }
+
+    private static TranslatedTextAnnotationRegion MergeTranslationRegions(
+        TranslatedTextAnnotationRegion first,
+        TranslatedTextAnnotationRegion second)
+    {
+        var bounds = Rect.Union(first.Bounds, second.Bounds);
+        var firstText = first.Text.Trim();
+        var secondText = second.Text.Trim();
+        var text = firstText.Length == 0
+            ? secondText
+            : secondText.Length == 0
+                ? firstText
+                : $"{firstText}\n{secondText}";
+        var firstFont = first.FontSize > 0 ? first.FontSize : double.MaxValue;
+        var secondFont = second.FontSize > 0 ? second.FontSize : double.MaxValue;
+        var fontSize = Math.Min(firstFont, secondFont);
+        return new TranslatedTextAnnotationRegion(
+            bounds,
+            text,
+            double.IsFinite(fontSize) ? fontSize : 16);
     }
 
     public void AddMosaicRegions(IEnumerable<Rect> regions)
