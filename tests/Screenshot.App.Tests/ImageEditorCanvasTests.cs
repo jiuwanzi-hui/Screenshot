@@ -954,4 +954,31 @@ public sealed class ImageEditorCanvasTests
                 overlays[0].Child).Text);
         });
     }
+
+    [Fact]
+    public void OverlappingDuplicateTranslationTextIsRenderedOnlyOnce()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var bitmap = new Bitmap(260, 100, PixelFormat.Format32bppPArgb);
+            using var image = new CapturedImage((Bitmap)bitmap.Clone());
+            var editor = new ImageEditorCanvas();
+            editor.Initialize(image, displayWidth: 260, displayHeight: 100);
+            editor.AddTranslationOverlay(
+            [
+                new TranslatedTextAnnotationRegion(
+                    new System.Windows.Rect(20, 20, 160, 26),
+                    "集体",
+                    18),
+                new TranslatedTextAnnotationRegion(
+                    new System.Windows.Rect(20, 42, 160, 14),
+                    "集体",
+                    12),
+            ]);
+
+            var text = Assert.IsType<System.Windows.Controls.TextBlock>(
+                Assert.Single(editor.Children.OfType<System.Windows.Controls.Border>()).Child);
+            Assert.Equal("集体", text.Text);
+        });
+    }
 }

@@ -328,11 +328,7 @@ public sealed class ImageEditorCanvas : Canvas
         var bounds = Rect.Union(first.Bounds, second.Bounds);
         var firstText = first.Text.Trim();
         var secondText = second.Text.Trim();
-        var text = firstText.Length == 0
-            ? secondText
-            : secondText.Length == 0
-                ? firstText
-                : $"{firstText}\n{secondText}";
+        var text = MergeTranslationText(firstText, secondText);
         var firstFont = first.FontSize > 0 ? first.FontSize : double.MaxValue;
         var secondFont = second.FontSize > 0 ? second.FontSize : double.MaxValue;
         var fontSize = Math.Min(firstFont, secondFont);
@@ -340,6 +336,46 @@ public sealed class ImageEditorCanvas : Canvas
             bounds,
             text,
             double.IsFinite(fontSize) ? fontSize : 16);
+    }
+
+    private static string MergeTranslationText(string first, string second)
+    {
+        if (first.Length == 0)
+        {
+            return second;
+        }
+
+        if (second.Length == 0 ||
+            string.Equals(first, second, StringComparison.OrdinalIgnoreCase))
+        {
+            return first;
+        }
+
+        var normalizedFirst = NormalizeTranslationTextForComparison(first);
+        var normalizedSecond = NormalizeTranslationTextForComparison(second);
+        if (normalizedFirst.Length > 0 && normalizedSecond.Length > 0)
+        {
+            if (normalizedFirst.Contains(
+                    normalizedSecond,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return first;
+            }
+
+            if (normalizedSecond.Contains(
+                    normalizedFirst,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return second;
+            }
+        }
+
+        return $"{first}\n{second}";
+    }
+
+    private static string NormalizeTranslationTextForComparison(string text)
+    {
+        return string.Concat(text.Where(character => !char.IsWhiteSpace(character)));
     }
 
     public void AddMosaicRegions(IEnumerable<Rect> regions)
