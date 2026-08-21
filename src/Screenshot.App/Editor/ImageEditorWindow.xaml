@@ -1,0 +1,592 @@
+<Window x:Class="Screenshot.App.Editor.ImageEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:editor="clr-namespace:Screenshot.App.Editor"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="编辑截图"
+        Width="1120"
+        Height="820"
+        MinWidth="760"
+        MinHeight="560"
+        Background="{DynamicResource ImageEditorWindowBackgroundBrush}"
+        FontFamily="Microsoft YaHei UI"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <ResourceDictionary>
+        <ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary Source="../Themes/ThemedContextMenus.xaml" />
+        </ResourceDictionary.MergedDictionaries>
+        <Geometry x:Key="UndoIconGeometry">M 8,2 L 2,8 L 8,14 V 11 C 13,11 16,13 17,17 C 17,10 13,6 8,6 Z</Geometry>
+        <Geometry x:Key="RedoIconGeometry">M 12,2 L 18,8 L 12,14 V 11 C 7,11 4,13 3,17 C 3,10 7,6 12,6 Z</Geometry>
+        <Geometry x:Key="RectangleIconGeometry">M 2,2 H 16 V 16 H 2 Z</Geometry>
+        <Geometry x:Key="EllipseIconGeometry">M 9,2 C 13.5,2 17,5.1 17,9 C 17,12.9 13.5,16 9,16 C 4.5,16 1,12.9 1,9 C 1,5.1 4.5,2 9,2 Z</Geometry>
+        <Geometry x:Key="StraightFilledArrowIconGeometry">M 1,7 H 11 V 3 L 18,9 L 11,15 V 11 H 1 Z</Geometry>
+        <Geometry x:Key="StraightHollowArrowIconGeometry">M 2,7 C 1,7 1,11 2,11 H 10 V 15 L 18,9 L 10,3 V 7 Z</Geometry>
+        <Geometry x:Key="CurvedFilledArrowIconGeometry">M 1,4 C 2,11 7,15 13,11 L 11,8 L 18,10 L 14,17 L 13,14 C 5,19 1,13 1,4 Z</Geometry>
+        <Geometry x:Key="CurvedHollowArrowIconGeometry">M 1,4 C 2,11 7,15 13,11 L 11,8 L 18,10 L 14,17 L 13,14 C 5,19 1,13 1,4 Z</Geometry>
+        <Style x:Key="GlassButton" TargetType="Button">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="MinWidth" Value="38" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="Padding" Value="10,3" />
+            <Setter Property="Foreground" Value="{DynamicResource ImageEditorToolbarIconBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ImageEditorToolbarButtonBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ImageEditorToolbarButtonBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ImageEditorToolbarButtonHoverBackgroundBrush}" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource ImageEditorToolbarButtonHoverBorderBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ImageEditorToolbarButtonPressedBackgroundBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.4" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="GlassTool" TargetType="RadioButton">
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+            <Setter Property="Padding" Value="10,3" />
+            <Setter Property="Foreground" Value="{DynamicResource ImageEditorToolbarIconBrush}" />
+            <Setter Property="Background" Value="{DynamicResource ImageEditorToolbarButtonBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ImageEditorToolbarButtonBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="MinWidth" Value="52" />
+            <Setter Property="GroupName" Value="EditorTool" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="ToolBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ToolBorder" Property="Background" Value="{DynamicResource ImageEditorToolbarButtonHoverBackgroundBrush}" />
+                                <Setter TargetName="ToolBorder" Property="BorderBrush" Value="{DynamicResource ImageEditorToolbarButtonHoverBorderBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ToolBorder" Property="Background" Value="{DynamicResource ImageEditorToolbarButtonPressedBackgroundBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="ToolBorder" Property="Background" Value="{DynamicResource ImageEditorToolbarButtonSelectedBackgroundBrush}" />
+                                <Setter TargetName="ToolBorder" Property="BorderBrush" Value="{DynamicResource ImageEditorToolbarButtonSelectedBorderBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource ImageEditorToolbarSelectedIconBrush}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="GlassSwatch" TargetType="Button">
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Margin" Value="0,0,7,0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ImageEditorSwatchBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Ellipse x:Name="SwatchCircle"
+                                     Fill="{TemplateBinding Background}"
+                                     Stroke="{TemplateBinding BorderBrush}"
+                                     StrokeThickness="{TemplateBinding BorderThickness}" />
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="SwatchCircle" Property="Stroke" Value="{DynamicResource ImageEditorSwatchHoverBorderBrush}" />
+                                <Setter TargetName="SwatchCircle" Property="StrokeThickness" Value="2" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="SwatchCircle" Property="Opacity" Value="0.7" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="EditorSlider" TargetType="Slider">
+            <Setter Property="Width" Value="108" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Border Height="3"
+                                    Background="{DynamicResource ImageEditorSliderTrackBrush}"
+                                    CornerRadius="1.5" />
+                            <Track x:Name="PART_Track"
+                                   Height="14"
+                                   VerticalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                                  IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="3"
+                                                        VerticalAlignment="Center"
+                                                        Background="{DynamicResource AppAccentBrush}"
+                                                        CornerRadius="1.5" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                                  IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="14"
+                                           Height="14"
+                                           Background="{DynamicResource AppAccentBrush}"
+                                           BorderBrush="{DynamicResource ImageEditorSliderThumbBorderBrush}"
+                                           BorderThickness="2"
+                                           Cursor="Hand">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse Fill="{TemplateBinding Background}"
+                                                         Stroke="{TemplateBinding BorderBrush}"
+                                                         StrokeThickness="{TemplateBinding BorderThickness}" />
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Border x:Name="EditorShell"
+            Margin="10"
+            Background="{DynamicResource ImageEditorShellBackgroundBrush}"
+            BorderBrush="{DynamicResource ImageEditorShellBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="16">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="24"
+                              Direction="270"
+                              Opacity="0.38"
+                              ShadowDepth="8"
+                              Color="#001014" />
+        </Border.Effect>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="112" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="34" />
+            </Grid.RowDefinitions>
+            <Canvas Grid.RowSpan="3"
+                    IsHitTestVisible="False"
+                    Opacity="0.45">
+                <Ellipse Width="3" Height="3" Fill="{DynamicResource AppAccentBrush}" Canvas.Left="44" Canvas.Top="108" />
+                <Ellipse Width="2" Height="2" Fill="{DynamicResource AppAccentBrush}" Canvas.Left="188" Canvas.Top="540" />
+                <Ellipse Width="3" Height="3" Fill="{DynamicResource AppAccentBrush}" Canvas.Left="760" Canvas.Top="92" />
+                <Ellipse Width="2" Height="2" Fill="{DynamicResource AppAccentBrush}" Canvas.Left="1010" Canvas.Top="620" />
+                <Ellipse Width="2" Height="2" Fill="{DynamicResource AppAccentBrush}" Canvas.Left="520" Canvas.Top="720" />
+            </Canvas>
+
+            <Border x:Name="EditorToolbarPanel"
+                    Grid.Row="0"
+                    Margin="12,12,12,8"
+                    Background="{DynamicResource ImageEditorToolbarBackgroundBrush}"
+                    BorderBrush="{DynamicResource ImageEditorToolbarBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="10">
+                <Grid Margin="12,8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <DockPanel Grid.Row="0" LastChildFill="False">
+                        <StackPanel VerticalAlignment="Center"
+                                    Orientation="Horizontal">
+                        <TextBlock Margin="0,0,16,0"
+                                   VerticalAlignment="Center"
+                                   FontSize="15"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource ImageEditorTitleBrush}"
+                                   Text="编辑截图" />
+                        <RadioButton x:Name="ShapeToolButton"
+                                     Tag="Rectangle"
+                                     Checked="OnToolSelected"
+                                     IsChecked="True"
+                                     ToolTip="矩形/椭圆标注"
+                                     Style="{StaticResource GlassTool}">
+                            <RadioButton.ContextMenu>
+                                <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
+                                    <MenuItem x:Name="RectangleShapeMenuItem"
+                                              Tag="Rectangle"
+                                              IsCheckable="True"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnShapeMenuItemClick">
+                                        <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="17" Height="17" Margin="0,0,8,0" Data="{StaticResource RectangleIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.6" /><TextBlock VerticalAlignment="Center" Text="矩形" /></StackPanel></MenuItem.Header>
+                                    </MenuItem>
+                                    <MenuItem x:Name="EllipseShapeMenuItem"
+                                              Tag="Ellipse"
+                                              IsCheckable="True"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnShapeMenuItemClick">
+                                        <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="17" Height="17" Margin="0,0,8,0" Data="{StaticResource EllipseIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.6" /><TextBlock VerticalAlignment="Center" Text="椭圆" /></StackPanel></MenuItem.Header>
+                                    </MenuItem>
+                                </ContextMenu>
+                            </RadioButton.ContextMenu>
+                            <Grid VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Path x:Name="ShapeToolIcon" Width="17" Height="17" HorizontalAlignment="Center" VerticalAlignment="Center" Data="{StaticResource RectangleIconGeometry}" Fill="Transparent" Stroke="{DynamicResource ImageEditorToolbarIconBrush}" StrokeThickness="1.6" Stretch="Uniform" />
+                                <TextBlock x:Name="ShapeToolLabel" Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="矩形" />
+                                <TextBlock Grid.Column="2"
+                                           Margin="5,0,0,0"
+                                           Padding="3,2"
+                                           VerticalAlignment="Center"
+                                           Cursor="Hand"
+                                           FontSize="10"
+                                           Text="▾"
+                                           ToolTip="选择形状"
+                                           PreviewMouseLeftButtonDown="OnShapeMenuArrowMouseDown" />
+                            </Grid>
+                        </RadioButton>
+                        <RadioButton x:Name="ArrowToolButton"
+                                     Tag="Arrow"
+                                     Checked="OnToolSelected"
+                                     ToolTip="箭头标注"
+                                     Style="{StaticResource GlassTool}">
+                            <RadioButton.ContextMenu>
+                                <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
+                                    <MenuItem x:Name="StraightFilledArrowMenuItem"
+                                              Tag="Arrow,Filled"
+                                              IsCheckable="True"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnArrowVariantMenuItemClick">
+                                        <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource StraightFilledArrowIconGeometry}" Fill="{DynamicResource AppControlForegroundBrush}" /><TextBlock VerticalAlignment="Center" Text="直线实心箭头" /></StackPanel></MenuItem.Header>
+                                    </MenuItem>
+                                    <MenuItem x:Name="StraightHollowArrowMenuItem"
+                                              Tag="Arrow,Hollow"
+                                              IsCheckable="True"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnArrowVariantMenuItemClick">
+                                        <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource StraightHollowArrowIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" /><TextBlock VerticalAlignment="Center" Text="直线空心箭头" /></StackPanel></MenuItem.Header>
+                                    </MenuItem>
+                                    <MenuItem x:Name="CurvedFilledArrowMenuItem"
+                                              Tag="CurvedArrow,Filled"
+                                              IsCheckable="True"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnArrowVariantMenuItemClick">
+                                        <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource CurvedFilledArrowIconGeometry}" Fill="{DynamicResource AppControlForegroundBrush}" /><TextBlock VerticalAlignment="Center" Text="弧形实心箭头" /></StackPanel></MenuItem.Header>
+                                    </MenuItem>
+                                    <MenuItem x:Name="CurvedHollowArrowMenuItem"
+                                              Tag="CurvedArrow,Hollow"
+                                              IsCheckable="True"
+                                              Style="{StaticResource ThemedMenuItemStyle}"
+                                              Click="OnArrowVariantMenuItemClick">
+                                        <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource CurvedHollowArrowIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" /><TextBlock VerticalAlignment="Center" Text="弧形空心箭头" /></StackPanel></MenuItem.Header>
+                                    </MenuItem>
+                                </ContextMenu>
+                            </RadioButton.ContextMenu>
+                            <Grid VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Path x:Name="ArrowToolIcon" Width="17" Height="17" HorizontalAlignment="Center" VerticalAlignment="Center" Data="{StaticResource StraightFilledArrowIconGeometry}" Fill="{DynamicResource ImageEditorToolbarIconBrush}" Stretch="Uniform" />
+                                <TextBlock x:Name="ArrowToolLabel" Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="直线实心" />
+                                <TextBlock Grid.Column="2"
+                                           Margin="5,0,0,0"
+                                           Padding="3,2"
+                                           VerticalAlignment="Center"
+                                           Cursor="Hand"
+                                           FontSize="10"
+                                           Text="▾"
+                                           ToolTip="选择箭头样式"
+                                           PreviewMouseLeftButtonDown="OnArrowMenuArrowMouseDown" />
+                            </Grid>
+                        </RadioButton>
+                        <RadioButton x:Name="BrushToolButton"
+                                     Tag="Brush"
+                                     Checked="OnToolSelected"
+                                     ToolTip="自由画笔"
+                                     Style="{StaticResource GlassTool}">
+                            <Grid VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe UI Symbol" FontSize="16" Text="✎" TextAlignment="Center" />
+                                <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="画笔" />
+                            </Grid>
+                        </RadioButton>
+                        <RadioButton x:Name="MosaicToolButton"
+                                     Tag="Mosaic"
+                                     Checked="OnToolSelected"
+                                     ToolTip="马赛克笔刷"
+                                     Style="{StaticResource GlassTool}">
+                            <Grid VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe UI Symbol" FontSize="16" Text="▧" TextAlignment="Center" />
+                                <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="马赛克" />
+                            </Grid>
+                        </RadioButton>
+                        <RadioButton x:Name="TextToolButton"
+                                     Tag="Text"
+                                     Checked="OnToolSelected"
+                                     ToolTip="文字标注"
+                                     Style="{StaticResource GlassTool}">
+                            <Grid VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe UI" FontWeight="SemiBold" Text="T" TextAlignment="Center" />
+                                <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="文字" />
+                            </Grid>
+                        </RadioButton>
+                        <RadioButton x:Name="EmojiToolButton"
+                                     Tag="Emoji"
+                                     Checked="OnToolSelected"
+                                     ToolTip="表情贴纸"
+                                     Style="{StaticResource GlassTool}">
+                            <Grid VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <editor:EmojiStickerImage Width="17" Height="17" HorizontalAlignment="Center" VerticalAlignment="Center" Sticker="😊" />
+                                <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="表情" />
+                            </Grid>
+                        </RadioButton>
+                        <RadioButton x:Name="NumberToolButton"
+                                     Tag="Number"
+                                     Checked="OnToolSelected"
+                                     ToolTip="序号标注"
+                                     Style="{StaticResource GlassTool}">
+                            <Grid VerticalAlignment="Center">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="17"
+                                        Height="17"
+                                        Background="{DynamicResource ImageEditorToolbarIconBrush}"
+                                        CornerRadius="9">
+                                    <TextBlock HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource ImageEditorToolbarBackgroundBrush}"
+                                               FontSize="10"
+                                               FontWeight="Bold"
+                                               Text="1" />
+                                </Border>
+                                <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="序号" />
+                            </Grid>
+                        </RadioButton>
+                        <Separator Width="1"
+                                   Height="24"
+                                   Margin="5,0,12,0"
+                                   Background="{DynamicResource ImageEditorSeparatorBrush}" />
+                        <Button Click="OnCropClick"
+                                Content="裁剪"
+                                ToolTip="按上、右、下、左四边裁剪图片"
+                                Style="{StaticResource GlassButton}" />
+                        <Button x:Name="UndoButton"
+                                Click="OnUndoClick"
+                                ToolTip="撤销"
+                                Style="{StaticResource GlassButton}">
+                            <Viewbox Width="18" Height="18" Stretch="Uniform">
+                                <Path Width="20" Height="20"
+                                      Data="{StaticResource UndoIconGeometry}"
+                                      Fill="{DynamicResource ImageEditorToolbarIconBrush}"
+                                      Stroke="Transparent"
+                                      StrokeThickness="0" />
+                            </Viewbox>
+                        </Button>
+                        <Button x:Name="RedoButton"
+                                Click="OnRedoClick"
+                                ToolTip="重做"
+                                Style="{StaticResource GlassButton}">
+                            <Viewbox Width="18" Height="18" Stretch="Uniform">
+                                <Path Width="20" Height="20"
+                                      Data="{StaticResource RedoIconGeometry}"
+                                      Fill="{DynamicResource ImageEditorToolbarIconBrush}"
+                                      Stroke="Transparent"
+                                      StrokeThickness="0" />
+                            </Viewbox>
+                        </Button>
+                        </StackPanel>
+                        <StackPanel DockPanel.Dock="Right"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal">
+                            <Button x:Name="TopmostButton"
+                                    Click="OnTopmostClick"
+                                    ToolTip="让编辑窗口保持在其他窗口上方"
+                                    Style="{StaticResource GlassButton}">
+                                <TextBlock x:Name="TopmostGlyph" FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE840;" />
+                            </Button>
+                            <Button Click="OnCopyClick"
+                                    ToolTip="复制"
+                                    Style="{StaticResource GlassButton}">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE8C8;" />
+                            </Button>
+                            <Button Click="OnSaveClick"
+                                    ToolTip="保存"
+                                    Style="{StaticResource GlassButton}">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74E;" />
+                            </Button>
+                            <Button x:Name="ApplyButton"
+                                    Click="OnApplyClick"
+                                    Content="应用"
+                                    ToolTip="将编辑结果应用回钉图"
+                                    Visibility="Collapsed"
+                                    Style="{StaticResource GlassButton}" />
+                        </StackPanel>
+                    </DockPanel>
+
+                    <StackPanel Grid.Row="1" Margin="0,8,0,0">
+                        <ScrollViewer x:Name="EmojiPaletteScroll"
+                                      MaxHeight="94"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      VerticalScrollBarVisibility="Auto"
+                                      Visibility="Collapsed">
+                            <WrapPanel x:Name="EmojiPalettePanel" MaxWidth="560" />
+                        </ScrollViewer>
+                        <StackPanel x:Name="StrokeOptionsPanel"
+                                    Orientation="Horizontal">
+                        <Button x:Name="CyanColorButton"
+                                Tag="#2EAFA5"
+                                Click="OnColorClick"
+                                Background="#2EAFA5"
+                                BorderBrush="{DynamicResource ImageEditorSliderThumbBorderBrush}"
+                                BorderThickness="2"
+                                ToolTip="青色"
+                                Style="{StaticResource GlassSwatch}" />
+                        <Button x:Name="RedColorButton"
+                                Tag="#E16B71"
+                                Click="OnColorClick"
+                                Background="#E16B71"
+                                ToolTip="红色"
+                                Style="{StaticResource GlassSwatch}" />
+                        <Button x:Name="LightColorButton"
+                                Tag="#DDEBE8"
+                                Click="OnColorClick"
+                                Background="#DDEBE8"
+                                ToolTip="浅色"
+                                Style="{StaticResource GlassSwatch}" />
+                        <Button x:Name="CustomColorButton"
+                                Margin="2,0,12,0"
+                                Click="OnCustomColorClick"
+                                Background="#647A80"
+                                ToolTip="选择自定义颜色"
+                                Style="{StaticResource GlassSwatch}">
+                            <TextBlock FontFamily="Segoe MDL2 Assets"
+                                       FontSize="12"
+                                       Foreground="#FFFFFF"
+                                       Text="&#xE790;" />
+                        </Button>
+                        <TextBlock Margin="0,0,8,0"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource ImageEditorMutedTextBrush}"
+                                   Text="线宽" />
+                        <Slider x:Name="StrokeWidthSlider"
+                                Margin="0,0,8,0"
+                                Minimum="1"
+                                Maximum="12"
+                                SmallChange="1"
+                                Style="{StaticResource EditorSlider}"
+                                Value="3"
+                                ValueChanged="OnStrokeWidthChanged"
+                                ToolTip="线条粗细" />
+                        <TextBlock x:Name="StrokeWidthText"
+                                   MinWidth="34"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource ImageEditorSecondaryTextBrush}"
+                                   Text="3 px" />
+                        </StackPanel>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border x:Name="EditorWorkspace"
+                    Grid.Row="1"
+                    Margin="12,0"
+                    Background="{DynamicResource ImageEditorWorkspaceBackgroundBrush}"
+                    BorderBrush="{DynamicResource ImageEditorWorkspaceBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="12"
+                    ClipToBounds="True">
+                <ScrollViewer x:Name="EditorScrollViewer"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalContentAlignment="Center"
+                              VerticalContentAlignment="Top"
+                              PreviewMouseWheel="OnEditorPreviewMouseWheel">
+                    <Border x:Name="EditorViewport"
+                            Background="{DynamicResource ImageEditorViewportBackgroundBrush}"
+                            BorderBrush="{DynamicResource ImageEditorViewportBorderBrush}"
+                            BorderThickness="1"
+                            ClipToBounds="True">
+                        <editor:ImageEditorCanvas x:Name="EditorCanvas"
+                                                  Background="{DynamicResource ImageEditorViewportBackgroundBrush}"
+                                                  HorizontalAlignment="Left"
+                                                  VerticalAlignment="Top" />
+                    </Border>
+                </ScrollViewer>
+            </Border>
+
+            <TextBlock x:Name="StatusText"
+                       Grid.Row="2"
+                       Margin="16,0"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource ImageEditorMutedTextBrush}"
+                       TextTrimming="CharacterEllipsis" />
+        </Grid>
+    </Border>
+</Window>

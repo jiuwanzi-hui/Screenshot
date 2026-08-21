@@ -1,0 +1,17 @@
+<Window x:Class="Screenshot.App.Editor.ThemeColorPickerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:editor="clr-namespace:Screenshot.App.Editor"
+        Title="选择颜色"
+        Width="272"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Topmost="True"
+        WindowStyle="None"
+        Loaded="OnWindowLoaded">
+    <editor:SharedColorPickerControl x:Name="ColorPicker" />
+</Window>

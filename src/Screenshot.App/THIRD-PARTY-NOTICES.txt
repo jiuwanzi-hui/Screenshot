@@ -1,0 +1,67 @@
+SnapCut third-party notices
+===========================
+
+BergamotTranslatorSharp
+Copyright (c) its contributors
+License: Mozilla Public License 2.0 (MPL-2.0)
+Source: https://github.com/Freeesia/BergamotTranslatorSharp
+
+Bergamot Translator
+Copyright (c) Mozilla and its contributors
+License: Mozilla Public License 2.0 (MPL-2.0)
+Source: https://github.com/browsermt/bergamot-translator
+
+Panlingo.LanguageIdentification.CLD3
+Copyright (c) 2024-2026 Alexander Gluschenko
+License: MIT
+Source: https://github.com/gluschenko/panlingo
+
+Compact Language Detector 3 (CLD3)
+Copyright (c) 2016 Google Inc.
+License: Apache License 2.0
+Source: https://github.com/google/cld3
+
+ScreenRecorderLib
+Copyright (c) 2017-2025 Sverre Kristoffer Skodje
+License: MIT
+Source: https://github.com/sskodje/ScreenRecorderLib
+
+Microsoft Visual C++ Runtime
+Copyright (c) Microsoft Corporation
+Redistributed under the Microsoft Visual Studio license terms
+Source: https://visualstudio.microsoft.com/license-terms/
+
+RapidOcrNet
+Copyright (c) its contributors
+License: Apache License 2.0
+Source: https://github.com/RapidAI/RapidOcrNet
+
+PaddleOCR and RapidOCR model files
+Copyright (c) PaddlePaddle and RapidAI contributors
+License: Apache License 2.0
+Source: https://github.com/PaddlePaddle/PaddleOCR
+Source: https://github.com/RapidAI/RapidOCR
+
+Qwen2.5
+Copyright (c) Alibaba Cloud
+License: Apache License 2.0
+Source: https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct
+
+llama.cpp
+Copyright (c) llama.cpp contributors
+License: MIT
+Source: https://github.com/ggml-org/llama.cpp
+
+Optional offline translation models are not bundled with SnapCut. When the
+user confirms a download, the model files are fetched directly from Mozilla's
+official Firefox Translations model registry:
+https://storage.googleapis.com/moz-fx-translations-data--303e-prod-translations-data/db/models.json
+
+The optional PP-OCRv6 model files, Qwen2.5 model, and llama.cpp runtime are
+also not bundled. They are downloaded only after the user explicitly starts
+the corresponding download in settings. Their source and license information
+is listed above.
+
+The notices and license files of the projects above remain available from
+their source repositories. SnapCut does not claim ownership of those projects
+or model files.

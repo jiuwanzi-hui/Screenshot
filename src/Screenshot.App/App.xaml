@@ -1,0 +1,458 @@
+﻿<Application x:Class="Screenshot.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <ResourceDictionary>
+        <ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary Source="Themes/ThemedContextMenus.xaml" />
+            <ResourceDictionary Source="Themes/ThemedControls.xaml" />
+        </ResourceDictionary.MergedDictionaries>
+        <Style x:Key="{x:Static SystemParameters.FocusVisualStyleKey}">
+            <Setter Property="Control.Template">
+                <Setter.Value>
+                    <ControlTemplate />
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <SolidColorBrush x:Key="AppWindowBackgroundBrush" Color="#E8F3F1" />
+        <SolidColorBrush x:Key="AppGlassBackgroundBrush" Color="#DDEEF1F2" />
+        <SolidColorBrush x:Key="AppSidebarBackgroundBrush" Color="#D9ECEA" />
+        <SolidColorBrush x:Key="AppPanelBackgroundBrush" Color="#F4FBFA" />
+        <SolidColorBrush x:Key="AppInputBackgroundBrush" Color="#F4FBFA" />
+        <SolidColorBrush x:Key="AppBorderBrush" Color="#8EB9B7" />
+        <SolidColorBrush x:Key="AppSubtleBorderBrush" Color="#A9CECA" />
+        <SolidColorBrush x:Key="AppTextPrimaryBrush" Color="#1C252D" />
+        <SolidColorBrush x:Key="AppTextSecondaryBrush" Color="#66757F" />
+        <SolidColorBrush x:Key="AppMutedTextBrush" Color="#66757F" />
+        <SolidColorBrush x:Key="AppControlForegroundBrush" Color="#26464B" />
+        <SolidColorBrush x:Key="AppAccentBrush" Color="#2EAFA5" />
+        <SolidColorBrush x:Key="AppAccentMutedBrush" Color="#BFE8E2" />
+        <SolidColorBrush x:Key="AppAccentForegroundBrush" Color="#00695F" />
+        <SolidColorBrush x:Key="AppDangerBrush" Color="#B42318" />
+        <SolidColorBrush x:Key="AppSeparatorBrush" Color="#DCE4E8" />
+        <SolidColorBrush x:Key="AppTooltipBackgroundBrush" Color="#F2F4FBFA" />
+        <SolidColorBrush x:Key="AppTooltipForegroundBrush" Color="#183F43" />
+        <SolidColorBrush x:Key="EditorToolbarButtonBackgroundBrush" Color="#FCFDFD" />
+        <SolidColorBrush x:Key="EditorToolbarButtonBorderBrush" Color="#AEBBBD" />
+        <SolidColorBrush x:Key="EditorToolbarIconBrush" Color="#20272B" />
+        <SolidColorBrush x:Key="EditorToolbarButtonHoverBackgroundBrush" Color="#F0F8F7" />
+        <SolidColorBrush x:Key="EditorToolbarButtonHoverBorderBrush" Color="#62AFA9" />
+        <SolidColorBrush x:Key="EditorToolbarButtonPressedBackgroundBrush" Color="#DDEDEA" />
+        <SolidColorBrush x:Key="EditorToolbarButtonSelectedBackgroundBrush" Color="#DDF3F0" />
+        <SolidColorBrush x:Key="EditorToolbarButtonSelectedBorderBrush" Color="#2EAFA5" />
+        <SolidColorBrush x:Key="EditorToolbarConfirmBackgroundBrush" Color="#E4F6F2" />
+        <SolidColorBrush x:Key="EditorToolbarConfirmBorderBrush" Color="#58B8AC" />
+        <SolidColorBrush x:Key="EditorToolbarConfirmIconBrush" Color="#167A70" />
+        <SolidColorBrush x:Key="EditorToolbarCancelIconBrush" Color="#D84B57" />
+        <SolidColorBrush x:Key="ImageEditorToolbarButtonBackgroundBrush" Color="#FCFDFD" />
+        <SolidColorBrush x:Key="ImageEditorToolbarButtonBorderBrush" Color="#AEBBBD" />
+        <SolidColorBrush x:Key="ImageEditorToolbarIconBrush" Color="#20272B" />
+        <SolidColorBrush x:Key="ImageEditorToolbarButtonHoverBackgroundBrush" Color="#F0F8F7" />
+        <SolidColorBrush x:Key="ImageEditorToolbarButtonHoverBorderBrush" Color="#62AFA9" />
+        <SolidColorBrush x:Key="ImageEditorToolbarButtonPressedBackgroundBrush" Color="#DDEDEA" />
+        <SolidColorBrush x:Key="ImageEditorToolbarButtonSelectedBackgroundBrush" Color="#DDF3F0" />
+        <SolidColorBrush x:Key="ImageEditorToolbarButtonSelectedBorderBrush" Color="#2EAFA5" />
+        <SolidColorBrush x:Key="ImageEditorToolbarSelectedIconBrush" Color="#20272B" />
+        <SolidColorBrush x:Key="ImageEditorWindowBackgroundBrush" Color="#EEF7F6" />
+        <SolidColorBrush x:Key="ImageEditorShellBackgroundBrush" Color="#FCFEFE" />
+        <SolidColorBrush x:Key="ImageEditorShellBorderBrush" Color="#86B7B2" />
+        <SolidColorBrush x:Key="ImageEditorToolbarBackgroundBrush" Color="#F4FAF9" />
+        <SolidColorBrush x:Key="ImageEditorToolbarBorderBrush" Color="#B9D4D1" />
+        <SolidColorBrush x:Key="ImageEditorTitleBrush" Color="#1C252D" />
+        <SolidColorBrush x:Key="ImageEditorSeparatorBrush" Color="#CADCDA" />
+        <SolidColorBrush x:Key="ImageEditorWorkspaceBackgroundBrush" Color="#E5EFEE" />
+        <SolidColorBrush x:Key="ImageEditorWorkspaceBorderBrush" Color="#A9C4C1" />
+        <SolidColorBrush x:Key="ImageEditorViewportBackgroundBrush" Color="#DCE8E6" />
+        <SolidColorBrush x:Key="ImageEditorViewportBorderBrush" Color="#A5BFBC" />
+        <SolidColorBrush x:Key="ImageEditorMutedTextBrush" Color="#536B6F" />
+        <SolidColorBrush x:Key="ImageEditorSecondaryTextBrush" Color="#35575B" />
+        <SolidColorBrush x:Key="ImageEditorSliderTrackBrush" Color="#C9DAD7" />
+        <SolidColorBrush x:Key="ImageEditorSliderThumbBorderBrush" Color="#F8FFFE" />
+        <SolidColorBrush x:Key="ImageEditorSwatchBorderBrush" Color="#6E898B" />
+        <SolidColorBrush x:Key="ImageEditorSwatchHoverBorderBrush" Color="#1F3034" />
+        <Style x:Key="VideoTrimSlider" TargetType="Slider">
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Cursor" Value="Arrow" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Border Height="5"
+                                    Background="{DynamicResource ImageEditorSliderTrackBrush}"
+                                    CornerRadius="2.5" />
+                            <Track x:Name="PART_Track"
+                                   Height="18"
+                                   VerticalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                                  IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="5"
+                                                        VerticalAlignment="Center"
+                                                        Background="{DynamicResource AppAccentBrush}"
+                                                        CornerRadius="2.5" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                                  IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="16"
+                                           Height="16"
+                                           Background="{DynamicResource AppAccentBrush}"
+                                           BorderBrush="{DynamicResource ImageEditorSliderThumbBorderBrush}"
+                                           BorderThickness="2"
+                                           Cursor="Hand">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse Fill="{TemplateBinding Background}"
+                                                         Stroke="{TemplateBinding BorderBrush}"
+                                                         StrokeThickness="{TemplateBinding BorderThickness}" />
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="VideoTrimTimelineHandle" TargetType="Thumb">
+            <Setter Property="Width" Value="14" />
+            <Setter Property="Height" Value="104" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ImageEditorSliderThumbBorderBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Grid>
+                            <Border Width="3"
+                                    HorizontalAlignment="Center"
+                                    Background="{TemplateBinding Background}"
+                                    CornerRadius="1.5" />
+                            <Border Width="14"
+                                    Height="28"
+                                    VerticalAlignment="Top"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4">
+                                <Grid Width="6" HorizontalAlignment="Center">
+                                    <Border Width="1"
+                                            Margin="0,7,0,7"
+                                            HorizontalAlignment="Left"
+                                            Background="{DynamicResource ImageEditorSliderThumbBorderBrush}" />
+                                    <Border Width="1"
+                                            Margin="0,7,0,7"
+                                            HorizontalAlignment="Right"
+                                            Background="{DynamicResource ImageEditorSliderThumbBorderBrush}" />
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Padding" Value="10,3" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="{DynamicResource AppPanelBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.92" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.78" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.45" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+                            <ScrollViewer x:Name="PART_ContentHost"
+                                          Margin="{TemplateBinding Padding}"
+                                          Focusable="False" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="PasswordBox">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="PasswordBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8">
+                            <ScrollViewer x:Name="PART_ContentHost"
+                                          Margin="{TemplateBinding Padding}"
+                                          Focusable="False" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Padding" Value="10,7" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="ItemBackground"
+                                Margin="3,1"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="ItemBackground"
+                                        Property="Background"
+                                        Value="{DynamicResource AppAccentMutedBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="ItemBackground"
+                                        Property="Background"
+                                        Value="{DynamicResource AppAccentBrush}" />
+                                <Setter Property="Foreground" Value="#FFFFFF" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Padding" Value="10,0,38,0" />
+            <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="DropDownToggle"
+                                          Background="{TemplateBinding Background}"
+                                          BorderBrush="{TemplateBinding BorderBrush}"
+                                          BorderThickness="{TemplateBinding BorderThickness}"
+                                          Focusable="False"
+                                          ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="ComboBorder"
+                                                Background="{TemplateBinding Background}"
+                                                BorderBrush="{TemplateBinding BorderBrush}"
+                                                BorderThickness="{TemplateBinding BorderThickness}"
+                                                CornerRadius="8">
+                                            <Grid>
+                                                <Path Width="10"
+                                                      Height="6"
+                                                      Margin="0,0,13,0"
+                                                      HorizontalAlignment="Right"
+                                                      VerticalAlignment="Center"
+                                                      Data="M 1,1 L 5,5 L 9,1"
+                                                      Fill="Transparent"
+                                                      Stroke="{DynamicResource AppControlForegroundBrush}"
+                                                      StrokeEndLineCap="Round"
+                                                      StrokeLineJoin="Round"
+                                                      StrokeThickness="1.6" />
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="ComboBorder"
+                                                        Property="BorderBrush"
+                                                        Value="{DynamicResource AppAccentBrush}" />
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="ComboBorder"
+                                                        Property="BorderBrush"
+                                                        Value="{DynamicResource AppAccentBrush}" />
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter x:Name="SelectionContent"
+                                              Margin="{TemplateBinding Padding}"
+                                              HorizontalAlignment="Left"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                              IsHitTestVisible="False"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" />
+                            <TextBox x:Name="PART_EditableTextBox"
+                                     Margin="10,1,38,1"
+                                     Padding="0"
+                                     VerticalContentAlignment="Center"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     Foreground="{TemplateBinding Foreground}"
+                                     IsReadOnly="{TemplateBinding IsReadOnly}"
+                                     Visibility="Hidden" />
+                            <Popup x:Name="PART_Popup"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   Placement="Bottom"
+                                   PopupAnimation="Fade">
+                                <Border MinWidth="{Binding PlacementTarget.ActualWidth, ElementName=PART_Popup}"
+                                        Margin="0,4,0,0"
+                                        Padding="2"
+                                        Background="{DynamicResource AppPanelBackgroundBrush}"
+                                        BorderBrush="{DynamicResource AppAccentBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="8">
+                                    <ScrollViewer MaxHeight="260"
+                                                  CanContentScroll="True"
+                                                  VerticalScrollBarVisibility="Auto">
+                                        <ItemsPresenter />
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEditable" Value="True">
+                                <Setter TargetName="SelectionContent" Property="Visibility" Value="Hidden" />
+                                <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ToolTip">
+            <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Foreground" Value="{DynamicResource AppTooltipForegroundBrush}" />
+            <Setter Property="Background" Value="{DynamicResource AppTooltipBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="MaxWidth" Value="360" />
+            <Setter Property="HasDropShadow" Value="False" />
+            <Setter Property="OverridesDefaultStyle" Value="True" />
+            <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToolTip">
+                        <Border Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8"
+                                SnapsToDevicePixels="True">
+                            <ContentPresenter Content="{TemplateBinding Content}"
+                                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                                              TextElement.Foreground="{TemplateBinding Foreground}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ScrollBar">
+            <Setter Property="Opacity" Value="0.78" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="Transparent">
+                            <Track x:Name="PART_Track"
+                                   Orientation="{TemplateBinding Orientation}"
+                                   IsDirectionReversed="True">
+                                <Track.Thumb>
+                                    <Thumb Background="{DynamicResource AppAccentMutedBrush}"
+                                           BorderBrush="{DynamicResource AppBorderBrush}"
+                                           BorderThickness="1">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border Background="{TemplateBinding Background}"
+                                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                                        BorderThickness="{TemplateBinding BorderThickness}"
+                                                        CornerRadius="4" />
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="Orientation" Value="Horizontal">
+                                <Setter TargetName="PART_Track" Property="Height" Value="8" />
+                                <Setter TargetName="PART_Track" Property="VerticalAlignment" Value="Center" />
+                            </Trigger>
+                            <Trigger Property="Orientation" Value="Vertical">
+                                <Setter TargetName="PART_Track" Property="Width" Value="8" />
+                                <Setter TargetName="PART_Track" Property="HorizontalAlignment" Value="Center" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

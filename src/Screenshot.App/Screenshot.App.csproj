@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>SnapCut</AssemblyName>
+    <RootNamespace>Screenshot.App</RootNamespace>
+    <ApplicationIcon>Assets\Screenshot.ico</ApplicationIcon>
+    <Version>3.4.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Authors>九万字 (jiuwanzi-hui)</Authors>
+    <Copyright>Copyright © 2026 九万字 (jiuwanzi-hui). All rights reserved.</Copyright>
+    <Product>SnapCut</Product>
+    <AssemblyTitle>SnapCut</AssemblyTitle>
+    <Description>轻量 Windows 截图工具</Description>
+    <PlatformTarget>x64</PlatformTarget>
+    <AllowedReferenceRelatedFileExtensions>
+      .pri;.dll.config;.exe.config
+    </AllowedReferenceRelatedFileExtensions>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\Screenshot.ico" />
+    <Resource Include="Assets\Screenshot.png" />
+    <Resource Include="Assets\DonateQr.jpg" />
+    <Resource Include="Assets\CreatorAvatar.jpg" />
+    <Content Include="THIRD-PARTY-NOTICES.txt"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\LICENSE"
+             Link="LICENSE.txt"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\..\updates\SnapCut-Releases.json"
+             Link="SnapCut-Releases.json"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BergamotTranslatorSharp" Version="0.5.1" />
+    <PackageReference Include="Panlingo.LanguageIdentification.CLD3" Version="0.8.0" />
+    <PackageReference Include="RapidOcrNet"
+                      Version="3.0.0"
+                      ExcludeAssets="build" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
+    <PackageReference Include="ZXing.Net" Version="0.16.10" />
+    <PackageReference Include="ScreenRecorderLib"
+                      Version="6.6.0"
+                      ExcludeAssets="build;compile"
+                      GeneratePathProperty="true" />
+    <Reference Include="ScreenRecorderLib">
+      <HintPath>$(PkgScreenRecorderLib)\build\x64\ScreenRecorderLib.dll</HintPath>
+      <Private>true</Private>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Reference>
+  </ItemGroup>
+
+</Project>
