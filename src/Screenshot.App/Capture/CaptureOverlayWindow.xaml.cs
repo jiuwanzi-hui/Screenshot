@@ -2528,15 +2528,22 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 return;
             }
 
-            // Keep the OCR line geometry intact. Merging nearby rows makes
-            // menus and lists look like one paragraph, so translated text is
-            // wrapped into unrelated rows and no longer matches the image.
-            var translationRegions = TranslationPresentationLayout
+            var tightenedRegions = TranslationPresentationLayout
                 .TightenToWordBounds(recognition.Regions, recognition.Words)
                 .Where(region => !string.IsNullOrWhiteSpace(region.Text))
                 .OrderBy(region => region.Y)
                 .ThenBy(region => region.X)
                 .ToArray();
+            // A full-screen capture is naturally a collection of paragraphs,
+            // not dozens of independent OCR requests. Merge adjacent lines
+            // into bounded paragraph regions so the translation engine gets
+            // context and the overlay can render one fluent sentence. Small
+            // selections keep their original line geometry for precision.
+            var translationRegions = tightenedRegions.Length >= 8
+                ? TranslationPresentationLayout
+                    .GroupParagraphs(tightenedRegions)
+                    .ToArray()
+                : tightenedRegions;
             var translationInput = recognition with
             {
                 Text = string.Join(

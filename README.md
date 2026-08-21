@@ -36,12 +36,14 @@ SnapCut（简截）是一款以 Windows 10/11 正式版为主的轻量截图工�
 
 下载最新的 x64 自包含版本。2.3.0 起发布附件统一使用 `SnapCut-Setup-*` 和 `SnapCut-Portable-*`；同时保留旧清单入口，2.1.0 及之后版本仍可在程序内在线更新：
 
-- [安装版 SnapCut Setup 3.4.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.4.0-win-x64.exe)
-- [免安装版 SnapCut Portable 3.4.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.4.0-win-x64.zip)
-- [安装版 SnapCut Setup 3.4.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.0/SnapCut-Setup-3.4.0-win-x64.exe)
-- [免安装版 SnapCut Portable 3.4.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.0/SnapCut-Portable-3.4.0-win-x64.zip)
+- [安装版 SnapCut Setup 3.4.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.4.1-win-x64.exe)
+- [免安装版 SnapCut Portable 3.4.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.4.1-win-x64.zip)
+- [安装版 SnapCut Setup 3.4.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.1/SnapCut-Setup-3.4.1-win-x64.exe)
+- [免安装版 SnapCut Portable 3.4.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.1/SnapCut-Portable-3.4.1-win-x64.zip)
 
 免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET 或 Visual C++ 运行库。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.8.3 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+
+3.4.1 优化整图翻译：使用已安装的离线语言路由进行批量翻译，避免无必要的在线请求和逐行重试；混合语言页面按实际文本占比选择源语言，URL、侧栏短词和技术标识不会导致整张译文被丢弃。移除整图翻译的全局 9 秒硬截断，改为按批次超时并保留已完成译文；同时修复多栏网页和长页面翻译失败、段落布局异常的问题。
 
 3.4.0 优化全局输入和截图性能：录屏初始化及内存整理移出界面线程，减少录屏快捷键卡顿和静态内存缓慢上涨；移除输入钩子中的同步磁盘日志与阻塞式菜单截图，延迟截图任务增加代际校验，避免旧画面残留到下一次截图。修复快捷键设置页自动进入录入、资源管理器和托盘菜单右键截图，以及鼠标钉图短按与长按的判定：短按保留原生点击，长按才拦截并触发钉图。
 
@@ -164,12 +166,14 @@ SnapCut is primarily a lightweight Windows 10/11 capture utility. It combines re
 
 Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-*` and `SnapCut-Portable-*` starting with 2.3.0. The legacy manifest endpoint remains available so versions 2.1.0 and later continue to update in-app:
 
-- [SnapCut Setup 3.4.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.4.0-win-x64.exe)
-- [SnapCut Portable 3.4.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.4.0-win-x64.zip)
-- [SnapCut Setup 3.4.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.0/SnapCut-Setup-3.4.0-win-x64.exe)
-- [SnapCut Portable 3.4.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.0/SnapCut-Portable-3.4.0-win-x64.zip)
+- [SnapCut Setup 3.4.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.4.1-win-x64.exe)
+- [SnapCut Portable 3.4.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.4.1-win-x64.zip)
+- [SnapCut Setup 3.4.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.1/SnapCut-Setup-3.4.1-win-x64.exe)
+- [SnapCut Portable 3.4.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.1/SnapCut-Portable-3.4.1-win-x64.zip)
 
 Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET or Visual C++ runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.8.3 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+
+Version 3.4.1 improves full-image translation: installed offline routes are used for batched translation without unnecessary online requests or per-line retries; mixed-language pages choose the source language from the actual text balance, and URLs, sidebar labels, and technical identifiers no longer discard an otherwise complete translation. The global nine-second cutoff is removed in favor of per-batch timeouts that preserve completed translations, and multi-column/long-page overlay layout is corrected.
 
 Version 3.4.0 improves global input and capture performance: recording initialization and memory cleanup no longer block the UI thread; synchronous hook logging and blocking menu captures are removed; delayed snapshots use generation checks so stale frames cannot leak into the next capture. Hotkey settings no longer enter capture mode on restored focus. Explorer and tray context-menu capture is fixed, and mouse pinning now preserves native short clicks while intercepting only a long press.
 

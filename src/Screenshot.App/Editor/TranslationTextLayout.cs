@@ -6,7 +6,6 @@ using System.Text;
 using Screenshot.App.Text;
 using WpfFontFamily = System.Windows.Media.FontFamily;
 using WpfRect = System.Windows.Rect;
-using WpfSize = System.Windows.Size;
 
 namespace Screenshot.App.Editor;
 
@@ -31,7 +30,7 @@ internal static class TranslationTextLayout
             preferredFontSize,
             MinimumFontSize,
             maximumAllowed);
-        if (MeasureHeight(text, availableWidth, candidate) <= availableHeight + 0.5)
+        if (MeasureWrappedHeight(text, availableWidth, candidate) <= availableHeight + 0.5)
         {
             return candidate;
         }
@@ -43,7 +42,7 @@ internal static class TranslationTextLayout
         {
             var middleStep = lowestStep + ((highestStep - lowestStep) / 2);
             var fontSize = middleStep / 2d;
-            if (MeasureHeight(text, availableWidth, fontSize) <= availableHeight + 0.5)
+            if (MeasureWrappedHeight(text, availableWidth, fontSize) <= availableHeight + 0.5)
             {
                 bestStep = middleStep;
                 lowestStep = middleStep + 1;
@@ -55,6 +54,39 @@ internal static class TranslationTextLayout
         }
 
         return bestStep / 2d;
+    }
+
+    public static double FitSingleLineFontSize(
+        string text,
+        double availableWidth,
+        double availableHeight,
+        double preferredFontSize)
+    {
+        availableWidth = Math.Max(1, availableWidth);
+        availableHeight = Math.Max(1, availableHeight);
+        var upper = Math.Clamp(
+            preferredFontSize,
+            MinimumFontSize,
+            Math.Min(MaximumFontSize, availableHeight / 1.12));
+        var low = (int)Math.Ceiling(MinimumFontSize * 2);
+        var high = (int)Math.Floor(upper * 2);
+        var best = low;
+        while (low <= high)
+        {
+            var middle = low + ((high - low) / 2);
+            var size = middle / 2d;
+            if (MeasureWidth(text, size) <= availableWidth + 0.5)
+            {
+                best = middle;
+                low = middle + 1;
+            }
+            else
+            {
+                high = middle - 1;
+            }
+        }
+
+        return best / 2d;
     }
 
     public static TranslationParagraphLayout LayoutParagraph(
@@ -156,24 +188,15 @@ internal static class TranslationTextLayout
         return formatted.WidthIncludingTrailingWhitespace;
     }
 
-    private static double MeasureHeight(
+    private static double MeasureWrappedHeight(
         string text,
         double availableWidth,
         double fontSize)
     {
-        var measurement = new TextBlock
-        {
-            Text = text,
-            FontFamily = new WpfFontFamily("Microsoft YaHei UI"),
-            FontSize = fontSize,
-            FontWeight = FontWeights.Normal,
-            Width = availableWidth,
-            TextWrapping = TextWrapping.Wrap,
-            LineHeight = fontSize * 1.12,
-            LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
-        };
-        measurement.Measure(new WpfSize(availableWidth, double.PositiveInfinity));
-        return measurement.DesiredSize.Height;
+        // Use the same character wrapping routine as LayoutParagraph. A
+        // WPF TextBlock can make a different break decision for CJK/Latin
+        // mixtures, which used to produce an extra visual line and overlap.
+        return WrapText(text, availableWidth, fontSize).Count * fontSize * 1.12;
     }
 }
 
