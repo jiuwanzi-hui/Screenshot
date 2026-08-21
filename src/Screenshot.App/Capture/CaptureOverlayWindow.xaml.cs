@@ -2536,16 +2536,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 .OrderBy(region => region.Y)
                 .ThenBy(region => region.X)
                 .ToArray();
-            // A full-screen capture is naturally a collection of paragraphs,
-            // not dozens of independent OCR requests. Merge adjacent lines
-            // into bounded paragraph regions so the translation engine gets
-            // context and the overlay can render one fluent sentence. Small
-            // selections keep their original line geometry for precision.
-            var translationRegions = tightenedRegions.Length >= 8
-                ? TranslationPresentationLayout
-                    .GroupParagraphs(tightenedRegions)
-                    .ToArray()
-                : tightenedRegions;
+            // OCR often returns each wrapped line as a separate region, even
+            // for a small selection. Always group compatible lines first so
+            // the translator and overlay calculate one font size and line
+            // height for the complete paragraph.
+            var translationRegions = TranslationPresentationLayout
+                .GroupParagraphs(tightenedRegions)
+                .ToArray();
             var translationInput = recognition with
             {
                 Text = string.Join(
