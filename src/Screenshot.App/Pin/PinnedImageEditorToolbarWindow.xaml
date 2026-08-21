@@ -110,6 +110,14 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="EmojiPaletteButton"
+               BasedOn="{StaticResource ToolbarButton}"
+               TargetType="Button">
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinWidth" Value="30" />
+            <Setter Property="Margin" Value="0,0,2,2" />
+        </Style>
         <Style x:Key="ColorSwatch" TargetType="Button">
             <Setter Property="Width" Value="24" />
             <Setter Property="Height" Value="24" />
@@ -293,6 +301,14 @@
                             Orientation="Horizontal"
                             Visibility="Collapsed" />
                 </StackPanel>
+                <ScrollViewer x:Name="EmojiPalette"
+                              Margin="0,6,0,0"
+                              MaxHeight="94"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto"
+                              Visibility="Collapsed">
+                    <WrapPanel x:Name="EmojiPalettePanel" MaxWidth="392" />
+                </ScrollViewer>
                 <StackPanel x:Name="ColorOptions"
                             Margin="0,6,0,0"
                             Background="Transparent"

@@ -60,6 +60,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
     private readonly ToolbarDragHintBehavior _toolbarDragHint;
     private bool _isClosing;
     private bool _isInitializing = true;
+    private bool _colorOptionsAvailable = true;
 
     public PinnedImageEditorToolbarWindow(
         Window attachedWindow,
@@ -83,6 +84,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
         _toolbarDragHint = new ToolbarDragHintBehavior(
             ToolbarSurface,
             ToolbarSurface);
+        PopulateEmojiPalette();
         ApplyPreferences(settings);
         ApplyToolbarFeatureVisibility(settings?.VisibleCaptureToolbarFeatures);
         ApplyToolbarLayout(
@@ -100,6 +102,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
     }
 
     public event Action<EditorTool>? ToolSelected;
+
+    public event Action<string>? EmojiSelected;
 
     public event Action<WpfColor>? ColorSelected;
 
@@ -144,6 +148,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
             ? EditorTool.Ellipse
             : EditorTool.Rectangle;
         SelectToolButton(_lastTool);
+        UpdateEmojiPaletteVisibility();
         UpdateShapeButtonPresentation();
         UpdateArrowButtonPresentation();
         UpdateArrowMenuState();
@@ -405,6 +410,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
             UpdateArrowMenuState(tool);
         }
         button.IsChecked = true;
+        UpdateEmojiPaletteVisibility();
     }
 
     private void OnToolChecked(object sender, RoutedEventArgs e)
@@ -439,7 +445,65 @@ public partial class PinnedImageEditorToolbarWindow : Window
             }
             _lastAnnotationToolChanged?.Invoke(ToAnnotationToolMode(selected));
             ToolSelected?.Invoke(selected);
+            UpdateEmojiPaletteVisibility();
         }
+    }
+
+    private void UpdateEmojiPaletteVisibility()
+    {
+        if (EmojiPalette is null)
+        {
+            return;
+        }
+
+        EmojiPalette.Visibility = _lastTool == EditorTool.Emoji
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        ColorOptions.Visibility = _lastTool == EditorTool.Emoji ||
+            !_colorOptionsAvailable
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
+    private void PopulateEmojiPalette()
+    {
+        foreach (var emoji in EmojiStickerCatalog.All)
+        {
+            var button = new WpfButton
+            {
+                Tag = emoji,
+                ToolTip = emoji,
+                Style = (Style)FindResource("EmojiPaletteButton"),
+                Content = new EmojiStickerImage
+                {
+                    Width = 23,
+                    Height = 23,
+                    Sticker = emoji,
+                },
+            };
+            button.Click += OnEmojiClick;
+            EmojiPalettePanel.Children.Add(button);
+        }
+    }
+
+    private void OnEmojiClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not WpfButton { Tag: string emoji } ||
+            string.IsNullOrWhiteSpace(emoji))
+        {
+            return;
+        }
+
+        _lastTool = EditorTool.Emoji;
+        var wasEmojiSelected = EmojiToolButton.IsChecked == true;
+        EmojiToolButton.IsChecked = true;
+        if (wasEmojiSelected)
+        {
+            UpdateEmojiPaletteVisibility();
+            _lastAnnotationToolChanged?.Invoke(AnnotationToolMode.Emoji);
+            ToolSelected?.Invoke(EditorTool.Emoji);
+        }
+        EmojiSelected?.Invoke(emoji);
     }
 
     private void OnColorClick(object sender, RoutedEventArgs e)
@@ -915,9 +979,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
         {
             _lastTool = selected.Tool;
         }
-        ColorOptions.Visibility = editorButtons.Any(item => IsElementVisible(item.Button))
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        _colorOptionsAvailable = editorButtons.Any(item => IsElementVisible(item.Button));
+        UpdateEmojiPaletteVisibility();
         UpdateToolbarSeparators();
         return;
 

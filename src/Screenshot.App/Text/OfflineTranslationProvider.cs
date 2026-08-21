@@ -7,7 +7,9 @@ namespace Screenshot.App.Text;
 
 public sealed class OfflineTranslationProvider : ITranslationProvider
 {
-    private static readonly TimeSpan EngineIdleTimeout = TimeSpan.FromSeconds(30);
+    // Keep the model warm for a short burst of consecutive translations, then
+    // unload its native buffers so the tray process returns close to idle size.
+    private static readonly TimeSpan EngineIdleTimeout = TimeSpan.FromSeconds(10);
     private static readonly object EngineLifecycleLock = new();
     private static readonly ConcurrentDictionary<string, TranslationEngine> Engines =
         new(StringComparer.OrdinalIgnoreCase);
@@ -43,6 +45,19 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
     }
 
     public string Id => TranslationProviderFactory.OfflineProviderId;
+
+    internal bool HasInstalledRoute(
+        string sourceLanguage,
+        string targetLanguage)
+    {
+        var sourceCode = TranslationLanguageCatalog.NormalizeOfflineCode(
+            sourceLanguage);
+        var targetCode = TranslationLanguageCatalog.NormalizeOfflineCode(
+            targetLanguage);
+        return sourceCode is not null && targetCode is not null &&
+            _modelManager.GetInstalledRoute(sourceCode, targetCode, _quality)
+                is not null;
+    }
 
     public async Task<TranslationResult> TranslateAsync(
         string text,

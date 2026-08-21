@@ -1237,6 +1237,15 @@ public partial class PinnedImageWindow : Window
                 InlineEditorCanvas.Focus();
             }
         };
+        toolbar.EmojiSelected += emoji =>
+        {
+            if (_isEditorMode)
+            {
+                InlineEditorCanvas.SelectEmoji(emoji);
+                InlineEditorCanvas.SelectTool(EditorTool.Emoji);
+                InlineEditorCanvas.Focus();
+            }
+        };
         toolbar.ColorSelected += color =>
         {
             if (_isEditorMode)
@@ -1323,13 +1332,16 @@ public partial class PinnedImageWindow : Window
 
         foreach (var region in _displayedRegions)
         {
-            var width = Math.Max(12, region.Width * scale + 2);
+            var width = Math.Max(12, region.Width * scale + 4);
             var height = Math.Max(16, region.Height * scale + 2);
-            var preferredFontSize = Math.Max(10, region.Height * scale * 0.78);
+            var preferredFontSize = _isShowingTranslation &&
+                region.EstimatedFontSize > 0
+                ? Math.Max(8, region.EstimatedFontSize * scale)
+                : Math.Max(10, region.Height * scale * 0.78);
             var fontSize = _isShowingTranslation
-                ? TranslationTextLayout.FitFontSize(
+                ? TranslationTextLayout.FitSingleLineFontSize(
                     region.Text,
-                    Math.Max(8, width - 4),
+                    Math.Max(8, width - 2),
                     Math.Max(8, height - 2),
                     preferredFontSize)
                 : preferredFontSize;
@@ -1338,9 +1350,7 @@ public partial class PinnedImageWindow : Window
                 Text = region.Text,
                 Width = width,
                 Height = height,
-                Padding = _isShowingTranslation
-                    ? new Thickness(2, 0, 2, 0)
-                    : new Thickness(0),
+                Padding = new Thickness(0),
                 Background = _isShowingTranslation
                     ? new SolidColorBrush(WpfColor.FromRgb(15, 23, 26))
                     : WpfBrushes.Transparent,
@@ -1348,9 +1358,7 @@ public partial class PinnedImageWindow : Window
                 Cursor = WpfCursors.IBeam,
                 FontFamily = new WpfFontFamily("Microsoft YaHei UI"),
                 FontSize = fontSize,
-                FontWeight = _isShowingTranslation
-                    ? FontWeights.SemiBold
-                    : FontWeights.Normal,
+                FontWeight = FontWeights.Normal,
                 Foreground = _isShowingTranslation
                     ? WpfBrushes.White
                     : WpfBrushes.Transparent,
@@ -1361,9 +1369,8 @@ public partial class PinnedImageWindow : Window
                 SelectionTextBrush = _isShowingTranslation
                     ? WpfBrushes.White
                     : WpfBrushes.Transparent,
-                TextWrapping = _isShowingTranslation
-                    ? TextWrapping.Wrap
-                    : TextWrapping.NoWrap,
+                TextWrapping = TextWrapping.NoWrap,
+                VerticalContentAlignment = VerticalAlignment.Center,
             };
             Canvas.SetLeft(textBox, imageOffsetX + (region.X * scale));
             Canvas.SetTop(textBox, imageOffsetY + (region.Y * scale));

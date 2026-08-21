@@ -745,6 +745,15 @@ public partial class PinnedImageGroupWindow : Window
                 InlineEditorCanvas.Focus();
             }
         };
+        toolbar.EmojiSelected += emoji =>
+        {
+            if (_isEditorMode)
+            {
+                InlineEditorCanvas.SelectEmoji(emoji);
+                InlineEditorCanvas.SelectTool(EditorTool.Emoji);
+                InlineEditorCanvas.Focus();
+            }
+        };
         toolbar.ColorSelected += color =>
         {
             if (_isEditorMode)

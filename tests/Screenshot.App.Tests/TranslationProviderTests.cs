@@ -950,7 +950,9 @@ public sealed class TranslationProviderTests
 
         Assert.True(result.IsSuccess, result.ErrorMessage);
         Assert.Equal(12, first.SegmentCallCount);
-        Assert.Equal(1, second.SegmentCallCount);
+        // A successful online provider remains the winner; the offline
+        // fallback is not probed again for every later full-screen batch.
+        Assert.Equal(0, second.SegmentCallCount);
     }
 
     [Fact]
@@ -1047,8 +1049,10 @@ public sealed class TranslationProviderTests
             "auto",
             "zh-Hans");
 
-        Assert.False(result.IsSuccess);
-        Assert.Contains("10 秒内未获得完整译文", result.ErrorMessage);
+        Assert.True(result.IsSuccess);
+        Assert.Contains("部分行翻译失败", result.ErrorMessage);
+        Assert.StartsWith("译文 ", result.Segments[0]);
+        Assert.Equal(source[^1], result.Segments[^1]);
     }
 
     [Fact]

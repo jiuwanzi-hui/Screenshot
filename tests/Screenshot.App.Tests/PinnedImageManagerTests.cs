@@ -479,6 +479,45 @@ public sealed class PinnedImageManagerTests
     }
 
     [Fact]
+    public void PinnedToolbarExpandsEmojiPaletteAndRaisesSelection()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var manager = new PinnedImageManager();
+            manager.Pin(new CapturedImage(new System.Drawing.Bitmap(100, 80)));
+            var pin = Assert.Single(manager.Windows);
+            var editButton = Assert.IsType<System.Windows.Controls.Button>(
+                pin.FindName("EditButton"));
+            editButton.RaiseEvent(new System.Windows.RoutedEventArgs(
+                System.Windows.Controls.Button.ClickEvent));
+
+            var toolbar = Assert.IsType<PinnedImageEditorToolbarWindow>(
+                pin.EditorToolbar);
+            var emojiButton = Assert.IsType<System.Windows.Controls.RadioButton>(
+                toolbar.FindName("EmojiToolButton"));
+            var palette = Assert.IsType<System.Windows.Controls.ScrollViewer>(
+                toolbar.FindName("EmojiPalette"));
+            var palettePanel = Assert.IsType<System.Windows.Controls.WrapPanel>(
+                toolbar.FindName("EmojiPalettePanel"));
+            string? selectedEmoji = null;
+            toolbar.EmojiSelected += emoji => selectedEmoji = emoji;
+
+            emojiButton.RaiseEvent(new System.Windows.RoutedEventArgs(
+                System.Windows.Controls.Primitives.ToggleButton.CheckedEvent));
+
+            Assert.Equal(System.Windows.Visibility.Visible, palette.Visibility);
+            Assert.Equal(Editor.EmojiStickerCatalog.All.Count, palettePanel.Children.Count);
+
+            var firstEmoji = Assert.IsType<System.Windows.Controls.Button>(
+                palettePanel.Children[0]);
+            firstEmoji.RaiseEvent(new System.Windows.RoutedEventArgs(
+                System.Windows.Controls.Button.ClickEvent));
+
+            Assert.Equal(Editor.EmojiStickerCatalog.All[0], selectedEmoji);
+        });
+    }
+
+    [Fact]
     public void HideAndShowStateTracksWhetherPinsAreHidden()
     {
         WpfTestHost.Invoke(() =>

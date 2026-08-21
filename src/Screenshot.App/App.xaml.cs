@@ -989,7 +989,7 @@ public partial class App : System.Windows.Application, IDisposable
                 _currentSettings,
                 new DpapiTranslationCredentialStore(),
                 _translationHttpClient,
-                preferFastOffline: false);
+                preferFastOffline: true);
             return await provider.TranslateSegmentsAsync(
                 recognition.Regions.Select(region => region.Text).ToArray(),
                 "auto",

@@ -7,12 +7,17 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
     // timed-out batch is halved again before we give up on that provider.
     private const int MaximumSegmentsPerBatch = 24;
     private const int MaximumCharactersPerBatch = 1800;
-    private const int PreferFastProvidersSegmentThreshold = 8;
-    private const int MaximumConcurrentOnlineBatches = 8;
+    // Medium selections use the large-capture scheduler too; the regular
+    // path can otherwise wait for a full provider timeout on one OCR block.
+    private const int PreferFastProvidersSegmentThreshold = 4;
+    // Local OpenAI-compatible servers usually serialize model inference.
+    // Eight simultaneous requests make every request wait behind the same
+    // model and turn a successful translation into a wall of timeouts.
+    private const int MaximumConcurrentOnlineBatches = 3;
     private const int LargeCaptureOnlineSegmentsPerBatch = 8;
     private const int LargeCaptureOnlineCharactersPerBatch = 650;
-    private static readonly TimeSpan LargeCaptureTotalBudget =
-        TimeSpan.FromSeconds(10);
+    private const int LargeCaptureOfflineSegmentsPerBatch = 64;
+    private const int LargeCaptureOfflineCharactersPerBatch = 8000;
     private static readonly TimeSpan DefaultOfflineTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan DefaultOnlineTimeout = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan DefaultLargeModelTimeout = TimeSpan.FromSeconds(30);
@@ -142,6 +147,10 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                 sourceLanguage,
                 targetLanguage,
                 providers,
+                _providers.FirstOrDefault(provider => string.Equals(
+                    provider.Id,
+                    TranslationProviderFactory.LocalLargeModelProviderId,
+                    StringComparison.OrdinalIgnoreCase)),
                 cancellationToken);
         }
 
@@ -285,37 +294,48 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         string sourceLanguage,
         string targetLanguage,
         IReadOnlyList<ITranslationProvider> providers,
+        ITranslationProvider? localModelFallback,
         CancellationToken cancellationToken)
     {
-        using var budgetCancellation =
+        using var translationCancellation =
             CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        budgetCancellation.CancelAfter(LargeCaptureTotalBudget);
+        var translationToken = translationCancellation.Token;
         var tasks = new List<Task<TranslationSegmentsResult>>(2);
-        if (providers.FirstOrDefault(provider => string.Equals(
+        var offline = providers.FirstOrDefault(provider => string.Equals(
                 provider.Id,
                 TranslationProviderFactory.OfflineProviderId,
-                StringComparison.OrdinalIgnoreCase)) is { } offline)
+                StringComparison.OrdinalIgnoreCase));
+        var online = providers.FirstOrDefault(provider => string.Equals(
+                provider.Id,
+                TranslationProviderFactory.OpenAiCompatibleProviderId,
+                StringComparison.OrdinalIgnoreCase));
+
+        // When the installed Bergamot route is available, use it as the
+        // single fast path. Starting an online request in parallel only adds
+        // network latency and can win the race with a valid local result.
+        // Online remains the fallback when the local route is unavailable.
+        var offlineRouteAvailable = offline is OfflineTranslationProvider installedOffline &&
+            installedOffline.HasInstalledRoute(
+                ResolveLargeCaptureSourceLanguage(segments, sourceLanguage),
+                targetLanguage);
+        if (offline is not null && (offlineRouteAvailable || online is null))
         {
-            tasks.Add(InvokeSegmentsWithTimeoutAsync(
+            tasks.Add(TranslateLargeCaptureOfflineAsync(
                 offline,
                 segments,
                 sourceLanguage,
                 targetLanguage,
-                LargeCaptureTotalBudget,
-                budgetCancellation.Token));
+                translationToken));
         }
 
-        if (providers.FirstOrDefault(provider => string.Equals(
-                provider.Id,
-                TranslationProviderFactory.OpenAiCompatibleProviderId,
-                StringComparison.OrdinalIgnoreCase)) is { } online)
+        if (online is not null && !offlineRouteAvailable)
         {
             tasks.Add(TranslateLargeCaptureOnlineAsync(
                 online,
                 segments,
                 sourceLanguage,
                 targetLanguage,
-                budgetCancellation.Token));
+                translationToken));
         }
 
         if (tasks.Count == 0)
@@ -325,19 +345,16 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         }
 
         var errors = new List<string>();
+        TranslationSegmentsResult? bestPartial = null;
         while (tasks.Count > 0)
         {
-            Task<TranslationSegmentsResult> completed;
-            try
-            {
-                completed = await Task.WhenAny(tasks).WaitAsync(
-                    LargeCaptureTotalBudget,
-                    cancellationToken);
-            }
-            catch (TimeoutException)
-            {
-                break;
-            }
+            // The ten-second figure is a performance target, not a reason to
+            // discard a valid translation. Each provider batch has its own
+            // bounded timeout; remaining batches are allowed to finish so a
+            // slow OCR fragment cannot erase the completed parts of a page.
+            var completed = (Task<TranslationSegmentsResult>)
+                await Task.WhenAny(tasks);
+            cancellationToken.ThrowIfCancellationRequested();
 
             tasks.Remove(completed);
             TranslationSegmentsResult result;
@@ -346,18 +363,43 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                 result = await completed;
             }
             catch (OperationCanceledException) when (
-                budgetCancellation.IsCancellationRequested &&
+                translationCancellation.IsCancellationRequested &&
                 !cancellationToken.IsCancellationRequested)
             {
                 continue;
             }
             if (IsCompleteValidTranslation(
+                segments,
+                result,
+                targetLanguage))
+            {
+                translationCancellation.Cancel();
+                return result;
+            }
+
+            // A full-screen OCR pass commonly contains URLs, product names,
+            // short navigation labels, and other invariant fragments. Those
+            // rows are intentionally preserved by the provider, so strict
+            // per-row script validation must not discard an otherwise
+            // complete capture. Small selections still use the strict path.
+            if (result.IsSuccess &&
+                result.Segments.Count == segments.Count &&
+                HasMeaningfulTranslation(
+                    segments,
+                    result.Segments,
+                    targetLanguage))
+            {
+                translationCancellation.Cancel();
+                return result;
+            }
+
+            if (IsUsablePartialTranslation(
                     segments,
                     result,
                     targetLanguage))
             {
-                budgetCancellation.Cancel();
-                return result;
+                bestPartial = result;
+                continue;
             }
 
             if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
@@ -366,11 +408,310 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
             }
         }
 
+        if (bestPartial is not null)
+        {
+            return bestPartial;
+        }
+
+        // The CPU Qwen fallback is useful for short prose, but a full-screen
+        // OCR pass can keep the process busy for tens of seconds and return
+        // an incomplete JSON payload. Large captures must stay interactive;
+        // reserve Qwen for the normal small-selection path.
+        if (localModelFallback is not null && segments.Count < 8)
+        {
+            var fallback = await TranslateLargeCaptureLocalModelAsync(
+                localModelFallback,
+                segments,
+                sourceLanguage,
+                targetLanguage,
+                cancellationToken);
+            if (IsCompleteValidTranslation(
+                segments,
+                fallback,
+                targetLanguage))
+            {
+                return fallback;
+            }
+
+            if (!string.IsNullOrWhiteSpace(fallback.ErrorMessage))
+            {
+                errors.Add(fallback.ErrorMessage);
+            }
+        }
+
         return TranslationSegmentsResult.Failure(
             errors.Count == 0
-                ? "整张截图翻译超过 10 秒，请检查在线服务或安装当前目标语言包。"
-                : "整张截图在 10 秒内未获得完整译文。" +
+                ? "整张截图翻译未完成，请检查在线服务或安装当前目标语言包。"
+                : "整张截图未获得完整译文。" +
                   string.Join("；", errors.Distinct(StringComparer.Ordinal)));
+    }
+
+    private async Task<TranslationSegmentsResult> TranslateLargeCaptureLocalModelAsync(
+        ITranslationProvider provider,
+        IReadOnlyList<string> segments,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken)
+    {
+        var normalizedSegments = segments
+            .Select(NormalizeLargeCaptureSegment)
+            .ToArray();
+        var batches = CreateBatches(normalizedSegments, 16, 1600);
+        var translated = new string[normalizedSegments.Length];
+        var failures = new List<string>();
+        foreach (var batch in batches)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await InvokeSegmentsWithTimeoutAsync(
+                provider,
+                batch.Segments,
+                sourceLanguage,
+                targetLanguage,
+                GetTimeout(provider, batch.Segments.Count),
+                cancellationToken);
+            RecordBatchResult(batch, result, translated, failures);
+            if (!result.IsSuccess ||
+                result.Segments.Count != batch.Segments.Count)
+            {
+                // A malformed/timeout Qwen response is a provider-level
+                // failure, not a reason to start the same model repeatedly
+                // for every remaining batch.
+                break;
+            }
+        }
+
+        var combined = CreateCombinedResult(
+            normalizedSegments,
+            translated,
+            failures);
+        var restored = combined.Segments.ToArray();
+        for (var index = 0; index < restored.Length; index++)
+        {
+            restored[index] = RestoreLargeCaptureSegment(
+                segments[index],
+                normalizedSegments[index],
+                restored[index]);
+        }
+
+        return new TranslationSegmentsResult(
+            combined.IsSuccess,
+            restored,
+            combined.ErrorMessage);
+    }
+
+    private async Task<TranslationSegmentsResult> TranslateLargeCaptureOfflineAsync(
+        ITranslationProvider offline,
+        IReadOnlyList<string> segments,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken)
+    {
+        // Bergamot is fast for short batches but becomes disproportionately
+        // slow when an entire screen is sent in one native call. Keep the
+        // original indexes so every translated line still maps to its OCR
+        // rectangle, while giving the engine smaller, predictable workloads.
+        var effectiveSourceLanguage = ResolveLargeCaptureSourceLanguage(
+            segments,
+            sourceLanguage);
+        if (offline is OfflineTranslationProvider offlineProvider &&
+            !offlineProvider.HasInstalledRoute(
+                effectiveSourceLanguage,
+                targetLanguage))
+        {
+            return TranslationSegmentsResult.Failure(
+                "当前目标语言的离线模型未安装。");
+        }
+        var batches = CreateBatches(
+            segments,
+            LargeCaptureOfflineSegmentsPerBatch,
+            LargeCaptureOfflineCharactersPerBatch);
+        var translated = new string[segments.Count];
+        var failures = new List<string>();
+        foreach (var batch in batches)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var result = await InvokeSegmentsWithTimeoutAsync(
+                offline,
+                batch.Segments,
+                effectiveSourceLanguage,
+                targetLanguage,
+                GetTimeout(offline, batch.Segments.Count),
+                cancellationToken);
+            // Do not retry individual OCR rows for a full-screen capture.
+            // Bergamot already translates the whole bounded batch in one
+            // native call; row retries are what previously pushed an
+            // otherwise fast result past the ten-second interaction budget.
+            RecordBatchResult(batch, result, translated, failures);
+        }
+
+        return CreateCombinedResult(segments, translated, failures);
+    }
+
+    private async Task<TranslationSegmentsResult> RetryUnchangedOfflineSegmentsAsync(
+        ITranslationProvider provider,
+        IReadOnlyList<string> source,
+        TranslationSegmentsResult result,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken)
+    {
+        var translated = result.Segments.ToArray();
+        var failures = new List<string>();
+        var retryCount = 0;
+        for (var index = 0; index < source.Count; index++)
+        {
+            if (TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(
+                    source[index], targetLanguage) ||
+                HasMeaningfulTranslation(
+                    [source[index]], [translated[index]], targetLanguage))
+            {
+                continue;
+            }
+
+            // Do not turn technical identifiers, URLs, or isolated labels
+            // into a second full model pass. Retry only natural-language rows,
+            // and cap retries per batch so a bad model response remains cheap.
+            if (retryCount >= 2 || !IsNaturalLanguageRetryCandidate(source[index]))
+            {
+                continue;
+            }
+            retryCount++;
+
+            var retry = await InvokeSegmentsWithTimeoutAsync(
+                provider,
+                [source[index]],
+                sourceLanguage,
+                targetLanguage,
+                GetTimeout(provider, 1),
+                cancellationToken);
+            if (retry.IsSuccess && retry.Segments.Count == 1 &&
+                HasMeaningfulTranslation(
+                    [source[index]], retry.Segments, targetLanguage))
+            {
+                translated[index] = retry.Segments[0];
+            }
+            else
+            {
+                failures.Add($"第 {index + 1} 行：" +
+                    (retry.ErrorMessage ?? "译文与原文相同"));
+            }
+        }
+
+        return CreateCombinedResult(source, translated, failures);
+    }
+
+    private static bool IsNaturalLanguageRetryCandidate(string text)
+    {
+        var value = text.Trim();
+        if (value.Length < 8 ||
+            value.Contains("http", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains('\\') || value.Contains('/') ||
+            value.Contains("://", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var words = value.Split(
+            (char[]?)null,
+            StringSplitOptions.RemoveEmptyEntries);
+        return words.Length >= 2 &&
+               value.Any(char.IsLetter) &&
+               !value.All(character => char.IsUpper(character) ||
+                                      !char.IsLetter(character));
+    }
+
+    private static string ResolveLargeCaptureSourceLanguage(
+        IReadOnlyList<string> segments,
+        string sourceLanguage)
+    {
+        if (TranslationLanguageCatalog.NormalizeOfflineCode(sourceLanguage)
+                is not null)
+        {
+            return sourceLanguage;
+        }
+
+        var combinedText = string.Join(
+            Environment.NewLine,
+            segments.Where(segment => !string.IsNullOrWhiteSpace(segment)));
+        var detection = Cld3OfflineLanguageDetector.Shared.Detect(combinedText);
+        if (detection.IsSuccess &&
+               detection.ErrorMessage is null &&
+               detection.LanguageCode is { } detected &&
+               TranslationLanguageCatalog.IsSupportedSource(detected)
+            )
+        {
+            // Full-page OCR often contains a small amount of Asian-language
+            // chrome mixed with a much larger English article. CLD3 can then
+            // classify the concatenated text as Chinese/Japanese, causing an
+            // English screenshot to take the wrong (or same-language) route.
+            // Prefer English when there is clear dominant English prose.
+            var englishProseCharacters = segments
+                .Where(TranslationTargetLanguageMatcher.HasLatinNaturalLanguageClause)
+                .Sum(segment => segment.Count(char.IsLetter));
+            var nonLatinProseCharacters = segments.Sum(segment =>
+                segment.Count(character =>
+                    character is >= '\u3400' and <= '\u4dbf' or
+                    >= '\u4e00' and <= '\u9fff' or
+                    >= '\u3040' and <= '\u30ff' or
+                    >= '\uac00' and <= '\ud7af'));
+            if (englishProseCharacters >= 40 &&
+                englishProseCharacters >= nonLatinProseCharacters * 1.2)
+            {
+                return "en";
+            }
+
+            return detected;
+        }
+
+        return sourceLanguage;
+    }
+
+    private async Task<TranslationSegmentsResult> RetryBatchIndividuallyAsync(
+        ITranslationProvider provider,
+        IReadOnlyList<string> segments,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken)
+    {
+        var translated = segments.ToArray();
+        var failures = new List<string>();
+        for (var index = 0; index < segments.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(
+                    segments[index],
+                    targetLanguage))
+            {
+                continue;
+            }
+
+            var result = await InvokeSegmentsWithTimeoutAsync(
+                provider,
+                [segments[index]],
+                sourceLanguage,
+                targetLanguage,
+                GetTimeout(provider, 1),
+                cancellationToken);
+            if (result.IsSuccess && result.Segments.Count == 1 &&
+                !string.IsNullOrWhiteSpace(result.Segments[0]))
+            {
+                translated[index] = result.Segments[0];
+            }
+            else
+            {
+                failures.Add(
+                    $"第 {index + 1} 行：" +
+                    (result.ErrorMessage ?? "翻译结果不完整"));
+            }
+        }
+
+        return CreateCombinedResult(segments, translated, failures);
+    }
+
+    private static bool ShouldRetryFailedBatch(string? errorMessage)
+    {
+        return IsTransientTimeout(errorMessage) ||
+               IsSplittableBatchFailure(errorMessage);
     }
 
     private async Task<TranslationSegmentsResult> TranslateLargeCaptureOnlineAsync(
@@ -380,11 +721,14 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         string targetLanguage,
         CancellationToken cancellationToken)
     {
+        var normalizedSegments = segments
+            .Select(NormalizeLargeCaptureSegment)
+            .ToArray();
         var batches = CreateBatches(
-            segments,
+            normalizedSegments,
             LargeCaptureOnlineSegmentsPerBatch,
             LargeCaptureOnlineCharactersPerBatch);
-        var translated = new string[segments.Count];
+        var translated = new string[normalizedSegments.Length];
         var failures = new List<string>();
         using var throttle = new SemaphoreSlim(MaximumConcurrentOnlineBatches);
         var tasks = batches.Select(async batch =>
@@ -398,6 +742,17 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                     sourceLanguage,
                     targetLanguage,
                     cancellationToken);
+                if (!result.IsSuccess &&
+                    batch.Segments.Count > 1 &&
+                    ShouldRetryFailedBatch(result.ErrorMessage))
+                {
+                    result = await RetryBatchIndividuallyAsync(
+                        online,
+                        batch.Segments,
+                        sourceLanguage,
+                        targetLanguage,
+                        cancellationToken);
+                }
                 return (Batch: batch, Result: result);
             }
             finally
@@ -420,10 +775,112 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         catch (OperationCanceledException)
         {
             return TranslationSegmentsResult.Failure(
-                "在线翻译未能在 10 秒内完成全部分段。");
+                "在线翻译已取消，未完成全部分段。");
         }
 
-        return CreateCombinedResult(segments, translated, failures);
+        var combined = CreateCombinedResult(
+            normalizedSegments,
+            translated,
+            failures);
+        if (!combined.IsSuccess)
+        {
+            return combined;
+        }
+
+        // Symbol-only OCR rows do not need a model request. Restore all
+        // decorative boundaries in place so bullets and markers remain
+        // aligned with the original capture.
+        var restored = combined.Segments.ToArray();
+        for (var index = 0; index < restored.Length; index++)
+        {
+            restored[index] = RestoreLargeCaptureSegment(
+                segments[index],
+                normalizedSegments[index],
+                restored[index]);
+        }
+
+        return new TranslationSegmentsResult(
+            true,
+            restored,
+            combined.ErrorMessage);
+    }
+
+    private static string RestoreLargeCaptureSegment(
+        string original,
+        string normalized,
+        string translated)
+    {
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return original;
+        }
+
+        var value = original.Trim();
+        var leadingLength = 0;
+        while (leadingLength < value.Length &&
+               IsDecorativeBoundary(value[leadingLength]))
+        {
+            leadingLength++;
+        }
+
+        var trailingLength = 0;
+        while (trailingLength < value.Length - leadingLength &&
+               IsDecorativeBoundary(
+                   value[value.Length - trailingLength - 1]))
+        {
+            trailingLength++;
+        }
+
+        var leading = value[..leadingLength];
+        var trailing = trailingLength == 0
+            ? string.Empty
+            : value[^trailingLength..];
+        return leading + translated.Trim() + trailing;
+    }
+
+    private static string NormalizeLargeCaptureSegment(string? segment)
+    {
+        var value = segment?.Trim() ?? string.Empty;
+        if (value.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var compact = string.Join(
+            ' ',
+            value.Split(
+                (char[]?)null,
+                StringSplitOptions.RemoveEmptyEntries));
+        var start = 0;
+        var end = compact.Length - 1;
+        while (start <= end && IsDecorativeBoundary(compact[start]))
+        {
+            start++;
+        }
+
+        while (end >= start && IsDecorativeBoundary(compact[end]))
+        {
+            end--;
+        }
+
+        if (start > end)
+        {
+            return string.Empty;
+        }
+
+        return compact[start..(end + 1)];
+    }
+
+    private static bool IsDecorativeBoundary(char value)
+    {
+        var category = char.GetUnicodeCategory(value);
+        return category is
+            System.Globalization.UnicodeCategory.MathSymbol or
+            System.Globalization.UnicodeCategory.CurrencySymbol or
+            System.Globalization.UnicodeCategory.ModifierSymbol or
+            System.Globalization.UnicodeCategory.OtherSymbol or
+            System.Globalization.UnicodeCategory.Format or
+            System.Globalization.UnicodeCategory.Control;
     }
 
     private static bool IsCompleteValidTranslation(
@@ -437,6 +894,24 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
             HasMeaningfulTranslation(source, result.Segments, targetLanguage) &&
             HasPlausibleTargetLanguage(source, result.Segments, targetLanguage) &&
             !ContainsUntranslatedHanText(source, result.Segments, targetLanguage);
+    }
+
+    private static bool IsUsablePartialTranslation(
+        IReadOnlyList<string> source,
+        TranslationSegmentsResult result,
+        string targetLanguage)
+    {
+        if (!result.IsSuccess ||
+            result.Segments.Count != source.Count ||
+            string.IsNullOrWhiteSpace(result.ErrorMessage))
+        {
+            return false;
+        }
+
+        return source.Select((text, index) => (text, index))
+            .Any(item => !TranslationTargetLanguageMatcher
+                .IsAlreadyTargetLanguage(item.text, targetLanguage) &&
+                !AreEquivalent(item.text, result.Segments[item.index]));
     }
 
     private static TranslationSegmentsResult CreateCombinedResult(
@@ -645,29 +1120,25 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
             return result;
         }
 
-        var remainingTimeout = timeout - timer.Elapsed;
-        if (remainingTimeout <= TimeSpan.Zero)
-        {
-            return result;
-        }
-
         var mid = segments.Count / 2;
-        // The two smaller online requests run together and share the original
-        // provider budget. A timeout therefore costs at most one provider
-        // timeout instead of recursively multiplying it at every split.
+        // A timed-out large request has already consumed its budget. Giving
+        // each smaller retry a fresh provider timeout is intentional: a model
+        // that needs several seconds for eight lines can still finish two
+        // smaller requests instead of receiving only the time left over from
+        // the failed parent request.
         var leftTask = InvokeSegmentsWithTimeoutAsync(
             provider,
             segments.Take(mid).ToArray(),
             sourceLanguage,
             targetLanguage,
-            remainingTimeout,
+            timeout,
             cancellationToken);
         var rightTask = InvokeSegmentsWithTimeoutAsync(
             provider,
             segments.Skip(mid).ToArray(),
             sourceLanguage,
             targetLanguage,
-            remainingTimeout,
+            timeout,
             cancellationToken);
         await Task.WhenAll(leftTask, rightTask);
         var left = await leftTask;
@@ -947,7 +1418,12 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                 TranslationProviderFactory.OfflineProviderId,
                 StringComparison.OrdinalIgnoreCase))
         {
-            return _offlineTimeout;
+            // A stuck native batch must not consume the entire interaction
+            // budget. Smaller batches and bounded retries preserve partial
+            // output while keeping a normal capture responsive.
+            var seconds = segmentCount >= 4 ? 10 : 6;
+            return TimeSpan.FromSeconds(
+                Math.Min(_offlineTimeout.TotalSeconds, seconds));
         }
 
         // Online latency grows with prompt size; give large batches room to

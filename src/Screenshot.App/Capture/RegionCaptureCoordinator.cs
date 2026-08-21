@@ -483,7 +483,7 @@ public sealed class RegionCaptureCoordinator
             _settingsProvider());
     }
 
-    private Task<TranslationSegmentsResult> TranslateTextAsync(
+    private async Task<TranslationSegmentsResult> TranslateTextAsync(
         OcrRecognitionResult recognition)
     {
         var settings = _settingsProvider();
@@ -491,11 +491,22 @@ public sealed class RegionCaptureCoordinator
             settings,
             _translationCredentialStore,
             _httpClient,
-            preferFastOffline: false);
-        return provider.TranslateSegmentsAsync(
-            recognition.Regions.Select(region => region.Text).ToArray(),
-            "auto",
-            settings.TranslationTargetLanguage);
+            // Screenshot translation is a user-visible blocking operation;
+            // use the fast offline beam for this workflow.
+            preferFastOffline: true);
+        try
+        {
+            return await provider.TranslateSegmentsAsync(
+                recognition.Regions.Select(region => region.Text).ToArray(),
+                "auto",
+                settings.TranslationTargetLanguage);
+        }
+        finally
+        {
+            // Translation models and OCR buffers are native/heavy allocations;
+            // return their retired pages without blocking the overlay thread.
+            _ = Task.Run(Core.MemoryFootprint.TrimAfterHeavyOperation);
+        }
     }
 
     private Task<ContentRecognitionResult> RecognizeFormulaAsync(
