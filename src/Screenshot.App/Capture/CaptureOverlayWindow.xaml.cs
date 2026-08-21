@@ -79,6 +79,8 @@ public sealed class CaptureOverlayOptions
 
     public required PinnedImageManager PinnedImageManager { get; init; }
 
+    public string TranslationTargetLanguage { get; init; } = "zh-Hans";
+
     public required Func<CapturedImage, Task> StartOcrAsync { get; init; }
 
     public Func<CapturedImage, Task<OcrRecognitionResult>>? RecognizeTextAsync { get; init; }
@@ -2551,8 +2553,27 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                     translationRegions.Select(region => region.Text)),
                 Regions = translationRegions,
             };
+
+            if (translationRegions.All(region =>
+                    TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(
+                        region.Text,
+                        _options.TranslationTargetLanguage)))
+            {
+                _inlineTranslatedTextRegions = translationRegions;
+                _inlineTranslatedAnnotationRegions = [];
+                CaptureStatusText.Text =
+                    "识别到的文字已经是目标语言，无需覆盖翻译。";
+                return;
+            }
+
             CaptureStatusText.Text =
                 $"文字识别完成，正在翻译 {translationRegions.Length} 段文字...";
+            var targetLanguageRegionCount = translationRegions.Count(region =>
+                TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(
+                    region.Text,
+                    _options.TranslationTargetLanguage));
+            var mostlyTargetLanguage = targetLanguageRegionCount >=
+                Math.Max(1, (int)Math.Ceiling(translationRegions.Length * 0.75));
             var translationTimer = System.Diagnostics.Stopwatch.StartNew();
             // Large captures translate for a while; a static label reads as a
             // freeze, so keep the elapsed time visibly moving.
@@ -2580,8 +2601,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             translationTimer.Stop();
             if (!translation.IsSuccess)
             {
-                CaptureStatusText.Text =
-                    translation.ErrorMessage ?? "翻译失败。";
+                CaptureStatusText.Text = mostlyTargetLanguage
+                    ? "识别到的大部分文字已经是目标语言，未生成覆盖翻译。"
+                    : translation.ErrorMessage ?? "翻译失败。";
                 return;
             }
 
@@ -2632,11 +2654,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             if (_inlineTranslatedAnnotationRegions.Count == 0)
             {
                 _inlineTranslatedTextRegions = translationRegions;
-                if (string.IsNullOrWhiteSpace(translation.ErrorMessage))
-                {
-                    CaptureStatusText.Text =
-                        "翻译未生成与原文不同的有效译文，请检查目标语言和翻译模型。";
-                }
+                CaptureStatusText.Text = mostlyTargetLanguage
+                    ? "识别到的文字已经是目标语言，无需覆盖翻译。"
+                    : string.IsNullOrWhiteSpace(translation.ErrorMessage)
+                        ? "没有生成可覆盖的译文。"
+                        : translation.ErrorMessage;
                 return;
             }
 

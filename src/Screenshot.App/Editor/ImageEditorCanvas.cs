@@ -307,11 +307,18 @@ public sealed class ImageEditorCanvas : Canvas
             0,
             Math.Min(previous.Bounds.Bottom, next.Bounds.Bottom) -
             Math.Max(previous.Bounds.Top, next.Bounds.Top));
+        var verticalGap = Math.Max(
+            0,
+            Math.Max(previous.Bounds.Top, next.Bounds.Top) -
+            Math.Min(previous.Bounds.Bottom, next.Bounds.Bottom));
         var sharedWidth = Math.Min(previous.Bounds.Width, next.Bounds.Width);
         var sameColumn = horizontalOverlap >= Math.Max(12, sharedWidth * 0.35);
-        var closeInHeight = Math.Abs(previous.Bounds.Height - next.Bounds.Height) <=
-            Math.Max(8, sharedWidth * 0.18);
-        return sameColumn && verticalOverlap > 0 && closeInHeight;
+        var nearSameLine = verticalOverlap > 0 ||
+                           verticalGap <= Math.Max(
+                               2,
+                               Math.Min(previous.Bounds.Height, next.Bounds.Height) *
+                               0.12);
+        return sameColumn && nearSameLine;
     }
 
     private static TranslatedTextAnnotationRegion MergeTranslationRegions(
