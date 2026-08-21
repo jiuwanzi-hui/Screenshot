@@ -2126,6 +2126,9 @@ public partial class MainWindow : Window, IDisposable
             case nameof(SettingsViewModel.RegionCaptureHotKey):
                 _settingsViewModel.RegionCaptureHotKey = e.Gesture;
                 break;
+            case nameof(SettingsViewModel.CompleteCaptureHotKey):
+                _settingsViewModel.CompleteCaptureHotKey = e.Gesture;
+                break;
             case nameof(SettingsViewModel.VideoRecordingHotKey):
                 _settingsViewModel.VideoRecordingHotKey = e.Gesture;
                 break;
@@ -2374,6 +2377,10 @@ public partial class MainWindow : Window, IDisposable
             case nameof(SettingsViewModel.RegionCaptureHotKey):
                 _settingsViewModel.RegionCaptureHotKey = _savedSettings.RegionCaptureHotKey;
                 break;
+            case nameof(SettingsViewModel.CompleteCaptureHotKey):
+                _settingsViewModel.CompleteCaptureHotKey =
+                    _savedSettings.CompleteCaptureHotKey;
+                break;
             case nameof(SettingsViewModel.VideoRecordingHotKey):
                 _settingsViewModel.VideoRecordingHotKey = _savedSettings.VideoRecordingHotKey;
                 break;
@@ -2402,6 +2409,8 @@ public partial class MainWindow : Window, IDisposable
         {
             nameof(SettingsViewModel.RegionCaptureHotKey) =>
                 HotKeyAction.RegionCapture,
+            nameof(SettingsViewModel.CompleteCaptureHotKey) =>
+                HotKeyAction.CompleteCapture,
             nameof(SettingsViewModel.VideoRecordingHotKey) =>
                 HotKeyAction.VideoRecording,
             nameof(SettingsViewModel.ScrollCaptureHotKey) =>

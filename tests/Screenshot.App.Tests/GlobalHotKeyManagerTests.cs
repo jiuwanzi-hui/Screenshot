@@ -40,6 +40,33 @@ public sealed class GlobalHotKeyManagerTests
             replayDepth: 0));
     }
 
+    [Theory]
+    [InlineData("Shell_TrayWnd")]
+    [InlineData("TrayNotifyWnd")]
+    [InlineData("TopLevelWindowForOverflowXamlIsland")]
+    [InlineData("NotifyIconOverflowWindow")]
+    [InlineData("#32768")]
+    [InlineData("Xaml_WindowedPopupClass")]
+    public void LetsShellTaskbarAndContextMenuInputPassThrough(
+        string className)
+    {
+        Assert.True(
+            GlobalHotKeyManager.IsShellTaskbarOrContextMenuClassForTest(
+                className));
+    }
+
+    [Theory]
+    [InlineData("HwndWrapper[SnapCut]")]
+    [InlineData("Chrome_RenderWidgetHostHWND")]
+    [InlineData("WindowsForms10.Window.20808.app")]
+    public void KeepsRegularWindowInputEligibleForMouseShortcuts(
+        string className)
+    {
+        Assert.False(
+            GlobalHotKeyManager.IsShellTaskbarOrContextMenuClassForTest(
+                className));
+    }
+
     [Fact]
     public void PreCapturesBeforeAltCanDismissTransientUi()
     {
@@ -65,6 +92,13 @@ public sealed class GlobalHotKeyManagerTests
         Assert.Contains(HotKeyAction.RegionCapture, actions);
         Assert.Contains(HotKeyAction.RecognizeText, actions);
         Assert.DoesNotContain(HotKeyAction.OpenSettings, actions);
+
+        var firstModifierActions = GlobalHotKeyManager.GetPreCaptureActions(
+            bindings,
+            virtualKey: 0x11,
+            modifiers: HotKeyModifiers.Control);
+        Assert.Contains(HotKeyAction.RegionCapture, firstModifierActions);
+        Assert.Contains(HotKeyAction.RecognizeText, firstModifierActions);
     }
 
     [Fact]
@@ -132,6 +166,7 @@ public sealed class GlobalHotKeyManagerTests
         Exception? exception = null;
         HotKeyRegistrationResult? result = null;
         var registeredCount = 0;
+        var requestedBindingCount = 0;
 
         var thread = new Thread(() =>
         {
@@ -143,9 +178,10 @@ public sealed class GlobalHotKeyManagerTests
                     HotKeyModifiers.Control |
                     HotKeyModifiers.Alt |
                     HotKeyModifiers.Shift;
-                var blockerBindings = CreateBindings(modifiers, firstVirtualKey: 0x7C);
-                var requestedBindings = CreateBindings(modifiers, firstVirtualKey: 0x82)
+                var blockerBindings = CreateBindings(modifiers, firstVirtualKey: 0x51);
+                var requestedBindings = CreateBindings(modifiers, firstVirtualKey: 0x41)
                     .ToArray();
+                requestedBindingCount = requestedBindings.Length;
                 requestedBindings[0] = blockerBindings[0];
 
                 Assert.True(blocker.Apply(blockerBindings).IsSuccess);
@@ -170,7 +206,7 @@ public sealed class GlobalHotKeyManagerTests
         Assert.Null(exception);
         Assert.NotNull(result);
         Assert.False(result.IsSuccess);
-        Assert.Equal(Enum.GetValues<HotKeyAction>().Length - 1, registeredCount);
+        Assert.Equal(requestedBindingCount - 1, registeredCount);
     }
 
     [Fact]

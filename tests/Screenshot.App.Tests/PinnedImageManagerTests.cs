@@ -67,8 +67,8 @@ public sealed class PinnedImageManagerTests
             Assert.IsType<System.Windows.Controls.Canvas>(
                 group.FindName("CropOverlay"));
             Assert.Null(group.EditorToolbar);
-            Assert.Equal(321, group.CompositePreview.PixelWidth);
-            Assert.Equal(140, group.CompositePreview.PixelHeight);
+            Assert.Equal(235, group.CompositePreview.PixelWidth);
+            Assert.Equal(112, group.CompositePreview.PixelHeight);
             var opacitySlider = Assert.IsType<System.Windows.Controls.Slider>(
                 group.FindName("GroupOpacitySlider"));
             Assert.NotNull(opacitySlider.Template);
@@ -83,6 +83,39 @@ public sealed class PinnedImageManagerTests
             });
             Assert.Same(firstPreview, members[0].Preview);
             Assert.Same(secondPreview, members[1].Preview);
+        });
+    }
+
+    [Fact]
+    public void GroupingKeepsTheOrderPinsWereAddedInsteadOfSortingByWindowPosition()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var manager = new PinnedImageManager();
+            manager.Pin(new CapturedImage(CreateSolidBitmap(
+                80,
+                40,
+                System.Drawing.Color.Red)));
+            manager.Pin(new CapturedImage(CreateSolidBitmap(
+                60,
+                40,
+                System.Drawing.Color.Blue)));
+            var members = manager.Windows;
+            var first = members.Single(member =>
+                ReadPixel(member.Preview, 1, 1).Red >
+                ReadPixel(member.Preview, 1, 1).Blue);
+            var second = members.Single(member => !ReferenceEquals(member, first));
+
+            first.Left = 900;
+            second.Left = 100;
+            first.SetGroupedState(true);
+            second.SetGroupedState(true);
+
+            var group = Assert.IsType<PinnedImageGroupWindow>(manager.GroupWindow);
+            Assert.Same(first, group.Members[0]);
+            Assert.Same(second, group.Members[1]);
+            var leftPixel = ReadPixel(group.CompositePreview, 10, 10);
+            Assert.True(leftPixel.Red > leftPixel.Blue);
         });
     }
 
@@ -118,6 +151,41 @@ public sealed class PinnedImageManagerTests
             var secondPixel = ReadPixel(members[1].Preview, 10, 10);
             Assert.True(firstPixel.Green > firstPixel.Red);
             Assert.True(secondPixel.Green > secondPixel.Blue);
+        });
+    }
+
+    [Fact]
+    public void GroupEditorZoomsWithTheMouseWheel()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var manager = new PinnedImageManager();
+            manager.Pin(new CapturedImage(new System.Drawing.Bitmap(160, 100)));
+            manager.Pin(new CapturedImage(new System.Drawing.Bitmap(120, 140)));
+            var members = manager.Windows;
+            members[0].SetGroupedState(true);
+            members[1].SetGroupedState(true);
+            var group = Assert.IsType<PinnedImageGroupWindow>(manager.GroupWindow);
+            group.UpdateLayout();
+            Assert.IsType<System.Windows.Controls.Button>(group.FindName("GroupEditButton"))
+                .RaiseEvent(new System.Windows.RoutedEventArgs(
+                    System.Windows.Controls.Button.ClickEvent));
+            var editor = Assert.IsType<Screenshot.App.Editor.ImageEditorCanvas>(
+                group.FindName("InlineEditorCanvas"));
+            var canvas = Assert.IsType<System.Windows.Controls.Grid>(
+                group.FindName("GroupCanvas"));
+            var wheel = new System.Windows.Input.MouseWheelEventArgs(
+                System.Windows.Input.Mouse.PrimaryDevice,
+                Environment.TickCount,
+                120)
+            {
+                RoutedEvent = System.Windows.UIElement.PreviewMouseWheelEvent,
+            };
+
+            canvas.RaiseEvent(wheel);
+
+            Assert.True(wheel.Handled);
+            Assert.True(editor.Zoom > 1);
         });
     }
 
@@ -430,6 +498,26 @@ public sealed class PinnedImageManagerTests
         });
     }
 
+    [Fact]
+    public void NewPinRemainsReachableWhenExistingPinsAreMinimized()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var manager = new PinnedImageManager();
+            manager.Pin(new CapturedImage(new System.Drawing.Bitmap(40, 30)));
+            manager.HideAll();
+
+            manager.Pin(new CapturedImage(new System.Drawing.Bitmap(30, 20)));
+
+            Assert.Equal(2, manager.Count);
+            Assert.All(manager.Windows, window =>
+            {
+                Assert.True(window.IsVisible);
+                Assert.True(window.IsMinimized);
+            });
+        });
+    }
+
 
     [Fact]
     public void GroupCopyCompositionContainsEveryMemberImage()
@@ -448,12 +536,70 @@ public sealed class PinnedImageManagerTests
             var combined = PinnedImageGroupWindow.ComposeImages(
                 [first.Preview, second.Preview]);
 
-            Assert.Equal(81, combined.PixelWidth);
+            Assert.Equal(61, combined.PixelWidth);
             Assert.Equal(30, combined.PixelHeight);
             var leftPixel = ReadPixel(combined, 10, 15);
             var rightPixel = ReadPixel(combined, 60, 15);
             Assert.True(leftPixel.Red > leftPixel.Blue);
             Assert.True(rightPixel.Blue > rightPixel.Red);
+        });
+    }
+
+    [Fact]
+    public void GroupCompositionKeepsEachPinDisplayScaleAndUsesTwoColumnWaterfallLayout()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var wide = new CapturedImage(CreateSolidBitmap(
+                100,
+                40,
+                System.Drawing.Color.Red));
+            using var tall = new CapturedImage(CreateSolidBitmap(
+                20,
+                80,
+                System.Drawing.Color.Blue));
+            using var shortImage = new CapturedImage(CreateSolidBitmap(
+                30,
+                20,
+                System.Drawing.Color.Green));
+
+            var combined = PinnedImageGroupWindow.ComposeImages(
+                [wide.Preview, tall.Preview, shortImage.Preview]);
+
+            Assert.Equal(121, combined.PixelWidth);
+            Assert.Equal(80, combined.PixelHeight);
+            var lowerLeftPixel = ReadPixel(combined, 10, 50);
+            var rightPixel = ReadPixel(combined, 110, 50);
+            Assert.True(lowerLeftPixel.Green > lowerLeftPixel.Red);
+            Assert.True(rightPixel.Blue > rightPixel.Red);
+        });
+    }
+
+    [Fact]
+    public void GroupCompositionBakesTheCheckerboardIntoItsEmptyAreas()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var first = new CapturedImage(CreateSolidBitmap(
+                30,
+                20,
+                System.Drawing.Color.Red));
+            using var second = new CapturedImage(CreateSolidBitmap(
+                30,
+                60,
+                System.Drawing.Color.Blue));
+            using var third = new CapturedImage(CreateSolidBitmap(
+                20,
+                20,
+                System.Drawing.Color.Green));
+
+            var combined = PinnedImageGroupWindow.ComposeImages(
+                [first.Preview, second.Preview, third.Preview]);
+
+            var emptyAreaPixel = ReadPixel(combined, 2, 50);
+            Assert.Equal(emptyAreaPixel.Red, emptyAreaPixel.Green);
+            Assert.Equal(emptyAreaPixel.Green, emptyAreaPixel.Blue);
+            Assert.NotEqual(0, emptyAreaPixel.Red);
         });
     }
 

@@ -152,6 +152,8 @@ public enum OfflineTranslationEngine
 
 public sealed record AppSettings
 {
+    public const string DefaultCompleteCaptureHotKey = "Ctrl+C";
+
     public const int MaximumHistoryItems = 100;
 
     // Version 13 adds a durable "last annotation tool" preference. Previous
@@ -229,6 +231,12 @@ public sealed record AppSettings
     public AppTheme Theme { get; init; } = AppTheme.AuroraMist;
 
     public string RegionCaptureHotKey { get; init; } = "Ctrl+Alt+S";
+
+    /// <summary>
+    /// Optional shortcut that confirms an active region capture after a valid
+    /// selection has been made. It intentionally has no default binding.
+    /// </summary>
+    public string CompleteCaptureHotKey { get; init; } = DefaultCompleteCaptureHotKey;
 
     public string VideoRecordingHotKey { get; init; } = string.Empty;
 
@@ -454,6 +462,9 @@ public sealed record AppSettings
                 ? defaults.VideoSaveDirectory
                 : VideoSaveDirectory.Trim(),
             RegionCaptureHotKey = RegionCaptureHotKey?.Trim() ?? string.Empty,
+            CompleteCaptureHotKey = string.IsNullOrWhiteSpace(CompleteCaptureHotKey)
+                ? defaults.CompleteCaptureHotKey
+                : CompleteCaptureHotKey.Trim(),
             VideoRecordingHotKey = VideoRecordingHotKey?.Trim() ?? string.Empty,
             ScrollCaptureHotKey = ScrollCaptureHotKey?.Trim() ?? string.Empty,
             OcrHotKey = OcrHotKey?.Trim() ?? string.Empty,

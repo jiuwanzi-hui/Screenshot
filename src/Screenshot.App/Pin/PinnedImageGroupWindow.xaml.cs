@@ -13,7 +13,6 @@ using WpfBrushes = System.Windows.Media.Brushes;
 using WpfButtonBase = System.Windows.Controls.Primitives.ButtonBase;
 using WpfColor = System.Windows.Media.Color;
 using WpfMouseEventArgs = System.Windows.Input.MouseEventArgs;
-using WpfPen = System.Windows.Media.Pen;
 using WpfPoint = System.Windows.Point;
 using WpfFontFamily = System.Windows.Media.FontFamily;
 using WpfTextBox = System.Windows.Controls.TextBox;
@@ -23,6 +22,9 @@ namespace Screenshot.App.Pin;
 
 public partial class PinnedImageGroupWindow : Window
 {
+    private static readonly DrawingBrush CompositeCheckerboardBrush =
+        CreateCompositeCheckerboardBrush();
+
     private sealed record CompositionResult(
         BitmapSource Image,
         IReadOnlyList<Int32Rect> MemberBounds);
@@ -40,6 +42,21 @@ public partial class PinnedImageGroupWindow : Window
     private bool _applyingCompositeToMembers;
     private PinnedImageEditorToolbarWindow? _editorToolbar;
     private OcrRecognitionResult? _recognition;
+    private bool _isPanningInlineEditor;
+    private WpfPoint _inlineEditorPanStartPoint;
+    private double _inlineEditorPanStartHorizontalOffset;
+    private double _inlineEditorPanStartVerticalOffset;
+    private PinnedWindowMinimization.Bounds? _restoreBounds;
+    private bool _isMinimized;
+    private double _restoreMinWidth;
+    private double _restoreMinHeight;
+    private bool _isDraggingThumbnail;
+    private bool _thumbnailDragMoved;
+    private WpfPoint _thumbnailDragStart;
+    private WpfPoint _thumbnailDragStartScreen;
+    private double _thumbnailStartTop;
+    private Thickness _restoreShellBorderThickness;
+    private ContextMenu? _restoreContextMenu;
 
     public PinnedImageGroupWindow(IReadOnlyList<PinnedImageWindow> members)
     {
@@ -50,6 +67,73 @@ public partial class PinnedImageGroupWindow : Window
     public event EventHandler? UngroupRequested;
 
     public event EventHandler? CloseGroupRequested;
+
+    public event EventHandler? SettingsRequested;
+
+    public event EventHandler? HideAllRequested;
+
+    public event EventHandler? MinimizeRequested;
+
+    public event EventHandler? MinimizedStateChanged;
+
+    internal bool IsMinimized => _isMinimized;
+
+    internal PinnedWindowMinimization.Bounds GetPersistenceBounds() =>
+        _restoreBounds ?? new(Left, Top, Width, Height);
+
+    internal void MinimizeTo(int stackIndex)
+    {
+        if (_isMinimized) return;
+        _restoreBounds = new(Left, Top, Width, Height);
+        _restoreMinWidth = MinWidth; _restoreMinHeight = MinHeight;
+        _isMinimized = true; MinWidth = 0; MinHeight = 0;
+        _restoreContextMenu = GroupShell.ContextMenu;
+        GroupShell.ContextMenu = null;
+        MinimizedStateChanged?.Invoke(this, EventArgs.Empty);
+        _restoreShellBorderThickness = GroupShell.BorderThickness;
+        Background = WpfBrushes.Transparent;
+        GroupShell.BorderThickness = new Thickness(0);
+        GroupShell.Background = WpfBrushes.Transparent;
+        GroupHeaderRow.Height = new GridLength(0);
+        GroupHeader.Visibility = Visibility.Collapsed;
+        GroupCanvas.Background = WpfBrushes.Transparent;
+        CompositeImage.Stretch = Stretch.UniformToFill;
+        GroupCanvas.Cursor = WpfCursors.Arrow;
+        GroupTextOverlay.Visibility = Visibility.Collapsed;
+        PinnedWindowMinimization.Animate(this, PinnedWindowMinimization.GetThumbnailBounds(stackIndex), () => { });
+    }
+
+    internal void RestoreFromMinimized()
+    {
+        if (!_isMinimized || _restoreBounds is not { } bounds) return;
+        PinnedWindowMinimization.Animate(this, bounds, () =>
+        {
+            BeginAnimation(LeftProperty, null); BeginAnimation(TopProperty, null);
+            BeginAnimation(WidthProperty, null); BeginAnimation(HeightProperty, null);
+            Left = bounds.Left; Top = bounds.Top;
+            Width = bounds.Width; Height = bounds.Height;
+            MinWidth = _restoreMinWidth; MinHeight = _restoreMinHeight;
+            SetResourceReference(
+                BackgroundProperty,
+                "AppPanelBackgroundBrush");
+            GroupShell.BorderThickness = _restoreShellBorderThickness;
+            GroupShell.SetResourceReference(
+                BackgroundProperty,
+                "AppPanelBackgroundBrush");
+            GroupShell.ContextMenu = _restoreContextMenu;
+            GroupHeaderRow.Height = new GridLength(36);
+            GroupHeader.Visibility = Visibility.Visible;
+            GroupCanvas.Background =
+                (System.Windows.Media.Brush)FindResource("PinnedCheckerboardBrush");
+            CompositeImage.Stretch = Stretch.Uniform;
+            GroupCanvas.Cursor = WpfCursors.Arrow;
+            GroupTextOverlay.Visibility = Visibility.Visible;
+            _isMinimized = false; _restoreBounds = null;
+            MinimizedStateChanged?.Invoke(this, EventArgs.Empty);
+        });
+    }
+
+    public event EventHandler? RestoreRequested;
 
     internal IReadOnlyList<PinnedImageWindow> Members => _members;
 
@@ -92,6 +176,7 @@ public partial class PinnedImageGroupWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        EndInlineEditorPanning();
         foreach (var member in _members)
         {
             member.ImageChanged -= OnMemberImageChanged;
@@ -114,7 +199,7 @@ public partial class PinnedImageGroupWindow : Window
         }
 
         var result = ComposeImagesWithLayout(
-            _members.Select(member => member.Preview).ToArray());
+            _members.Select(member => member.GroupingPreview).ToArray());
         _compositePreview = result.Image;
         _memberBounds = result.MemberBounds;
         _hasCompositeEdits = false;
@@ -278,6 +363,76 @@ public partial class PinnedImageGroupWindow : Window
         }
     }
 
+    private void OnGroupCanvasMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (_isMinimized)
+        {
+            PinnedWindowMinimization.CommitCurrentAnimation(this);
+            _isDraggingThumbnail = true;
+            _thumbnailDragMoved = false;
+            _thumbnailDragStart = e.GetPosition(this);
+            _thumbnailDragStartScreen = GetCurrentScreenCursorPosition();
+            _thumbnailStartTop = Top;
+            GroupCanvas.Cursor = WpfCursors.SizeAll;
+            _ = GroupCanvas.CaptureMouse();
+            e.Handled = true;
+        }
+    }
+
+    private void OnGroupCanvasMouseMove(object sender, WpfMouseEventArgs e)
+    {
+        if (!_isDraggingThumbnail || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var workArea = SystemParameters.WorkArea;
+        var currentScreen = GetCurrentScreenCursorPosition();
+        var top = _thumbnailStartTop +
+            currentScreen.Y - _thumbnailDragStartScreen.Y;
+        _thumbnailDragMoved |= Math.Abs(top - _thumbnailStartTop) >= 3;
+        Left = workArea.Right - Width - 12;
+        Top = Math.Clamp(top, workArea.Top + 12, workArea.Bottom - Height - 12);
+        e.Handled = true;
+    }
+
+    private void OnGroupCanvasMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        var restore = _isDraggingThumbnail && !_thumbnailDragMoved;
+        EndThumbnailDrag();
+        if (restore)
+        {
+            RestoreFromMinimized();
+        }
+    }
+
+    private void OnGroupCanvasLostMouseCapture(object sender, WpfMouseEventArgs e) =>
+        EndThumbnailDrag();
+
+    private WpfPoint GetCurrentScreenCursorPosition()
+    {
+        var cursor = System.Windows.Forms.Cursor.Position;
+        var source = PresentationSource.FromVisual(this);
+        return source?.CompositionTarget is { } target
+            ? target.TransformFromDevice.Transform(
+                new WpfPoint(cursor.X, cursor.Y))
+            : new WpfPoint(cursor.X, cursor.Y);
+    }
+
+    private void EndThumbnailDrag()
+    {
+        _isDraggingThumbnail = false;
+        _thumbnailDragMoved = false;
+        if (GroupCanvas.IsMouseCaptured)
+        {
+            GroupCanvas.ReleaseMouseCapture();
+        }
+        if (_isMinimized)
+        {
+            GroupCanvas.Cursor = WpfCursors.Arrow;
+        }
+    }
+
     private void OnEditClick(object sender, RoutedEventArgs e)
     {
         if (_isEditorMode)
@@ -330,6 +485,7 @@ public partial class PinnedImageGroupWindow : Window
         {
             return;
         }
+        EndInlineEditorPanning();
         InlineEditorCanvas.Reset();
         _inlineEditorImage?.Dispose();
         _inlineEditorImage = null;
@@ -873,74 +1029,69 @@ public partial class PinnedImageGroupWindow : Window
         {
             throw new ArgumentException("At least one image is required.", nameof(images));
         }
-        var columns = (int)Math.Ceiling(Math.Sqrt(images.Count));
-        var rows = (int)Math.Ceiling(images.Count / (double)columns);
-        var maximumWidth = images.Max(image => image.PixelWidth);
-        var maximumHeight = images.Max(image => image.PixelHeight);
+        const int gap = 1;
+        var columns = Math.Min(2, images.Count);
+        var columnHeights = new int[columns];
+        var columnWidths = new int[columns];
+        var placements = new List<(BitmapSource Image, int Column, int Top)>(images.Count);
+        for (var index = 0; index < images.Count; index++)
+        {
+            var image = images[index];
+            var column = index < columns
+                ? index
+                : Array.IndexOf(columnHeights, columnHeights.Min());
+            placements.Add((image, column, columnHeights[column]));
+            columnHeights[column] += image.PixelHeight + gap;
+            columnWidths[column] = Math.Max(columnWidths[column], image.PixelWidth);
+        }
+
+        var columnOffsets = new int[columns];
+        for (var column = 1; column < columns; column++)
+        {
+            columnOffsets[column] = columnOffsets[column - 1] +
+                columnWidths[column - 1] + gap;
+        }
+
+        var rawWidth = columnWidths.Sum() + (gap * Math.Max(0, columns - 1));
+        var rawHeight = Math.Max(1, columnHeights.Max() - gap);
         const int maximumOutputDimension = 8192;
         const long maximumOutputPixels = 48_000_000;
-        var rawWidth = (long)maximumWidth * columns;
-        var rawHeight = (long)maximumHeight * rows;
         var scale = Math.Min(
             1,
             Math.Min(
-                maximumOutputDimension / (double)Math.Max(1, rawWidth),
-                maximumOutputDimension / (double)Math.Max(1, rawHeight)));
+                maximumOutputDimension / (double)rawWidth,
+                maximumOutputDimension / (double)rawHeight));
         scale = Math.Min(
             scale,
             Math.Sqrt(maximumOutputPixels /
-                (double)Math.Max(1, rawWidth * rawHeight)));
-        var cellWidth = Math.Max(1, (int)Math.Round(maximumWidth * scale));
-        var cellHeight = Math.Max(1, (int)Math.Round(maximumHeight * scale));
-        var outputWidth = (cellWidth * columns) + Math.Max(0, columns - 1);
-        var outputHeight = (cellHeight * rows) + Math.Max(0, rows - 1);
+                (double)rawWidth * rawHeight));
+        var outputWidth = Math.Max(1, (int)Math.Round(rawWidth * scale));
+        var outputHeight = Math.Max(1, (int)Math.Round(rawHeight * scale));
         var memberBounds = new List<Int32Rect>(images.Count);
         var visual = new DrawingVisual();
         using (var drawing = visual.RenderOpen())
         {
+            // The composite is copied directly to the clipboard, so its
+            // transparent areas need a visible checkerboard baked into it.
             drawing.DrawRectangle(
-                new SolidColorBrush(WpfColor.FromRgb(16, 18, 20)),
+                CompositeCheckerboardBrush,
                 null,
                 new Rect(0, 0, outputWidth, outputHeight));
-            for (var index = 0; index < images.Count; index++)
+            foreach (var placement in placements)
             {
-                var image = images[index];
-                var column = index % columns;
-                var row = index / columns;
-                var available = new Rect(
-                    column * (cellWidth + 1),
-                    row * (cellHeight + 1),
-                    cellWidth,
-                    cellHeight);
-                var imageScale = Math.Min(
-                    available.Width / image.PixelWidth,
-                    available.Height / image.PixelHeight);
-                var width = Math.Max(1, image.PixelWidth * imageScale);
-                var height = Math.Max(1, image.PixelHeight * imageScale);
+                var width = Math.Max(1, placement.Image.PixelWidth * scale);
+                var height = Math.Max(1, placement.Image.PixelHeight * scale);
                 var destination = new Rect(
-                    available.X + ((available.Width - width) / 2),
-                    available.Y + ((available.Height - height) / 2),
+                    columnOffsets[placement.Column] * scale,
+                    placement.Top * scale,
                     width,
                     height);
-                drawing.DrawImage(image, destination);
+                drawing.DrawImage(placement.Image, destination);
                 var left = Math.Clamp((int)Math.Floor(destination.Left), 0, outputWidth - 1);
                 var top = Math.Clamp((int)Math.Floor(destination.Top), 0, outputHeight - 1);
                 var right = Math.Clamp((int)Math.Ceiling(destination.Right), left + 1, outputWidth);
                 var bottom = Math.Clamp((int)Math.Ceiling(destination.Bottom), top + 1, outputHeight);
                 memberBounds.Add(new Int32Rect(left, top, right - left, bottom - top));
-            }
-            var dividerPen = new WpfPen(
-                new SolidColorBrush(WpfColor.FromRgb(76, 84, 94)),
-                1);
-            for (var column = 1; column < columns; column++)
-            {
-                var x = (column * cellWidth) + column - 0.5;
-                drawing.DrawLine(dividerPen, new WpfPoint(x, 0), new WpfPoint(x, outputHeight));
-            }
-            for (var row = 1; row < rows; row++)
-            {
-                var y = (row * cellHeight) + row - 0.5;
-                drawing.DrawLine(dividerPen, new WpfPoint(0, y), new WpfPoint(outputWidth, y));
             }
         }
         var result = new RenderTargetBitmap(
@@ -954,8 +1105,53 @@ public partial class PinnedImageGroupWindow : Window
         return new CompositionResult(result, memberBounds);
     }
 
+    private static DrawingBrush CreateCompositeCheckerboardBrush()
+    {
+        const double squareSize = 6;
+        const double tileSize = squareSize * 2;
+        var tile = new DrawingGroup();
+        using (var drawing = tile.Open())
+        {
+            drawing.DrawRectangle(
+                WpfBrushes.White,
+                null,
+                new Rect(0, 0, tileSize, tileSize));
+            var gray = new SolidColorBrush(WpfColor.FromRgb(156, 156, 156));
+            gray.Freeze();
+            drawing.DrawRectangle(gray, null, new Rect(0, 0, squareSize, squareSize));
+            drawing.DrawRectangle(
+                gray,
+                null,
+                new Rect(squareSize, squareSize, squareSize, squareSize));
+        }
+        tile.Freeze();
+
+        var brush = new DrawingBrush(tile)
+        {
+            TileMode = TileMode.Tile,
+            Viewport = new Rect(0, 0, tileSize, tileSize),
+            ViewportUnits = BrushMappingMode.Absolute,
+            Viewbox = new Rect(0, 0, tileSize, tileSize),
+            ViewboxUnits = BrushMappingMode.Absolute,
+        };
+        brush.Freeze();
+        return brush;
+    }
+
     private void OnUngroupClick(object sender, RoutedEventArgs e) =>
         UngroupRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnOpenSettingsClick(object sender, RoutedEventArgs e) =>
+        SettingsRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnHideAllClick(object sender, RoutedEventArgs e) =>
+        HideAllRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnMinimizeClick(object sender, RoutedEventArgs e) =>
+        MinimizeRequested?.Invoke(this, EventArgs.Empty);
+
+    private void OnRestoreClick(object sender, RoutedEventArgs e) =>
+        RestoreRequested?.Invoke(this, EventArgs.Empty);
 
     private void OnCloseClick(object sender, RoutedEventArgs e) =>
         CloseGroupRequested?.Invoke(this, EventArgs.Empty);
@@ -966,8 +1162,30 @@ public partial class PinnedImageGroupWindow : Window
 
     private void OnCanvasMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (_isEditorMode || _isCropMode)
+        if (_isEditorMode)
         {
+            var pointer = e.GetPosition(InlineEditorViewport);
+            var previousZoom = InlineEditorCanvas.Zoom;
+            var contentX =
+                (InlineEditorViewport.HorizontalOffset + pointer.X) / previousZoom;
+            var contentY =
+                (InlineEditorViewport.VerticalOffset + pointer.Y) / previousZoom;
+            var editorZoomFactor = e.Delta > 0 ? 1.1 : 1 / 1.1;
+            InlineEditorCanvas.SetZoom(InlineEditorCanvas.Zoom * editorZoomFactor);
+            InlineEditorFrame.Width = InlineEditorCanvas.DisplayWidth;
+            InlineEditorFrame.Height = InlineEditorCanvas.DisplayHeight;
+            InlineEditorViewport.UpdateLayout();
+            InlineEditorViewport.ScrollToHorizontalOffset(
+                (contentX * InlineEditorCanvas.Zoom) - pointer.X);
+            InlineEditorViewport.ScrollToVerticalOffset(
+                (contentY * InlineEditorCanvas.Zoom) - pointer.Y);
+            HeaderStatusText.Text = $"钉图编组 · {_members.Count} 张 · 正在编辑 · {InlineEditorCanvas.Zoom * 100:0}%";
+            e.Handled = true;
+            return;
+        }
+        if (_isCropMode)
+        {
+            e.Handled = true;
             return;
         }
         var factor = e.Delta > 0 ? 1.08 : 1 / 1.08;
@@ -980,5 +1198,67 @@ public partial class PinnedImageGroupWindow : Window
         Width = nextWidth;
         Height = nextHeight;
         e.Handled = true;
+    }
+
+    private void OnInlineEditorPreviewMouseDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (!_isEditorMode || e.ChangedButton != MouseButton.Middle)
+        {
+            return;
+        }
+
+        _isPanningInlineEditor = true;
+        _inlineEditorPanStartPoint = e.GetPosition(InlineEditorViewport);
+        _inlineEditorPanStartHorizontalOffset = InlineEditorViewport.HorizontalOffset;
+        _inlineEditorPanStartVerticalOffset = InlineEditorViewport.VerticalOffset;
+        InlineEditorViewport.Cursor = WpfCursors.SizeAll;
+        _ = InlineEditorViewport.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnInlineEditorPreviewMouseMove(object sender, WpfMouseEventArgs e)
+    {
+        if (!_isPanningInlineEditor)
+        {
+            return;
+        }
+        if (e.MiddleButton != MouseButtonState.Pressed)
+        {
+            EndInlineEditorPanning();
+            return;
+        }
+
+        var current = e.GetPosition(InlineEditorViewport);
+        InlineEditorViewport.ScrollToHorizontalOffset(
+            _inlineEditorPanStartHorizontalOffset + _inlineEditorPanStartPoint.X - current.X);
+        InlineEditorViewport.ScrollToVerticalOffset(
+            _inlineEditorPanStartVerticalOffset + _inlineEditorPanStartPoint.Y - current.Y);
+        e.Handled = true;
+    }
+
+    private void OnInlineEditorPreviewMouseUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (_isPanningInlineEditor && e.ChangedButton == MouseButton.Middle)
+        {
+            EndInlineEditorPanning();
+            e.Handled = true;
+        }
+    }
+
+    private void OnInlineEditorLostMouseCapture(object sender, WpfMouseEventArgs e) =>
+        EndInlineEditorPanning();
+
+    private void EndInlineEditorPanning()
+    {
+        _isPanningInlineEditor = false;
+        if (InlineEditorViewport.IsMouseCaptured)
+        {
+            InlineEditorViewport.ReleaseMouseCapture();
+        }
+        InlineEditorViewport.Cursor = WpfCursors.Arrow;
     }
 }

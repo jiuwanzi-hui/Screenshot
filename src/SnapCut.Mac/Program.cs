@@ -5,6 +5,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using SnapCut.Mac.App;
 using SnapCut.Core;
 using SnapCut.Mac.Capture;
+using SnapCut.Mac.Input;
 using SnapCut.Mac.Native;
 
 namespace SnapCut.Mac;
@@ -108,18 +109,28 @@ internal static class Program
 
     private static int RunPermissions()
     {
-        if (MacScreenCaptureService.HasScreenCaptureAccess())
+        var screen = MacScreenCaptureService.HasScreenCaptureAccess();
+        var input = MacGlobalHotkeyService.HasInputMonitoringAccess();
+        var accessibility = MacAccessibility.IsTrusted();
+        Console.WriteLine($"屏幕录制：{(screen ? "已授予" : "未授予")}");
+        Console.WriteLine($"输入监控：{(input ? "已授予" : "未授予/当前构建尚未生效")}");
+        Console.WriteLine($"辅助功能：{(accessibility ? "已授予" : "未授予")}");
+        if (!screen)
         {
-            Console.WriteLine("屏幕录制权限：已授予。");
-            return 0;
+            Console.WriteLine("正在向系统申请屏幕录制权限…");
+            screen = MacScreenCaptureService.RequestScreenCaptureAccess();
         }
 
-        Console.WriteLine("屏幕录制权限：未授予，正在向系统申请…");
-        var granted = MacScreenCaptureService.RequestScreenCaptureAccess();
-        Console.WriteLine(granted
-            ? "已授予。"
-            : "仍未授予。请在 系统设置 → 隐私与安全性 → 屏幕录制 中勾选本程序后重试。");
-        return granted ? 0 : 1;
+        if (!screen || !input || !accessibility)
+        {
+            Console.WriteLine(
+                "请在 系统设置 → 隐私与安全性 中分别打开“屏幕录制”“输入监控”“辅助功能”，" +
+                "勾选当前 SnapCut.app 后完全退出并重新打开应用。授权记录绑定应用签名/路径，" +
+                "重新编译的副本需要重新添加。\n" +
+                $"当前进程：{Environment.ProcessPath}");
+        }
+
+        return screen && input ? 0 : 1;
     }
 
     private static int RunCapture(string[] args)

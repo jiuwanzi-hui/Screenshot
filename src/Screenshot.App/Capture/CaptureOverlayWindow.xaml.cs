@@ -129,6 +129,8 @@ public sealed class CaptureOverlayOptions
 
     public Action? CaptureClosed { get; init; }
 
+    public string CompletionHotKey { get; init; } = string.Empty;
+
     public ArrowStyle ArrowStyle { get; init; } = ArrowStyle.Filled;
 
     public ArrowToolMode ArrowToolMode { get; init; } = ArrowToolMode.Straight;
@@ -172,6 +174,7 @@ public sealed class CaptureOverlayOptions
 
 public partial class CaptureOverlayWindow : Window, IDisposable
 {
+    private static CaptureOverlayWindow? _activeInteractiveOverlay;
     private const int TopmostWindow = -1;
     private const int ExtendedWindowStyleIndex = -20;
     private const int NonClientHitTestMessage = 0x0084;
@@ -189,6 +192,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private readonly ScreenRegion _virtualScreenBounds;
     private readonly CaptureOverlayOptions? _options;
+    private readonly HotKeyGesture? _completionHotKeyGesture;
     private readonly bool _isScrollCaptureSelection;
     private readonly CapturePointerContinuation? _initialPointerContinuation;
     private readonly TaskCompletionSource<ScreenRegion?> _selectionCompletionSource =
@@ -266,6 +270,16 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         CapturePointerContinuation? initialPointerContinuation = null)
     {
         _options = options;
+        var completionHotKey = string.IsNullOrWhiteSpace(options?.CompletionHotKey)
+            ? AppSettings.DefaultCompleteCaptureHotKey
+            : options!.CompletionHotKey;
+        if (HotKeyGesture.TryParseCompletionShortcut(
+                completionHotKey,
+                out var parsedCompletionHotKey,
+                out _))
+        {
+            _completionHotKeyGesture = parsedCompletionHotKey;
+        }
         _currentArrowStyle = options?.ArrowStyle ?? ArrowStyle.Filled;
         _currentArrowToolMode = options?.ArrowToolMode ?? ArrowToolMode.Straight;
         _currentShapeToolMode = options?.ShapeToolMode ?? ShapeToolMode.Rectangle;
@@ -343,6 +357,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 ? Visibility.Visible
                 : Visibility.Collapsed;
         UpdateToolbarSeparators();
+        UpdateConfirmButtonToolTip();
         InlineEditorCanvas.HistoryChanged += OnInlineEditorHistoryChanged;
         InlineEditorCanvas.AnnotationSelectionChanged +=
             OnInlineAnnotationSelectionChanged;
@@ -370,10 +385,12 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     }
 
     public static Task<ScreenRegion?> SelectAsync(
-        CapturePointerContinuation? initialPointerContinuation = null)
+        CapturePointerContinuation? initialPointerContinuation = null,
+        CapturedImage? initialScreenSnapshot = null)
     {
         var overlay = new CaptureOverlayWindow(
             options: null,
+            initialScreenSnapshot: initialScreenSnapshot,
             initialPointerContinuation: initialPointerContinuation);
         overlay.Show();
         return overlay._selectionCompletionSource.Task;
@@ -410,6 +427,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         var overlay = new CaptureOverlayWindow(
             options,
             initialScreenSnapshot: initialScreenSnapshot);
+        _activeInteractiveOverlay = overlay;
         overlay.Show();
         if (options.InitialSelection is { } initialSelection)
         {
@@ -420,8 +438,52 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         return overlay;
     }
 
+    internal static bool TryCompleteActiveInteractiveSelection()
+    {
+        var overlay = _activeInteractiveOverlay;
+        if (overlay is null || overlay._isDisposed)
+        {
+            return false;
+        }
+
+        if (!overlay.Dispatcher.CheckAccess())
+        {
+            return overlay.Dispatcher.Invoke(
+                overlay.TryCompleteFromConfiguredHotKey);
+        }
+
+        return overlay.TryCompleteFromConfiguredHotKey();
+    }
+
+    internal static bool TryHandleGlobalCompletionKey(
+        uint virtualKey,
+        HotKeyModifiers modifiers)
+    {
+        var overlay = _activeInteractiveOverlay;
+        if (overlay is null ||
+            overlay._isDisposed ||
+            !overlay.MatchesCompletionGesture(
+                new HotKeyGesture(modifiers, virtualKey)))
+        {
+            return false;
+        }
+
+        if (!overlay.Dispatcher.CheckAccess())
+        {
+            return overlay.Dispatcher.Invoke(
+                overlay.TryCompleteFromConfiguredHotKey);
+        }
+
+        return overlay.TryCompleteFromConfiguredHotKey();
+    }
+
     protected override void OnClosed(EventArgs e)
     {
+        if (ReferenceEquals(_activeInteractiveOverlay, this))
+        {
+            _activeInteractiveOverlay = null;
+        }
+
         if (!_isInitializing)
         {
             _options?.LastAnnotationToolChanged?.Invoke(
@@ -538,6 +600,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return;
         }
 
+        if (IsConfiguredCompletionShortcut(e) &&
+            TryCompleteFromConfiguredHotKey())
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (e.Key == Key.C &&
             Keyboard.Modifiers == ModifierKeys.None &&
             !_isSelecting &&
@@ -564,7 +633,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
         else if (e.Key == Key.C &&
                  Keyboard.Modifiers.HasFlag(ModifierKeys.Control) &&
-                 HasValidSelection())
+                 HasValidSelection() &&
+                 IsDefaultCompletionShortcut())
         {
             // A selectable OCR/translation text box handles Ctrl+C during
             // PreviewKeyDown. Reaching the capture surface means there is no
@@ -577,6 +647,81 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             ConfirmCurrentSelection();
             e.Handled = true;
         }
+    }
+
+    private bool TryCompleteFromConfiguredHotKey()
+    {
+        if (_isCompleted ||
+            _isScrollCaptureSelection ||
+            _isColorPickerActive ||
+            _isActionInProgress ||
+            _isEditorInitializing ||
+            CaptureToolbar.Visibility != Visibility.Visible ||
+            !HasValidSelection())
+        {
+            return false;
+        }
+
+        ConfirmCurrentSelection();
+        return true;
+    }
+
+    private bool IsConfiguredCompletionShortcut(WpfKeyEventArgs e)
+    {
+        if (_completionHotKeyGesture is not { } configuredGesture)
+        {
+            return false;
+        }
+
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var virtualKey = (uint)KeyInterop.VirtualKeyFromKey(key);
+        var modifiers = HotKeyModifiers.None;
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            modifiers |= HotKeyModifiers.Control;
+        }
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Alt))
+        {
+            modifiers |= HotKeyModifiers.Alt;
+        }
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+        {
+            modifiers |= HotKeyModifiers.Shift;
+        }
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Windows))
+        {
+            modifiers |= HotKeyModifiers.Windows;
+        }
+
+        return MatchesCompletionGesture(new HotKeyGesture(modifiers, virtualKey));
+    }
+
+    private bool MatchesCompletionGesture(HotKeyGesture gesture)
+    {
+        return _completionHotKeyGesture is { } configuredGesture &&
+               configuredGesture == gesture;
+    }
+
+    private bool IsDefaultCompletionShortcut()
+    {
+        return _options is null ||
+            string.IsNullOrWhiteSpace(_options.CompletionHotKey) ||
+            string.Equals(
+                _options.CompletionHotKey.Trim(),
+                AppSettings.DefaultCompleteCaptureHotKey,
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void UpdateConfirmButtonToolTip()
+    {
+        var configuredHotKey = _options?.CompletionHotKey?.Trim();
+        ConfirmButton.ToolTip = string.IsNullOrWhiteSpace(configuredHotKey) ||
+            string.Equals(
+                configuredHotKey,
+                AppSettings.DefaultCompleteCaptureHotKey,
+                StringComparison.OrdinalIgnoreCase)
+            ? "完成并复制到剪贴板（Ctrl+C）"
+            : $"完成并复制到剪贴板（{configuredHotKey}）";
     }
 
     private void ConfirmCurrentSelection()
@@ -992,6 +1137,17 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return;
         }
 
+        // A mouse-triggered capture replays the native button-up after the
+        // overlay takes ownership. The synthetic WPF event arrives before
+        // the physical release continuation and would complete an empty
+        // selection through the normal path, skipping the color picker.
+        if (_initialPointerContinuation?.Button == CapturePointerButton.Left &&
+            _continuedSelectionButton == CapturePointerButton.Left)
+        {
+            e.Handled = true;
+            return;
+        }
+
         e.Handled = true;
         await CompletePointerSelectionAsync(e.GetPosition(CaptureSurface));
     }
@@ -1224,6 +1380,14 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         if (_isColorPickerActive && IsColorCopyKey(e))
         {
             _ = CopyPickedColorAsync();
+            e.Handled = true;
+            return;
+        }
+
+        if (!_isColorPickerActive &&
+            IsConfiguredCompletionShortcut(e) &&
+            TryCompleteFromConfiguredHotKey())
+        {
             e.Handled = true;
         }
     }

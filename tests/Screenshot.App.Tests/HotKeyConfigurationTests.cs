@@ -166,6 +166,83 @@ public sealed class HotKeyConfigurationTests
     }
 
     [Fact]
+    public void RegistersCompletionShortcutWhenConfigured()
+    {
+        var settings = AppSettings.CreateDefault() with
+        {
+            CompleteCaptureHotKey = "Ctrl+Alt+F12",
+        };
+
+        var bindings = HotKeyConfiguration.CreateBindings(settings);
+
+        Assert.Contains(
+            bindings,
+            binding => binding.Action == HotKeyAction.CompleteCapture &&
+                       binding.Gesture.ToString() == "Ctrl+Alt+F12");
+    }
+
+    [Fact]
+    public void AllowsStandaloneLetterForCompletionShortcut()
+    {
+        var settings = AppSettings.CreateDefault() with
+        {
+            CompleteCaptureHotKey = "A",
+        };
+
+        var bindings = HotKeyConfiguration.CreateBindings(settings);
+
+        Assert.Contains(
+            bindings,
+            binding => binding.Action == HotKeyAction.CompleteCapture &&
+                       binding.Gesture.ToString() == "A");
+    }
+
+    [Fact]
+    public void NormalizesLowercaseStandaloneCompletionLetter()
+    {
+        var settings = AppSettings.CreateDefault() with
+        {
+            CompleteCaptureHotKey = "c",
+        };
+
+        var binding = Assert.Single(
+            HotKeyConfiguration.CreateBindings(settings),
+            item => item.Action == HotKeyAction.CompleteCapture);
+
+        Assert.Equal("C", binding.Gesture.ToString());
+    }
+
+    [Fact]
+    public void EmptyCompletionShortcutNormalizesToCtrlC()
+    {
+        var normalized = AppSettings.CreateDefault() with
+        {
+            CompleteCaptureHotKey = string.Empty,
+        };
+
+        Assert.Equal(
+            AppSettings.DefaultCompleteCaptureHotKey,
+            normalized.Normalize().CompleteCaptureHotKey);
+    }
+
+    [Theory]
+    [InlineData("F1")]
+    [InlineData("1")]
+    [InlineData("MouseLeft")]
+    public void RejectsUnsupportedCompletionShortcut(string configured)
+    {
+        var settings = AppSettings.CreateDefault() with
+        {
+            CompleteCaptureHotKey = configured,
+        };
+
+        var exception = Assert.Throws<ArgumentException>(
+            () => HotKeyConfiguration.CreateBindings(settings));
+
+        Assert.Contains("完成截图", exception.Message);
+    }
+
+    [Fact]
     public void RegistersVideoRecordingShortcut()
     {
         var settings = AppSettings.CreateDefault() with

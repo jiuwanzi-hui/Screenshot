@@ -23,6 +23,34 @@ public sealed class CaptureHistoryStoreTests : IDisposable
         Assert.DoesNotContain(first, result);
     }
 
+    [Fact]
+    public void TrimToLimitDeletesOnlyOldPngFilesAndEmptyFolders()
+    {
+        var oldest = Create("2026-08-01", "oldest.png", new DateTime(2026, 8, 1));
+        var middle = Create("2026-08-02", "middle.png", new DateTime(2026, 8, 2));
+        var newest = Create("2026-08-03", "newest.png", new DateTime(2026, 8, 3));
+        var unrelated = Create("2026-08-01", "keep.txt", new DateTime(2026, 8, 1));
+        var store = new CaptureHistoryStore(_directory);
+
+        store.TrimToLimit(2);
+
+        Assert.False(File.Exists(oldest));
+        Assert.True(File.Exists(middle));
+        Assert.True(File.Exists(newest));
+        Assert.True(File.Exists(unrelated));
+    }
+
+    [Fact]
+    public void UpdateDirectoryChangesTheActiveSaveLocation()
+    {
+        var next = Path.Combine(_directory, "next");
+        var store = new CaptureHistoryStore(_directory);
+
+        store.UpdateDirectory(next);
+
+        Assert.Equal(Path.GetFullPath(next), store.HistoryDirectory);
+    }
+
     private string Create(string folder, string name, DateTime modified)
     {
         var directory = Path.Combine(_directory, folder);

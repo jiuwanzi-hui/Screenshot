@@ -74,12 +74,75 @@ internal static class MacNativeUi
             var workspace = ObjectiveC.SendIntPtr(
                 ObjectiveC.GetClass("NSWorkspace"),
                 "sharedWorkspace");
-            return ObjectiveC.SendIntPtr(workspace, "openURL:", url) != IntPtr.Zero;
+            return ObjectiveC.SendBool(workspace, "openURL:", url);
         }
         finally
         {
             ObjectiveC.Release(pathString);
         }
+    }
+
+    public static bool CopyText(string text)
+    {
+        var value = ObjectiveC.CreateString(text);
+        var type = ObjectiveC.CreateString("public.utf8-plain-text");
+        try
+        {
+            var pasteboard = ObjectiveC.SendIntPtr(
+                ObjectiveC.GetClass("NSPasteboard"),
+                "generalPasteboard");
+            if (pasteboard == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            _ = ObjectiveC.SendNInt(pasteboard, "clearContents");
+            return ObjectiveC.SendBool(
+                pasteboard,
+                "setString:forType:",
+                value,
+                type);
+        }
+        finally
+        {
+            ObjectiveC.Release(type);
+            ObjectiveC.Release(value);
+        }
+    }
+
+    public static bool OpenUrl(string address)
+    {
+        var addressString = ObjectiveC.CreateString(address);
+        try
+        {
+            var url = ObjectiveC.SendIntPtr(
+                ObjectiveC.GetClass("NSURL"),
+                "URLWithString:",
+                addressString);
+            var workspace = ObjectiveC.SendIntPtr(
+                ObjectiveC.GetClass("NSWorkspace"),
+                "sharedWorkspace");
+            return url != IntPtr.Zero &&
+                ObjectiveC.SendBool(workspace, "openURL:", url);
+        }
+        finally
+        {
+            ObjectiveC.Release(addressString);
+        }
+    }
+
+    public static void OpenPrivacySettings(string privacyPane)
+    {
+        // macOS 13+ uses the PrivacySecurity extension. Keep the legacy URL as
+        // a fallback for Monterey/Ventura installations.
+        var modern =
+            $"x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?{privacyPane}";
+        if (OpenUrl(modern))
+        {
+            return;
+        }
+
+        _ = OpenUrl($"x-apple.systempreferences:com.apple.preference.security?{privacyPane}");
     }
 
     public static void ExcludeFromScreenCapture(Window window)

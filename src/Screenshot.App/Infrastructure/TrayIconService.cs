@@ -11,7 +11,6 @@ public sealed class TrayIconService : IDisposable
     private readonly ContextMenuStrip _contextMenu;
     private readonly ToolStripItem[] _menuItems;
     private readonly ToolStripMenuItem _hidePinnedImagesItem;
-    private readonly ToolStripMenuItem _showPinnedImagesItem;
     private bool _disposed;
 
     public TrayIconService(AppTheme theme = AppTheme.AuroraMist)
@@ -31,11 +30,8 @@ public sealed class TrayIconService : IDisposable
         var historyItem = new ToolStripMenuItem("历史查看");
         historyItem.Click += OnHistoryClicked;
 
-        _hidePinnedImagesItem = new ToolStripMenuItem("隐藏所有钉图");
+        _hidePinnedImagesItem = new ToolStripMenuItem("最小化全部钉图");
         _hidePinnedImagesItem.Click += OnHidePinnedImagesClicked;
-
-        _showPinnedImagesItem = new ToolStripMenuItem("显示所有钉图");
-        _showPinnedImagesItem.Click += OnShowPinnedImagesClicked;
 
         var exitItem = new ToolStripMenuItem("退出");
         exitItem.Click += OnExitClicked;
@@ -55,7 +51,6 @@ public sealed class TrayIconService : IDisposable
             videoRecordingItem,
             historyItem,
             _hidePinnedImagesItem,
-            _showPinnedImagesItem,
             openSettingsItem,
             new ToolStripSeparator(),
             exitItem,
@@ -110,7 +105,6 @@ public sealed class TrayIconService : IDisposable
 
     public event EventHandler? HidePinnedImagesRequested;
 
-    public event EventHandler? ShowPinnedImagesRequested;
 
     public event EventHandler? ExitRequested;
 
@@ -165,10 +159,8 @@ public sealed class TrayIconService : IDisposable
         bool hasHiddenPinnedImages)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        _showPinnedImagesItem.Available =
-            hasPinnedImages && hasHiddenPinnedImages;
         _hidePinnedImagesItem.Available =
-            hasPinnedImages && !hasHiddenPinnedImages;
+            hasPinnedImages;
     }
 
     public void Dispose()
@@ -213,11 +205,6 @@ public sealed class TrayIconService : IDisposable
     private void OnHidePinnedImagesClicked(object? sender, EventArgs e)
     {
         HidePinnedImagesRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void OnShowPinnedImagesClicked(object? sender, EventArgs e)
-    {
-        ShowPinnedImagesRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnExitClicked(object? sender, EventArgs e)

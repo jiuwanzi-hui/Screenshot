@@ -37,6 +37,22 @@ internal static partial class CoreFoundation
     public static partial long CFDataGetLength(IntPtr data);
 
     [LibraryImport(Library)]
+    public static partial long CFArrayGetCount(IntPtr array);
+
+    [LibraryImport(Library)]
+    public static partial IntPtr CFArrayGetValueAtIndex(IntPtr array, long index);
+
+    [LibraryImport(Library)]
+    public static partial IntPtr CFDictionaryGetValue(IntPtr dictionary, IntPtr key);
+
+    [LibraryImport(Library)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static partial bool CFNumberGetValue(
+        IntPtr number,
+        int numberType,
+        out int value);
+
+    [LibraryImport(Library)]
     public static partial IntPtr CFMachPortCreateRunLoopSource(
         IntPtr allocator,
         IntPtr port,

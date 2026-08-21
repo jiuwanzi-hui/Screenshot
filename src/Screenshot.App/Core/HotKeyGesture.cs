@@ -114,6 +114,38 @@ public readonly record struct HotKeyGesture(HotKeyModifiers Modifiers, uint Virt
         return true;
     }
 
+    public static bool TryParseCompletionShortcut(
+        string? value,
+        out HotKeyGesture gesture,
+        out string errorMessage)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            var tokens = value.Split(
+                '+',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (tokens.Length == 1 &&
+                tokens[0].Length == 1 &&
+                char.IsAsciiLetter(tokens[0][0]))
+            {
+                gesture = new HotKeyGesture(
+                    HotKeyModifiers.None,
+                    char.ToUpperInvariant(tokens[0][0]));
+                errorMessage = string.Empty;
+                return true;
+            }
+        }
+
+        return TryParse(value, out gesture, out errorMessage);
+    }
+
+    public static bool IsCompletionShortcutAllowed(HotKeyGesture gesture)
+    {
+        return !gesture.IsMouseButton &&
+               (gesture.Modifiers != HotKeyModifiers.None ||
+                gesture.VirtualKey is >= 'A' and <= 'Z');
+    }
+
     public override string ToString()
     {
         var parts = new List<string>();

@@ -64,6 +64,8 @@ internal static partial class CoreGraphics
     public const uint EventTapHeadInsert = 0; // kCGHeadInsertEventTap
     public const uint EventTapOptionListenOnly = 1;
     public const uint EventKeyDown = 10;
+    public const uint EventLeftMouseDown = 1;
+    public const uint EventRightMouseDown = 3;
     public const uint EventScrollWheel = 22; // kCGEventScrollWheel
     public const uint EventTapDisabledByTimeout = 0xFFFFFFFE;
     public const uint EventTapDisabledByUserInput = 0xFFFFFFFF;
@@ -72,6 +74,10 @@ internal static partial class CoreGraphics
     public const int ScrollWheelEventDeltaAxis1 = 11;
     public const int ScrollWheelEventIsContinuous = 88;
     public const int ScrollWheelEventPointDeltaAxis1 = 96;
+    public const uint WindowListOptionOnScreenOnly = 1;
+    public const uint WindowListExcludeDesktopElements = 16;
+    public const uint ScrollEventUnitPixel = 0;
+    public const uint EventTapHid = 0;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     public delegate IntPtr EventTapCallback(
@@ -191,4 +197,54 @@ internal static partial class CoreGraphics
     [LibraryImport(Library)]
     [return: MarshalAs(UnmanagedType.I1)]
     public static partial bool CGRequestListenEventAccess();
+
+    [LibraryImport(Library)]
+    public static partial IntPtr CGWindowListCopyWindowInfo(
+        uint option,
+        uint relativeToWindow);
+
+    [LibraryImport(Library)]
+    [return: MarshalAs(UnmanagedType.I1)]
+    public static partial bool CGRectMakeWithDictionaryRepresentation(
+        IntPtr dictionary,
+        out CGRect rectangle);
+
+    [DllImport(Library)]
+    public static extern IntPtr CGEventCreateScrollWheelEvent(
+        IntPtr source,
+        uint units,
+        uint wheelCount,
+        int wheel1);
+
+    [LibraryImport(Library)]
+    public static partial void CGEventPost(uint tap, IntPtr cgEvent);
+
+    [LibraryImport(Library)]
+    public static partial int CGWarpMouseCursorPosition(CGPoint newCursorPosition);
+
+    public static IntPtr WindowBoundsKey { get; } = ResolveConstant("kCGWindowBounds");
+
+    public static IntPtr WindowLayerKey { get; } = ResolveConstant("kCGWindowLayer");
+
+    public static IntPtr WindowOwnerPidKey { get; } = ResolveConstant("kCGWindowOwnerPID");
+
+    private static IntPtr ResolveConstant(string symbol)
+    {
+        if (!OperatingSystem.IsMacOS())
+        {
+            return IntPtr.Zero;
+        }
+
+        var handle = NativeLibrary.Load(Library);
+        try
+        {
+            return NativeLibrary.TryGetExport(handle, symbol, out var export)
+                ? Marshal.ReadIntPtr(export)
+                : IntPtr.Zero;
+        }
+        finally
+        {
+            NativeLibrary.Free(handle);
+        }
+    }
 }

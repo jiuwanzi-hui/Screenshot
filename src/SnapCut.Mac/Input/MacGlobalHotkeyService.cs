@@ -7,6 +7,11 @@ internal enum MacHotkeyAction
 {
     Capture,
     ScrollCapture,
+    VideoRecording,
+    RecognizeText,
+    Translation,
+    PinImage,
+    OpenSettings,
 }
 
 internal sealed class MacGlobalHotkeyService : IDisposable
@@ -18,6 +23,11 @@ internal sealed class MacGlobalHotkeyService : IDisposable
     private bool _disposed;
     private MacHotkeyGesture _capture = MacHotkeyGesture.CaptureDefault;
     private MacHotkeyGesture _scroll = MacHotkeyGesture.ScrollDefault;
+    private MacHotkeyGesture _recording = MacHotkeyGesture.RecordingDefault;
+    private MacHotkeyGesture _ocr = MacHotkeyGesture.OcrDefault;
+    private MacHotkeyGesture _translation = MacHotkeyGesture.TranslationDefault;
+    private MacHotkeyGesture _pin = MacHotkeyGesture.PinDefault;
+    private MacHotkeyGesture _settings = MacHotkeyGesture.SettingsDefault;
 
     public MacGlobalHotkeyService()
     {
@@ -38,6 +48,11 @@ internal sealed class MacGlobalHotkeyService : IDisposable
     {
         _capture = settings.CaptureHotkey;
         _scroll = settings.ScrollHotkey;
+        _recording = settings.RecordingHotkey;
+        _ocr = settings.OcrHotkey;
+        _translation = settings.TranslationHotkey;
+        _pin = settings.PinHotkey;
+        _settings = settings.SettingsHotkey;
     }
 
     public bool TryStart()
@@ -127,6 +142,26 @@ internal sealed class MacGlobalHotkeyService : IDisposable
         else if (_scroll.Matches(keyCode, flags))
         {
             Pressed?.Invoke(MacHotkeyAction.ScrollCapture);
+        }
+        else if (_recording.Matches(keyCode, flags))
+        {
+            Pressed?.Invoke(MacHotkeyAction.VideoRecording);
+        }
+        else if (_ocr.Matches(keyCode, flags))
+        {
+            Pressed?.Invoke(MacHotkeyAction.RecognizeText);
+        }
+        else if (_translation.Matches(keyCode, flags))
+        {
+            Pressed?.Invoke(MacHotkeyAction.Translation);
+        }
+        else if (_pin.Matches(keyCode, flags))
+        {
+            Pressed?.Invoke(MacHotkeyAction.PinImage);
+        }
+        else if (_settings.Matches(keyCode, flags))
+        {
+            Pressed?.Invoke(MacHotkeyAction.OpenSettings);
         }
 
         return cgEvent;

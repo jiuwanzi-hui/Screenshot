@@ -1207,6 +1207,54 @@
                         <TextBlock FontSize="14"
                                    FontWeight="SemiBold"
                                    Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="完成截图" />
+                        <TextBlock Margin="0,4,16,0"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                   TextWrapping="Wrap"
+                               Text="默认使用 Ctrl+C；填写其他快捷键后会替换 Ctrl+C。仅在截图框选完成、底部工具栏显示后生效，用于完成当前截图并复制。支持键盘组合或单独一个英文字母。" />
+                        <Grid Margin="0,8,16,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <local:HotKeyCaptureBox x:Name="CompleteCaptureHotKeyBox"
+                                                    Height="34"
+                                                    Padding="10,3"
+                                                    BorderBrush="{DynamicResource AppBorderBrush}"
+                                                    GotKeyboardFocus="OnHotKeyCaptureGotKeyboardFocus"
+                                                    HotKeyCaptured="OnHotKeyCaptured"
+                                                    HotKeyCaptureCanceled="OnHotKeyCaptureCanceled"
+                                                    LostKeyboardFocus="OnHotKeyCaptureLostKeyboardFocus"
+                                                    Tag="CompleteCaptureHotKey"
+                                                    Text="{Binding CompleteCaptureHotKey}"
+                                                    TextAlignment="Center"
+                                                    ToolTip="单击后按下要用于完成当前截图的快捷键" />
+                            <Button Grid.Column="1"
+                                    Width="68"
+                                    Margin="8,0,0,0"
+                                    Click="OnBeginHotKeyEditClick"
+                                    Content="修改"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="CompleteCaptureHotKeyBox"
+                                    ToolTip="修改完成截图快捷键" />
+                            <Button Grid.Column="2"
+                                    Width="34"
+                                    Margin="6,0,0,0"
+                                    Click="OnClearHotKeyClick"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="CompleteCaptureHotKeyBox"
+                                    ToolTip="不设置完成截图快捷键">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,17,0,0">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
                                    Text="视频录制" />
                         <Grid Margin="0,8,16,0">
                             <Grid.ColumnDefinitions>

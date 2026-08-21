@@ -24,6 +24,42 @@ public sealed class PinnedImageWindowTests
     ];
 
     [Fact]
+    public void SinglePinEditorZoomsWithTheMouseWheel()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var image = new CapturedImage(new System.Drawing.Bitmap(800, 600));
+            var window = new PinnedImageWindow(image.Clone());
+            try
+            {
+                window.Show();
+                window.UpdateLayout();
+                Assert.IsType<Button>(window.FindName("EditButton")).RaiseEvent(
+                    new System.Windows.RoutedEventArgs(Button.ClickEvent));
+                var editor = Assert.IsType<ImageEditorCanvas>(
+                    window.FindName("InlineEditorCanvas"));
+                var surface = Assert.IsType<Border>(window.FindName("ImageSurface"));
+                var wheel = new System.Windows.Input.MouseWheelEventArgs(
+                    System.Windows.Input.Mouse.PrimaryDevice,
+                    Environment.TickCount,
+                    120)
+                {
+                    RoutedEvent = System.Windows.UIElement.PreviewMouseWheelEvent,
+                };
+
+                surface.RaiseEvent(wheel);
+
+                Assert.True(wheel.Handled);
+                Assert.True(editor.Zoom > 1);
+            }
+            finally
+            {
+                window.Close();
+            }
+        });
+    }
+
+    [Fact]
     public void PinChromeChangesWithTheSelectedApplicationTheme()
     {
         WpfTestHost.Invoke(() =>

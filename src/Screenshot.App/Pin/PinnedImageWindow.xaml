@@ -21,6 +21,20 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="../Themes/ThemedContextMenus.xaml" />
             </ResourceDictionary.MergedDictionaries>
+        <DrawingBrush x:Key="PinnedCheckerboardBrush"
+                      TileMode="Tile"
+                      Viewport="0,0,12,12"
+                      ViewportUnits="Absolute"
+                      Viewbox="0,0,12,12"
+                      ViewboxUnits="Absolute">
+            <DrawingBrush.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="#FFFFFFFF" Geometry="M0,0 H12 V12 H0 Z" />
+                    <GeometryDrawing Brush="#FF9C9C9C" Geometry="M0,0 H6 V6 H0 Z" />
+                    <GeometryDrawing Brush="#FF9C9C9C" Geometry="M6,6 H12 V12 H6 Z" />
+                </DrawingGroup>
+            </DrawingBrush.Drawing>
+        </DrawingBrush>
         <Style x:Key="PinnedCommandButton" TargetType="Button">
             <Setter Property="Height" Value="24" />
             <Setter Property="MinWidth" Value="42" />
@@ -199,8 +213,11 @@
                           Click="OnGroupClick"
                           Header="加入钉图编组"
                           Style="{StaticResource ThemedMenuItemStyle}" />
+                <MenuItem Click="OnMinimizeClick"
+                          Header="最小化此钉图"
+                          Style="{StaticResource ThemedMenuItemStyle}" />
                 <MenuItem Click="OnHideAllClick"
-                          Header="隐藏全部钉图"
+                          Header="最小化全部钉图"
                           Style="{StaticResource ThemedMenuItemStyle}" />
                 <MenuItem Click="OnCloseFromContextMenuClick"
                           Header="关闭钉图"
@@ -216,7 +233,7 @@
         </Border.Effect>
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="30" />
+                <RowDefinition x:Name="PinnedHeaderRow" Height="30" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
@@ -275,24 +292,33 @@
                                        Text="&#xE711;" />
                         </Button>
                     </StackPanel>
-                    <TextBlock x:Name="HeaderStatusText"
-                               Margin="9,0,8,0"
-                               VerticalAlignment="Center"
-                               FontSize="12"
-                               Foreground="{DynamicResource AppTextPrimaryBrush}"
-                               TextTrimming="CharacterEllipsis"
-                               Text="钉图" />
+                    <StackPanel Margin="9,0,8,0"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal">
+                        <TextBlock x:Name="HeaderStatusText"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   TextTrimming="CharacterEllipsis"
+                                   Text="钉图" />
+                        <TextBlock Margin="7,0,0,0"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                   Text="右键更多 | 滚轮缩放 | 中键按住拖动画面" />
+                    </StackPanel>
                 </DockPanel>
             </Border>
 
             <Border x:Name="ImageSurface"
                     Grid.Row="1"
-                    Background="{DynamicResource ImageEditorViewportBackgroundBrush}"
+                    Background="{StaticResource PinnedCheckerboardBrush}"
                     CornerRadius="0,0,7,7"
-                    Cursor="SizeAll"
+                    Cursor="Arrow"
                     ClipToBounds="True"
                     PreviewMouseWheel="OnImageMouseWheel"
-                    MouseLeftButtonDown="OnImageMouseLeftButtonDown">
+                    PreviewMouseLeftButtonDown="OnImageMouseLeftButtonDown"
+                    PreviewMouseMove="OnImageMouseMove"
+                    PreviewMouseLeftButtonUp="OnImageMouseLeftButtonUp"
+                    LostMouseCapture="OnImageLostMouseCapture">
                 <Grid x:Name="ImageViewport"
                       SizeChanged="OnImageViewportSizeChanged">
                     <Image x:Name="PinnedImage"
@@ -301,20 +327,28 @@
                     <Canvas x:Name="TextOverlay"
                             Panel.ZIndex="20"
                             Background="{x:Null}" />
-                    <Grid x:Name="InlineEditorViewport"
+                    <ScrollViewer x:Name="InlineEditorViewport"
                           Panel.ZIndex="10"
-                          Background="{DynamicResource ImageEditorViewportBackgroundBrush}"
+                          Background="{StaticResource PinnedCheckerboardBrush}"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalContentAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          PreviewMouseDown="OnInlineEditorPreviewMouseDown"
+                          PreviewMouseMove="OnInlineEditorPreviewMouseMove"
+                          PreviewMouseUp="OnInlineEditorPreviewMouseUp"
+                          LostMouseCapture="OnInlineEditorLostMouseCapture"
                           Visibility="Collapsed">
                         <Border x:Name="InlineEditorFrame"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
-                                Background="{DynamicResource ImageEditorViewportBackgroundBrush}"
+                                Background="{StaticResource PinnedCheckerboardBrush}"
                                 ClipToBounds="True">
                             <editor:ImageEditorCanvas x:Name="InlineEditorCanvas"
                                                       HorizontalAlignment="Left"
                                                       VerticalAlignment="Top" />
                         </Border>
-                    </Grid>
+                    </ScrollViewer>
                     <Canvas x:Name="CropOverlay"
                             Panel.ZIndex="40"
                             Visibility="Collapsed"

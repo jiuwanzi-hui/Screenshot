@@ -25,6 +25,29 @@ internal static class ObjectiveC
         IntPtr argument);
 
     [DllImport(Library, EntryPoint = "objc_msgSend")]
+    private static extern IntPtr MessageIntPtr(
+        IntPtr receiver,
+        IntPtr selector,
+        IntPtr first,
+        IntPtr second);
+
+    [DllImport(Library, EntryPoint = "objc_msgSend")]
+    private static extern CGRect MessageCGRect(IntPtr receiver, IntPtr selector);
+
+    [DllImport(Library, EntryPoint = "objc_msgSend_stret")]
+    private static extern void MessageCGRectStret(
+        out CGRect result,
+        IntPtr receiver,
+        IntPtr selector);
+
+    [DllImport(Library, EntryPoint = "objc_msgSend")]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private static extern bool MessageBool(
+        IntPtr receiver,
+        IntPtr selector,
+        IntPtr argument);
+
+    [DllImport(Library, EntryPoint = "objc_msgSend")]
     [return: MarshalAs(UnmanagedType.I1)]
     private static extern bool MessageBool(
         IntPtr receiver,
@@ -60,6 +83,30 @@ internal static class ObjectiveC
         string selector,
         IntPtr argument) =>
         MessageIntPtr(receiver, GetSelector(selector), argument);
+
+    public static IntPtr SendIntPtr(
+        IntPtr receiver,
+        string selector,
+        IntPtr first,
+        IntPtr second) =>
+        MessageIntPtr(receiver, GetSelector(selector), first, second);
+
+    public static CGRect SendCGRect(IntPtr receiver, string selector)
+    {
+        if (RuntimeInformation.ProcessArchitecture == Architecture.X64)
+        {
+            MessageCGRectStret(out var result, receiver, GetSelector(selector));
+            return result;
+        }
+
+        return MessageCGRect(receiver, GetSelector(selector));
+    }
+
+    public static bool SendBool(
+        IntPtr receiver,
+        string selector,
+        IntPtr argument) =>
+        MessageBool(receiver, GetSelector(selector), argument);
 
     public static bool SendBool(
         IntPtr receiver,

@@ -219,7 +219,6 @@ public partial class App : System.Windows.Application, IDisposable
         _trayIconService.VideoRecordingRequested += OnVideoRecordingRequested;
         _trayIconService.HistoryRequested += OnHistoryRequested;
         _trayIconService.HidePinnedImagesRequested += OnHidePinnedImagesRequested;
-        _trayIconService.ShowPinnedImagesRequested += OnShowPinnedImagesRequested;
         _trayIconService.ExitRequested += OnExitRequested;
         UpdatePinnedImageTrayCommands();
         _trayIconService.SetVisible(_currentSettings.ShowNotificationIcon);
@@ -365,11 +364,6 @@ public partial class App : System.Windows.Application, IDisposable
     private void OnHidePinnedImagesRequested(object? sender, EventArgs e)
     {
         _ = Dispatcher.BeginInvoke(() => _pinnedImageManager?.HideAll());
-    }
-
-    private void OnShowPinnedImagesRequested(object? sender, EventArgs e)
-    {
-        _ = Dispatcher.BeginInvoke(() => _pinnedImageManager?.ShowAll());
     }
 
     private void OnPinnedImageDisplayStateChanged(object? sender, EventArgs e)
@@ -689,6 +683,10 @@ public partial class App : System.Windows.Application, IDisposable
                 DetachUsablePreCapturedScreen(e),
                 e.CapturePointerContinuation);
         }
+        else if (e.Action == HotKeyAction.CompleteCapture)
+        {
+            CaptureOverlayWindow.TryCompleteActiveInteractiveSelection();
+        }
         else if (e.Action == HotKeyAction.RecognizeText)
         {
             RequestTranslationCapture(
@@ -697,7 +695,9 @@ public partial class App : System.Windows.Application, IDisposable
         }
         else if (e.Action == HotKeyAction.PinImage)
         {
-            RequestPinCapture(e.CapturePointerContinuation);
+            RequestPinCapture(
+                DetachUsablePreCapturedScreen(e),
+                e.CapturePointerContinuation);
         }
         else if (e.Action == HotKeyAction.ScrollCapture)
         {
@@ -874,9 +874,10 @@ public partial class App : System.Windows.Application, IDisposable
     }
 
     private void RequestPinCapture(
-        CapturePointerContinuation? pointerContinuation)
+        CapturedImage? initialScreenSnapshot = null,
+        CapturePointerContinuation? pointerContinuation = null)
     {
-        _ = RequestPinCaptureAsync(pointerContinuation);
+        _ = RequestPinCaptureAsync(initialScreenSnapshot, pointerContinuation);
     }
 
     private void RequestScrollCapture(
@@ -932,6 +933,7 @@ public partial class App : System.Windows.Application, IDisposable
     }
 
     private async Task RequestPinCaptureAsync(
+        CapturedImage? initialScreenSnapshot,
         CapturePointerContinuation? pointerContinuation)
     {
         try
@@ -939,11 +941,19 @@ public partial class App : System.Windows.Application, IDisposable
             if (_regionCaptureCoordinator is not null)
             {
                 await _regionCaptureCoordinator.RequestPinCaptureAsync(
+                    initialScreenSnapshot,
                     pointerContinuation);
+                initialScreenSnapshot = null;
+            }
+            else
+            {
+                initialScreenSnapshot?.Dispose();
+                initialScreenSnapshot = null;
             }
         }
         catch (Exception)
         {
+            initialScreenSnapshot?.Dispose();
             _mainWindow?.ShowStatus("钉图失败，请重试。");
         }
     }
@@ -1036,7 +1046,6 @@ public partial class App : System.Windows.Application, IDisposable
         _trayIconService.VideoRecordingRequested -= OnVideoRecordingRequested;
         _trayIconService.HistoryRequested -= OnHistoryRequested;
         _trayIconService.HidePinnedImagesRequested -= OnHidePinnedImagesRequested;
-        _trayIconService.ShowPinnedImagesRequested -= OnShowPinnedImagesRequested;
         _trayIconService.ExitRequested -= OnExitRequested;
         _trayIconService.Dispose();
         _trayIconService = null;

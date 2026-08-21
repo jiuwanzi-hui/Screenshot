@@ -26,4 +26,25 @@ internal static class SelectionGeometry
             normalized.Width * scaleX,
             normalized.Height * scaleY);
     }
+
+    public static PixelSize ToPixelSize(
+        Rect selection,
+        Size overlaySize,
+        int displayPixelWidth,
+        int displayPixelHeight)
+    {
+        if (overlaySize.Width <= 0 || overlaySize.Height <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(overlaySize),
+                "框选窗口必须具有有效尺寸。");
+        }
+
+        var normalized = selection.Normalize();
+        return new PixelSize(
+            Math.Max(0, (int)Math.Round(
+                normalized.Width * displayPixelWidth / overlaySize.Width)),
+            Math.Max(0, (int)Math.Round(
+                normalized.Height * displayPixelHeight / overlaySize.Height)));
+    }
 }

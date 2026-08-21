@@ -70,26 +70,22 @@ public sealed class TrayIconServiceTests
         var items = tray.ContextMenuForTesting.Items
             .OfType<System.Windows.Forms.ToolStripMenuItem>()
             .ToArray();
-        var hide = Assert.Single(items.Where(item => item.Text == "隐藏所有钉图"));
-        var show = Assert.Single(items.Where(item => item.Text == "显示所有钉图"));
+        var hide = Assert.Single(items.Where(item => item.Text == "最小化全部钉图"));
 
         tray.UpdatePinnedImageCommands(
             hasPinnedImages: false,
             hasHiddenPinnedImages: false);
         Assert.False(hide.Available);
-        Assert.False(show.Available);
 
         tray.UpdatePinnedImageCommands(
             hasPinnedImages: true,
             hasHiddenPinnedImages: false);
         Assert.True(hide.Available);
-        Assert.False(show.Available);
 
         tray.UpdatePinnedImageCommands(
             hasPinnedImages: true,
             hasHiddenPinnedImages: true);
-        Assert.False(hide.Available);
-        Assert.True(show.Available);
+        Assert.True(hide.Available);
     }
 
     private static double GetContrastRatio(

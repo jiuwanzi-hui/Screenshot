@@ -182,6 +182,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private string _screenshotHistoryLimitText;
     private string _videoHistoryLimitText;
     private string _regionCaptureHotKey;
+    private string _completeCaptureHotKey;
     private string _videoRecordingHotKey;
     private string _scrollCaptureHotKey;
     private string _ocrHotKey;
@@ -251,6 +252,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _videoHistoryLimitText = settings.VideoHistoryLimit.ToString(
             CultureInfo.InvariantCulture);
         _regionCaptureHotKey = settings.RegionCaptureHotKey;
+        _completeCaptureHotKey = settings.CompleteCaptureHotKey;
         _videoRecordingHotKey = settings.VideoRecordingHotKey;
         _scrollCaptureHotKey = settings.ScrollCaptureHotKey;
         _ocrHotKey = settings.OcrHotKey;
@@ -595,6 +597,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _regionCaptureHotKey, value);
     }
 
+    public string CompleteCaptureHotKey
+    {
+        get => _completeCaptureHotKey;
+        set => SetProperty(ref _completeCaptureHotKey, value);
+    }
+
     public string VideoRecordingHotKey
     {
         get => _videoRecordingHotKey;
@@ -758,6 +766,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
                     VideoHistoryRetentionDaysText,
                     _baseSettings.VideoHistoryRetentionDays),
             RegionCaptureHotKey = RegionCaptureHotKey,
+            CompleteCaptureHotKey = CompleteCaptureHotKey,
             VideoRecordingHotKey = VideoRecordingHotKey,
             ScrollCaptureHotKey = ScrollCaptureHotKey,
             OcrHotKey = OcrHotKey,
@@ -834,6 +843,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         VideoHistoryLimitText = settings.VideoHistoryLimit.ToString(
             CultureInfo.InvariantCulture);
         RegionCaptureHotKey = settings.RegionCaptureHotKey;
+        CompleteCaptureHotKey = settings.CompleteCaptureHotKey;
         VideoRecordingHotKey = settings.VideoRecordingHotKey;
         ScrollCaptureHotKey = settings.ScrollCaptureHotKey;
         OcrHotKey = settings.OcrHotKey;

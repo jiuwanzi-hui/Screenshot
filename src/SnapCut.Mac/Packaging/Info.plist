@@ -30,5 +30,11 @@
   <true/>
   <key>NSScreenCaptureUsageDescription</key>
   <string>SnapCut 需要读取屏幕内容来完成区域截图和滚动长截图。</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>SnapCut 需要访问麦克风来录制讲解声音。</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>SnapCut 需要捕获系统音频来完成带声音的屏幕录制。</string>
+  <key>NSAccessibilityUsageDescription</key>
+  <string>SnapCut 需要辅助功能权限来监听全局快捷键并识别窗口边界。</string>
 </dict>
 </plist>

@@ -74,7 +74,7 @@ public sealed class HotKeyCaptureBox : WpfTextBox
         }
 
         if (IsModifierVirtualKey(virtualKey) ||
-            !TryFormatGesture(capturedGesture, out var gesture))
+            !TryFormatCapturedGesture(capturedGesture, out var gesture))
         {
             return;
         }
@@ -125,7 +125,8 @@ public sealed class HotKeyCaptureBox : WpfTextBox
             return;
         }
 
-        if (!TryCreateGesture(key, Keyboard.Modifiers, out var gesture))
+        if (!TryCreateGesture(key, Keyboard.Modifiers, out var gesture) &&
+            !TryCreateStandaloneLetterGesture(key, Keyboard.Modifiers, out gesture))
         {
             e.Handled = true;
             return;
@@ -179,6 +180,51 @@ public sealed class HotKeyCaptureBox : WpfTextBox
         gesture = new HotKeyGesture(modifiers, virtualKey);
         return true;
     }
+
+    private bool TryCreateStandaloneLetterGesture(
+        Key key,
+        ModifierKeys keyboardModifiers,
+        out HotKeyGesture gesture)
+    {
+        gesture = default;
+        if (!IsCompletionCaptureSetting ||
+            keyboardModifiers != ModifierKeys.None ||
+            !TryGetVirtualKey(key, out var virtualKey) ||
+            virtualKey is < 'A' or > 'Z')
+        {
+            return false;
+        }
+
+        gesture = new HotKeyGesture(HotKeyModifiers.None, virtualKey);
+        return true;
+    }
+
+    private bool TryFormatCapturedGesture(
+        HotKeyGesture capturedGesture,
+        out string gesture)
+    {
+        if (TryFormatGesture(capturedGesture, out gesture))
+        {
+            return true;
+        }
+
+        if (IsCompletionCaptureSetting &&
+            capturedGesture.Modifiers == HotKeyModifiers.None &&
+            capturedGesture.VirtualKey is >= 'A' and <= 'Z')
+        {
+            gesture = capturedGesture.ToString();
+            return true;
+        }
+
+        gesture = string.Empty;
+        return false;
+    }
+
+    private bool IsCompletionCaptureSetting =>
+        string.Equals(
+            Tag?.ToString(),
+            "CompleteCaptureHotKey",
+            StringComparison.Ordinal);
 
     public static bool TryFormatGesture(
         Key key,

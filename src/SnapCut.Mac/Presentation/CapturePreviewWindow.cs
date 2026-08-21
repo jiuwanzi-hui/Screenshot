@@ -17,7 +17,11 @@ internal sealed class CapturePreviewWindow : Window
     private readonly double _naturalHeight;
     private double _zoom = 1;
 
-    public CapturePreviewWindow(PixelImage image, string historyPath, bool isScrollCapture)
+    public CapturePreviewWindow(
+        PixelImage image,
+        string historyPath,
+        bool isScrollCapture,
+        Action? pinImage = null)
     {
         _historyPath = historyPath;
         var bitmap = PixelImageBitmap.Create(image);
@@ -48,6 +52,12 @@ internal sealed class CapturePreviewWindow : Window
             Background = Brushes.White,
         };
 
+        _status = new TextBlock
+        {
+            Text = $"{image.Width} × {image.Height} px",
+            Foreground = new SolidColorBrush(MacTheme.SecondaryText),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
         var copy = MacTheme.CreateButton("复制");
         copy.Click += (_, _) => Copy();
         var save = MacTheme.CreateButton("另存为", primary: true);
@@ -55,15 +65,16 @@ internal sealed class CapturePreviewWindow : Window
         var open = MacTheme.CreateButton("在访达中打开");
         open.Click += (_, _) => MacNativeUi.OpenPath(
             Path.GetDirectoryName(_historyPath) ?? _historyPath);
-        _status = new TextBlock
+        var pin = MacTheme.CreateButton("钉在桌面");
+        pin.Click += (_, _) =>
         {
-            Text = $"{image.Width} × {image.Height} px",
-            Foreground = new SolidColorBrush(MacTheme.SecondaryText),
-            VerticalAlignment = VerticalAlignment.Center,
+            pinImage?.Invoke();
+            _status.Text = "已创建钉图 · 滚轮缩放 · 拖动移动 · 右键操作";
         };
+        pin.IsVisible = pinImage is not null;
         var toolbar = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto,Auto"),
+            ColumnDefinitions = new ColumnDefinitions("*,Auto,Auto,Auto,Auto"),
             Margin = new Thickness(16, 12),
             ColumnSpacing = 8,
             Children =
@@ -71,12 +82,14 @@ internal sealed class CapturePreviewWindow : Window
                 _status,
                 copy,
                 save,
+                pin,
                 open,
             },
         };
         Grid.SetColumn(copy, 1);
         Grid.SetColumn(save, 2);
-        Grid.SetColumn(open, 3);
+        Grid.SetColumn(pin, 3);
+        Grid.SetColumn(open, 4);
 
         Content = new Grid
         {
@@ -93,7 +106,7 @@ internal sealed class CapturePreviewWindow : Window
 
     protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
     {
-        if ((e.KeyModifiers & KeyModifiers.Control) == 0)
+        if ((e.KeyModifiers & (KeyModifiers.Meta | KeyModifiers.Control)) == 0)
         {
             base.OnPointerWheelChanged(e);
             return;
@@ -104,6 +117,41 @@ internal sealed class CapturePreviewWindow : Window
         _imageView.Height = _naturalHeight * _zoom;
         _status.Text = $"{Path.GetFileName(_historyPath)} · {_zoom:P0}";
         e.Handled = true;
+    }
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        var command = (e.KeyModifiers & KeyModifiers.Meta) != 0;
+        if (command && e.Key == Key.C)
+        {
+            Copy();
+            e.Handled = true;
+            return;
+        }
+
+        if (command && e.Key == Key.S)
+        {
+            SaveAs();
+            e.Handled = true;
+            return;
+        }
+
+        if (command && e.Key == Key.O)
+        {
+            MacNativeUi.OpenPath(
+                Path.GetDirectoryName(_historyPath) ?? _historyPath);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Escape)
+        {
+            Close();
+            e.Handled = true;
+            return;
+        }
+
+        base.OnKeyDown(e);
     }
 
     private void Copy()

@@ -29,4 +29,16 @@ public sealed class SelectionGeometryTests
                 default,
                 new CGRect(0, 0, 1920, 1080)));
     }
+
+    [Fact]
+    public void ConvertsSelectionPointsToRetinaPixels()
+    {
+        var result = SelectionGeometry.ToPixelSize(
+            new Rect(50, 40, 320, 180),
+            new Size(1440, 900),
+            displayPixelWidth: 2880,
+            displayPixelHeight: 1800);
+
+        Assert.Equal(new PixelSize(640, 360), result);
+    }
 }

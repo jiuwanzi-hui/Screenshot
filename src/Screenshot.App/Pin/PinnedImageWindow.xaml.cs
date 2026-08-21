@@ -52,6 +52,25 @@ public partial class PinnedImageWindow : Window
     private WpfPoint? _cropDragStart;
     private bool _isEditorMode;
     private bool _isCropMode;
+    private BitmapSource? _groupingPreview;
+    private bool _isPanningInlineEditor;
+    private WpfPoint _inlineEditorPanStartPoint;
+    private double _inlineEditorPanStartHorizontalOffset;
+    private double _inlineEditorPanStartVerticalOffset;
+    private PinnedWindowMinimization.Bounds? _restoreBounds;
+    private bool _isMinimized;
+    private double _restoreMinWidth;
+    private double _restoreMinHeight;
+    private bool _isDraggingThumbnail;
+    private bool _thumbnailDragMoved;
+    private WpfPoint _thumbnailDragStart;
+    private WpfPoint _thumbnailDragStartScreen;
+    private double _thumbnailStartTop;
+    private Thickness _restoreShellMargin;
+    private Thickness _restoreShellBorderThickness;
+    private CornerRadius _restoreShellCornerRadius;
+    private System.Windows.Media.Effects.Effect? _restoreShellEffect;
+    private ContextMenu? _restoreContextMenu;
 
     public PinnedImageWindow(
         CapturedImage capturedImage,
@@ -97,6 +116,77 @@ public partial class PinnedImageWindow : Window
 
     public event EventHandler? HideAllRequested;
 
+    public event EventHandler? MinimizeRequested;
+
+    public event EventHandler? MinimizedStateChanged;
+
+    internal bool IsMinimized => _isMinimized;
+
+    internal PinnedWindowMinimization.Bounds GetPersistenceBounds() =>
+        _restoreBounds ?? new(Left, Top, Width, Height);
+
+    internal void MinimizeTo(int stackIndex)
+    {
+        if (_isMinimized) return;
+        _restoreBounds = new(Left, Top, Width, Height);
+        _restoreMinWidth = MinWidth;
+        _restoreMinHeight = MinHeight;
+        _isMinimized = true;
+        _restoreContextMenu = PinnedShell.ContextMenu;
+        PinnedShell.ContextMenu = null;
+        MinimizedStateChanged?.Invoke(this, EventArgs.Empty);
+        MinWidth = 0;
+        MinHeight = 0;
+        _restoreShellMargin = PinnedShell.Margin;
+        _restoreShellBorderThickness = PinnedShell.BorderThickness;
+        _restoreShellCornerRadius = PinnedShell.CornerRadius;
+        _restoreShellEffect = PinnedShell.Effect;
+        PinnedShell.Margin = new Thickness(0);
+        PinnedShell.BorderThickness = new Thickness(0);
+        PinnedShell.CornerRadius = new CornerRadius(0);
+        PinnedShell.Effect = null;
+        PinnedShell.Background = WpfBrushes.Transparent;
+        PinnedHeaderRow.Height = new GridLength(0);
+        PinnedHeader.Visibility = Visibility.Collapsed;
+        ImageSurface.Background = WpfBrushes.Transparent;
+        ImageSurface.CornerRadius = new CornerRadius(0);
+        PinnedImage.Stretch = Stretch.UniformToFill;
+        ImageSurface.Cursor = WpfCursors.Arrow;
+        TextOverlay.Visibility = Visibility.Collapsed;
+        PinnedWindowMinimization.Animate(this, PinnedWindowMinimization.GetThumbnailBounds(stackIndex), () => { });
+    }
+
+    internal void RestoreFromMinimized()
+    {
+        if (!_isMinimized || _restoreBounds is not { } bounds) return;
+        PinnedWindowMinimization.Animate(this, bounds, () =>
+        {
+            BeginAnimation(LeftProperty, null); BeginAnimation(TopProperty, null);
+            BeginAnimation(WidthProperty, null); BeginAnimation(HeightProperty, null);
+            Left = bounds.Left; Top = bounds.Top;
+            Width = bounds.Width; Height = bounds.Height;
+            MinWidth = _restoreMinWidth; MinHeight = _restoreMinHeight;
+            PinnedShell.Margin = _restoreShellMargin;
+            PinnedShell.BorderThickness = _restoreShellBorderThickness;
+            PinnedShell.CornerRadius = _restoreShellCornerRadius;
+            PinnedShell.Effect = _restoreShellEffect;
+            PinnedShell.SetResourceReference(
+                BackgroundProperty,
+                "AppPanelBackgroundBrush");
+            PinnedShell.ContextMenu = _restoreContextMenu;
+            PinnedHeaderRow.Height = new GridLength(30);
+            PinnedHeader.Visibility = Visibility.Visible;
+            ImageSurface.Background =
+                (System.Windows.Media.Brush)FindResource("PinnedCheckerboardBrush");
+            ImageSurface.CornerRadius = new CornerRadius(0, 0, 7, 7);
+            PinnedImage.Stretch = Stretch.Uniform;
+            ImageSurface.Cursor = WpfCursors.Arrow;
+            TextOverlay.Visibility = Visibility.Visible;
+            _isMinimized = false; _restoreBounds = null;
+            MinimizedStateChanged?.Invoke(this, EventArgs.Empty);
+        });
+    }
+
     public event EventHandler? GroupMembershipChanged;
 
     public event EventHandler? PersistenceChanged;
@@ -133,6 +223,9 @@ public partial class PinnedImageWindow : Window
 
     internal BitmapSource Preview => _capturedImage.Preview;
 
+    // Preserve the scale visible to the user when this pin enters a group.
+    internal BitmapSource GroupingPreview => _groupingPreview ?? Preview;
+
     internal bool IsInlineEditorVisible => _isEditorMode;
 
     internal bool IsInlineCropVisible => _isCropMode;
@@ -150,6 +243,7 @@ public partial class PinnedImageWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _isClosed = true;
+        EndInlineEditorPanning();
         SourceInitialized -= OnSourceInitialized;
         Loaded -= OnLoaded;
         CloseEditorToolbar();
@@ -362,6 +456,9 @@ public partial class PinnedImageWindow : Window
         HideAllRequested?.Invoke(this, EventArgs.Empty);
     }
 
+    private void OnMinimizeClick(object sender, RoutedEventArgs e) =>
+        MinimizeRequested?.Invoke(this, EventArgs.Empty);
+
     private void OnGroupClick(object sender, RoutedEventArgs e)
     {
         SetGroupedState(!IsGrouped);
@@ -381,6 +478,7 @@ public partial class PinnedImageWindow : Window
         }
 
         IsGrouped = isGrouped;
+        _groupingPreview = isGrouped ? CreateGroupingPreview() : null;
         GroupMenuItem.Header = IsGrouped ? "移出钉图编组" : "加入钉图编组";
         HeaderStatusText.Text = IsGrouped ? "钉图 · 已加入编组" : "钉图";
         GroupMembershipChanged?.Invoke(this, EventArgs.Empty);
@@ -394,7 +492,14 @@ public partial class PinnedImageWindow : Window
 
     private void OnImageMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (_isEditorMode || _isCropMode)
+        if (_isEditorMode)
+        {
+            ZoomInlineEditor(e);
+            e.Handled = true;
+            return;
+        }
+
+        if (_isCropMode)
         {
             e.Handled = true;
             return;
@@ -416,6 +521,88 @@ public partial class PinnedImageWindow : Window
         Width = nextWidth;
         Height = nextHeight;
         e.Handled = true;
+    }
+
+    private void ZoomInlineEditor(MouseWheelEventArgs e)
+    {
+        var pointer = e.GetPosition(InlineEditorViewport);
+        var previousZoom = InlineEditorCanvas.Zoom;
+        var contentX =
+            (InlineEditorViewport.HorizontalOffset + pointer.X) / previousZoom;
+        var contentY =
+            (InlineEditorViewport.VerticalOffset + pointer.Y) / previousZoom;
+        var factor = e.Delta > 0 ? 1.1 : 1 / 1.1;
+        InlineEditorCanvas.SetZoom(InlineEditorCanvas.Zoom * factor);
+        InlineEditorFrame.Width = InlineEditorCanvas.DisplayWidth;
+        InlineEditorFrame.Height = InlineEditorCanvas.DisplayHeight;
+        InlineEditorViewport.UpdateLayout();
+        InlineEditorViewport.ScrollToHorizontalOffset(
+            (contentX * InlineEditorCanvas.Zoom) - pointer.X);
+        InlineEditorViewport.ScrollToVerticalOffset(
+            (contentY * InlineEditorCanvas.Zoom) - pointer.Y);
+        HeaderStatusText.Text = $"钉图 · 正在编辑 · {InlineEditorCanvas.Zoom * 100:0}%";
+    }
+
+    private void OnInlineEditorPreviewMouseDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (!_isEditorMode || e.ChangedButton != MouseButton.Middle)
+        {
+            return;
+        }
+
+        _isPanningInlineEditor = true;
+        _inlineEditorPanStartPoint = e.GetPosition(InlineEditorViewport);
+        _inlineEditorPanStartHorizontalOffset = InlineEditorViewport.HorizontalOffset;
+        _inlineEditorPanStartVerticalOffset = InlineEditorViewport.VerticalOffset;
+        InlineEditorViewport.Cursor = WpfCursors.SizeAll;
+        _ = InlineEditorViewport.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void OnInlineEditorPreviewMouseMove(object sender, WpfMouseEventArgs e)
+    {
+        if (!_isPanningInlineEditor)
+        {
+            return;
+        }
+        if (e.MiddleButton != MouseButtonState.Pressed)
+        {
+            EndInlineEditorPanning();
+            return;
+        }
+
+        var current = e.GetPosition(InlineEditorViewport);
+        InlineEditorViewport.ScrollToHorizontalOffset(
+            _inlineEditorPanStartHorizontalOffset + _inlineEditorPanStartPoint.X - current.X);
+        InlineEditorViewport.ScrollToVerticalOffset(
+            _inlineEditorPanStartVerticalOffset + _inlineEditorPanStartPoint.Y - current.Y);
+        e.Handled = true;
+    }
+
+    private void OnInlineEditorPreviewMouseUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (_isPanningInlineEditor && e.ChangedButton == MouseButton.Middle)
+        {
+            EndInlineEditorPanning();
+            e.Handled = true;
+        }
+    }
+
+    private void OnInlineEditorLostMouseCapture(object sender, WpfMouseEventArgs e) =>
+        EndInlineEditorPanning();
+
+    private void EndInlineEditorPanning()
+    {
+        _isPanningInlineEditor = false;
+        if (InlineEditorViewport.IsMouseCaptured)
+        {
+            InlineEditorViewport.ReleaseMouseCapture();
+        }
+        InlineEditorViewport.Cursor = WpfCursors.Arrow;
     }
 
     private void OnCropClick(object sender, RoutedEventArgs e)
@@ -506,6 +693,7 @@ public partial class PinnedImageWindow : Window
             return;
         }
 
+        EndInlineEditorPanning();
         InlineEditorCanvas.Reset();
         _inlineEditorImage?.Dispose();
         _inlineEditorImage = null;
@@ -585,6 +773,10 @@ public partial class PinnedImageWindow : Window
         TextOverlay.Children.Clear();
         TranslateButton.IsEnabled = false;
         ApplyInitialSize();
+        if (IsGrouped)
+        {
+            _groupingPreview = CreateGroupingPreview();
+        }
         _textRecognitionTask = RecognizeTextAsync();
         if (IsPersistent)
         {
@@ -595,12 +787,79 @@ public partial class PinnedImageWindow : Window
 
     private void OnImageMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (_isMinimized)
+        {
+            PinnedWindowMinimization.CommitCurrentAnimation(this);
+            _isDraggingThumbnail = true;
+            _thumbnailDragMoved = false;
+            _thumbnailDragStart = e.GetPosition(this);
+            _thumbnailDragStartScreen = GetCurrentScreenCursorPosition();
+            _thumbnailStartTop = Top;
+            ImageSurface.Cursor = WpfCursors.SizeAll;
+            _ = ImageSurface.CaptureMouse();
+            e.Handled = true;
+            return;
+        }
         if (_isEditorMode || _isCropMode || IsSelectableTextSource(e.OriginalSource))
         {
             return;
         }
 
         BeginWindowDrag(e);
+    }
+
+    private void OnImageMouseMove(object sender, WpfMouseEventArgs e)
+    {
+        if (!_isDraggingThumbnail || e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var workArea = SystemParameters.WorkArea;
+        var currentScreen = GetCurrentScreenCursorPosition();
+        var top = _thumbnailStartTop +
+            currentScreen.Y - _thumbnailDragStartScreen.Y;
+        _thumbnailDragMoved |= Math.Abs(top - _thumbnailStartTop) >= 3;
+        Left = workArea.Right - Width - 12;
+        Top = Math.Clamp(top, workArea.Top + 12, workArea.Bottom - Height - 12);
+        e.Handled = true;
+    }
+
+    private void OnImageMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        var restore = _isDraggingThumbnail && !_thumbnailDragMoved;
+        EndThumbnailDrag();
+        if (restore)
+        {
+            RestoreFromMinimized();
+        }
+    }
+
+    private void OnImageLostMouseCapture(object sender, WpfMouseEventArgs e) =>
+        EndThumbnailDrag();
+
+    private WpfPoint GetCurrentScreenCursorPosition()
+    {
+        var cursor = System.Windows.Forms.Cursor.Position;
+        var source = PresentationSource.FromVisual(this);
+        return source?.CompositionTarget is { } target
+            ? target.TransformFromDevice.Transform(
+                new WpfPoint(cursor.X, cursor.Y))
+            : new WpfPoint(cursor.X, cursor.Y);
+    }
+
+    private void EndThumbnailDrag()
+    {
+        _isDraggingThumbnail = false;
+        _thumbnailDragMoved = false;
+        if (ImageSurface.IsMouseCaptured)
+        {
+            ImageSurface.ReleaseMouseCapture();
+        }
+        if (_isMinimized)
+        {
+            ImageSurface.Cursor = WpfCursors.Arrow;
+        }
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -1198,6 +1457,33 @@ public partial class PinnedImageWindow : Window
         MaxHeight = Math.Max(MinHeight, workAreaHeight);
         Width = Math.Max(MinWidth, (contentWidth * scale) + ShadowInset);
         Height = Math.Max(MinHeight, (contentHeight * scale) + HeaderAndShadowHeight);
+    }
+
+    private BitmapSource CreateGroupingPreview()
+    {
+        var source = Preview;
+        var availableWidth = Math.Max(1, Width - ShadowInset);
+        var availableHeight = Math.Max(1, Height - HeaderAndShadowHeight);
+        var scale = Math.Min(
+            availableWidth / Math.Max(1, source.PixelWidth),
+            availableHeight / Math.Max(1, source.PixelHeight));
+        var width = Math.Max(1, (int)Math.Round(source.PixelWidth * scale));
+        var height = Math.Max(1, (int)Math.Round(source.PixelHeight * scale));
+        if (width == source.PixelWidth && height == source.PixelHeight)
+        {
+            return source;
+        }
+
+        var visual = new DrawingVisual();
+        using (var drawing = visual.RenderOpen())
+        {
+            drawing.DrawImage(source, new Rect(0, 0, width, height));
+        }
+
+        var result = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        result.Render(visual);
+        result.Freeze();
+        return result;
     }
 
     private void ApplyInitialPlacement()

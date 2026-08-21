@@ -15,6 +15,7 @@ public static class HotKeyConfiguration
 
         var bindings = new List<HotKeyBinding>();
         AddBinding(bindings, HotKeyAction.RegionCapture, settings.RegionCaptureHotKey);
+        AddBinding(bindings, HotKeyAction.CompleteCapture, settings.CompleteCaptureHotKey);
         AddBinding(bindings, HotKeyAction.VideoRecording, settings.VideoRecordingHotKey);
         AddBinding(bindings, HotKeyAction.RecognizeText, settings.OcrHotKey);
         AddBinding(
@@ -43,6 +44,14 @@ public static class HotKeyConfiguration
                 return new HotKeyValidationResult(false, reservedError);
             }
 
+            if (binding.Action == HotKeyAction.CompleteCapture &&
+                !HotKeyGesture.IsCompletionShortcutAllowed(binding.Gesture))
+            {
+                return new HotKeyValidationResult(
+                    false,
+                    "完成截图快捷键只支持键盘组合或单独一个英文字母，不支持其他单键和鼠标键。");
+            }
+
             if (!gestures.Add(binding.Gesture))
             {
                 return new HotKeyValidationResult(
@@ -64,10 +73,27 @@ public static class HotKeyConfiguration
             return;
         }
 
-        if (!HotKeyGesture.TryParse(configuredGesture, out var gesture, out var errorMessage))
+        var parsed = action == HotKeyAction.CompleteCapture
+            ? HotKeyGesture.TryParseCompletionShortcut(
+                configuredGesture,
+                out var gesture,
+                out var errorMessage)
+            : HotKeyGesture.TryParse(
+                configuredGesture,
+                out gesture,
+                out errorMessage);
+        if (!parsed)
         {
             throw new ArgumentException(
                 $"{GetActionName(action)}：{errorMessage}",
+                nameof(configuredGesture));
+        }
+
+        if (action == HotKeyAction.CompleteCapture &&
+            !HotKeyGesture.IsCompletionShortcutAllowed(gesture))
+        {
+            throw new ArgumentException(
+                "完成截图：只支持键盘组合或单独一个英文字母，不支持其他单键和鼠标键。",
                 nameof(configuredGesture));
         }
 
@@ -79,6 +105,7 @@ public static class HotKeyConfiguration
         return action switch
         {
             HotKeyAction.RegionCapture => "区域截图",
+            HotKeyAction.CompleteCapture => "完成截图",
             HotKeyAction.VideoRecording => "视频录制",
             HotKeyAction.ScrollCapture => "长截图",
             HotKeyAction.RecognizeText => "翻译",

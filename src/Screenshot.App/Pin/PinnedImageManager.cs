@@ -8,6 +8,9 @@ namespace Screenshot.App.Pin;
 public sealed class PinnedImageManager : IDisposable
 {
     private readonly HashSet<PinnedImageWindow> _windows = [];
+    // Keep the order in which pins enter a group. Window coordinates are not a
+    // reliable ordering because users can move pins after adding them.
+    private readonly List<PinnedImageWindow> _groupOrder = [];
     private readonly Func<CapturedImage, Task<OcrRecognitionResult>>?
         _recognizeTextAsync;
     private readonly Func<OcrRecognitionResult, Task<TranslationSegmentsResult>>?
@@ -149,10 +152,11 @@ public sealed class PinnedImageManager : IDisposable
             return;
         }
 
-        _groupWindow?.Hide();
+        var index = 0;
+        _groupWindow?.MinimizeTo(index++);
         foreach (var window in _windows.Where(window => !window.IsGrouped))
         {
-            window.Hide();
+            window.MinimizeTo(index++);
         }
         _hasHiddenWindows = _windows.Count > 0;
         NotifyDisplayStateChanged();
@@ -160,13 +164,10 @@ public sealed class PinnedImageManager : IDisposable
 
     public void ShowAll()
     {
-        if (_groupWindow is not null)
-        {
-            _groupWindow.Show();
-        }
+        _groupWindow?.RestoreFromMinimized();
         foreach (var window in _windows.Where(window => !window.IsGrouped))
         {
-            window.Show();
+            window.RestoreFromMinimized();
         }
         _hasHiddenWindows = false;
         NotifyDisplayStateChanged();
@@ -191,6 +192,7 @@ public sealed class PinnedImageManager : IDisposable
         }
 
         _windows.Clear();
+        _groupOrder.Clear();
         _lastPositions.Clear();
         _saveTimer.Tick -= OnSaveTimerTick;
     }
@@ -204,6 +206,7 @@ public sealed class PinnedImageManager : IDisposable
 
         DetachWindow(window);
         _windows.Remove(window);
+        _groupOrder.Remove(window);
         _lastPositions.Remove(window);
         if (_windows.Count == 0)
         {
@@ -229,7 +232,10 @@ public sealed class PinnedImageManager : IDisposable
         _windows.Add(window);
         if (_hasHiddenWindows)
         {
-            window.Hide();
+            // The minimized state is still an active pin surface. New pins
+            // must join the thumbnail stack instead of becoming unreachable.
+            window.Show();
+            window.MinimizeTo(_windows.Count - 1);
         }
         else
         {
@@ -244,6 +250,8 @@ public sealed class PinnedImageManager : IDisposable
         window.Closed += OnPinnedImageWindowClosed;
         window.SettingsRequested += OnPinnedImageSettingsRequested;
         window.HideAllRequested += OnHideAllRequested;
+        window.MinimizeRequested += OnMinimizeRequested;
+        window.MinimizedStateChanged += OnMinimizedStateChanged;
         window.GroupMembershipChanged += OnGroupMembershipChanged;
         window.PersistenceChanged += OnPersistenceChanged;
         window.LocationChanged += OnWindowLocationChanged;
@@ -255,6 +263,8 @@ public sealed class PinnedImageManager : IDisposable
         window.Closed -= OnPinnedImageWindowClosed;
         window.SettingsRequested -= OnPinnedImageSettingsRequested;
         window.HideAllRequested -= OnHideAllRequested;
+        window.MinimizeRequested -= OnMinimizeRequested;
+        window.MinimizedStateChanged -= OnMinimizedStateChanged;
         window.GroupMembershipChanged -= OnGroupMembershipChanged;
         window.PersistenceChanged -= OnPersistenceChanged;
         window.LocationChanged -= OnWindowLocationChanged;
@@ -263,10 +273,51 @@ public sealed class PinnedImageManager : IDisposable
 
     private void OnHideAllRequested(object? sender, EventArgs e) => HideAll();
 
+    private void OnMinimizeRequested(object? sender, EventArgs e)
+    {
+        if (sender is not PinnedImageWindow window || window.IsMinimized)
+        {
+            return;
+        }
+
+        window.MinimizeTo(GetNextThumbnailIndex(window));
+        UpdateMinimizedState();
+    }
+
+    private int GetNextThumbnailIndex(PinnedImageWindow target)
+    {
+        var groupOffset = _groupWindow?.IsMinimized == true ? 1 : 0;
+        return groupOffset + _windows
+            .Where(candidate => !ReferenceEquals(candidate, target) && candidate.IsMinimized)
+            .Count();
+    }
+
+    private void OnMinimizedStateChanged(object? sender, EventArgs e) =>
+        UpdateMinimizedState();
+
+    private void UpdateMinimizedState()
+    {
+        _hasHiddenWindows =
+            _groupWindow?.IsMinimized == true ||
+            _windows.Any(window => window.IsMinimized);
+        NotifyDisplayStateChanged();
+    }
+
     private void OnGroupMembershipChanged(object? sender, EventArgs e)
     {
         if (sender is PinnedImageWindow window)
         {
+            if (window.IsGrouped)
+            {
+                if (!_groupOrder.Contains(window))
+                {
+                    _groupOrder.Add(window);
+                }
+            }
+            else
+            {
+                _groupOrder.Remove(window);
+            }
             _lastPositions[window] = (window.Left, window.Top);
             ReconcileGroupWindow();
         }
@@ -303,7 +354,10 @@ public sealed class PinnedImageManager : IDisposable
             return;
         }
 
-        _lastPositions[moved] = (moved.Left, moved.Top);
+        if (!moved.IsMinimized)
+        {
+            _lastPositions[moved] = (moved.Left, moved.Top);
+        }
         SchedulePersistentSave(moved);
     }
 
@@ -314,20 +368,19 @@ public sealed class PinnedImageManager : IDisposable
             return;
         }
 
-        var members = _windows
-            .Where(window => window.IsGrouped)
-            .OrderBy(window => window.Top)
-            .ThenBy(window => window.Left)
+        var members = _groupOrder
+            .Where(window => _windows.Contains(window) && window.IsGrouped)
+            .Concat(_windows
+                .Where(window => window.IsGrouped && !_groupOrder.Contains(window))
+                .OrderBy(window => window.Top)
+                .ThenBy(window => window.Left))
             .ToArray();
         if (members.Length < 2)
         {
             CloseGroupWindow();
-            if (!_hasHiddenWindows)
+            foreach (var member in members)
             {
-                foreach (var member in members)
-                {
-                    member.Show();
-                }
+                member.Show();
             }
             return;
         }
@@ -337,6 +390,11 @@ public sealed class PinnedImageManager : IDisposable
             _groupWindow = new PinnedImageGroupWindow(members);
             _groupWindow.UngroupRequested += OnUngroupRequested;
             _groupWindow.CloseGroupRequested += OnCloseGroupRequested;
+            _groupWindow.SettingsRequested += OnPinnedImageSettingsRequested;
+            _groupWindow.HideAllRequested += OnHideAllRequested;
+            _groupWindow.MinimizeRequested += OnGroupMinimizeRequested;
+            _groupWindow.MinimizedStateChanged += OnMinimizedStateChanged;
+            _groupWindow.RestoreRequested += OnGroupRestoreRequested;
             _groupWindow.Closed += OnGroupWindowClosed;
             ApplyGroupWindowBounds(_groupWindow, members);
         }
@@ -349,10 +407,8 @@ public sealed class PinnedImageManager : IDisposable
         {
             member.Hide();
         }
-        if (!_hasHiddenWindows)
-        {
-            _groupWindow.Show();
-        }
+        _groupWindow.Show();
+        _hasHiddenWindows = false;
     }
 
     private static void ApplyGroupWindowBounds(
@@ -392,10 +448,7 @@ public sealed class PinnedImageManager : IDisposable
             foreach (var member in members)
             {
                 member.SetGroupedState(false);
-                if (!_hasHiddenWindows)
-                {
-                    member.Show();
-                }
+                member.Show();
                 if (_lastPositions.TryGetValue(member, out var position))
                 {
                     member.Left = position.Left;
@@ -429,6 +482,30 @@ public sealed class PinnedImageManager : IDisposable
         }
     }
 
+    private void OnGroupRestoreRequested(object? sender, EventArgs e)
+    {
+        foreach (var member in _windows.Where(window => window.IsGrouped))
+        {
+            if (!member.IsPersistent)
+            {
+                member.SetPersistentState(true);
+                OnPersistenceChanged(member, EventArgs.Empty);
+            }
+        }
+    }
+
+    private void OnGroupMinimizeRequested(object? sender, EventArgs e)
+    {
+        if (_groupWindow is not { IsMinimized: false } groupWindow)
+        {
+            return;
+        }
+
+        groupWindow.MinimizeTo(_windows.Count(window => window.IsMinimized));
+        _hasHiddenWindows = true;
+        NotifyDisplayStateChanged();
+    }
+
     private void OnGroupWindowClosed(object? sender, EventArgs e)
     {
         if (sender is not PinnedImageGroupWindow groupWindow ||
@@ -440,6 +517,11 @@ public sealed class PinnedImageManager : IDisposable
         groupWindow.ApplyCompositeToMembers();
         groupWindow.UngroupRequested -= OnUngroupRequested;
         groupWindow.CloseGroupRequested -= OnCloseGroupRequested;
+        groupWindow.SettingsRequested -= OnPinnedImageSettingsRequested;
+        groupWindow.HideAllRequested -= OnHideAllRequested;
+        groupWindow.MinimizeRequested -= OnGroupMinimizeRequested;
+        groupWindow.MinimizedStateChanged -= OnMinimizedStateChanged;
+        groupWindow.RestoreRequested -= OnGroupRestoreRequested;
         groupWindow.Closed -= OnGroupWindowClosed;
         _groupWindow = null;
         UngroupAll();
@@ -455,6 +537,11 @@ public sealed class PinnedImageManager : IDisposable
         _groupWindow.ApplyCompositeToMembers();
         _groupWindow.UngroupRequested -= OnUngroupRequested;
         _groupWindow.CloseGroupRequested -= OnCloseGroupRequested;
+        _groupWindow.SettingsRequested -= OnPinnedImageSettingsRequested;
+        _groupWindow.HideAllRequested -= OnHideAllRequested;
+        _groupWindow.MinimizeRequested -= OnGroupMinimizeRequested;
+        _groupWindow.MinimizedStateChanged -= OnMinimizedStateChanged;
+        _groupWindow.RestoreRequested -= OnGroupRestoreRequested;
         _groupWindow.Closed -= OnGroupWindowClosed;
         _groupWindow.Close();
         _groupWindow = null;
@@ -462,7 +549,7 @@ public sealed class PinnedImageManager : IDisposable
 
     private void OnWindowSizeChanged(object sender, System.Windows.SizeChangedEventArgs e)
     {
-        if (sender is PinnedImageWindow window)
+        if (sender is PinnedImageWindow window && !window.IsMinimized)
         {
             SchedulePersistentSave(window);
         }
@@ -489,14 +576,17 @@ public sealed class PinnedImageManager : IDisposable
         var states = _windows
             .Where(window => window.IsPersistent &&
                              window.PersistenceId is not null)
-            .Select(window => new PinnedImageState(
+            .Select(window => {
+                var bounds = window.GetPersistenceBounds();
+                return new PinnedImageState(
                 window.PersistenceId!,
                 PinnedImagePersistenceStore.GetImageFileName(
                     window.PersistenceId!),
-                window.Left,
-                window.Top,
-                window.Width,
-                window.Height));
+                bounds.Left,
+                bounds.Top,
+                bounds.Width,
+                bounds.Height);
+            });
         _persistenceStore.SaveIndex(states);
     }
 

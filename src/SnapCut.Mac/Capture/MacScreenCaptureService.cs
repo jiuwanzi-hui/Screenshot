@@ -51,6 +51,43 @@ internal static class MacScreenCaptureService
         }
     }
 
+    public static PixelImage CaptureAllDisplays()
+    {
+        var displays = MacDisplayService.GetActiveDisplays();
+        if (displays.Count == 0)
+        {
+            throw new InvalidOperationException("没有可用的显示器。");
+        }
+
+        var minLeft = displays.Min(display => display.Bounds.Left);
+        var minTop = displays.Min(display => display.Bounds.Top);
+        var scale = displays.Max(display => display.Scale);
+        var maxRight = displays.Max(display => display.Bounds.Right);
+        var maxBottom = displays.Max(display => display.Bounds.Bottom);
+        var result = new PixelImage(
+            Math.Max(1, (int)Math.Ceiling((maxRight - minLeft) * scale)),
+            Math.Max(1, (int)Math.Ceiling((maxBottom - minTop) * scale)));
+        result.Fill(0, 0, 0, 255);
+        foreach (var display in displays)
+        {
+            var image = CaptureRegion(display.Bounds);
+            var left = Math.Max(0, (int)Math.Round((display.Bounds.Left - minLeft) * scale));
+            var top = Math.Max(0, (int)Math.Round((display.Bounds.Top - minTop) * scale));
+            for (var y = 0; y < image.Height && top + y < result.Height; y++)
+            {
+                var width = Math.Min(image.Width, result.Width - left);
+                if (width <= 0)
+                {
+                    continue;
+                }
+                image.Pixels.AsSpan(y * image.Stride, width * 4).CopyTo(
+                    result.Pixels.AsSpan((top + y) * result.Stride + left * 4, width * 4));
+            }
+        }
+
+        return result;
+    }
+
     /// <summary>Normalizes any 32-bit CGImage byte order to tightly packed BGRA.</summary>
     internal static unsafe PixelImage ConvertToPixelImage(IntPtr cgImage)
     {

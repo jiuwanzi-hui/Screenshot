@@ -301,7 +301,10 @@ public sealed class RegionCaptureCoordinator
         SetCaptureInProgress(true);
         try
         {
-            await WaitForCaptureChromeToHideAsync();
+            if (initialScreenSnapshot is null)
+            {
+                await WaitForCaptureChromeToHideAsync();
+            }
             var settings = _settingsProvider();
             // A hotkey can arrive before the low-level pre-capture worker has
             // finished. Capture the fallback snapshot off the dispatcher so a
@@ -323,6 +326,7 @@ public sealed class RegionCaptureCoordinator
                 new CaptureOverlayOptions
                 {
                     SaveDirectory = settings.SaveDirectory,
+                    CompletionHotKey = settings.CompleteCaptureHotKey,
                     KeepHistory = true,
                     HistoryLimit = settings.HistoryLimit,
                     HistoryService = _historyService,
@@ -376,10 +380,12 @@ public sealed class RegionCaptureCoordinator
     }
 
     public async Task RequestPinCaptureAsync(
+        CapturedImage? initialScreenSnapshot = null,
         CapturePointerContinuation? pointerContinuation = null)
     {
         if (_isCaptureInProgress)
         {
+            initialScreenSnapshot?.Dispose();
             return;
         }
 
@@ -388,8 +394,19 @@ public sealed class RegionCaptureCoordinator
         try
         {
             await WaitForCaptureChromeToHideAsync();
-            var selection = await CaptureOverlayWindow.SelectAsync(
-                pointerContinuation);
+            CapturedImage? overlaySnapshot = initialScreenSnapshot?.Clone();
+            ScreenRegion? selection;
+            try
+            {
+                selection = await CaptureOverlayWindow.SelectAsync(
+                    pointerContinuation,
+                    overlaySnapshot);
+                overlaySnapshot = null;
+            }
+            finally
+            {
+                overlaySnapshot?.Dispose();
+            }
 
             if (selection is null)
             {
@@ -399,13 +416,41 @@ public sealed class RegionCaptureCoordinator
             // The selection overlay is intentionally a lightweight mode: after
             // the user releases the mouse, capture the selected pixels and hand
             // ownership directly to the pin manager without opening a preview.
-            var image = ScreenCaptureService.Capture(selection.Value);
+            var image = initialScreenSnapshot is null
+                ? ScreenCaptureService.Capture(selection.Value)
+                : CropCapturedImage(initialScreenSnapshot, selection.Value);
             _pinnedImageManager.Pin(image);
         }
         finally
         {
+            initialScreenSnapshot?.Dispose();
             SetCaptureInProgress(false);
         }
+    }
+
+    private static CapturedImage CropCapturedImage(
+        CapturedImage source,
+        ScreenRegion selection)
+    {
+        var sourceRegion = source.SourceRegion ?? VirtualScreen.GetBounds();
+        var crop = new Rectangle(
+            selection.X - sourceRegion.X,
+            selection.Y - sourceRegion.Y,
+            selection.Width,
+            selection.Height);
+        crop.Intersect(new Rectangle(0, 0, source.Bitmap.Width, source.Bitmap.Height));
+        if (crop.Width <= 0 || crop.Height <= 0)
+        {
+            throw new InvalidOperationException("截图选区超出屏幕范围。");
+        }
+
+        return new CapturedImage(
+            source.Bitmap.Clone(crop, source.Bitmap.PixelFormat),
+            ScreenRegion.FromCorners(
+                selection.X,
+                selection.Y,
+                selection.X + crop.Width,
+                selection.Y + crop.Height));
     }
 
     private void OnInteractiveCaptureClosed()
