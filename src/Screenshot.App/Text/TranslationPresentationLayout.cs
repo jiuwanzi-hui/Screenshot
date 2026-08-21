@@ -227,6 +227,7 @@ internal static partial class TranslationPresentationLayout
         var centerDistance = nextCenter - previousCenter;
         var heightRatio = Math.Max(previous.Height, next.Height) /
                           Math.Max(1, Math.Min(previous.Height, next.Height));
+        var sameHanScript = ContainsHan(previous.Text) == ContainsHan(next.Text);
         var leftAligned = Math.Abs(next.X - first.X) <=
                           Math.Max(20, typicalHeight * 2.0);
         var isFollowingLine = centerDistance >= -(typicalHeight * 0.25) &&
@@ -234,8 +235,15 @@ internal static partial class TranslationPresentationLayout
         return isFollowingLine &&
                verticalGap <= Math.Min(previous.Height, next.Height) * 1.1 &&
                leftAligned &&
+               sameHanScript &&
                heightRatio <= 1.6;
     }
+
+    private static bool ContainsHan(string text) =>
+        text.Any(character =>
+            character is >= '\u3400' and <= '\u4dbf' or
+                >= '\u4e00' and <= '\u9fff' or
+                >= '\uf900' and <= '\ufaff');
 
     private static OcrTextRegion MergeGroup(IReadOnlyList<OcrTextRegion> group)
     {

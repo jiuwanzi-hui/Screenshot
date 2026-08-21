@@ -1927,7 +1927,7 @@ public sealed class CaptureOverlayWindowTests
     }
 
     [Fact]
-    public async Task TranslationKeepsOcrRowsSeparateAndDoesNotCoverUnchangedChinese()
+    public async Task TranslationGroupsCompatibleRowsAndDoesNotCoverUnchangedChinese()
     {
         CaptureOverlayWindow? overlay = null;
         Task? enterEditorTask = null;
@@ -1974,7 +1974,7 @@ public sealed class CaptureOverlayWindowTests
                         translationCompleted.TrySetResult();
                         return Task.FromResult(new TranslationSegmentsResult(
                             true,
-                            ["连接", "频道", "类别", "开发调优"],
+                            ["连接频道", "类别 开发调优"],
                             ErrorMessage: null));
                     },
                     CaptureClosed = pinnedImageManager.Dispose,
@@ -2008,7 +2008,7 @@ public sealed class CaptureOverlayWindowTests
             WpfTestHost.Invoke(() =>
             {
                 Assert.Equal(
-                    ["Connect", "Channel", "类别", "开发调优"],
+                    ["Connect Channel", "类别 开发调优"],
                     requestedSegments);
 
                 var editor = Assert.IsType<ImageEditorCanvas>(
@@ -2016,9 +2016,9 @@ public sealed class CaptureOverlayWindowTests
                 var translatedBorders = editor.Children
                     .OfType<Border>()
                     .ToArray();
-                Assert.Equal(2, translatedBorders.Length);
+                Assert.Single(translatedBorders);
                 Assert.Equal(
-                    ["连接", "频道"],
+                    ["连接频道"],
                     translatedBorders
                         .Select(border => Assert.IsType<TextBlock>(border.Child).Text)
                         .ToArray());
@@ -2031,10 +2031,8 @@ public sealed class CaptureOverlayWindowTests
                 Assert.Equal(
                     string.Join(
                         Environment.NewLine,
-                        "连接",
-                        "频道",
-                        "类别",
-                        "开发调优"),
+                        "连接频道",
+                        "类别 开发调优"),
                     translatedText.SelectedText);
             });
         }

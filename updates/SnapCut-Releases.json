@@ -1,5 +1,20 @@
 [
   {
+    "tag_name": "v3.4.2",
+    "name": "SnapCut 3.4.2",
+    "body": "- 修复整图翻译覆盖层的段落布局：同一段 OCR 行统一字号与行距，合并重叠区域并去除重复译文。\n- 减少多栏页面中文字上下覆盖、字号忽大忽小的问题。\n- 截图内容已经是目标语言时不再误报翻译失败。\n- 修复笔记本合盖、主机未连接显示器及部分远程控制环境中设置窗口内容白屏的问题。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v3.4.2",
+    "published_at": "2026-08-21T21:00:00+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.2/SnapCut-Update.json" },
+      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.2/Screenshot-Update.json" },
+      { "name": "SnapCut-Setup-3.4.2-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.2/SnapCut-Setup-3.4.2-win-x64.exe" },
+      { "name": "SnapCut-Portable-3.4.2-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.2/SnapCut-Portable-3.4.2-win-x64.zip" }
+    ]
+  },
+  {
     "tag_name": "v3.4.1",
     "name": "SnapCut 3.4.1",
     "body": "- 优化整图翻译：使用已安装的离线语言路由进行批量翻译，避免无必要的在线请求和逐行重试。\n- 混合语言页面按实际文本占比选择源语言，URL、侧栏短词和技术标识不会导致整张译文被丢弃。\n- 移除整图翻译的全局 9 秒硬截断，改为按批次超时并保留已完成译文。\n- 修复多栏网页和长页面翻译失败、段落布局异常的问题。",
