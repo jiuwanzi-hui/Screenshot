@@ -917,4 +917,68 @@ public sealed class ImageEditorCanvasTests
                 System.Windows.Controls.Canvas.GetTop(overlays[1]));
         });
     }
+
+    [Fact]
+    public void OverlappingTranslationRegionsAreRenderedAsOneStableParagraph()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var bitmap = new Bitmap(320, 140, PixelFormat.Format32bppPArgb);
+            using (var graphics = Graphics.FromImage(bitmap))
+            {
+                graphics.Clear(Color.FromArgb(255, 245, 245, 245));
+            }
+
+            using var image = new CapturedImage((Bitmap)bitmap.Clone());
+            var editor = new ImageEditorCanvas();
+            editor.Initialize(image, displayWidth: 320, displayHeight: 140);
+            editor.AddTranslationOverlay(
+            [
+                new TranslatedTextAnnotationRegion(
+                    new System.Windows.Rect(20, 20, 180, 28),
+                    "第一行翻译",
+                    20),
+                new TranslatedTextAnnotationRegion(
+                    new System.Windows.Rect(20, 38, 180, 28),
+                    "第二行翻译",
+                    18),
+            ]);
+
+            var overlays = editor.Children
+                .OfType<System.Windows.Controls.Border>()
+                .ToArray();
+            Assert.Single(overlays);
+            Assert.Contains("第一行翻译", Assert.IsType<System.Windows.Controls.TextBlock>(
+                overlays[0].Child).Text);
+            Assert.Contains("第二行翻译", Assert.IsType<System.Windows.Controls.TextBlock>(
+                overlays[0].Child).Text);
+        });
+    }
+
+    [Fact]
+    public void OverlappingDuplicateTranslationTextIsRenderedOnlyOnce()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var bitmap = new Bitmap(260, 100, PixelFormat.Format32bppPArgb);
+            using var image = new CapturedImage((Bitmap)bitmap.Clone());
+            var editor = new ImageEditorCanvas();
+            editor.Initialize(image, displayWidth: 260, displayHeight: 100);
+            editor.AddTranslationOverlay(
+            [
+                new TranslatedTextAnnotationRegion(
+                    new System.Windows.Rect(20, 20, 160, 26),
+                    "集体",
+                    18),
+                new TranslatedTextAnnotationRegion(
+                    new System.Windows.Rect(20, 42, 160, 14),
+                    "集体",
+                    12),
+            ]);
+
+            var text = Assert.IsType<System.Windows.Controls.TextBlock>(
+                Assert.Single(editor.Children.OfType<System.Windows.Controls.Border>()).Child);
+            Assert.Equal("集体", text.Text);
+        });
+    }
 }

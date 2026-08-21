@@ -331,6 +331,7 @@ public sealed class RegionCaptureCoordinator
                     HistoryLimit = settings.HistoryLimit,
                     HistoryService = _historyService,
                     PinnedImageManager = _pinnedImageManager,
+                    TranslationTargetLanguage = settings.TranslationTargetLanguage,
                     StartOcrAsync = ShowOcrResultAndCompleteCaptureAsync,
                     RecognizeTextAsync = RecognizeTextAsync,
                     TranslateTextAsync = TranslateTextAsync,

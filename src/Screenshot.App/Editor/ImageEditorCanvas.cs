@@ -257,17 +257,125 @@ public sealed class ImageEditorCanvas : Canvas
                 !string.IsNullOrWhiteSpace(region.Text) &&
                 region.Bounds.Width > 0 &&
                 region.Bounds.Height > 0)
+            .OrderBy(region => region.Bounds.Top)
+            .ThenBy(region => region.Bounds.Left)
             .ToArray();
         if (validRegions.Length == 0)
         {
             return;
         }
 
+        validRegions = MergeOverlappingTranslationRegions(validRegions);
+
         CommitPendingText();
         _isTranslationOverlayVisible = true;
         _document.Add(new TranslationOverlayAnnotation(validRegions));
         RebuildCanvas();
         RaiseHistoryChanged();
+    }
+
+    private static TranslatedTextAnnotationRegion[]
+        MergeOverlappingTranslationRegions(
+            IReadOnlyList<TranslatedTextAnnotationRegion> regions)
+    {
+        var merged = new List<TranslatedTextAnnotationRegion>(regions.Count);
+        foreach (var region in regions)
+        {
+            var current = region;
+            while (merged.Count > 0 &&
+                   ShouldMergeTranslationRegions(merged[^1], current))
+            {
+                current = MergeTranslationRegions(merged[^1], current);
+                merged.RemoveAt(merged.Count - 1);
+            }
+
+            merged.Add(current);
+        }
+
+        return merged.ToArray();
+    }
+
+    private static bool ShouldMergeTranslationRegions(
+        TranslatedTextAnnotationRegion previous,
+        TranslatedTextAnnotationRegion next)
+    {
+        var horizontalOverlap = Math.Max(
+            0,
+            Math.Min(previous.Bounds.Right, next.Bounds.Right) -
+            Math.Max(previous.Bounds.Left, next.Bounds.Left));
+        var verticalOverlap = Math.Max(
+            0,
+            Math.Min(previous.Bounds.Bottom, next.Bounds.Bottom) -
+            Math.Max(previous.Bounds.Top, next.Bounds.Top));
+        var verticalGap = Math.Max(
+            0,
+            Math.Max(previous.Bounds.Top, next.Bounds.Top) -
+            Math.Min(previous.Bounds.Bottom, next.Bounds.Bottom));
+        var sharedWidth = Math.Min(previous.Bounds.Width, next.Bounds.Width);
+        var sameColumn = horizontalOverlap >= Math.Max(12, sharedWidth * 0.35);
+        var nearSameLine = verticalOverlap > 0 ||
+                           verticalGap <= Math.Max(
+                               2,
+                               Math.Min(previous.Bounds.Height, next.Bounds.Height) *
+                               0.12);
+        return sameColumn && nearSameLine;
+    }
+
+    private static TranslatedTextAnnotationRegion MergeTranslationRegions(
+        TranslatedTextAnnotationRegion first,
+        TranslatedTextAnnotationRegion second)
+    {
+        var bounds = Rect.Union(first.Bounds, second.Bounds);
+        var firstText = first.Text.Trim();
+        var secondText = second.Text.Trim();
+        var text = MergeTranslationText(firstText, secondText);
+        var firstFont = first.FontSize > 0 ? first.FontSize : double.MaxValue;
+        var secondFont = second.FontSize > 0 ? second.FontSize : double.MaxValue;
+        var fontSize = Math.Min(firstFont, secondFont);
+        return new TranslatedTextAnnotationRegion(
+            bounds,
+            text,
+            double.IsFinite(fontSize) ? fontSize : 16);
+    }
+
+    private static string MergeTranslationText(string first, string second)
+    {
+        if (first.Length == 0)
+        {
+            return second;
+        }
+
+        if (second.Length == 0 ||
+            string.Equals(first, second, StringComparison.OrdinalIgnoreCase))
+        {
+            return first;
+        }
+
+        var normalizedFirst = NormalizeTranslationTextForComparison(first);
+        var normalizedSecond = NormalizeTranslationTextForComparison(second);
+        if (normalizedFirst.Length > 0 && normalizedSecond.Length > 0)
+        {
+            if (normalizedFirst.Contains(
+                    normalizedSecond,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return first;
+            }
+
+            if (normalizedSecond.Contains(
+                    normalizedFirst,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return second;
+            }
+        }
+
+        return $"{first}\n{second}";
+    }
+
+    private static string NormalizeTranslationTextForComparison(string text)
+    {
+        return string.Concat(text.Where(character => !char.IsWhiteSpace(character)));
     }
 
     public void AddMosaicRegions(IEnumerable<Rect> regions)

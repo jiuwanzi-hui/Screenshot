@@ -246,6 +246,20 @@ public sealed class ContentRecognitionServiceTests
         Assert.Equal(30 / 1.12, grouped[1].EstimatedFontSize, precision: 6);
     }
 
+    [Fact]
+    public void TranslationPresentationGroupsLinesWithOcrVerticalOverlap()
+    {
+        var grouped = TranslationPresentationLayout.GroupParagraphs(
+        [
+            new OcrTextRegion("第一行", 10, 10, 220, 24),
+            new OcrTextRegion("第二行", 12, 22, 210, 18),
+        ]);
+
+        var paragraph = Assert.Single(grouped);
+        Assert.Equal("第一行 第二行", paragraph.Text);
+        Assert.Equal(30, paragraph.Height);
+    }
+
     [Theory]
     [InlineData("住宅 I P 地址", "住宅 IP 地址")]
     [InlineData("应 当谨慎使用", "应当谨慎使用")]

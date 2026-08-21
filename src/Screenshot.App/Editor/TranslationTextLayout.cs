@@ -12,6 +12,7 @@ namespace Screenshot.App.Editor;
 internal static class TranslationTextLayout
 {
     internal const double MinimumFontSize = 8;
+    internal const double LineSpacingFactor = 1.24;
     private const double MaximumFontSize = 32;
 
     public static double FitFontSize(
@@ -22,7 +23,7 @@ internal static class TranslationTextLayout
     {
         availableWidth = Math.Max(1, availableWidth);
         availableHeight = Math.Max(1, availableHeight);
-        var maximumForOneLine = availableHeight / 1.12;
+        var maximumForOneLine = availableHeight / LineSpacingFactor;
         var maximumAllowed = Math.Max(
             MinimumFontSize,
             Math.Min(MaximumFontSize, maximumForOneLine));
@@ -67,7 +68,7 @@ internal static class TranslationTextLayout
         var upper = Math.Clamp(
             preferredFontSize,
             MinimumFontSize,
-            Math.Min(MaximumFontSize, availableHeight / 1.12));
+            Math.Min(MaximumFontSize, availableHeight / LineSpacingFactor));
         var low = (int)Math.Ceiling(MinimumFontSize * 2);
         var high = (int)Math.Floor(upper * 2);
         var best = low;
@@ -103,7 +104,7 @@ internal static class TranslationTextLayout
             contentBounds.Height,
             region.FontSize);
         var lines = WrapText(region.Text, contentBounds.Width, fontSize);
-        var lineHeight = fontSize * 1.12;
+        var lineHeight = fontSize * LineSpacingFactor;
         var lineRegions = lines
             .Select((line, index) => new OcrTextRegion(
                 line,
@@ -196,7 +197,8 @@ internal static class TranslationTextLayout
         // Use the same character wrapping routine as LayoutParagraph. A
         // WPF TextBlock can make a different break decision for CJK/Latin
         // mixtures, which used to produce an extra visual line and overlap.
-        return WrapText(text, availableWidth, fontSize).Count * fontSize * 1.12;
+        return WrapText(text, availableWidth, fontSize).Count *
+            fontSize * LineSpacingFactor;
     }
 }
 

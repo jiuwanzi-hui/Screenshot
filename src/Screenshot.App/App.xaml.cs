@@ -37,6 +37,7 @@ public partial class App : System.Windows.Application, IDisposable
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        WpfRenderingCompatibility.ConfigureForCurrentSession();
         base.OnStartup(e);
         TrimCrashLogIfOversized();
         DispatcherUnhandledException += OnDispatcherUnhandledException;

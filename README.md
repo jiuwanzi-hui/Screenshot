@@ -36,12 +36,14 @@ SnapCut（简截）是一款以 Windows 10/11 正式版为主的轻量截图工�
 
 下载最新的 x64 自包含版本。2.3.0 起发布附件统一使用 `SnapCut-Setup-*` 和 `SnapCut-Portable-*`；同时保留旧清单入口，2.1.0 及之后版本仍可在程序内在线更新：
 
-- [安装版 SnapCut Setup 3.4.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.4.1-win-x64.exe)
-- [免安装版 SnapCut Portable 3.4.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.4.1-win-x64.zip)
-- [安装版 SnapCut Setup 3.4.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.1/SnapCut-Setup-3.4.1-win-x64.exe)
-- [免安装版 SnapCut Portable 3.4.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.1/SnapCut-Portable-3.4.1-win-x64.zip)
+- [安装版 SnapCut Setup 3.4.2（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.4.2-win-x64.exe)
+- [免安装版 SnapCut Portable 3.4.2（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.4.2-win-x64.zip)
+- [安装版 SnapCut Setup 3.4.2（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.2/SnapCut-Setup-3.4.2-win-x64.exe)
+- [免安装版 SnapCut Portable 3.4.2（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.2/SnapCut-Portable-3.4.2-win-x64.zip)
 
 免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET 或 Visual C++ 运行库。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.8.3 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+
+3.4.2 修复整图翻译覆盖层的段落布局：同一段 OCR 行统一字号与行距，合并重叠区域并去除重复译文，减少多栏页面中文字上下覆盖、字号忽大忽小的问题。截图内容已经是目标语言时不再误报翻译失败。设置窗口改用兼容的软件合成路径，修复笔记本合盖、主机未连接显示器及部分远程控制环境中窗口内容白屏的问题。
 
 3.4.1 优化整图翻译：使用已安装的离线语言路由进行批量翻译，避免无必要的在线请求和逐行重试；混合语言页面按实际文本占比选择源语言，URL、侧栏短词和技术标识不会导致整张译文被丢弃。移除整图翻译的全局 9 秒硬截断，改为按批次超时并保留已完成译文；同时修复多栏网页和长页面翻译失败、段落布局异常的问题。
 
@@ -166,12 +168,14 @@ SnapCut is primarily a lightweight Windows 10/11 capture utility. It combines re
 
 Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-*` and `SnapCut-Portable-*` starting with 2.3.0. The legacy manifest endpoint remains available so versions 2.1.0 and later continue to update in-app:
 
-- [SnapCut Setup 3.4.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.4.1-win-x64.exe)
-- [SnapCut Portable 3.4.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.4.1-win-x64.zip)
-- [SnapCut Setup 3.4.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.1/SnapCut-Setup-3.4.1-win-x64.exe)
-- [SnapCut Portable 3.4.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.1/SnapCut-Portable-3.4.1-win-x64.zip)
+- [SnapCut Setup 3.4.2 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.4.2-win-x64.exe)
+- [SnapCut Portable 3.4.2 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.4.2-win-x64.zip)
+- [SnapCut Setup 3.4.2 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.2/SnapCut-Setup-3.4.2-win-x64.exe)
+- [SnapCut Portable 3.4.2 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.4.2/SnapCut-Portable-3.4.2-win-x64.zip)
 
 Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET or Visual C++ runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.8.3 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+
+Version 3.4.2 fixes full-image translation overlay layout by giving each OCR paragraph one font size and line height, merging overlapping regions, and removing duplicate translated text. Screenshots that are already in the target language no longer report a translation failure. WPF windows use a compatibility rendering path to prevent blank content when a laptop lid is closed, no physical display is connected, or certain remote-control tools are active.
 
 Version 3.4.1 improves full-image translation: installed offline routes are used for batched translation without unnecessary online requests or per-line retries; mixed-language pages choose the source language from the actual text balance, and URLs, sidebar labels, and technical identifiers no longer discard an otherwise complete translation. The global nine-second cutoff is removed in favor of per-batch timeouts that preserve completed translations, and multi-column/long-page overlay layout is corrected.
 
