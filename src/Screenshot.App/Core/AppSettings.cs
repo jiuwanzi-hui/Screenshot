@@ -115,7 +115,15 @@ public readonly record struct VideoRecordingPreferences(
     bool RecordMicrophone,
     bool ShowKeyboardInput = false,
     bool ShowMouseInput = false,
+    bool ShowMouseTrail = false,
     VideoRecordingOutputFormat OutputFormat = VideoRecordingOutputFormat.Mp4);
+
+public readonly record struct VideoRecordingAnnotationPreferences(
+    ShapeToolMode ShapeToolMode,
+    ArrowToolMode ArrowToolMode,
+    ArrowStyle ArrowStyle,
+    string StrokeColor,
+    int StrokeWidth);
 
 public enum TranslationMode
 {
@@ -184,6 +192,8 @@ public sealed record AppSettings
     public bool ShowKeyboardInputInRecording { get; init; }
 
     public bool ShowMouseInputInRecording { get; init; }
+
+    public bool ShowMouseTrailInRecording { get; init; }
 
     public bool ShowTaskbarIcon { get; init; } = true;
 

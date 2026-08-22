@@ -97,6 +97,12 @@ public partial class CaptureHistoryWindow : Window
             $"录屏：{FormatRetentionDays(videoRetentionDays)} / {videoLimit} 个。";
     }
 
+    public void ShowVideoHistory()
+    {
+        VideoHistoryTab.IsChecked = true;
+        ShowHistorySection(showVideo: true, updateStatus: false);
+    }
+
     private static string FormatRetentionDays(int days)
     {
         return days <= 0 ? "全部保留" : $"保留 {days} 天";

@@ -12,6 +12,13 @@ internal sealed class RecordingInputChangedEventArgs(
     public bool IsTransient { get; } = isTransient;
 }
 
+internal sealed class RecordingMouseMovedEventArgs(int x, int y) : EventArgs
+{
+    public int X { get; } = x;
+
+    public int Y { get; } = y;
+}
+
 internal sealed class RecordingInputMonitor : IDisposable
 {
     private const int LowLevelKeyboardHook = 13;
@@ -20,6 +27,7 @@ internal sealed class RecordingInputMonitor : IDisposable
     private const int KeyUpMessage = 0x0101;
     private const int SystemKeyDownMessage = 0x0104;
     private const int SystemKeyUpMessage = 0x0105;
+    private const int MouseMoveMessage = 0x0200;
     private const int LeftButtonDownMessage = 0x0201;
     private const int LeftButtonUpMessage = 0x0202;
     private const int RightButtonDownMessage = 0x0204;
@@ -37,6 +45,7 @@ internal sealed class RecordingInputMonitor : IDisposable
 
     private readonly bool _showKeyboard;
     private readonly bool _showMouse;
+    private readonly bool _showMouseTrail;
     private readonly NativeMethods.LowLevelKeyboardProcedure _keyboardProcedure;
     private readonly NativeMethods.LowLevelMouseProcedure _mouseProcedure;
     private readonly List<uint> _pressedKeys = [];
@@ -45,16 +54,24 @@ internal sealed class RecordingInputMonitor : IDisposable
     private IntPtr _mouseHook;
     private bool _isPaused;
     private bool _disposed;
+    private long _lastMouseMoveTimestamp;
+    private NativeMethods.NativePoint _lastMousePoint;
 
-    public RecordingInputMonitor(bool showKeyboard, bool showMouse)
+    public RecordingInputMonitor(
+        bool showKeyboard,
+        bool showMouse,
+        bool showMouseTrail = false)
     {
         _showKeyboard = showKeyboard;
         _showMouse = showMouse;
+        _showMouseTrail = showMouseTrail;
         _keyboardProcedure = OnKeyboardInput;
         _mouseProcedure = OnMouseInput;
     }
 
     public event EventHandler<RecordingInputChangedEventArgs>? InputChanged;
+
+    public event EventHandler<RecordingMouseMovedEventArgs>? MouseMoved;
 
     public void Start()
     {
@@ -69,7 +86,7 @@ internal sealed class RecordingInputMonitor : IDisposable
                 threadId: 0);
         }
 
-        if (_showMouse && _mouseHook == IntPtr.Zero)
+        if ((_showMouse || _showMouseTrail) && _mouseHook == IntPtr.Zero)
         {
             _mouseHook = NativeMethods.SetWindowsHookEx(
                 LowLevelMouseHook,
@@ -228,7 +245,8 @@ internal sealed class RecordingInputMonitor : IDisposable
             {
                 ProcessMouseMessage(
                     unchecked((int)message.ToInt64()),
-                    data.MouseData);
+                    data.MouseData,
+                    data.Point);
             }
         }
 
@@ -239,10 +257,16 @@ internal sealed class RecordingInputMonitor : IDisposable
             dataPointer);
     }
 
-    private void ProcessMouseMessage(int message, uint mouseData)
+    private void ProcessMouseMessage(
+        int message,
+        uint mouseData,
+        NativeMethods.NativePoint point)
     {
         switch (message)
         {
+            case MouseMoveMessage when _showMouseTrail:
+                PublishMouseMove(point);
+                break;
             case LeftButtonDownMessage:
                 AddMouseButton("鼠标左键");
                 break;
@@ -278,6 +302,21 @@ internal sealed class RecordingInputMonitor : IDisposable
                     GetWheelDelta(mouseData) >= 0 ? "滚轮向右" : "滚轮向左");
                 break;
         }
+    }
+
+    private void PublishMouseMove(NativeMethods.NativePoint point)
+    {
+        var timestamp = Environment.TickCount64;
+        var movedEnough = Math.Abs(point.X - _lastMousePoint.X) >= 2 ||
+            Math.Abs(point.Y - _lastMousePoint.Y) >= 2;
+        if (!movedEnough || timestamp - _lastMouseMoveTimestamp < 12)
+        {
+            return;
+        }
+
+        _lastMousePoint = point;
+        _lastMouseMoveTimestamp = timestamp;
+        MouseMoved?.Invoke(this, new RecordingMouseMovedEventArgs(point.X, point.Y));
     }
 
     private void AddMouseButton(string token)

@@ -50,6 +50,28 @@ public sealed class ImageEditorWindowTests
     }
 
     [Fact]
+    public void ColorSliderMouseUpDoesNotRetainMouseInput()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var picker = new SharedColorPickerControl();
+            var slider = Assert.IsType<Slider>(picker.FindName("HueSlider"));
+            var args = new System.Windows.Input.MouseButtonEventArgs(
+                System.Windows.Input.Mouse.PrimaryDevice,
+                0,
+                System.Windows.Input.MouseButton.Left)
+            {
+                RoutedEvent = System.Windows.Input.Mouse.PreviewMouseUpEvent,
+                Source = slider,
+            };
+
+            slider.RaiseEvent(args);
+
+            Assert.False(args.Handled);
+        });
+    }
+
+    [Fact]
     public void CropRectangleClampsAllFourEdgesAndKeepsOnePixel()
     {
         Assert.Equal(

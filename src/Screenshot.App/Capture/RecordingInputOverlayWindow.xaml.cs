@@ -1,10 +1,14 @@
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Shapes;
 using System.Windows.Threading;
 using Screenshot.App.Infrastructure;
 using DrawingRectangle = System.Drawing.Rectangle;
+using WpfPoint = System.Windows.Point;
+using WpfColor = System.Windows.Media.Color;
 
 namespace Screenshot.App.Capture;
 
@@ -17,47 +21,48 @@ public partial class RecordingInputOverlayWindow : Window
     private const int TopmostWindow = -1;
     private const uint DoNotActivate = 0x0010;
     private const uint DoNotChangeOwnerZOrder = 0x0200;
-    private const int OverlayHeight = 48;
-    private const int HorizontalMargin = 12;
-    private const int BottomMargin = 16;
+    private const int MaximumTrailSegments = 32;
+    private static readonly TimeSpan TrailLifetime = TimeSpan.FromMilliseconds(320);
 
     private readonly DispatcherTimer _clearTimer;
+    private readonly DispatcherTimer _trailTimer;
     private readonly DrawingRectangle _windowBounds;
+    private readonly MonitorDpiScale _dpi;
+    private readonly Queue<TrailSegment> _trailSegments = [];
+    private bool _showMouseTrail;
+    private WpfPoint? _lastTrailPoint;
     private bool _isPaused;
 
-    public RecordingInputOverlayWindow(ScreenRegion recordingRegion)
+    public RecordingInputOverlayWindow(
+        ScreenRegion recordingRegion)
     {
-        var width = Math.Min(
-            420,
-            Math.Max(2, recordingRegion.Width - (HorizontalMargin * 2)));
-        var height = Math.Min(
-            OverlayHeight,
-            Math.Max(2, recordingRegion.Height - 8));
-        var bottomMargin = Math.Min(
-            BottomMargin,
-            Math.Max(0, recordingRegion.Height - height));
-        _windowBounds = new DrawingRectangle(
-            recordingRegion.X + ((recordingRegion.Width - width) / 2),
-            recordingRegion.Y + recordingRegion.Height - height - bottomMargin,
-            width,
-            height);
-        var dpi = MonitorGeometryService.GetDpiScale(new DrawingRectangle(
+        var recordingBounds = new DrawingRectangle(
             recordingRegion.X,
             recordingRegion.Y,
             recordingRegion.Width,
-            recordingRegion.Height));
-        Width = _windowBounds.Width / dpi.X;
-        Height = _windowBounds.Height / dpi.Y;
-        Left = _windowBounds.X / dpi.X;
-        Top = _windowBounds.Y / dpi.Y;
+            recordingRegion.Height);
+        _windowBounds = recordingBounds;
+        _dpi = MonitorGeometryService.GetDpiScale(recordingBounds);
+        Width = _windowBounds.Width / _dpi.X;
+        Height = _windowBounds.Height / _dpi.Y;
+        Left = _windowBounds.X / _dpi.X;
+        Top = _windowBounds.Y / _dpi.Y;
         InitializeComponent();
         _clearTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(850),
         };
         _clearTimer.Tick += OnClearTimerTick;
+        _trailTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(33),
+        };
+        _trailTimer.Tick += OnTrailTimerTick;
         SourceInitialized += OnSourceInitialized;
     }
+
+    internal IntPtr EnsureWindowHandle() =>
+        new WindowInteropHelper(this).EnsureHandle();
 
     public void ShowInput(string displayText, bool isTransient)
     {
@@ -91,7 +96,63 @@ public partial class RecordingInputOverlayWindow : Window
         if (isPaused)
         {
             ClearInput();
+            ClearMouseTrail();
         }
+    }
+
+    public void SetMouseTrailEnabled(bool isEnabled)
+    {
+        _showMouseTrail = isEnabled;
+        if (!isEnabled)
+        {
+            ClearMouseTrail();
+        }
+    }
+
+    public void ShowMousePosition(int screenX, int screenY)
+    {
+        if (_isPaused || !_showMouseTrail ||
+            !_windowBounds.Contains(screenX, screenY))
+        {
+            return;
+        }
+
+        var point = new WpfPoint(
+            (screenX - _windowBounds.X) / _dpi.X,
+            (screenY - _windowBounds.Y) / _dpi.Y);
+        if (_lastTrailPoint is not WpfPoint previous)
+        {
+            _lastTrailPoint = point;
+            return;
+        }
+
+        if ((point - previous).Length < 2)
+        {
+            return;
+        }
+
+        var line = new Line
+        {
+            X1 = previous.X,
+            Y1 = previous.Y,
+            X2 = point.X,
+            Y2 = point.Y,
+            Stroke = CreateTrailBrush(),
+            StrokeThickness = 3.5,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+            IsHitTestVisible = false,
+        };
+        var segment = new TrailSegment(line, DateTime.UtcNow);
+        _trailSegments.Enqueue(segment);
+        MouseTrailCanvas.Children.Add(line);
+        _lastTrailPoint = point;
+        while (_trailSegments.Count > MaximumTrailSegments)
+        {
+            RemoveOldestTrailSegment();
+        }
+        UpdateTrailOpacity();
+        _trailTimer.Start();
     }
 
     protected override void OnClosed(EventArgs e)
@@ -99,6 +160,9 @@ public partial class RecordingInputOverlayWindow : Window
         SourceInitialized -= OnSourceInitialized;
         _clearTimer.Stop();
         _clearTimer.Tick -= OnClearTimerTick;
+        _trailTimer.Stop();
+        _trailTimer.Tick -= OnTrailTimerTick;
+        _trailSegments.Clear();
         base.OnClosed(e);
     }
 
@@ -132,6 +196,23 @@ public partial class RecordingInputOverlayWindow : Window
         ClearInput();
     }
 
+    private void OnTrailTimerTick(object? sender, EventArgs e)
+    {
+        var now = DateTime.UtcNow;
+        while (_trailSegments.TryPeek(out var item) &&
+               now - item.Timestamp >= TrailLifetime)
+        {
+            RemoveOldestTrailSegment();
+        }
+
+        UpdateTrailOpacity();
+
+        if (_trailSegments.Count == 0)
+        {
+            ClearMouseTrail();
+        }
+    }
+
     private void ClearInput()
     {
         _clearTimer.Stop();
@@ -140,6 +221,71 @@ public partial class RecordingInputOverlayWindow : Window
         InputSurface.Visibility = Visibility.Collapsed;
         InputText.Text = string.Empty;
     }
+
+    private void ClearMouseTrail()
+    {
+        _trailTimer.Stop();
+        _trailSegments.Clear();
+        MouseTrailCanvas.Children.Clear();
+        _lastTrailPoint = null;
+    }
+
+    private void RemoveOldestTrailSegment()
+    {
+        if (_trailSegments.TryDequeue(out var segment))
+        {
+            MouseTrailCanvas.Children.Remove(segment.Line);
+        }
+    }
+
+    private SolidColorBrush CreateTrailBrush()
+    {
+        var accent = ResolveThemeAccentColor();
+        var trailBrush = new SolidColorBrush(accent);
+        trailBrush.Freeze();
+        return trailBrush;
+    }
+
+    private WpfColor ResolveThemeAccentColor()
+    {
+        if (TryFindResource("EditorToolbarButtonHoverBorderBrush") is
+            SolidColorBrush toolbarAccent)
+        {
+            return toolbarAccent.Color;
+        }
+
+        return TryFindResource("AppAccentBrush") switch
+        {
+            SolidColorBrush accent => accent.Color,
+            GradientBrush gradient when gradient.GradientStops.Count > 0 =>
+                gradient.GradientStops[0].Color,
+            _ => WpfColor.FromRgb(240, 68, 85),
+        };
+    }
+
+    private void UpdateTrailOpacity()
+    {
+        var count = _trailSegments.Count;
+        var index = 0;
+        foreach (var segment in _trailSegments)
+        {
+            segment.Line.Opacity = CalculateTrailOpacity(index, count);
+            index++;
+        }
+    }
+
+    internal static double CalculateTrailOpacity(int index, int count)
+    {
+        if (count <= 0 || index < 0 || index >= count)
+        {
+            return 0;
+        }
+
+        var progress = (index + 1d) / count;
+        return 0.05 + (0.95 * progress * progress);
+    }
+
+    private sealed record TrailSegment(Line Line, DateTime Timestamp);
 
     private static class NativeMethods
     {

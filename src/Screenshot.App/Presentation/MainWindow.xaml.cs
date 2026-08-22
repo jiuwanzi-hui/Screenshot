@@ -209,7 +209,20 @@ public partial class MainWindow : Window, IDisposable
             preferences.ShowKeyboardInput;
         _settingsViewModel.ShowMouseInputInRecording =
             preferences.ShowMouseInput;
+        _settingsViewModel.ShowMouseTrailInRecording =
+            preferences.ShowMouseTrail;
         _settingsViewModel.RecordingOutputFormat = preferences.OutputFormat;
+        ApplySettingsImmediately();
+    }
+
+    internal void SaveVideoRecordingAnnotationPreferences(
+        VideoRecordingAnnotationPreferences preferences)
+    {
+        _settingsViewModel.ShapeToolMode = preferences.ShapeToolMode;
+        _settingsViewModel.ArrowToolMode = preferences.ArrowToolMode;
+        _settingsViewModel.ArrowStyle = preferences.ArrowStyle;
+        _settingsViewModel.CustomStrokeColor = preferences.StrokeColor.Trim();
+        _settingsViewModel.DefaultStrokeWidth = preferences.StrokeWidth;
         ApplySettingsImmediately();
     }
 

@@ -39,6 +39,7 @@ public sealed class SettingsStoreTests : IDisposable
             TextTranslationHotKey = "Ctrl+Alt+T",
             ShowKeyboardInputInRecording = true,
             ShowMouseInputInRecording = true,
+            ShowMouseTrailInRecording = true,
             ShowTaskbarIcon = true,
             ShowFloatingCaptureButton = true,
             FloatingCaptureClickBehavior =
@@ -50,6 +51,7 @@ public sealed class SettingsStoreTests : IDisposable
             LastAnnotationTool = AnnotationToolMode.CurvedArrow,
             CustomStrokeColor = "#123456",
             CustomColorPalette = [0x123456, 0xABCDEF],
+            DefaultStrokeWidth = 7,
             CloseBehavior = WindowCloseBehavior.ExitApplication,
             MouseLongPressMilliseconds = 1150,
             MouseSideButtonsUseLongPress = true,
@@ -94,6 +96,7 @@ public sealed class SettingsStoreTests : IDisposable
             AnnotationToolMode.CurvedArrow,
             loadResult.Settings.LastAnnotationTool);
         Assert.Equal("#123456", loadResult.Settings.CustomStrokeColor);
+        Assert.Equal(7, loadResult.Settings.DefaultStrokeWidth);
         Assert.Equal(
             [0x123456, 0xABCDEF],
             loadResult.Settings.CustomColorPalette);
@@ -121,6 +124,7 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal("Ctrl+Alt+T", loadResult.Settings.TextTranslationHotKey);
         Assert.True(loadResult.Settings.ShowKeyboardInputInRecording);
         Assert.True(loadResult.Settings.ShowMouseInputInRecording);
+        Assert.True(loadResult.Settings.ShowMouseTrailInRecording);
         Assert.Equal(
             OfflineTranslationQuality.Ultra,
             loadResult.Settings.OfflineTranslationQuality);

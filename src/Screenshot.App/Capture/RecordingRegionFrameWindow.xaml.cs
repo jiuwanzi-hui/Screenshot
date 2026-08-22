@@ -15,7 +15,10 @@ public partial class RecordingRegionFrameWindow : Window
     private const int TopmostWindow = -1;
     private const uint DoNotActivate = 0x0010;
     private const uint DoNotChangeOwnerZOrder = 0x0200;
-    private const int FrameMargin = 6;
+    // Keep the complete stroke outside the encoded region. Matching the
+    // margin to the stroke removes the visible gap that looked like a
+    // second recording frame.
+    private const int FrameMargin = 3;
     private readonly ScreenRegion _windowRegion;
 
     public RecordingRegionFrameWindow(ScreenRegion recordingRegion)
@@ -52,6 +55,24 @@ public partial class RecordingRegionFrameWindow : Window
                 ExtendedStyleTransparent |
                 ExtendedStyleToolWindow |
                 ExtendedStyleNoActivate));
+        _ = NativeMethods.SetWindowPos(
+            handle,
+            new IntPtr(TopmostWindow),
+            _windowRegion.X,
+            _windowRegion.Y,
+            _windowRegion.Width,
+            _windowRegion.Height,
+            DoNotActivate | DoNotChangeOwnerZOrder);
+    }
+
+    internal void EnsureTopmost()
+    {
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return;
+        }
+
         _ = NativeMethods.SetWindowPos(
             handle,
             new IntPtr(TopmostWindow),

@@ -182,13 +182,17 @@ public partial class App : System.Windows.Application, IDisposable
             message => _mainWindow?.ShowStatus(message),
             suspended => _hotKeyManager.SetMouseShortcutsSuspended(suspended),
             preferences => _mainWindow?.SaveVideoRecordingPreferences(preferences),
+            preferences => _mainWindow?.SaveVideoRecordingAnnotationPreferences(
+                preferences),
             arrowStyle => _mainWindow?.SaveArrowStyle(arrowStyle),
             arrowToolMode => _mainWindow?.SaveArrowToolMode(arrowToolMode),
             shapeToolMode => _mainWindow?.SaveShapeToolMode(shapeToolMode),
             tool => _mainWindow?.SaveLastAnnotationTool(tool),
             colorText => _mainWindow?.SaveCustomStrokeColor(colorText),
             colors => _mainWindow?.SaveCustomColorPalette(colors),
-            (x, y) => _mainWindow?.SaveCaptureToolbarPosition(x, y));
+            (x, y) => _mainWindow?.SaveCaptureToolbarPosition(x, y),
+            () => _ = Dispatcher.BeginInvoke(
+                () => ShowCaptureHistory(showVideo: true)));
         _regionCaptureCoordinator.CaptureStateChanged += OnCaptureStateChanged;
 
         if (dataMigrationResult.Warning is not null)
@@ -401,7 +405,7 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void OnHistoryRequested(object? sender, EventArgs e)
     {
-        _ = Dispatcher.BeginInvoke(ShowCaptureHistory);
+        _ = Dispatcher.BeginInvoke(() => ShowCaptureHistory());
     }
 
     private void OnTextTranslationRequested(object? sender, EventArgs e)
@@ -797,7 +801,9 @@ public partial class App : System.Windows.Application, IDisposable
         _textTranslationWindow = null;
     }
 
-    private void ShowCaptureHistory()
+    private void ShowCaptureHistory() => ShowCaptureHistory(showVideo: false);
+
+    private void ShowCaptureHistory(bool showVideo)
     {
         if (_captureHistoryService is null)
         {
@@ -818,6 +824,10 @@ public partial class App : System.Windows.Application, IDisposable
                     _currentSettings.VideoHistoryRetentionDays,
                     _currentSettings.VideoHistoryLimit);
                 _captureHistoryWindow.Closed += OnCaptureHistoryWindowClosed;
+                if (showVideo)
+                {
+                    _captureHistoryWindow.ShowVideoHistory();
+                }
                 _captureHistoryWindow.Show();
                 return;
             }
@@ -825,6 +835,10 @@ public partial class App : System.Windows.Application, IDisposable
             _captureHistoryWindow.UpdateDirectories(
                 _currentSettings.SaveDirectory,
                 _currentSettings.VideoSaveDirectory);
+            if (showVideo)
+            {
+                _captureHistoryWindow.ShowVideoHistory();
+            }
             _captureHistoryWindow.Show();
             _captureHistoryWindow.Activate();
         }

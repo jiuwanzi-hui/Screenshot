@@ -241,6 +241,7 @@ public sealed class ImmediateSettingsTests : IDisposable
                         RecordMicrophone: true,
                         ShowKeyboardInput: true,
                         ShowMouseInput: true,
+                        ShowMouseTrail: true,
                         OutputFormat: VideoRecordingOutputFormat.Gif));
             }
             finally
@@ -257,9 +258,53 @@ public sealed class ImmediateSettingsTests : IDisposable
         Assert.True(loaded.Settings.RecordMicrophone);
         Assert.True(loaded.Settings.ShowKeyboardInputInRecording);
         Assert.True(loaded.Settings.ShowMouseInputInRecording);
+        Assert.True(loaded.Settings.ShowMouseTrailInRecording);
         Assert.Equal(
             VideoRecordingOutputFormat.Gif,
             loaded.Settings.RecordingOutputFormat);
+    }
+
+    [Fact]
+    public void RecordingAnnotationPreferencesAreSavedForTheNextSession()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var settingsPath = Path.Combine(
+            _testDirectory,
+            "recording-annotation-settings.json");
+        var settingsStore = new SettingsStore(settingsPath);
+
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeyManager = new GlobalHotKeyManager();
+            var window = new MainWindow(
+                CreateSettings(),
+                settingsStore,
+                new FakeStartupRegistrationService(),
+                hotKeyManager,
+                new FakeTranslationCredentialStore());
+            try
+            {
+                window.SaveVideoRecordingAnnotationPreferences(
+                    new VideoRecordingAnnotationPreferences(
+                        ShapeToolMode.Ellipse,
+                        ArrowToolMode.Curved,
+                        ArrowStyle.Hollow,
+                        "#123456",
+                        7));
+            }
+            finally
+            {
+                window.RequestExit();
+            }
+        });
+
+        var loaded = settingsStore.Load();
+        Assert.Null(loaded.Warning);
+        Assert.Equal(ShapeToolMode.Ellipse, loaded.Settings.ShapeToolMode);
+        Assert.Equal(ArrowToolMode.Curved, loaded.Settings.ArrowToolMode);
+        Assert.Equal(ArrowStyle.Hollow, loaded.Settings.ArrowStyle);
+        Assert.Equal("#123456", loaded.Settings.CustomStrokeColor);
+        Assert.Equal(7, loaded.Settings.DefaultStrokeWidth);
     }
 
     private static string GetGroupTitle(MainWindow window, string groupName)

@@ -157,6 +157,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private double _captureToolbarPositionYRatio;
     private bool _showKeyboardInputInRecording;
     private bool _showMouseInputInRecording;
+    private bool _showMouseTrailInRecording;
     private bool _showTaskbarIcon;
     private bool _showNotificationIcon;
     private bool _showFloatingCaptureButton;
@@ -169,6 +170,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private CaptureToolbarRowCount _captureToolbarRows;
     private string _customStrokeColor;
     private int[] _customColorPalette;
+    private int _defaultStrokeWidth;
     private bool _launchAtStartup;
     private bool _requestAdministratorPrivileges;
     private WindowCloseBehavior _closeBehavior;
@@ -216,6 +218,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _captureToolbarPositionYRatio = settings.CaptureToolbarPositionYRatio;
         _showKeyboardInputInRecording = settings.ShowKeyboardInputInRecording;
         _showMouseInputInRecording = settings.ShowMouseInputInRecording;
+        _showMouseTrailInRecording = settings.ShowMouseTrailInRecording;
         _showTaskbarIcon = settings.ShowTaskbarIcon;
         _showNotificationIcon = settings.ShowNotificationIcon;
         _showFloatingCaptureButton = settings.ShowFloatingCaptureButton;
@@ -231,6 +234,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             settings.CaptureToolbarFeatureOrder);
         _customStrokeColor = settings.CustomStrokeColor;
         _customColorPalette = settings.CustomColorPalette.ToArray();
+        _defaultStrokeWidth = settings.DefaultStrokeWidth;
         _launchAtStartup = settings.LaunchAtStartup;
         _requestAdministratorPrivileges = settings.RequestAdministratorPrivileges;
         _closeBehavior = settings.CloseBehavior;
@@ -425,6 +429,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _showMouseInputInRecording, value);
     }
 
+    public bool ShowMouseTrailInRecording
+    {
+        get => _showMouseTrailInRecording;
+        set => SetProperty(ref _showMouseTrailInRecording, value);
+    }
+
     public bool ShowTaskbarIcon
     {
         get => _showTaskbarIcon;
@@ -489,6 +499,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         get => _customColorPalette;
         set => SetProperty(ref _customColorPalette, value ?? []);
+    }
+
+    public int DefaultStrokeWidth
+    {
+        get => _defaultStrokeWidth;
+        set => SetProperty(ref _defaultStrokeWidth, Math.Clamp(value, 1, 24));
     }
 
     public bool LaunchAtStartup
@@ -726,6 +742,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             CaptureToolbarPositionYRatio = CaptureToolbarPositionYRatio,
             ShowKeyboardInputInRecording = ShowKeyboardInputInRecording,
             ShowMouseInputInRecording = ShowMouseInputInRecording,
+            ShowMouseTrailInRecording = ShowMouseTrailInRecording,
             ShowTaskbarIcon = ShowTaskbarIcon,
             ShowNotificationIcon = ShowNotificationIcon,
             ShowFloatingCaptureButton = ShowFloatingCaptureButton,
@@ -745,6 +762,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             CaptureToolbarRows = CaptureToolbarRows,
             CustomStrokeColor = CustomStrokeColor,
             CustomColorPalette = CustomColorPalette.ToArray(),
+            DefaultStrokeWidth = DefaultStrokeWidth,
             LaunchAtStartup = LaunchAtStartup,
             RequestAdministratorPrivileges = RequestAdministratorPrivileges,
             CloseBehavior = CloseBehavior,
@@ -805,6 +823,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         CaptureToolbarPositionYRatio = settings.CaptureToolbarPositionYRatio;
         ShowKeyboardInputInRecording = settings.ShowKeyboardInputInRecording;
         ShowMouseInputInRecording = settings.ShowMouseInputInRecording;
+        ShowMouseTrailInRecording = settings.ShowMouseTrailInRecording;
         ShowTaskbarIcon = settings.ShowTaskbarIcon;
         ShowNotificationIcon = settings.ShowNotificationIcon;
         ShowFloatingCaptureButton = settings.ShowFloatingCaptureButton;
@@ -820,6 +839,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             settings.CaptureToolbarFeatureOrder);
         CustomStrokeColor = settings.CustomStrokeColor;
         CustomColorPalette = settings.CustomColorPalette.ToArray();
+        DefaultStrokeWidth = settings.DefaultStrokeWidth;
         LaunchAtStartup = settings.LaunchAtStartup;
         RequestAdministratorPrivileges = settings.RequestAdministratorPrivileges;
         CloseBehavior = settings.CloseBehavior;

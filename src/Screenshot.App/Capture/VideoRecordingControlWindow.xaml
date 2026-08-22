@@ -1,7 +1,8 @@
 <Window x:Class="Screenshot.App.Capture.VideoRecordingControlWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Width="668"
+        xmlns:editor="clr-namespace:Screenshot.App.Editor"
+        Width="760"
         Height="38"
         MinHeight="38"
         MaxHeight="38"
@@ -17,16 +18,41 @@
         WindowStartupLocation="Manual"
         WindowStyle="None"
         KeyDown="OnWindowKeyDown"
-        MouseEnter="OnWindowMouseEnter"
-        MouseLeave="OnWindowMouseLeave"
         PreviewMouseLeftButtonDown="OnControlSurfaceMouseLeftButtonDown"
         PreviewMouseLeftButtonUp="OnControlSurfaceMouseLeftButtonUp"
         PreviewMouseMove="OnControlSurfaceMouseMove">
     <Window.Resources>
+        <ResourceDictionary>
+        <ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary Source="../Themes/ThemedContextMenus.xaml" />
+        </ResourceDictionary.MergedDictionaries>
         <Geometry x:Key="PauseIconGeometry">M 5,4 V 14 M 12,4 V 14</Geometry>
         <Geometry x:Key="ResumeIconGeometry">M 5,3 L 14,9 L 5,15 Z</Geometry>
         <Geometry x:Key="StopIconGeometry">M 4,4 H 14 V 14 H 4 Z</Geometry>
         <Geometry x:Key="CancelIconGeometry">M 4,4 L 14,14 M 14,4 L 4,14</Geometry>
+        <Geometry x:Key="PointerIconGeometry">M 3,2 L 15,9 L 10,10 L 13,16 L 10,17 L 7,11 L 3,14 Z</Geometry>
+        <Geometry x:Key="RectangleIconGeometry">M 2,2 H 16 V 16 H 2 Z</Geometry>
+        <Geometry x:Key="EllipseIconGeometry">M 9,2 C 13.5,2 17,5.1 17,9 C 17,12.9 13.5,16 9,16 C 4.5,16 1,12.9 1,9 C 1,5.1 4.5,2 9,2 Z</Geometry>
+        <Geometry x:Key="StraightFilledArrowIconGeometry">M 1,7 H 11 V 3 L 18,9 L 11,15 V 11 H 1 Z</Geometry>
+        <Geometry x:Key="StraightHollowArrowIconGeometry">M 2,7 C 1,7 1,11 2,11 H 10 V 15 L 18,9 L 10,3 V 7 Z</Geometry>
+        <Geometry x:Key="CurvedFilledArrowIconGeometry">M 1,4 C 2,11 7,15 13,11 L 11,8 L 18,10 L 14,17 L 13,14 C 5,19 1,13 1,4 Z</Geometry>
+        <Geometry x:Key="CurvedHollowArrowIconGeometry">M 1,4 C 2,11 7,15 13,11 L 11,8 L 18,10 L 14,17 L 13,14 C 5,19 1,13 1,4 Z</Geometry>
+        <Geometry x:Key="PenIconGeometry">M 3,14 L 4.2,9.8 L 12.6,1.4 L 16.6,5.4 L 8.2,13.8 Z M 11.2,3.8 L 14.2,6.8</Geometry>
+        <Geometry x:Key="MosaicIconGeometry">M 2,2 H 16 V 16 H 2 Z M 6.7,2 V 16 M 11.3,2 V 16 M 2,6.7 H 16 M 2,11.3 H 16</Geometry>
+        <Geometry x:Key="TextIconGeometry">M 3,3 H 15 M 9,3 V 16</Geometry>
+        <Geometry x:Key="UndoIconGeometry">M 8,2 L 2,8 L 8,14 V 11 C 13,11 16,13 17,17 C 17,10 13,6 8,6 Z</Geometry>
+        <Geometry x:Key="RedoIconGeometry">M 12,2 L 18,8 L 12,14 V 11 C 7,11 4,13 3,17 C 3,10 7,6 12,6 Z</Geometry>
+        <Style x:Key="RecordingIconPath" TargetType="Path">
+            <Setter Property="Width" Value="16" />
+            <Setter Property="Height" Value="16" />
+            <Setter Property="Stretch" Value="Uniform" />
+            <Setter Property="Fill" Value="Transparent" />
+            <Setter Property="Stroke" Value="{DynamicResource EditorToolbarIconBrush}" />
+            <Setter Property="StrokeThickness" Value="1.7" />
+            <Setter Property="StrokeStartLineCap" Value="Round" />
+            <Setter Property="StrokeEndLineCap" Value="Round" />
+            <Setter Property="StrokeLineJoin" Value="Round" />
+        </Style>
         <Style x:Key="RecordingControlButton" TargetType="Button">
             <Setter Property="Width" Value="24" />
             <Setter Property="Height" Value="24" />
@@ -64,6 +90,135 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="RecordingToolButton" TargetType="ToggleButton">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Margin" Value="4,0,0,0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="{DynamicResource EditorToolbarButtonBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource EditorToolbarButtonBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder"
+                                        Property="Background"
+                                        Value="{DynamicResource EditorToolbarButtonHoverBackgroundBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="ButtonBorder"
+                                        Property="Background"
+                                        Value="{DynamicResource AppAccentMutedBrush}" />
+                                <Setter TargetName="ButtonBorder"
+                                        Property="BorderBrush"
+                                        Value="{DynamicResource AppAccentBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="RecordingEditorSlider" TargetType="Slider">
+            <Setter Property="Height" Value="20" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Border Height="3"
+                                    Background="{DynamicResource ImageEditorSliderTrackBrush}"
+                                    CornerRadius="1.5" />
+                            <Track x:Name="PART_Track"
+                                   Height="14"
+                                   VerticalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
+                                                  IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="3"
+                                                        VerticalAlignment="Center"
+                                                        Background="{DynamicResource AppAccentBrush}"
+                                                        CornerRadius="1.5" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
+                                                  IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Background="Transparent" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="14"
+                                           Height="14"
+                                           Background="{DynamicResource AppAccentBrush}"
+                                           BorderBrush="{DynamicResource ImageEditorSliderThumbBorderBrush}"
+                                           BorderThickness="2">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Ellipse Fill="{TemplateBinding Background}"
+                                                         Stroke="{TemplateBinding BorderBrush}"
+                                                         StrokeThickness="{TemplateBinding BorderThickness}" />
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="RecordingEmojiHostMenuItem" TargetType="MenuItem">
+            <Setter Property="OverridesDefaultStyle" Value="True" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="MenuItem">
+                        <ContentPresenter ContentSource="Header" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="RecordingEmojiButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="2" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Padding="{TemplateBinding Padding}"
+                                Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        </ResourceDictionary>
     </Window.Resources>
 
     <Border x:Name="ControlSurface"
@@ -168,6 +323,193 @@
                     <ComboBoxItem Content="显示键盘" Tag="Keyboard" />
                     <ComboBoxItem Content="显示键盘鼠标" Tag="KeyboardAndMouse" />
                 </ComboBox>
+                <CheckBox x:Name="MouseTrailCheckBox"
+                          Margin="8,0,0,0"
+                          VerticalAlignment="Center"
+                          FontSize="11"
+                          Cursor="Hand"
+                          Checked="OnRecordingOptionChanged"
+                          Unchecked="OnRecordingOptionChanged"
+                          Content="鼠标轨迹"
+                          Foreground="{DynamicResource AppTextPrimaryBrush}"
+                          ToolTip="在视频中显示鼠标移动轨迹" />
+            </StackPanel>
+
+            <StackPanel x:Name="AnnotationToolsPanel"
+                        Grid.Column="1"
+                        Margin="6,0,4,0"
+                        VerticalAlignment="Center"
+                        Orientation="Horizontal"
+                        Visibility="Collapsed">
+                <ToggleButton x:Name="ShapeToolButton"
+                              Click="OnAnnotationToolClick"
+                              Style="{StaticResource RecordingToolButton}"
+                              Tag="Rectangle"
+                              ToolTip="矩形/椭圆">
+                    <ToggleButton.ContextMenu>
+                        <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
+                            <MenuItem Tag="Rectangle"
+                                      Style="{StaticResource ThemedMenuItemStyle}"
+                                      Click="OnRecordingShapeMenuItemClick">
+                                <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource RectangleIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.6" /><TextBlock VerticalAlignment="Center" Text="矩形" /></StackPanel></MenuItem.Header>
+                            </MenuItem>
+                            <MenuItem Tag="Ellipse"
+                                      Style="{StaticResource ThemedMenuItemStyle}"
+                                      Click="OnRecordingShapeMenuItemClick">
+                                <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource EllipseIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.6" /><TextBlock VerticalAlignment="Center" Text="椭圆" /></StackPanel></MenuItem.Header>
+                            </MenuItem>
+                        </ContextMenu>
+                    </ToggleButton.ContextMenu>
+                    <Grid Width="20">
+                        <Path x:Name="ShapeToolIcon"
+                              Width="14" Height="14"
+                              HorizontalAlignment="Left"
+                              Data="{StaticResource RectangleIconGeometry}"
+                              Style="{StaticResource RecordingIconPath}" />
+                        <TextBlock HorizontalAlignment="Right"
+                                   VerticalAlignment="Center"
+                                   FontSize="8"
+                                   Foreground="{DynamicResource EditorToolbarIconBrush}"
+                                   Text="▾"
+                                   ToolTip="选择形状"
+                                   PreviewMouseLeftButtonDown="OnRecordingShapeMenuArrowMouseDown" />
+                    </Grid>
+                </ToggleButton>
+                <ToggleButton x:Name="ArrowToolButton"
+                              Click="OnAnnotationToolClick"
+                              Style="{StaticResource RecordingToolButton}"
+                              Tag="Arrow"
+                              ToolTip="箭头：在录制区域内拖动">
+                    <ToggleButton.ContextMenu>
+                        <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
+                            <MenuItem Tag="Arrow,Filled" Style="{StaticResource ThemedMenuItemStyle}" Click="OnRecordingArrowMenuItemClick"><MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource StraightFilledArrowIconGeometry}" Fill="{DynamicResource AppControlForegroundBrush}" /><TextBlock VerticalAlignment="Center" Text="直线实心箭头" /></StackPanel></MenuItem.Header></MenuItem>
+                            <MenuItem Tag="Arrow,Hollow" Style="{StaticResource ThemedMenuItemStyle}" Click="OnRecordingArrowMenuItemClick"><MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource StraightHollowArrowIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.8" /><TextBlock VerticalAlignment="Center" Text="直线空心箭头" /></StackPanel></MenuItem.Header></MenuItem>
+                            <MenuItem Tag="CurvedArrow,Filled" Style="{StaticResource ThemedMenuItemStyle}" Click="OnRecordingArrowMenuItemClick"><MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource CurvedFilledArrowIconGeometry}" Fill="{DynamicResource AppControlForegroundBrush}" /><TextBlock VerticalAlignment="Center" Text="弧形实心箭头" /></StackPanel></MenuItem.Header></MenuItem>
+                            <MenuItem Tag="CurvedArrow,Hollow" Style="{StaticResource ThemedMenuItemStyle}" Click="OnRecordingArrowMenuItemClick"><MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource CurvedHollowArrowIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.8" /><TextBlock VerticalAlignment="Center" Text="弧形空心箭头" /></StackPanel></MenuItem.Header></MenuItem>
+                        </ContextMenu>
+                    </ToggleButton.ContextMenu>
+                    <Grid Width="20">
+                        <Path x:Name="ArrowToolIcon"
+                              Width="15" Height="15"
+                              HorizontalAlignment="Left"
+                              Data="{StaticResource StraightFilledArrowIconGeometry}"
+                              Fill="{DynamicResource EditorToolbarIconBrush}"
+                              Stretch="Uniform" />
+                        <TextBlock HorizontalAlignment="Right"
+                                   VerticalAlignment="Center"
+                                   FontSize="8"
+                                   Foreground="{DynamicResource EditorToolbarIconBrush}"
+                                   Text="▾"
+                                   ToolTip="选择箭头"
+                                   PreviewMouseLeftButtonDown="OnRecordingArrowMenuArrowMouseDown" />
+                    </Grid>
+                </ToggleButton>
+                <ToggleButton x:Name="EmojiToolButton"
+                              Click="OnAnnotationToolClick"
+                              Style="{StaticResource RecordingToolButton}"
+                              Tag="Emoji"
+                              ToolTip="表情；右键选择表情">
+                    <ToggleButton.ContextMenu>
+                        <ContextMenu x:Name="RecordingEmojiMenu"
+                                     ItemContainerStyle="{StaticResource RecordingEmojiHostMenuItem}"
+                                     Style="{StaticResource ThemedContextMenuStyle}" />
+                    </ToggleButton.ContextMenu>
+                    <Grid Width="20">
+                        <editor:EmojiStickerImage x:Name="EmojiToolIcon"
+                                                  Width="16" Height="16"
+                                                  HorizontalAlignment="Left"
+                                                  Sticker="😊" />
+                        <TextBlock HorizontalAlignment="Right"
+                                   VerticalAlignment="Center"
+                                   FontSize="8"
+                                   Foreground="{DynamicResource EditorToolbarIconBrush}"
+                                   Text="▾"
+                                   ToolTip="选择表情"
+                                   PreviewMouseLeftButtonDown="OnRecordingEmojiMenuArrowMouseDown" />
+                    </Grid>
+                </ToggleButton>
+                <ToggleButton x:Name="NumberToolButton"
+                              Click="OnAnnotationToolClick"
+                              Style="{StaticResource RecordingToolButton}"
+                              Tag="Number"
+                              ToolTip="序号标注">
+                    <Border Width="16" Height="16"
+                            Background="{DynamicResource EditorToolbarIconBrush}"
+                            CornerRadius="8">
+                        <TextBlock HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   FontSize="10" FontWeight="Bold"
+                                   Foreground="{DynamicResource AppPanelBackgroundBrush}"
+                                   Text="1" />
+                    </Border>
+                </ToggleButton>
+                <ToggleButton x:Name="BrushToolButton"
+                              Click="OnAnnotationToolClick"
+                              Style="{StaticResource RecordingToolButton}"
+                              Tag="Brush"
+                              ToolTip="画笔：在录制区域内拖动">
+                    <Path Data="{StaticResource PenIconGeometry}"
+                          Style="{StaticResource RecordingIconPath}" />
+                </ToggleButton>
+                <ToggleButton x:Name="TextToolButton"
+                              Click="OnAnnotationToolClick"
+                              Style="{StaticResource RecordingToolButton}"
+                              Tag="Text"
+                              ToolTip="文字（Ctrl+Enter 完成）">
+                    <Path Data="{StaticResource TextIconGeometry}"
+                          Style="{StaticResource RecordingIconPath}" />
+                </ToggleButton>
+                <ToggleButton x:Name="MosaicToolButton"
+                              Click="OnAnnotationToolClick"
+                              Style="{StaticResource RecordingToolButton}"
+                              Tag="Mosaic"
+                              ToolTip="马赛克：在录制区域内拖动">
+                    <Path Data="{StaticResource MosaicIconGeometry}"
+                          Style="{StaticResource RecordingIconPath}" />
+                </ToggleButton>
+                <Border Width="1" Height="18" Margin="5,0,1,0"
+                        Background="{DynamicResource AppBorderBrush}" />
+                <Button x:Name="AnnotationColorButton"
+                        Click="OnAnnotationColorClick"
+                        Style="{StaticResource RecordingControlButton}"
+                        ToolTip="标注颜色">
+                    <Ellipse x:Name="AnnotationColorSwatch"
+                             Width="14" Height="14"
+                             Fill="#F04455"
+                             Stroke="{DynamicResource AppBorderBrush}"
+                             StrokeThickness="1" />
+                </Button>
+                <Slider x:Name="AnnotationStrokeWidthSlider"
+                        Width="58" Height="20"
+                        Margin="5,0,1,0"
+                        VerticalAlignment="Center"
+                        Minimum="1" Maximum="12" Value="3"
+                        SmallChange="1" LargeChange="2"
+                        TickFrequency="1"
+                        Style="{StaticResource RecordingEditorSlider}"
+                        ValueChanged="OnAnnotationStrokeWidthChanged"
+                        PreviewMouseLeftButtonUp="OnAnnotationStrokeWidthCommitted"
+                        LostKeyboardFocus="OnAnnotationStrokeWidthCommitted"
+                        ToolTip="标注大小" />
+                <Button Click="OnAnnotationUndoClick"
+                        Style="{StaticResource RecordingControlButton}"
+                        ToolTip="撤销上一项标注">
+                    <Path Data="{StaticResource UndoIconGeometry}"
+                          Style="{StaticResource RecordingIconPath}" />
+                </Button>
+                <Button Click="OnAnnotationRedoClick"
+                        Style="{StaticResource RecordingControlButton}"
+                        ToolTip="重做标注">
+                    <Path Data="{StaticResource RedoIconGeometry}"
+                          Style="{StaticResource RecordingIconPath}" />
+                </Button>
+                <Button Click="OnAnnotationClearClick"
+                        Style="{StaticResource RecordingControlButton}"
+                        ToolTip="清除所有标记">
+                    <TextBlock FontFamily="Segoe MDL2 Assets"
+                               FontSize="14"
+                               Text="&#xE74D;" />
+                </Button>
             </StackPanel>
 
             <StackPanel Grid.Column="2"
@@ -210,6 +552,19 @@
                           StrokeStartLineCap="Round"
                           StrokeEndLineCap="Round"
                           StrokeLineJoin="Round"
+                          StrokeThickness="1.8"
+                          Stretch="Uniform" />
+                </Button>
+                <Button x:Name="CancelRecordingButton"
+                        Click="OnCancelRecordingClick"
+                        IsEnabled="False"
+                        Visibility="Collapsed"
+                        Style="{StaticResource RecordingControlButton}"
+                        ToolTip="取消录制并删除本次视频">
+                    <Path Width="16" Height="16"
+                          Data="{StaticResource CancelIconGeometry}"
+                          Fill="Transparent"
+                          Stroke="#F04455"
                           StrokeThickness="1.8"
                           Stretch="Uniform" />
                 </Button>
