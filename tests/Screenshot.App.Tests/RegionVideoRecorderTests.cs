@@ -1,12 +1,27 @@
 using System.IO;
 using System.Drawing;
 using Screenshot.App.Capture;
+using Screenshot.App.Core;
 using WinForms = System.Windows.Forms;
+using WpfRectangle = System.Windows.Shapes.Rectangle;
 
 namespace Screenshot.App.Tests;
 
 public sealed class RegionVideoRecorderTests
 {
+    [Fact]
+    public void RecordingColorPaletteUsesTheSharedPersistedSlots()
+    {
+        Assert.Equal(
+            [0x123456, 0xABCDEF],
+            VideoRecordingControlWindow.NormalizeCustomColorPalette(
+                [0x123456, -1, 0xABCDEF, 0x1000000]));
+        Assert.Equal(
+            Enumerable.Range(0, 16),
+            VideoRecordingControlWindow.NormalizeCustomColorPalette(
+                Enumerable.Range(0, 20)));
+    }
+
     [Fact]
     public void AutomaticRecordingControlsStayCenteredWhenWidthChanges()
     {
@@ -14,12 +29,12 @@ public sealed class RegionVideoRecorderTests
         var workArea = new System.Drawing.Rectangle(0, 0, 1920, 1080);
 
         var expanded = VideoRecordingControlWindow
-            .CalculateAutomaticControlBounds(region, workArea, 668, 54);
+            .CalculateAutomaticControlBounds(region, workArea, 760, 54);
         var compact = VideoRecordingControlWindow
-            .CalculateAutomaticControlBounds(region, workArea, 216, 54);
+            .CalculateAutomaticControlBounds(region, workArea, 520, 54);
 
-        Assert.Equal(100 + ((800 - 668) / 2), expanded.X);
-        Assert.Equal(100 + ((800 - 216) / 2), compact.X);
+        Assert.Equal(100 + ((800 - 760) / 2), expanded.X);
+        Assert.Equal(100 + ((800 - 520) / 2), compact.X);
         Assert.Equal(region.Y + region.Height + 10, compact.Y);
     }
 
@@ -117,6 +132,110 @@ public sealed class RegionVideoRecorderTests
     }
 
     [Fact]
+    public void DisplayOnlyRecordingOptionsDoNotRecreateNativeRecorder()
+    {
+        var current = new VideoRecordingPreferences(
+            VideoRecordingCodec.H264,
+            30,
+            RecordSystemAudio: true,
+            RecordMicrophone: false);
+        var displayChanged = current with
+        {
+            ShowKeyboardInput = true,
+            ShowMouseInput = true,
+            ShowMouseTrail = true,
+            OutputFormat = VideoRecordingOutputFormat.Gif,
+        };
+
+        Assert.False(VideoRecordingControlWindow.RequiresRecorderReplacement(
+            current,
+            displayChanged));
+        Assert.True(VideoRecordingControlWindow.RequiresRecorderReplacement(
+            current,
+            current with { FrameRate = 60 }));
+        Assert.True(VideoRecordingControlWindow.RequiresRecorderReplacement(
+            current,
+            current with { RecordMicrophone = true }));
+    }
+
+    [Fact]
+    public void RecordingArrowGeometryIncludesShaftAndHead()
+    {
+        var geometry = RecordingAnnotationOverlayWindow.CreateArrowGeometry(
+            new System.Windows.Point(10, 20),
+            new System.Windows.Point(110, 20));
+
+        Assert.True(geometry.IsFrozen);
+        Assert.Equal(10, geometry.Bounds.Left, precision: 3);
+        Assert.Equal(110, geometry.Bounds.Right, precision: 3);
+        Assert.True(geometry.Bounds.Height > 10);
+    }
+
+    [Fact]
+    public void ClickingSelectedRecordingToolReturnsToPointerPassThrough()
+    {
+        Assert.Equal(
+            RecordingAnnotationTool.Rectangle,
+            VideoRecordingControlWindow.ResolveAnnotationToolSelection(
+                RecordingAnnotationTool.Rectangle,
+                isChecked: true));
+        Assert.Equal(
+            RecordingAnnotationTool.Pointer,
+            VideoRecordingControlWindow.ResolveAnnotationToolSelection(
+                RecordingAnnotationTool.Rectangle,
+                isChecked: false));
+    }
+
+    [Fact]
+    public void ActiveRecordingToolCreatesVisibleHitTestSurface()
+    {
+        RecordingAnnotationOverlayWindow? overlay = null;
+        try
+        {
+            WpfTestHost.Invoke(() =>
+            {
+                overlay = new RecordingAnnotationOverlayWindow(
+                    new ScreenRegion(40, 40, 320, 240));
+                overlay.EnsureWindowHandle();
+                overlay.Show();
+                overlay.SelectTool(RecordingAnnotationTool.Rectangle);
+
+                var brush = Assert.IsType<System.Windows.Media.SolidColorBrush>(
+                    overlay.DrawingCanvas.Background);
+                Assert.Equal(1, brush.Color.A);
+
+                overlay.SelectTool(RecordingAnnotationTool.Pointer);
+                Assert.Same(
+                    System.Windows.Media.Brushes.Transparent,
+                    overlay.DrawingCanvas.Background);
+            });
+        }
+        finally
+        {
+            if (overlay is not null)
+            {
+                WpfTestHost.Invoke(overlay.Close);
+            }
+        }
+    }
+
+    [Fact]
+    public void MouseTrailFadesContinuouslyFromTailToHead()
+    {
+        var opacities = Enumerable.Range(0, 8)
+            .Select(index => RecordingInputOverlayWindow.CalculateTrailOpacity(index, 8))
+            .ToArray();
+
+        Assert.InRange(opacities[0], 0.05, 0.07);
+        Assert.Equal(1, opacities[^1], precision: 3);
+        Assert.All(
+            opacities.Zip(opacities.Skip(1)),
+            pair => Assert.True(pair.First < pair.Second));
+        Assert.Equal(0, RecordingInputOverlayWindow.CalculateTrailOpacity(-1, 8));
+        Assert.Equal(0, RecordingInputOverlayWindow.CalculateTrailOpacity(0, 0));
+    }
+
+    [Fact]
     public async Task RecordsPausesResumesAndFinalizesMp4()
     {
         var screen = WinForms.Screen.PrimaryScreen ??
@@ -152,6 +271,137 @@ public sealed class RegionVideoRecorderTests
         }
         finally
         {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task CancelDiscardsRecordedMp4()
+    {
+        var screen = WinForms.Screen.PrimaryScreen ??
+            Assert.Single(WinForms.Screen.AllScreens);
+        var bounds = screen.Bounds;
+        var region = new ScreenRegion(
+            bounds.Left + 20,
+            bounds.Top + 20,
+            Math.Min(320, (bounds.Width - 20) & ~1),
+            Math.Min(240, (bounds.Height - 20) & ~1));
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "SnapCut-Recording-Cancel-Tests",
+            Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            using var recorder = new RegionVideoRecorder(region, directory);
+            recorder.Start();
+            await Task.Delay(600);
+
+            await recorder.CancelAsync();
+
+            Assert.Empty(Directory.EnumerateFiles(directory, "*.mp4"));
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task VisibleAnnotationWindowIsCapturedBySingleDisplaySource()
+    {
+        var screen = WinForms.Screen.PrimaryScreen ??
+            Assert.Single(WinForms.Screen.AllScreens);
+        var bounds = screen.Bounds;
+        var region = new ScreenRegion(
+            bounds.Left + 40,
+            bounds.Top + 40,
+            Math.Min(320, (bounds.Width - 40) & ~1),
+            Math.Min(240, (bounds.Height - 40) & ~1));
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "SnapCut-Recording-Overlay-Tests",
+            Guid.NewGuid().ToString("N"));
+        RecordingAnnotationOverlayWindow? overlay = null;
+
+        try
+        {
+            WpfTestHost.Invoke(() =>
+            {
+                overlay = new RecordingAnnotationOverlayWindow(region);
+                var marker = new WpfRectangle
+                {
+                    Width = 150,
+                    Height = 100,
+                    Fill = System.Windows.Media.Brushes.Red,
+                };
+                System.Windows.Controls.Canvas.SetLeft(marker, 70);
+                System.Windows.Controls.Canvas.SetTop(marker, 60);
+                overlay.DrawingCanvas.Children.Add(marker);
+            });
+
+            using var recorder = new RegionVideoRecorder(
+                region,
+                directory);
+            WpfTestHost.Invoke(() =>
+            {
+                overlay!.Show();
+                overlay.UpdateLayout();
+            });
+            recorder.Start();
+            await Task.Delay(900);
+
+            using var snapshot = new MemoryStream();
+            Assert.True(recorder.TryTakeSnapshot(snapshot));
+            snapshot.Position = 0;
+            using var bitmap = new Bitmap(snapshot);
+            Assert.Equal(region.Width, bitmap.Width);
+            Assert.Equal(region.Height, bitmap.Height);
+            var redSamples = 0;
+            for (var y = 70; y < 150; y += 8)
+            {
+                for (var x = 80; x < 200; x += 8)
+                {
+                    var color = bitmap.GetPixel(x, y);
+                    if (color.R > 180 && color.G < 100 && color.B < 100)
+                    {
+                        redSamples++;
+                    }
+                }
+            }
+
+            Assert.True(redSamples >= 20, $"录制帧只检测到 {redSamples} 个标注像素。");
+            var backgroundSamples = 0;
+            for (var y = 8; y < 48; y += 8)
+            {
+                for (var x = 8; x < 48; x += 8)
+                {
+                    var color = bitmap.GetPixel(x, y);
+                    if (color.R > 8 || color.G > 8 || color.B > 8)
+                    {
+                        backgroundSamples++;
+                    }
+                }
+            }
+
+            Assert.True(
+                backgroundSamples >= 10,
+                $"透明标注层遮住了原画面，只检测到 {backgroundSamples} 个背景像素。");
+            var result = await recorder.StopAsync();
+            Assert.True(result.IsSuccess, result.ErrorMessage);
+        }
+        finally
+        {
+            if (overlay is not null)
+            {
+                WpfTestHost.Invoke(overlay.Close);
+            }
             if (Directory.Exists(directory))
             {
                 Directory.Delete(directory, recursive: true);

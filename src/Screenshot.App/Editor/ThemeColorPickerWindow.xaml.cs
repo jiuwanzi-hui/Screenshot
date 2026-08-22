@@ -1,5 +1,7 @@
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using WpfBrush = System.Windows.Media.Brush;
 using WpfColor = System.Windows.Media.Color;
 
@@ -8,6 +10,7 @@ namespace Screenshot.App.Editor;
 public partial class ThemeColorPickerWindow : Window
 {
     private readonly List<Window> _outsideClickWindows = [];
+    private bool _hasBeenActivated;
 
     public ThemeColorPickerWindow(
         WpfColor initialColor,
@@ -57,6 +60,30 @@ public partial class ThemeColorPickerWindow : Window
             _outsideClickWindows.Add(window);
         }
     }
+
+    private void OnWindowDeactivated(object? sender, EventArgs e)
+    {
+        if (!_hasBeenActivated || !IsVisible)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Input,
+            () =>
+            {
+                if (IsVisible &&
+                    !IsActive &&
+                    !IsMouseOver &&
+                    Mouse.Captured is null)
+                {
+                    Close();
+                }
+            });
+    }
+
+    private void OnWindowActivated(object? sender, EventArgs e) =>
+        _hasBeenActivated = true;
 
     private void OnOtherWindowPreviewMouseDown(
         object sender,

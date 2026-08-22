@@ -12,6 +12,8 @@
         Background="Transparent"
         Topmost="True"
         WindowStyle="None"
-        Loaded="OnWindowLoaded">
+        Loaded="OnWindowLoaded"
+        Activated="OnWindowActivated"
+        Deactivated="OnWindowDeactivated">
     <editor:SharedColorPickerControl x:Name="ColorPicker" />
 </Window>

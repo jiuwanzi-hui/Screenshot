@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Screenshot.App.Capture;
 using WpfButton = System.Windows.Controls.Button;
 using WpfColor = System.Windows.Media.Color;
@@ -16,6 +17,8 @@ public partial class SharedColorPickerControl : System.Windows.Controls.UserCont
     private bool _isUpdating;
     private int[] _palette = [];
     private WpfColor _previewColor = WpfColor.FromRgb(0, 127, 115);
+    private WpfColor _pendingPreviewColor;
+    private DispatcherOperation? _previewUpdateOperation;
 
     public SharedColorPickerControl()
     {
@@ -156,7 +159,7 @@ public partial class SharedColorPickerControl : System.Windows.Controls.UserCont
         {
             return;
         }
-        UpdatePreview(ColorFromHsv(
+        SchedulePreviewUpdate(ColorFromHsv(
             HueSlider.Value,
             SaturationSlider.Value / 100d,
             ValueSlider.Value / 100d,
@@ -165,14 +168,17 @@ public partial class SharedColorPickerControl : System.Windows.Controls.UserCont
 
     private void OnSliderMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        FlushPendingPreview();
         CommitColor(closeAfterCommit: false);
-        e.Handled = true;
     }
 
     private void OnSliderLostKeyboardFocus(
         object sender,
-        KeyboardFocusChangedEventArgs e) =>
+        KeyboardFocusChangedEventArgs e)
+    {
+        FlushPendingPreview();
         CommitColor(closeAfterCommit: false);
+    }
 
     private void OnHexTextBoxPreviewKeyDown(object sender, WpfKeyEventArgs e)
     {
@@ -204,6 +210,7 @@ public partial class SharedColorPickerControl : System.Windows.Controls.UserCont
 
     private void SetColorValues(WpfColor color)
     {
+        CancelPendingPreview();
         _isUpdating = true;
         try
         {
@@ -229,6 +236,41 @@ public partial class SharedColorPickerControl : System.Windows.Controls.UserCont
         SaturationText.Text = $"{SaturationSlider.Value:0}%";
         ValueText.Text = $"{ValueSlider.Value:0}%";
         AlphaText.Text = $"{AlphaSlider.Value:0}%";
+    }
+
+    private void SchedulePreviewUpdate(WpfColor color)
+    {
+        _pendingPreviewColor = color;
+        if (_previewUpdateOperation is not null)
+        {
+            return;
+        }
+
+        _previewUpdateOperation = Dispatcher.BeginInvoke(
+            DispatcherPriority.Render,
+            () =>
+            {
+                _previewUpdateOperation = null;
+                UpdatePreview(_pendingPreviewColor);
+            });
+    }
+
+    private void FlushPendingPreview()
+    {
+        if (_previewUpdateOperation is null)
+        {
+            return;
+        }
+
+        _previewUpdateOperation.Abort();
+        _previewUpdateOperation = null;
+        UpdatePreview(_pendingPreviewColor);
+    }
+
+    private void CancelPendingPreview()
+    {
+        _previewUpdateOperation?.Abort();
+        _previewUpdateOperation = null;
     }
 
     private static WpfColor ColorFromHsv(

@@ -109,7 +109,6 @@ internal sealed class RegionVideoRecorder : IDisposable
                 recordSystemAudio,
                 recordMicrophone),
         };
-
         _recorder = Recorder.CreateRecorder(options);
         _recorder.OnRecordingComplete += OnRecordingComplete;
         _recorder.OnRecordingFailed += OnRecordingFailed;
@@ -191,6 +190,15 @@ internal sealed class RegionVideoRecorder : IDisposable
         }
     }
 
+    internal bool TryTakeSnapshot(Stream output)
+    {
+        ArgumentNullException.ThrowIfNull(output);
+        lock (_sync)
+        {
+            return !_disposed && _recorder.TakeSnapshot(output);
+        }
+    }
+
     public void Resume()
     {
         lock (_sync)
@@ -249,6 +257,35 @@ internal sealed class RegionVideoRecorder : IDisposable
         {
             CompleteWithFailure("结束录制超时，请检查系统媒体组件是否可用。");
             return await _completion.Task;
+        }
+    }
+
+    public async Task CancelAsync()
+    {
+        var result = await StopAsync();
+        var path = string.IsNullOrWhiteSpace(result.FilePath)
+            ? _outputPath
+            : result.FilePath;
+        for (var attempt = 0; attempt < 5 && File.Exists(path); attempt++)
+        {
+            try
+            {
+                File.Delete(path);
+            }
+            catch (IOException)
+            {
+                if (attempt < 4)
+                {
+                    await Task.Delay(80);
+                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                if (attempt < 4)
+                {
+                    await Task.Delay(80);
+                }
+            }
         }
     }
 

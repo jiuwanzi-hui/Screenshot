@@ -15,6 +15,53 @@ namespace Screenshot.App.Tests;
 public sealed class ImageEditorCanvasTests
 {
     [Fact]
+    public void TransparentAnnotationOverlayRendersAndEditsWithoutCapturedImage()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var editor = new ImageEditorCanvas();
+            editor.InitializeAnnotationOverlay(
+                pixelWidth: 320,
+                pixelHeight: 240,
+                displayWidth: 320,
+                displayHeight: 240);
+            var documentField = typeof(ImageEditorCanvas).GetField(
+                "_document",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var selectedField = typeof(ImageEditorCanvas).GetField(
+                "_selectedAnnotationIndex",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var rebuildMethod = typeof(ImageEditorCanvas).GetMethod(
+                "RebuildCanvas",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(documentField);
+            Assert.NotNull(selectedField);
+            Assert.NotNull(rebuildMethod);
+
+            var document = Assert.IsType<EditorDocument>(documentField.GetValue(editor));
+            document.Add(new RectangleAnnotation(
+                new System.Windows.Rect(20, 20, 100, 70),
+                System.Windows.Media.Colors.Red,
+                3));
+            rebuildMethod.Invoke(editor, null);
+
+            Assert.False(editor.HasImage);
+            Assert.Contains(editor.Children.Cast<System.Windows.UIElement>(), child =>
+                child is System.Windows.Shapes.Rectangle);
+
+            selectedField.SetValue(editor, 0);
+            editor.SelectColor(System.Windows.Media.Colors.Blue);
+            editor.SetStrokeWidth(7);
+            var updated = Assert.IsType<RectangleAnnotation>(
+                Assert.Single(document.Annotations));
+            Assert.Equal(System.Windows.Media.Colors.Blue, updated.StrokeColor);
+            Assert.Equal(7, updated.StrokeWidth);
+            Assert.True(editor.DeleteSelectedAnnotation());
+            Assert.Empty(document.Annotations);
+        });
+    }
+
+    [Fact]
     public void NumberAnnotationsAreRenumberedAfterDeletingAnEarlierMarker()
     {
         WpfTestHost.Invoke(() =>
@@ -170,6 +217,81 @@ public sealed class ImageEditorCanvasTests
 
             editor.Undo();
             Assert.NotNull(editor.GetAnnotationBounds());
+        });
+    }
+
+    [Fact]
+    public void SelectedEllipseAndBrushResizeHandlesWorkOutsideTheirStrokes()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var editor = new ImageEditorCanvas();
+            editor.InitializeAnnotationOverlay(
+                pixelWidth: 160,
+                pixelHeight: 120,
+                displayWidth: 160,
+                displayHeight: 120);
+            var documentField = typeof(ImageEditorCanvas).GetField(
+                "_document",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var selectedField = typeof(ImageEditorCanvas).GetField(
+                "_selectedAnnotationIndex",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var handleField = typeof(ImageEditorCanvas).GetField(
+                "_activeAnnotationHandle",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var beginEditMethod = typeof(ImageEditorCanvas).GetMethod(
+                "BeginAnnotationEdit",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var updateEditMethod = typeof(ImageEditorCanvas).GetMethod(
+                "UpdateAnnotationEdit",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var cancelEditMethod = typeof(ImageEditorCanvas).GetMethod(
+                "CancelAnnotationEdit",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(documentField);
+            Assert.NotNull(selectedField);
+            Assert.NotNull(handleField);
+            Assert.NotNull(beginEditMethod);
+            Assert.NotNull(updateEditMethod);
+            Assert.NotNull(cancelEditMethod);
+
+            var document = Assert.IsType<EditorDocument>(documentField.GetValue(editor));
+            document.Add(new EllipseAnnotation(
+                new System.Windows.Rect(20, 20, 80, 50),
+                System.Windows.Media.Colors.Red,
+                3));
+            selectedField.SetValue(editor, 0);
+
+            Assert.True(Assert.IsType<bool>(beginEditMethod.Invoke(
+                editor,
+                [new WpfPoint(100, 70)])));
+            Assert.Equal(4, Assert.IsType<int>(handleField.GetValue(editor)));
+            updateEditMethod.Invoke(editor, [new WpfPoint(120, 90)]);
+            var ellipse = Assert.IsType<EllipseAnnotation>(document.Annotations[0]);
+            Assert.Equal(new System.Windows.Rect(20, 20, 100, 70), ellipse.Bounds);
+            cancelEditMethod.Invoke(editor, null);
+
+            document = new EditorDocument();
+            documentField.SetValue(editor, document);
+            document.Add(new BrushAnnotation(
+                [
+                    new WpfPoint(20, 40),
+                    new WpfPoint(100, 20),
+                    new WpfPoint(60, 70),
+                ],
+                System.Windows.Media.Colors.Blue,
+                4));
+            selectedField.SetValue(editor, 0);
+
+            Assert.True(Assert.IsType<bool>(beginEditMethod.Invoke(
+                editor,
+                [new WpfPoint(100, 70)])));
+            Assert.Equal(8, Assert.IsType<int>(handleField.GetValue(editor)));
+            updateEditMethod.Invoke(editor, [new WpfPoint(120, 90)]);
+            var brush = Assert.IsType<BrushAnnotation>(document.Annotations[0]);
+            Assert.Equal(new WpfPoint(120, 20), brush.Points[1]);
+            Assert.Equal(new WpfPoint(70, 90), brush.Points[2]);
         });
     }
 

@@ -20,6 +20,8 @@ public sealed class RegionCaptureCoordinator
     private readonly Action<bool>? _mouseShortcutSuppressionChanged;
     private readonly Action<VideoRecordingPreferences>?
         _videoRecordingPreferencesChanged;
+    private readonly Action<VideoRecordingAnnotationPreferences>?
+        _videoRecordingAnnotationPreferencesChanged;
     private readonly Action<ArrowStyle>? _arrowStyleChanged;
     private readonly Action<ArrowToolMode>? _arrowToolModeChanged;
     private readonly Action<ShapeToolMode>? _shapeToolModeChanged;
@@ -27,6 +29,7 @@ public sealed class RegionCaptureCoordinator
     private readonly Action<string>? _customStrokeColorChanged;
     private readonly Action<int[]>? _customColorPaletteChanged;
     private readonly Action<double, double>? _captureToolbarPositionChanged;
+    private readonly Action? _showVideoHistory;
     private bool _isCaptureInProgress;
     private bool _isRecordingInProgress;
     private ScreenRegion? _lastOrdinaryCaptureRegion;
@@ -40,13 +43,16 @@ public sealed class RegionCaptureCoordinator
         Action<string> statusReporter,
         Action<bool>? mouseShortcutSuppressionChanged = null,
         Action<VideoRecordingPreferences>? videoRecordingPreferencesChanged = null,
+        Action<VideoRecordingAnnotationPreferences>?
+            videoRecordingAnnotationPreferencesChanged = null,
         Action<ArrowStyle>? arrowStyleChanged = null,
         Action<ArrowToolMode>? arrowToolModeChanged = null,
         Action<ShapeToolMode>? shapeToolModeChanged = null,
         Action<AnnotationToolMode>? lastAnnotationToolChanged = null,
         Action<string>? customStrokeColorChanged = null,
         Action<int[]>? customColorPaletteChanged = null,
-        Action<double, double>? captureToolbarPositionChanged = null)
+        Action<double, double>? captureToolbarPositionChanged = null,
+        Action? showVideoHistory = null)
     {
         ArgumentNullException.ThrowIfNull(settingsProvider);
         ArgumentNullException.ThrowIfNull(historyService);
@@ -63,6 +69,8 @@ public sealed class RegionCaptureCoordinator
         _statusReporter = statusReporter;
         _mouseShortcutSuppressionChanged = mouseShortcutSuppressionChanged;
         _videoRecordingPreferencesChanged = videoRecordingPreferencesChanged;
+        _videoRecordingAnnotationPreferencesChanged =
+            videoRecordingAnnotationPreferencesChanged;
         _arrowStyleChanged = arrowStyleChanged;
         _arrowToolModeChanged = arrowToolModeChanged;
         _shapeToolModeChanged = shapeToolModeChanged;
@@ -70,6 +78,7 @@ public sealed class RegionCaptureCoordinator
         _customStrokeColorChanged = customStrokeColorChanged;
         _customColorPaletteChanged = customColorPaletteChanged;
         _captureToolbarPositionChanged = captureToolbarPositionChanged;
+        _showVideoHistory = showVideoHistory;
     }
 
     public Task RequestCaptureAsync(
@@ -1029,15 +1038,29 @@ public sealed class RegionCaptureCoordinator
                 settings.VideoRecordingFrameRate,
                 settings.ShowKeyboardInputInRecording,
                 settings.ShowMouseInputInRecording,
+                settings.ShowMouseTrailInRecording,
                 settings.RecordingOutputFormat,
-                _videoRecordingPreferencesChanged);
+                _videoRecordingPreferencesChanged,
+                new VideoRecordingAnnotationPreferences(
+                    settings.ShapeToolMode,
+                    settings.ArrowToolMode,
+                    settings.ArrowStyle,
+                    string.IsNullOrWhiteSpace(settings.CustomStrokeColor)
+                        ? settings.DefaultStrokeColor
+                        : settings.CustomStrokeColor,
+                    settings.DefaultStrokeWidth),
+                _videoRecordingAnnotationPreferencesChanged,
+                settings.CustomColorPalette,
+                _customColorPaletteChanged);
             if (result.IsSuccess)
             {
                 var completedSettings = _settingsProvider();
                 if (result.OpenEditor)
                 {
                     _statusReporter($"视频已保存：{result.FilePath}");
-                    new VideoPostProcessWindow(result.FilePath!).Show();
+                    var editor = new VideoPostProcessWindow(result.FilePath!);
+                    editor.Closed += (_, _) => _showVideoHistory?.Invoke();
+                    editor.Show();
                 }
                 else if (completedSettings.RecordingOutputFormat ==
                     VideoRecordingOutputFormat.Gif)
@@ -1071,6 +1094,10 @@ public sealed class RegionCaptureCoordinator
                     completedSettings.VideoSaveDirectory,
                     completedSettings.VideoHistoryRetentionDays,
                     completedSettings.VideoHistoryLimit);
+                if (!result.OpenEditor)
+                {
+                    _showVideoHistory?.Invoke();
+                }
             }
             else if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
             {
