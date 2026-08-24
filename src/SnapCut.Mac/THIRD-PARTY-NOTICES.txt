@@ -1,0 +1,28 @@
+SnapCut for macOS - Third-Party Notices
+
+Avalonia UI and Avalonia Controls ColorPicker
+License: MIT
+https://github.com/AvaloniaUI/Avalonia
+
+Six Labors ImageSharp and ImageSharp.Drawing
+License: Six Labors Split License 1.0
+https://github.com/SixLabors/ImageSharp
+
+BergamotTranslatorSharp / Bergamot Translator
+License: MPL-2.0
+https://github.com/Freeesia/BergamotTranslatorSharp
+
+RapidOcrNet and PaddleOCR models (Apple Silicon optional OCR helper)
+License: Apache-2.0
+https://github.com/BobLd/RapidOcrNet
+
+ONNX Runtime (Apple Silicon optional OCR helper)
+License: MIT
+https://github.com/microsoft/onnxruntime
+
+FFmpeg and FFprobe (Intel macOS recording helper)
+License: GPL-3.0-or-later for the distributed Evermeet build
+https://ffmpeg.org/
+https://evermeet.cx/ffmpeg/
+
+Complete license texts and source links are available from the projects above.

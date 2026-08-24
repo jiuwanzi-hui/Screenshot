@@ -1,0 +1,32 @@
+# IDE and local tooling
+.vs/
+.idea/
+.claude/
+.grok/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# .NET build output
+**/bin/
+**/obj/
+TestResults/
+*.pdb
+
+# Personal application data and credentials
+**/ScreenshotData/
+**/settings.json
+**/translation-credentials.dat
+
+# Local diagnostics and scratch files
+tmp_*
+tmp_diag/
+tmp_test_out/
+*.log
+
+# Generated diagnostics and publish intermediates
+artifacts/
+
+# Release binaries are uploaded to GitHub/Gitee Releases, not Git history.
+installer/dist/*

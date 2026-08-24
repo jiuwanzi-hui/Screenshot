@@ -1,0 +1,47 @@
+<Window x:Class="Screenshot.App.Capture.CameraPreviewOverlayWindow"
+        x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowActivated="False"
+        ShowInTaskbar="False"
+        Topmost="True"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual">
+    <Border x:Name="PreviewBorder"
+            Background="{DynamicResource AppPanelBackgroundBrush}"
+            BorderBrush="{DynamicResource AppAccentBrush}"
+            BorderThickness="2"
+            CornerRadius="6"
+            Padding="2"
+            IsHitTestVisible="True"
+            ToolTip="拖动移动摄像头画面；拖动边缘或四角缩放；双击恢复初始位置和大小"
+            MouseLeftButtonDown="OnPreviewMouseLeftButtonDown"
+            MouseMove="OnPreviewMouseMove"
+            MouseLeftButtonUp="OnPreviewMouseLeftButtonUp"
+            LostMouseCapture="OnPreviewMouseCaptureLost">
+        <Grid ClipToBounds="True">
+            <TextBlock x:Name="CameraStatusText"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       Foreground="White"
+                       FontSize="12"
+                       Text="正在连接摄像头..." />
+            <Image x:Name="CameraImage"
+                   Stretch="Uniform"
+                   IsHitTestVisible="False" />
+            <!-- Transparent grips keep the preview visually clean while allowing
+                 Windows to expose the standard resize cursor on every edge. -->
+            <Thumb x:Name="ResizeTop" Panel.ZIndex="1" Height="12" HorizontalAlignment="Stretch" VerticalAlignment="Top" Cursor="SizeNS" DragStarted="OnResizeDragStarted" DragDelta="OnResizeDragDelta" DragCompleted="OnResizeDragCompleted" Background="Transparent" BorderThickness="0" Opacity="0.01" />
+            <Thumb x:Name="ResizeLeft" Panel.ZIndex="1" Width="12" HorizontalAlignment="Left" VerticalAlignment="Stretch" Cursor="SizeWE" DragStarted="OnResizeDragStarted" DragDelta="OnResizeDragDelta" DragCompleted="OnResizeDragCompleted" Background="Transparent" BorderThickness="0" Opacity="0.01" />
+            <Thumb x:Name="ResizeRight" Panel.ZIndex="1" Width="12" HorizontalAlignment="Right" VerticalAlignment="Stretch" Cursor="SizeWE" DragStarted="OnResizeDragStarted" DragDelta="OnResizeDragDelta" DragCompleted="OnResizeDragCompleted" Background="Transparent" BorderThickness="0" Opacity="0.01" />
+            <Thumb x:Name="ResizeBottom" Panel.ZIndex="1" Height="12" HorizontalAlignment="Stretch" VerticalAlignment="Bottom" Cursor="SizeNS" DragStarted="OnResizeDragStarted" DragDelta="OnResizeDragDelta" DragCompleted="OnResizeDragCompleted" Background="Transparent" BorderThickness="0" Opacity="0.01" />
+            <Thumb x:Name="ResizeTopLeft" Panel.ZIndex="2" Width="16" Height="16" HorizontalAlignment="Left" VerticalAlignment="Top" Cursor="SizeNWSE" DragStarted="OnResizeDragStarted" DragDelta="OnResizeDragDelta" DragCompleted="OnResizeDragCompleted" Background="Transparent" BorderThickness="0" Opacity="0.01" />
+            <Thumb x:Name="ResizeTopRight" Panel.ZIndex="2" Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Top" Cursor="SizeNESW" DragStarted="OnResizeDragStarted" DragDelta="OnResizeDragDelta" DragCompleted="OnResizeDragCompleted" Background="Transparent" BorderThickness="0" Opacity="0.01" />
+            <Thumb x:Name="ResizeBottomLeft" Panel.ZIndex="2" Width="16" Height="16" HorizontalAlignment="Left" VerticalAlignment="Bottom" Cursor="SizeNESW" DragStarted="OnResizeDragStarted" DragDelta="OnResizeDragDelta" DragCompleted="OnResizeDragCompleted" Background="Transparent" BorderThickness="0" Opacity="0.01" />
+            <Thumb x:Name="ResizeBottomRight" Panel.ZIndex="2" Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Bottom" Cursor="SizeNWSE" DragStarted="OnResizeDragStarted" DragDelta="OnResizeDragDelta" DragCompleted="OnResizeDragCompleted" Background="Transparent" BorderThickness="0" Opacity="0.01" />
+        </Grid>
+    </Border>
+</Window>

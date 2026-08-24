@@ -1,0 +1,121 @@
+<Window x:Class="Screenshot.App.Text.TextTranslationWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="离线文本翻译"
+        Width="760"
+        Height="560"
+        MinWidth="560"
+        MinHeight="420"
+        Background="{DynamicResource AppWindowBackgroundBrush}"
+        Foreground="{DynamicResource AppTextPrimaryBrush}"
+        FontFamily="Microsoft YaHei UI"
+        WindowStartupLocation="CenterScreen">
+    <Border Margin="14"
+            Padding="14"
+            Background="{DynamicResource AppGlassBackgroundBrush}"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1"
+            CornerRadius="14">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="36" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <ComboBox x:Name="SourceLanguageComboBox"
+                          Height="36"
+                          DisplayMemberPath="Label"
+                          SelectedValuePath="Value"
+                          SelectionChanged="OnLanguageSelectionChanged" />
+                <TextBlock Grid.Column="1"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           FontSize="17"
+                           Foreground="{DynamicResource AppTextSecondaryBrush}"
+                           Text="→" />
+                <ComboBox x:Name="TargetLanguageComboBox"
+                          Grid.Column="2"
+                          Height="36"
+                          DisplayMemberPath="Label"
+                          SelectedValuePath="Value"
+                          SelectionChanged="OnLanguageSelectionChanged" />
+            </Grid>
+
+            <Grid Grid.Row="1" Margin="0,12,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="SourceTextBox"
+                         Padding="14,12"
+                         AcceptsReturn="True"
+                         Background="{DynamicResource AppInputBackgroundBrush}"
+                         BorderBrush="{DynamicResource AppSubtleBorderBrush}"
+                         FontSize="14"
+                         TextChanged="OnSourceTextChanged"
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto"
+                         ToolTip="输入文字，停止输入后自动翻译；也可在其他程序中选中文字后使用快捷键" />
+                <TextBox x:Name="ResultTextBox"
+                         Grid.Column="2"
+                         Padding="14,12"
+                         AcceptsReturn="True"
+                         Background="{DynamicResource AppPanelBackgroundBrush}"
+                         BorderBrush="{DynamicResource AppSubtleBorderBrush}"
+                         FontSize="14"
+                         IsReadOnly="True"
+                         TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" />
+            </Grid>
+
+            <Grid Grid.Row="2" Margin="0,12,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock x:Name="StatusText"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               Text="完全离线运行；停止输入后自动翻译。" />
+                    <TextBlock Margin="0,2,0,0"
+                               FontSize="11"
+                               Foreground="{DynamicResource AppMutedTextBrush}"
+                               Text="模型仅在翻译时按需加载，空闲后自动释放。" />
+                </StackPanel>
+                <Button Grid.Column="1"
+                        x:Name="CopyButton"
+                        MinWidth="88"
+                        Margin="8,0,0,0"
+                        Padding="14,7"
+                        Click="OnCopyClick"
+                        Content="复制译文" />
+                <Button x:Name="TranslateButton"
+                        Grid.Column="3"
+                        MinWidth="88"
+                        Margin="8,0,0,0"
+                        Padding="14,7"
+                        Click="OnTranslateClick"
+                        Content="立即翻译"
+                        ToolTip="无需等待自动翻译延迟，立即开始" />
+                <Button x:Name="InstallModelButton"
+                        Grid.Column="2"
+                        MinWidth="126"
+                        Margin="8,0,0,0"
+                        Padding="12,7"
+                        Click="OnInstallModelClick"
+                        Content="安装当前语言包"
+                        Visibility="Collapsed" />
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

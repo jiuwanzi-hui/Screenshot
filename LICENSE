@@ -1,0 +1,102 @@
+SnapCut Personal Non-Commercial License 1.0
+SnapCut 个人非商业许可证 1.0
+
+Copyright (c) 2026 九万字 (jiuwanzi-hui). All rights reserved.
+
+中文条款（具有优先效力）
+
+1. 适用范围
+
+本许可证仅适用于本仓库中由 SnapCut 项目版权所有者原创并拥有著作权的
+源代码、资源和文档（以下简称“本软件”）。第三方组件、库、模型、字体及
+其他第三方材料不属于本许可证的授权范围，仍分别适用其原有许可证。
+
+2. 允许的个人非商业使用
+
+在完整保留本许可证和版权声明的前提下，版权所有者授予自然人一项可撤销、
+非独占、不可转让且不可再许可的权限，用于：
+
+- 为个人、非商业目的下载、复制、安装和运行本软件；
+- 为个人学习、研究和非商业使用查看、分析和修改源代码；
+- 仅为个人非商业学习或向本项目提交贡献而建立公开源码分支，但该分支必须
+  完整保留本许可证和版权声明，且不得发布安装包、可执行文件或其他二进制
+  分发物。
+
+3. 禁止的用途
+
+未经版权所有者事先书面许可，不得：
+
+- 将本软件或其任何修改版本用于任何商业、营利、收费或创收活动；
+- 将本软件用于公司、组织、工作室、个体经营者或其他经营主体的内部业务、
+  生产、运营、客户服务或其他与经营活动相关的场景；
+- 销售、出租、许可、再许可、收费分发、捆绑销售本软件，或将其集成到任何
+  商业产品、商业服务、付费项目、广告支持项目或面向客户的解决方案中；
+- 发布、传播或提供本软件或修改版本的安装包、可执行文件、二进制文件或
+  托管服务；
+- 删除、隐藏或更改本许可证、版权声明或其他权利标识；
+- 以任何方式暗示版权所有者对派生版本、产品、服务或组织提供认可或背书。
+
+“商业使用”包括直接或间接获取收入、费用、商业利益或经营优势的使用，
+无论是否实际盈利，也无论本软件是否单独收费。
+
+4. 商业授权
+
+任何超出第 2 条范围的使用均须事先取得版权所有者的单独书面授权。商业授权
+请求可通过本项目仓库联系版权所有者。
+
+5. 终止
+
+一旦违反本许可证，依据本许可证获得的全部权限立即自动终止。终止后必须停止
+使用、复制、修改和分发本软件，并删除所持有的本软件副本；法律另有要求的除外。
+
+6. 免责声明
+
+本软件按“现状”提供，不附带任何明示或默示保证，包括但不限于适销性、特定
+用途适用性及不侵权保证。在适用法律允许的最大范围内，版权所有者不对因使用
+或无法使用本软件产生的任何直接、间接、附带、特殊、惩罚性或后果性损失承担
+责任。
+
+7. 非开源声明
+
+本许可证包含用途和分发限制，不属于开放源代码促进会（OSI）认可的开源许可
+证。本软件属于源码可见软件，而非 OSI 定义的开源软件。
+
+English Reference Translation (the Chinese terms control)
+
+Copyright (c) 2026 九万字 (jiuwanzi-hui). All rights reserved.
+
+This license applies only to original SnapCut source code, resources, and
+documentation owned by the copyright holder. Third-party materials remain
+subject to their respective licenses.
+
+An individual may download, copy, install, run, study, and modify the Software
+solely for personal, non-commercial purposes, provided that this license and
+all copyright notices are retained. A public source-code fork is permitted
+solely for personal non-commercial study or for contributing to this project.
+Such a fork must retain this license and may not distribute installers,
+executables, or other binary builds.
+
+Without prior written permission from the copyright holder, you may not use
+the Software or a modified version for any commercial, revenue-generating,
+paid, business, organizational, professional, customer-facing, or internal
+operational purpose. You may not sell, rent, license, sublicense, bundle,
+commercially distribute, host as a service, or integrate it into any commercial
+product, service, paid project, advertising-supported project, or customer
+solution. You may not distribute binary builds or remove or alter legal notices.
+
+“Commercial use” includes any use intended to obtain direct or indirect
+revenue, fees, commercial benefit, or business advantage, whether or not a
+profit is actually realized and whether or not the Software is separately
+charged for.
+
+Any use outside the permissions above requires separate prior written
+permission from the copyright holder. A breach automatically terminates all
+permissions granted by this license.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND. TO THE MAXIMUM
+EXTENT PERMITTED BY LAW, THE COPYRIGHT HOLDER SHALL NOT BE LIABLE FOR ANY CLAIM,
+DAMAGES, OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
+
+Because this license restricts fields of use and redistribution, it is not an
+Open Source Initiative approved license. The Software is source-available, not
+open-source software as defined by the OSI.

@@ -1,0 +1,40 @@
+<Window x:Class="Screenshot.App.Capture.RecordingInputOverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Focusable="False"
+        IsHitTestVisible="False"
+        ResizeMode="NoResize"
+        ShowActivated="False"
+        ShowInTaskbar="False"
+        Title="SnapCut Recording Input"
+        Topmost="True"
+        WindowStartupLocation="Manual"
+        WindowStyle="None">
+    <Grid Background="Transparent">
+        <Canvas x:Name="MouseTrailCanvas" IsHitTestVisible="False" />
+        <Border x:Name="InputSurface"
+                MinWidth="112"
+                MaxWidth="420"
+                Margin="12,0,12,12"
+                Padding="14,8"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Bottom"
+                Background="#D91A1D24"
+                BorderBrush="#667F8598"
+                BorderThickness="1"
+                CornerRadius="8"
+                Opacity="0"
+                Visibility="Collapsed">
+            <TextBlock x:Name="InputText"
+                       HorizontalAlignment="Center"
+                       Foreground="#FFFFFF"
+                       FontFamily="Microsoft YaHei UI"
+                       FontSize="14"
+                       FontWeight="SemiBold"
+                       TextAlignment="Center"
+                       TextTrimming="CharacterEllipsis" />
+        </Border>
+    </Grid>
+</Window>

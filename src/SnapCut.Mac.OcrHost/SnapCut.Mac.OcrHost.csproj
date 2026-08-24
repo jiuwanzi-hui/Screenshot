@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>snapcut-ocr</AssemblyName>
+    <RootNamespace>SnapCut.Mac.OcrHost</RootNamespace>
+    <RuntimeIdentifiers>osx-x64;osx-arm64</RuntimeIdentifiers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="RapidOcrNet"
+                      Version="3.0.0"
+                      ExcludeAssets="build" />
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="3.119.1" />
+  </ItemGroup>
+
+</Project>
