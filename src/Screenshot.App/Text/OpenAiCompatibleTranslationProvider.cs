@@ -86,8 +86,12 @@ public sealed class OpenAiCompatibleTranslationProvider : ITranslationProvider
         }
 
         var indexesToTranslate = Enumerable.Range(0, segments.Count)
-            .Where(index => !TranslationTargetLanguageMatcher
-                .IsAlreadyTargetLanguage(segments[index], targetLanguage))
+            .Where(index =>
+                !TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(
+                    segments[index],
+                    targetLanguage) &&
+                !TranslationTargetLanguageMatcher.IsLikelyInvariant(
+                    segments[index]))
             .ToArray();
         if (indexesToTranslate.Length == 0)
         {
@@ -545,6 +549,12 @@ public sealed class OpenAiCompatibleTranslationProvider : ITranslationProvider
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             {
                 return TranslationResult.Failure("翻译服务拒绝了凭据。");
+            }
+
+            if (response.StatusCode == HttpStatusCode.PaymentRequired)
+            {
+                return TranslationResult.Failure(
+                    "在线翻译账户余额不足，请充值或切换到离线翻译。");
             }
 
             if (!response.IsSuccessStatusCode)

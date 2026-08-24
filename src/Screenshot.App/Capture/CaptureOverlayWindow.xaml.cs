@@ -182,6 +182,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private WpfPoint _selectionStartPoint;
     private WpfPoint _dragStartPoint;
     private Rect _dragStartBounds;
+    private Rect? _pendingSelectionBounds;
+    private Rect? _lastRenderedSelectionBounds;
+    private bool _selectionBoundsUpdateScheduled;
     private ScreenRegion? _selectionAdjustmentStartPhysicalBounds;
     private Rect? _selectionAdjustmentProtectedBounds;
     private CapturedImage? _inlineEditorImage;
@@ -1087,13 +1090,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
                 _isWindowSnapClickPending = false;
                 HideWindowSnap();
-                UpdateSelectionBounds(new Rect(
+                QueueSelectionBoundsUpdate(new Rect(
                     _selectionStartPoint,
                     _selectionStartPoint));
                 SelectionRectangle.Visibility = Visibility.Visible;
             }
 
-            UpdateSelectionBounds(new Rect(_selectionStartPoint, currentPoint));
+            QueueSelectionBoundsUpdate(new Rect(_selectionStartPoint, currentPoint));
             return;
         }
 
@@ -1142,6 +1145,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         var snappedBounds = _isWindowSnapClickPending
             ? _windowSnapBounds
             : null;
+        FlushSelectionBoundsUpdate();
         _isWindowSnapClickPending = false;
         _isSelecting = false;
         _continuedSelectionButton = null;
@@ -1501,7 +1505,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             _dragStartBounds.Y + delta.Y,
             _dragStartBounds.Width,
             _dragStartBounds.Height));
-        UpdateSelectionBounds(bounds);
+        QueueSelectionBoundsUpdate(bounds);
     }
 
     private void OnSelectionRectangleMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -1512,6 +1516,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         _isMovingSelection = false;
+        FlushSelectionBoundsUpdate();
         SelectionRectangle.ReleaseMouseCapture();
         e.Handled = true;
     }
@@ -1555,7 +1560,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             _dragStartBounds.Y + delta.Y,
             _dragStartBounds.Width,
             _dragStartBounds.Height));
-        UpdateSelectionBounds(bounds);
+        QueueSelectionBoundsUpdate(bounds);
         e.Handled = true;
     }
 
@@ -1569,6 +1574,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         _isMovingSelection = false;
+        FlushSelectionBoundsUpdate();
         InlineEditorOutline.ReleaseMouseCapture();
         e.Handled = true;
         await CompleteSelectionAdjustmentAsync();
@@ -1576,42 +1582,42 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void OnTopLeftResizeThumbDragDelta(object sender, DragDeltaEventArgs e)
     {
-        ResizeSelection(e.HorizontalChange, e.VerticalChange, 0, 0);
+        ResizeSelectionFromDrag(e.HorizontalChange, e.VerticalChange, 0, 0);
     }
 
     private void OnTopRightResizeThumbDragDelta(object sender, DragDeltaEventArgs e)
     {
-        ResizeSelection(0, e.VerticalChange, e.HorizontalChange, 0);
+        ResizeSelectionFromDrag(0, e.VerticalChange, e.HorizontalChange, 0);
     }
 
     private void OnBottomLeftResizeThumbDragDelta(object sender, DragDeltaEventArgs e)
     {
-        ResizeSelection(e.HorizontalChange, 0, 0, e.VerticalChange);
+        ResizeSelectionFromDrag(e.HorizontalChange, 0, 0, e.VerticalChange);
     }
 
     private void OnBottomRightResizeThumbDragDelta(object sender, DragDeltaEventArgs e)
     {
-        ResizeSelection(0, 0, e.HorizontalChange, e.VerticalChange);
+        ResizeSelectionFromDrag(0, 0, e.HorizontalChange, e.VerticalChange);
     }
 
     private void OnTopResizeThumbDragDelta(object sender, DragDeltaEventArgs e)
     {
-        ResizeSelection(0, e.VerticalChange, 0, 0);
+        ResizeSelectionFromDrag(0, e.VerticalChange, 0, 0);
     }
 
     private void OnLeftResizeThumbDragDelta(object sender, DragDeltaEventArgs e)
     {
-        ResizeSelection(e.HorizontalChange, 0, 0, 0);
+        ResizeSelectionFromDrag(e.HorizontalChange, 0, 0, 0);
     }
 
     private void OnRightResizeThumbDragDelta(object sender, DragDeltaEventArgs e)
     {
-        ResizeSelection(0, 0, e.HorizontalChange, 0);
+        ResizeSelectionFromDrag(0, 0, e.HorizontalChange, 0);
     }
 
     private void OnBottomResizeThumbDragDelta(object sender, DragDeltaEventArgs e)
     {
-        ResizeSelection(0, 0, 0, e.VerticalChange);
+        ResizeSelectionFromDrag(0, 0, 0, e.VerticalChange);
     }
 
     private async void OnSaveClick(object sender, RoutedEventArgs e)
@@ -1882,6 +1888,14 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         _selectionAdjustmentStartPhysicalBounds = GetPhysicalSelectionBounds();
         _selectionAdjustmentProtectedBounds = GetProtectedAnnotationBounds();
         ClearInlineOcrText();
+
+        // Keep the adjustment surface live. The old editor bitmap and its
+        // translation/OCR overlays must not remain visible while the bounds
+        // are being dragged; they belong to the previous selection frame.
+        InlineEditorCanvas.Visibility = Visibility.Collapsed;
+        OcrTextOverlay.Visibility = Visibility.Collapsed;
+        ContentRecognitionOverlay.Visibility = Visibility.Collapsed;
+        SelectionRectangle.Visibility = Visibility.Collapsed;
     }
 
     private Rect? GetProtectedAnnotationBounds()
@@ -1937,6 +1951,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         object sender,
         DragCompletedEventArgs e)
     {
+        FlushSelectionBoundsUpdate();
         await CompleteSelectionAdjustmentAsync();
     }
 
@@ -4223,9 +4238,117 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         return await CaptureCurrentSelectionAsync(restoreOverlay);
     }
 
+    private void QueueSelectionBoundsUpdate(Rect requestedBounds)
+    {
+        _pendingSelectionBounds = requestedBounds;
+        if (_isDisposed ||
+            _windowHandle == IntPtr.Zero ||
+            !IsVisible)
+        {
+            FlushSelectionBoundsUpdate();
+            return;
+        }
+
+        if (Dispatcher.HasShutdownStarted ||
+            Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        // Pointer events can arrive much faster than WPF can arrange the four
+        // masks, resize handles, and toolbar. Coalesce them to one render
+        // callback and always render only the latest pointer position.
+        if (_selectionBoundsUpdateScheduled)
+        {
+            return;
+        }
+
+        _selectionBoundsUpdateScheduled = true;
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Render,
+            new Action(() =>
+            {
+                _selectionBoundsUpdateScheduled = false;
+                if (_pendingSelectionBounds is { } bounds)
+                {
+                    _pendingSelectionBounds = null;
+                    ApplySelectionPreviewBounds(bounds);
+                }
+            }));
+    }
+
+    private void FlushSelectionBoundsUpdate()
+    {
+        if (_pendingSelectionBounds is not { } bounds)
+        {
+            return;
+        }
+
+        _pendingSelectionBounds = null;
+        if (_isDisposed || Dispatcher.HasShutdownStarted ||
+            Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        UpdateSelectionBounds(bounds);
+    }
+
+    private void ApplySelectionPreviewBounds(Rect requestedBounds)
+    {
+        var bounds = ClampBoundsToSurface(NormalizeBounds(requestedBounds));
+        if (_lastRenderedSelectionBounds is { } previous &&
+            previous == bounds)
+        {
+            return;
+        }
+
+        _lastRenderedSelectionBounds = bounds;
+        Canvas.SetLeft(SelectionRectangle, bounds.X);
+        Canvas.SetTop(SelectionRectangle, bounds.Y);
+        SelectionRectangle.Width = bounds.Width;
+        SelectionRectangle.Height = bounds.Height;
+
+        // These are direct Canvas property writes and do not measure the
+        // captured bitmap. Keep the border, handles, toolbar, and lightweight
+        // physical-size badge aligned while the pointer is moving.
+        UpdateSelectionControlPositions(bounds);
+        UpdateSelectionSizeBadge(bounds);
+        UpdateSelectionMask(bounds);
+
+        var hasArea = bounds.Width >= MinimumSelectionEdge &&
+                      bounds.Height >= MinimumSelectionEdge;
+        CaptureShade.Visibility = hasArea
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        SetSelectionMaskVisibility(hasArea
+            ? Visibility.Visible
+            : Visibility.Collapsed);
+
+        if (InlineEditorCanvas.HasImage)
+        {
+            Canvas.SetLeft(InlineEditorOutline, bounds.X);
+            Canvas.SetTop(InlineEditorOutline, bounds.Y);
+            InlineEditorOutline.Width = bounds.Width;
+            InlineEditorOutline.Height = bounds.Height;
+            InlineEditorOutline.Visibility = Visibility.Visible;
+            Canvas.SetLeft(OcrTextOverlay, bounds.X);
+            Canvas.SetTop(OcrTextOverlay, bounds.Y);
+            Canvas.SetLeft(ContentRecognitionOverlay, bounds.X);
+            Canvas.SetTop(ContentRecognitionOverlay, bounds.Y);
+
+            if (!_isSelectionAdjustmentInProgress)
+            {
+                Canvas.SetLeft(InlineEditorCanvas, bounds.X);
+                Canvas.SetTop(InlineEditorCanvas, bounds.Y);
+            }
+        }
+    }
+
     private void UpdateSelectionBounds(Rect requestedBounds)
     {
         var bounds = ClampBoundsToSurface(NormalizeBounds(requestedBounds));
+        _lastRenderedSelectionBounds = bounds;
         if (_isColorPickerActive &&
             bounds.Width >= MinimumSelectionEdge &&
             bounds.Height >= MinimumSelectionEdge)
@@ -4290,7 +4413,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
     }
 
-    private void UpdateSelectionControlPositions(Rect bounds)
+    private void UpdateResizeThumbPositions(Rect bounds)
     {
         SetControlPosition(TopLeftResizeThumb, bounds.X, bounds.Y);
         SetControlPosition(TopRightResizeThumb, bounds.Right, bounds.Y);
@@ -4300,6 +4423,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         SetControlPosition(LeftResizeThumb, bounds.X, bounds.Y + (bounds.Height / 2));
         SetControlPosition(RightResizeThumb, bounds.Right, bounds.Y + (bounds.Height / 2));
         SetControlPosition(BottomResizeThumb, bounds.X + (bounds.Width / 2), bounds.Bottom);
+    }
+
+    private void UpdateSelectionControlPositions(Rect bounds)
+    {
+        UpdateResizeThumbPositions(bounds);
 
         if (_hasCustomToolbarPosition)
         {
@@ -4520,6 +4648,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         var bounds = GetSelectionBounds();
         SelectionRectangle.IsHitTestVisible = false;
         SelectionRectangle.Fill = WpfBrushes.Transparent;
+        // The editor outline is the single source of truth after the first
+        // selection. Keeping the original rectangle visible creates a second,
+        // stale border when the editor region is adjusted.
+        SelectionRectangle.Visibility = Visibility.Collapsed;
         Canvas.SetLeft(InlineEditorOutline, bounds.X);
         Canvas.SetTop(InlineEditorOutline, bounds.Y);
         InlineEditorOutline.Width = bounds.Width;
@@ -4543,8 +4675,23 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private void ClearSelection()
     {
         HideInlineCustomColorPanel();
+        // A new selection must start from the live selection surface. The
+        // previous editor image/overlays are otherwise still children of the
+        // same overlay window and can appear as a stale frame underneath the
+        // new selection rectangle.
+        if (InlineEditorCanvas.HasImage || _inlineEditorImage is not null)
+        {
+            InlineEditorCanvas.Reset();
+            _inlineEditorImage?.Dispose();
+            _inlineEditorImage = null;
+        }
+        InlineEditorCanvas.Visibility = Visibility.Collapsed;
+        InlineEditorOutline.Visibility = Visibility.Collapsed;
+        ClearInlineOcrText();
         _isSelecting = false;
         _isMovingSelection = false;
+        _pendingSelectionBounds = null;
+        _lastRenderedSelectionBounds = null;
 
         if (CaptureSurface.IsMouseCaptured)
         {
@@ -5036,14 +5183,45 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             Math.Abs(bounds.Height));
     }
 
+    private void ResizeSelectionFromDrag(
+        double leftChange,
+        double topChange,
+        double rightChange,
+        double bottomChange)
+    {
+        ResizeSelectionCore(
+            leftChange,
+            topChange,
+            rightChange,
+            bottomChange,
+            deferVisualUpdate: true);
+    }
+
     private void ResizeSelection(
         double leftChange,
         double topChange,
         double rightChange,
         double bottomChange)
     {
+        ResizeSelectionCore(
+            leftChange,
+            topChange,
+            rightChange,
+            bottomChange,
+            deferVisualUpdate: false);
+    }
+
+    private void ResizeSelectionCore(
+        double leftChange,
+        double topChange,
+        double rightChange,
+        double bottomChange,
+        bool deferVisualUpdate)
+    {
         BeginSelectionAdjustment();
-        var bounds = GetSelectionBounds();
+        var bounds = deferVisualUpdate && _pendingSelectionBounds is { } pending
+            ? ClampBoundsToSurface(NormalizeBounds(pending))
+            : GetSelectionBounds();
         var left = Math.Clamp(bounds.Left + leftChange, 0, CaptureSurface.ActualWidth);
         var top = Math.Clamp(bounds.Top + topChange, 0, CaptureSurface.ActualHeight);
         var right = Math.Clamp(bounds.Right + rightChange, 0, CaptureSurface.ActualWidth);
@@ -5096,9 +5274,17 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             }
         }
 
-        UpdateSelectionBounds(new Rect(
+        var resizedBounds = new Rect(
             new WpfPoint(left, top),
-            new WpfPoint(right, bottom)));
+            new WpfPoint(right, bottom));
+        if (deferVisualUpdate)
+        {
+            QueueSelectionBoundsUpdate(resizedBounds);
+        }
+        else
+        {
+            UpdateSelectionBounds(resizedBounds);
+        }
     }
 
     private static bool IsCaptureSurfaceBackground(object source)

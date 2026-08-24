@@ -150,6 +150,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private string _videoSaveDirectory;
     private bool _recordSystemAudio;
     private bool _recordMicrophone;
+    private string? _microphoneDeviceId;
+    private string? _cameraDeviceId;
     private VideoRecordingCodec _videoRecordingCodec;
     private int _videoRecordingFrameRate;
     private VideoRecordingOutputFormat _recordingOutputFormat;
@@ -158,6 +160,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private bool _showKeyboardInputInRecording;
     private bool _showMouseInputInRecording;
     private bool _showMouseTrailInRecording;
+    private bool _showCameraInRecording;
     private bool _showTaskbarIcon;
     private bool _showNotificationIcon;
     private bool _showFloatingCaptureButton;
@@ -211,6 +214,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _videoSaveDirectory = settings.VideoSaveDirectory;
         _recordSystemAudio = settings.RecordSystemAudio;
         _recordMicrophone = settings.RecordMicrophone;
+        _microphoneDeviceId = settings.MicrophoneDeviceId;
+        _cameraDeviceId = settings.CameraDeviceId;
         _videoRecordingCodec = settings.VideoRecordingCodec;
         _videoRecordingFrameRate = settings.VideoRecordingFrameRate;
         _recordingOutputFormat = settings.RecordingOutputFormat;
@@ -219,6 +224,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _showKeyboardInputInRecording = settings.ShowKeyboardInputInRecording;
         _showMouseInputInRecording = settings.ShowMouseInputInRecording;
         _showMouseTrailInRecording = settings.ShowMouseTrailInRecording;
+        _showCameraInRecording = settings.ShowCameraInRecording;
         _showTaskbarIcon = settings.ShowTaskbarIcon;
         _showNotificationIcon = settings.ShowNotificationIcon;
         _showFloatingCaptureButton = settings.ShowFloatingCaptureButton;
@@ -387,6 +393,18 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _recordMicrophone, value);
     }
 
+    public string? MicrophoneDeviceId
+    {
+        get => _microphoneDeviceId;
+        set => SetProperty(ref _microphoneDeviceId, value);
+    }
+
+    public string? CameraDeviceId
+    {
+        get => _cameraDeviceId;
+        set => SetProperty(ref _cameraDeviceId, value);
+    }
+
     public VideoRecordingCodec VideoRecordingCodec
     {
         get => _videoRecordingCodec;
@@ -433,6 +451,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         get => _showMouseTrailInRecording;
         set => SetProperty(ref _showMouseTrailInRecording, value);
+    }
+
+    public bool ShowCameraInRecording
+    {
+        get => _showCameraInRecording;
+        set => SetProperty(ref _showCameraInRecording, value);
     }
 
     public bool ShowTaskbarIcon
@@ -735,6 +759,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             VideoSaveDirectory = VideoSaveDirectory,
             RecordSystemAudio = RecordSystemAudio,
             RecordMicrophone = RecordMicrophone,
+            MicrophoneDeviceId = MicrophoneDeviceId,
+            CameraDeviceId = CameraDeviceId,
             VideoRecordingCodec = VideoRecordingCodec,
             VideoRecordingFrameRate = VideoRecordingFrameRate,
             RecordingOutputFormat = RecordingOutputFormat,
@@ -743,6 +769,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             ShowKeyboardInputInRecording = ShowKeyboardInputInRecording,
             ShowMouseInputInRecording = ShowMouseInputInRecording,
             ShowMouseTrailInRecording = ShowMouseTrailInRecording,
+            ShowCameraInRecording = ShowCameraInRecording,
             ShowTaskbarIcon = ShowTaskbarIcon,
             ShowNotificationIcon = ShowNotificationIcon,
             ShowFloatingCaptureButton = ShowFloatingCaptureButton,
@@ -816,6 +843,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         VideoSaveDirectory = settings.VideoSaveDirectory;
         RecordSystemAudio = settings.RecordSystemAudio;
         RecordMicrophone = settings.RecordMicrophone;
+        MicrophoneDeviceId = settings.MicrophoneDeviceId;
+        CameraDeviceId = settings.CameraDeviceId;
         VideoRecordingCodec = settings.VideoRecordingCodec;
         VideoRecordingFrameRate = settings.VideoRecordingFrameRate;
         RecordingOutputFormat = settings.RecordingOutputFormat;
@@ -824,6 +853,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         ShowKeyboardInputInRecording = settings.ShowKeyboardInputInRecording;
         ShowMouseInputInRecording = settings.ShowMouseInputInRecording;
         ShowMouseTrailInRecording = settings.ShowMouseTrailInRecording;
+        ShowCameraInRecording = settings.ShowCameraInRecording;
         ShowTaskbarIcon = settings.ShowTaskbarIcon;
         ShowNotificationIcon = settings.ShowNotificationIcon;
         ShowFloatingCaptureButton = settings.ShowFloatingCaptureButton;

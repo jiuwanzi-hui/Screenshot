@@ -341,7 +341,7 @@ public sealed class MainWindowLifecycleTests
             Assert.All(
                 navigation.Items.Cast<ListBoxItem>(),
                 item => Assert.Null(item.FocusVisualStyle));
-            Assert.Equal(6, navigation.Items.Count);
+            Assert.Equal(7, navigation.Items.Count);
             navigation.SelectedIndex = 4;
             window.UpdateLayout();
             var updatePanel = Assert.IsType<ScrollViewer>(
@@ -355,6 +355,14 @@ public sealed class MainWindowLifecycleTests
             var donateQrImage = Assert.IsType<Image>(
                 window.FindName("DonateQrImage"));
             Assert.NotNull(donateQrImage.Source);
+            navigation.SelectedIndex = 6;
+            window.UpdateLayout();
+            var contactPanel = Assert.IsType<ScrollViewer>(
+                window.FindName("ContactSettingsPanel"));
+            Assert.Equal(Visibility.Visible, contactPanel.Visibility);
+            var communityQrImage = Assert.IsType<Image>(
+                window.FindName("CommunityQrImage"));
+            Assert.NotNull(communityQrImage.Source);
             window.RequestExit();
         });
     }

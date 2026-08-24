@@ -242,7 +242,10 @@ public sealed class ImmediateSettingsTests : IDisposable
                         ShowKeyboardInput: true,
                         ShowMouseInput: true,
                         ShowMouseTrail: true,
-                        OutputFormat: VideoRecordingOutputFormat.Gif));
+                        OutputFormat: VideoRecordingOutputFormat.Gif,
+                        ShowCamera: true,
+                        MicrophoneDeviceId: "microphone-2",
+                        CameraDeviceId: "camera-2"));
             }
             finally
             {
@@ -259,6 +262,9 @@ public sealed class ImmediateSettingsTests : IDisposable
         Assert.True(loaded.Settings.ShowKeyboardInputInRecording);
         Assert.True(loaded.Settings.ShowMouseInputInRecording);
         Assert.True(loaded.Settings.ShowMouseTrailInRecording);
+        Assert.True(loaded.Settings.ShowCameraInRecording);
+        Assert.Equal("microphone-2", loaded.Settings.MicrophoneDeviceId);
+        Assert.Equal("camera-2", loaded.Settings.CameraDeviceId);
         Assert.Equal(
             VideoRecordingOutputFormat.Gif,
             loaded.Settings.RecordingOutputFormat);

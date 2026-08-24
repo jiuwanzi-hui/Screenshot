@@ -192,7 +192,8 @@ public partial class App : System.Windows.Application, IDisposable
             colors => _mainWindow?.SaveCustomColorPalette(colors),
             (x, y) => _mainWindow?.SaveCaptureToolbarPosition(x, y),
             () => _ = Dispatcher.BeginInvoke(
-                () => ShowCaptureHistory(showVideo: true)));
+                () => ShowCaptureHistory(showVideo: true)),
+            () => _floatingCaptureWindow?.ShowRecordingAlreadyActiveFeedback());
         _regionCaptureCoordinator.CaptureStateChanged += OnCaptureStateChanged;
 
         if (dataMigrationResult.Warning is not null)

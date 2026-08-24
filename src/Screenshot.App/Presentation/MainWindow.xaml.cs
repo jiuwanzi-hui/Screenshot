@@ -9,6 +9,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using Screenshot.App.Core;
 using Screenshot.App.Infrastructure;
@@ -36,6 +37,9 @@ internal sealed class ReleaseHistoryItemViewModel
 public partial class MainWindow : Window, IDisposable
 {
     private const string CreatorProfileUrl = "https://b23.tv/ZzD0zPS";
+    // Replace this file in the repository when the time-limited QR code changes.
+    private const string CommunityQrImageUrl =
+        "https://raw.githubusercontent.com/jiuwanzi-hui/Screenshot/main/src/Screenshot.App/Assets/SnapCutCommunityQr.jpg";
     private const string GithubRepositoryUrl =
         "https://github.com/jiuwanzi-hui/Screenshot";
     private static readonly Version MinimumAutomaticRollbackVersion = new(2, 0, 0);
@@ -74,6 +78,7 @@ public partial class MainWindow : Window, IDisposable
     private bool? _pendingShowInTaskbar;
     private HistoryRetentionDialog? _activeHistoryRetentionDialog;
     private bool _disposed;
+    private int _communityQrLoadStarted;
 
     public MainWindow(
         AppSettings initialSettings,
@@ -205,12 +210,15 @@ public partial class MainWindow : Window, IDisposable
         _settingsViewModel.VideoRecordingFrameRate = preferences.FrameRate;
         _settingsViewModel.RecordSystemAudio = preferences.RecordSystemAudio;
         _settingsViewModel.RecordMicrophone = preferences.RecordMicrophone;
+        _settingsViewModel.MicrophoneDeviceId = preferences.MicrophoneDeviceId;
+        _settingsViewModel.CameraDeviceId = preferences.CameraDeviceId;
         _settingsViewModel.ShowKeyboardInputInRecording =
             preferences.ShowKeyboardInput;
         _settingsViewModel.ShowMouseInputInRecording =
             preferences.ShowMouseInput;
         _settingsViewModel.ShowMouseTrailInRecording =
             preferences.ShowMouseTrail;
+        _settingsViewModel.ShowCameraInRecording = preferences.ShowCamera;
         _settingsViewModel.RecordingOutputFormat = preferences.OutputFormat;
         ApplySettingsImmediately();
     }
@@ -2488,7 +2496,8 @@ public partial class MainWindow : Window, IDisposable
             OcrSettingsPanel is null ||
             TranslationSettingsPanel is null ||
             UpdateSettingsPanel is null ||
-            DonateSettingsPanel is null)
+            DonateSettingsPanel is null ||
+            ContactSettingsPanel is null)
         {
             return;
         }
@@ -2511,6 +2520,42 @@ public partial class MainWindow : Window, IDisposable
         DonateSettingsPanel.Visibility = sectionIndex == 5
             ? Visibility.Visible
             : Visibility.Collapsed;
+        ContactSettingsPanel.Visibility = sectionIndex == 6
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        if (sectionIndex == 6 &&
+            Interlocked.Exchange(ref _communityQrLoadStarted, 1) == 0)
+        {
+            _ = LoadCommunityQrImageAsync();
+        }
+    }
+
+    private async Task LoadCommunityQrImageAsync()
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(4));
+            var bytes = await _modelCatalogHttpClient.GetByteArrayAsync(
+                CommunityQrImageUrl,
+                timeout.Token);
+            using var stream = new MemoryStream(bytes, writable: false);
+            var image = new BitmapImage();
+            image.BeginInit();
+            image.CacheOption = BitmapCacheOption.OnLoad;
+            image.StreamSource = stream;
+            image.EndInit();
+            image.Freeze();
+
+            if (CommunityQrImage is not null)
+            {
+                CommunityQrImage.Source = image;
+            }
+        }
+        catch (Exception)
+        {
+            // Keep the bundled QR code when the remote copy is unavailable.
+        }
     }
 
     private void ShowOcrLanguageAvailability()

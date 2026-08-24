@@ -569,6 +569,27 @@ public sealed class TranslationProviderTests
     }
 
     [Fact]
+    public async Task ReportsInsufficientBalanceAsAnActionableProviderError()
+    {
+        var handler = new RecordingHandler(
+            """{"error":{"message":"Insufficient Balance"}}""",
+            HttpStatusCode.PaymentRequired);
+        using var client = new HttpClient(handler);
+        var provider = new OpenAiCompatibleTranslationProvider(
+            "https://api.deepseek.com",
+            "deepseek-v4-flash",
+            "test-key",
+            client);
+
+        var result = await provider.TranslateAsync("hello", "en", "zh-Hans");
+
+        Assert.False(result.IsSuccess);
+        Assert.Equal(
+            "在线翻译账户余额不足，请充值或切换到离线翻译。",
+            result.ErrorMessage);
+    }
+
+    [Fact]
     public void TranslationRemainsAvailableWithoutTheLegacyConsentFlag()
     {
         var settings = AppSettings.CreateDefault() with
@@ -922,7 +943,7 @@ public sealed class TranslationProviderTests
             result.Segments.Select((text, index) => (text, index)),
             item => Assert.Equal($"译文 English sentence {item.index + 1}", item.text));
         Assert.Equal(0, first.SegmentCallCount);
-        Assert.Equal(12, second.SegmentCallCount);
+        Assert.Equal(4, second.SegmentCallCount);
     }
 
     [Fact]
@@ -949,7 +970,7 @@ public sealed class TranslationProviderTests
             "zh-Hans");
 
         Assert.True(result.IsSuccess, result.ErrorMessage);
-        Assert.Equal(12, first.SegmentCallCount);
+        Assert.Equal(4, first.SegmentCallCount);
         // A successful online provider remains the winner; the offline
         // fallback is not probed again for every later full-screen batch.
         Assert.Equal(0, second.SegmentCallCount);
@@ -1017,7 +1038,7 @@ public sealed class TranslationProviderTests
 
         Assert.True(result.IsSuccess, result.ErrorMessage);
         Assert.Equal(12, result.Segments.Count);
-        Assert.Equal(4, online.SegmentCallCount);
+        Assert.Equal(3, online.SegmentCallCount);
     }
 
     [Fact]
@@ -1079,8 +1100,8 @@ public sealed class TranslationProviderTests
             "zh-Hans");
 
         Assert.True(result.IsSuccess, result.ErrorMessage);
-        Assert.Equal(0, qwen.SegmentCallCount);
-        Assert.Equal(3, online.SegmentCallCount);
+        Assert.Equal(1, qwen.SegmentCallCount);
+        Assert.Equal(1, online.SegmentCallCount);
     }
 
     [Fact]

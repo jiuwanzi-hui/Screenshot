@@ -208,6 +208,7 @@ public partial class FloatingCaptureWindow : Window
     private bool _isCaptureHidden;
     private bool _isContextMenuOpen;
     private bool _isDisplaySettingsSubscribed;
+    private int _recordingFeedbackVersion;
 
     public FloatingCaptureWindow()
     {
@@ -265,6 +266,49 @@ public partial class FloatingCaptureWindow : Window
             _ = Dispatcher.BeginInvoke(
                 DispatcherPriority.Loaded,
                 () => ReconcileWithDisplays(snapNearby: false));
+        }
+    }
+
+    internal async void ShowRecordingAlreadyActiveFeedback()
+    {
+        if (!IsLoaded || Dispatcher.HasShutdownStarted)
+        {
+            return;
+        }
+
+        var version = ++_recordingFeedbackVersion;
+        var wasHidden = !IsVisible;
+        if (wasHidden)
+        {
+            Show();
+            ReconcileWithDisplays(snapNearby: false);
+        }
+
+        var previousContent = VideoRecordingMenuButton.Content;
+        var previousToolTip = VideoRecordingMenuButton.ToolTip;
+        VideoRecordingMenuButton.Content = "正在录制";
+        VideoRecordingMenuButton.ToolTip = "当前已经有一个录屏任务";
+        FeatureMenuPopup.IsOpen = true;
+        try
+        {
+            await Task.Delay(1400);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        if (version != _recordingFeedbackVersion || !IsLoaded)
+        {
+            return;
+        }
+
+        VideoRecordingMenuButton.Content = previousContent;
+        VideoRecordingMenuButton.ToolTip = previousToolTip;
+        FeatureMenuPopup.IsOpen = false;
+        if (wasHidden && _isCaptureHidden)
+        {
+            Hide();
         }
     }
 

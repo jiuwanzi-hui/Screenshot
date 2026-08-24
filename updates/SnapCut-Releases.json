@@ -1,5 +1,20 @@
 [
   {
+    "tag_name": "v3.6.0",
+    "name": "SnapCut 3.6.0",
+    "body": "- 增加录屏摄像头实时预览，支持实体与虚拟摄像头、多麦克风选择、区域内移动和四角等比例缩放；设备选择会保留，无首帧时自动重连。\n- 修复区域录屏框选后画面停在首帧的问题，并优化录屏工具栏、标注和输入轨迹交互。\n- 优化截图、钉图和录屏框选的拖动流畅度，拖动时实时显示分辨率并清除旧画面残留。\n- 改进复杂页面整图翻译的分区并行、服务优先级和失败回退，提升速度与覆盖完整性。\n- 设置页新增可远程更新二维码的“交流联系”入口。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v3.6.0",
+    "published_at": "2026-08-24T13:27:33+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.0/SnapCut-Update.json" },
+      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.0/Screenshot-Update.json" },
+      { "name": "SnapCut-Setup-3.6.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.0/SnapCut-Setup-3.6.0-win-x64.exe" },
+      { "name": "SnapCut-Portable-3.6.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.0/SnapCut-Portable-3.6.0-win-x64.zip" }
+    ]
+  },
+  {
     "tag_name": "v3.5.0",
     "name": "SnapCut 3.5.0",
     "body": "- 为区域录屏增加与普通截图一致的实时标注工具栏，支持矩形、椭圆、直线/曲线箭头、画笔、文字、序号、表情和马赛克。\n- 录屏标注支持选中后移动、缩放、调整颜色与粗细；工具样式和常用颜色跨录制保留。\n- 录屏增加按键提示、主题色鼠标渐隐轨迹、暂停、取消录制，以及结束后自动打开录屏历史。\n- 修复首次录屏初始化卡顿、重复画面、无显示器或合盖环境兼容、椭圆和画笔缩放、颜色选择器交互及工具栏状态问题。",

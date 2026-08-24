@@ -16,6 +16,11 @@ Copyright (c) 2024-2026 Alexander Gluschenko
 License: MIT
 Source: https://github.com/gluschenko/panlingo
 
+DirectShowLib
+Copyright (c) Larry Beall and contributors
+License: GNU Lesser General Public License 2.1 (LGPL-2.1)
+Source: https://github.com/larrybeall/DirectShowLib
+
 Compact Language Detector 3 (CLD3)
 Copyright (c) 2016 Google Inc.
 License: Apache License 2.0

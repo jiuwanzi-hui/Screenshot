@@ -36,12 +36,14 @@ SnapCut（简截）是一款以 Windows 10/11 正式版为主的轻量截图工�
 
 下载最新的 x64 自包含版本。2.3.0 起发布附件统一使用 `SnapCut-Setup-*` 和 `SnapCut-Portable-*`；同时保留旧清单入口，2.1.0 及之后版本仍可在程序内在线更新：
 
-- [安装版 SnapCut Setup 3.5.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.5.0-win-x64.exe)
-- [免安装版 SnapCut Portable 3.5.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.5.0-win-x64.zip)
-- [安装版 SnapCut Setup 3.5.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.5.0/SnapCut-Setup-3.5.0-win-x64.exe)
-- [免安装版 SnapCut Portable 3.5.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.5.0/SnapCut-Portable-3.5.0-win-x64.zip)
+- [安装版 SnapCut Setup 3.6.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.6.0-win-x64.exe)
+- [免安装版 SnapCut Portable 3.6.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.6.0-win-x64.zip)
+- [安装版 SnapCut Setup 3.6.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.6.0/SnapCut-Setup-3.6.0-win-x64.exe)
+- [免安装版 SnapCut Portable 3.6.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.6.0/SnapCut-Portable-3.6.0-win-x64.zip)
 
 免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET 或 Visual C++ 运行库。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.8.3 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+
+3.6.0 增加录屏摄像头实时预览，支持实体、虚拟摄像头和多麦克风选择；摄像头画面可在录制区域内移动、四角等比例缩放并双击恢复，设备选择会跨录制保留，无首帧时自动重连。录屏框选恢复动态画面，工具栏和输入轨迹交互进一步优化。截图、钉图和录屏的框选边框更跟手，拖动时同步显示分辨率并消除旧画面残留。整图翻译改进分区并行、服务优先级与失败回退，提升复杂页面的速度和覆盖完整性；设置页新增可在线替换二维码的“交流联系”入口。
 
 3.5.0 为区域录屏增加与普通截图一致的实时标注工具栏，支持矩形、椭圆、直线/曲线箭头、画笔、文字、序号、表情和马赛克；标注可选中后移动、缩放、调整颜色与粗细，常用颜色和工具样式会跨录制保留。录屏支持按键提示、主题色鼠标渐隐轨迹、暂停、取消及结束后自动打开录屏历史，同时修复首次录屏初始化卡顿、重复画面、无显示器环境兼容、椭圆/画笔控制点和颜色滑块交互问题。
 
@@ -170,12 +172,14 @@ SnapCut is primarily a lightweight Windows 10/11 capture utility. It combines re
 
 Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-*` and `SnapCut-Portable-*` starting with 2.3.0. The legacy manifest endpoint remains available so versions 2.1.0 and later continue to update in-app:
 
-- [SnapCut Setup 3.5.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.5.0-win-x64.exe)
-- [SnapCut Portable 3.5.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.5.0-win-x64.zip)
-- [SnapCut Setup 3.5.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.5.0/SnapCut-Setup-3.5.0-win-x64.exe)
-- [SnapCut Portable 3.5.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.5.0/SnapCut-Portable-3.5.0-win-x64.zip)
+- [SnapCut Setup 3.6.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.6.0-win-x64.exe)
+- [SnapCut Portable 3.6.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.6.0-win-x64.zip)
+- [SnapCut Setup 3.6.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.6.0/SnapCut-Setup-3.6.0-win-x64.exe)
+- [SnapCut Portable 3.6.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.6.0/SnapCut-Portable-3.6.0-win-x64.zip)
 
 Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET or Visual C++ runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.8.3 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+
+Version 3.6.0 adds a live camera preview to region recording with physical and virtual camera support plus selectable microphones. The camera frame stays inside the recording region, moves and resizes at its original aspect ratio, restores on double-click, remembers the selected device, and reconnects automatically when the first frame stalls. Region recording is live again while selecting, and toolbar/input-overlay interaction is smoother. Screenshot, pin, and recording selections now track the pointer more closely, show resolution while dragging, and avoid stale-frame remnants. Full-image translation improves parallel region processing, provider priority, and fallback coverage on complex pages. Settings also gains a Contact page whose QR image can be replaced remotely.
 
 Version 3.5.0 adds a live annotation toolbar to region recording with the same rectangle, ellipse, straight/curved arrow, brush, text, number, emoji, and mosaic tools used by screenshots. Annotations can be selected, moved, resized, recolored, and restyled, while recent colors and tool variants persist between sessions. Recording now supports keystroke hints, a theme-colored fading mouse trail, pause, cancel, and automatic opening of video history after completion. It also fixes first-recording startup stalls, duplicated frames, headless-display compatibility, ellipse/brush resize handles, and color-slider interaction.
 

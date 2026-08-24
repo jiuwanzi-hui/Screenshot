@@ -5,7 +5,11 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
+using MediaBrush = System.Windows.Media.Brush;
+using MediaFontFamily = System.Windows.Media.FontFamily;
+using WpfPath = System.Windows.Shapes.Path;
 using Screenshot.App.Core;
+using Screenshot.App.Editor;
 
 namespace Screenshot.App.Presentation;
 
@@ -227,10 +231,10 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
 
             foreach (var item in items)
             {
-                tokens.Add(CreatePreviewButton(item.Glyph, item.Label));
+                tokens.Add(CreatePreviewButton(item.Feature, item.Glyph, item.Label));
                 if (item.Feature == CaptureToolbarFeature.UndoRedo)
                 {
-                    tokens.Add(CreatePreviewButton("↷", "重做"));
+                    tokens.Add(CreatePreviewButton(item.Feature, "↷", "重做"));
                 }
             }
         }
@@ -258,7 +262,7 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
             ToolTip = toolTip ?? item.Label,
             Cursor = System.Windows.Input.Cursors.Hand,
             AllowDrop = true,
-            Content = CreateGlyph(glyph ?? item.Glyph, 15),
+            Content = CreateToolbarIcon(item.Feature, glyph ?? item.Glyph, 15),
         };
         button.SetResourceReference(ForegroundProperty,
             item.IsVisible ? "EditorToolbarIconBrush" : "AppTextSecondaryBrush");
@@ -272,7 +276,8 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
         return button;
     }
 
-    private static System.Windows.Controls.Button CreatePreviewButton(
+    private System.Windows.Controls.Button CreatePreviewButton(
+        CaptureToolbarFeature? feature,
         string glyph,
         string toolTip)
     {
@@ -284,7 +289,7 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
             Padding = new Thickness(0),
             IsHitTestVisible = false,
             ToolTip = toolTip,
-            Content = CreateGlyph(glyph, 14),
+            Content = CreateToolbarIcon(feature, glyph, 14),
         };
         button.SetResourceReference(BackgroundProperty,
             "EditorToolbarButtonBackgroundBrush");
@@ -293,12 +298,12 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
         return button;
     }
 
-    private static System.Windows.Controls.Button CreateFixedButton(
+    private System.Windows.Controls.Button CreateFixedButton(
         string glyph,
         string toolTip,
         bool confirm)
     {
-        var button = CreatePreviewButton(glyph, toolTip);
+        var button = CreatePreviewButton(null, glyph, toolTip);
         button.IsHitTestVisible = false;
         if (confirm)
         {
@@ -311,14 +316,109 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
         return button;
     }
 
-    private static TextBlock CreateGlyph(string glyph, double fontSize) => new()
+    private FrameworkElement CreateToolbarIcon(
+        CaptureToolbarFeature? feature,
+        string glyph,
+        double size)
     {
-        Text = glyph,
-        FontSize = fontSize,
-        FontWeight = FontWeights.SemiBold,
-        HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
-        VerticalAlignment = System.Windows.VerticalAlignment.Center,
-    };
+        if (feature == CaptureToolbarFeature.Emoji)
+        {
+            return new EmojiStickerImage
+            {
+                Width = size,
+                Height = size,
+                Sticker = "😊",
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+                VerticalAlignment = System.Windows.VerticalAlignment.Center,
+            };
+        }
+
+        if (feature == CaptureToolbarFeature.Number)
+        {
+            return new Border
+            {
+                Width = size + 4,
+                Height = size + 4,
+                Background = ResolveBrush("EditorToolbarIconBrush", Colors.DimGray),
+                CornerRadius = new CornerRadius((size + 4) / 2),
+                Child = new TextBlock
+                {
+                    Text = "1",
+                    Foreground = ResolveBrush("EditorToolbarButtonBackgroundBrush", Colors.White),
+                    FontSize = size - 1,
+                    FontWeight = FontWeights.Bold,
+                    HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+                    VerticalAlignment = System.Windows.VerticalAlignment.Center,
+                },
+            };
+        }
+
+        if (feature is CaptureToolbarFeature.TextRecognition or
+            CaptureToolbarFeature.CopyRecognizedText or
+            CaptureToolbarFeature.Translation or
+            CaptureToolbarFeature.PrivacyRedaction)
+        {
+            return new TextBlock
+            {
+                Text = glyph,
+                FontFamily = new MediaFontFamily("Microsoft YaHei UI"),
+                FontSize = size,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = ResolveBrush("EditorToolbarIconBrush", Colors.DimGray),
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+                VerticalAlignment = System.Windows.VerticalAlignment.Center,
+            };
+        }
+
+        var resourceKey = feature switch
+        {
+            CaptureToolbarFeature.Shape => "RectangleIconGeometry",
+            CaptureToolbarFeature.Arrow => "ArrowIconGeometry",
+            CaptureToolbarFeature.Brush => "PenIconGeometry",
+            CaptureToolbarFeature.Text => "TextIconGeometry",
+            CaptureToolbarFeature.Mosaic => "MosaicIconGeometry",
+            CaptureToolbarFeature.VideoRecording => "RecordIconGeometry",
+            CaptureToolbarFeature.Save => "SaveIconGeometry",
+            CaptureToolbarFeature.ScrollCapture => "ScrollIconGeometry",
+            CaptureToolbarFeature.TextRecognition or
+                CaptureToolbarFeature.CopyRecognizedText => "OcrIconGeometry",
+            CaptureToolbarFeature.PinImage => "PinIconGeometry",
+            CaptureToolbarFeature.UndoRedo => "UndoIconGeometry",
+            _ => null,
+        };
+        if (resourceKey is not null && TryFindResource(resourceKey) is Geometry geometry)
+        {
+            var path = new WpfPath { Data = geometry };
+            path.SetResourceReference(StyleProperty, "ToolbarPreviewIcon");
+            path.Width = size;
+            path.Height = size;
+            return path;
+        }
+
+        return new TextBlock
+        {
+            Text = glyph,
+            FontSize = size,
+            FontWeight = FontWeights.SemiBold,
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+            VerticalAlignment = System.Windows.VerticalAlignment.Center,
+        };
+    }
+
+    private MediaBrush ResolveBrush(string key, System.Windows.Media.Color fallback)
+    {
+        if (TryFindResource(key) is MediaBrush brush)
+        {
+            return brush;
+        }
+
+        if (System.Windows.Application.Current?.TryFindResource(key) is MediaBrush applicationBrush)
+        {
+            return applicationBrush;
+        }
+
+        return new SolidColorBrush(fallback);
+    }
 
     private static Border CreateSeparator() => new()
     {

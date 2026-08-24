@@ -13,11 +13,18 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
     // Local OpenAI-compatible servers usually serialize model inference.
     // Eight simultaneous requests make every request wait behind the same
     // model and turn a successful translation into a wall of timeouts.
-    private const int MaximumConcurrentOnlineBatches = 3;
-    private const int LargeCaptureOnlineSegmentsPerBatch = 8;
-    private const int LargeCaptureOnlineCharactersPerBatch = 650;
+    private const int MaximumConcurrentOnlineBatches = 4;
+    // Keep enough neighboring context for the model while limiting a full
+    // screen to a small number of requests. Tiny batches multiply network
+    // latency and make a working provider miss the capture deadline.
+    private const int LargeCaptureOnlineSegmentsPerBatch = 24;
+    private const int LargeCaptureOnlineCharactersPerBatch = 1800;
     private const int LargeCaptureOfflineSegmentsPerBatch = 64;
     private const int LargeCaptureOfflineCharactersPerBatch = 8000;
+    // The capture UI must remain interactive. This is a deadline for the
+    // whole translation request, not an independent timeout per provider.
+    private static readonly TimeSpan TranslationBudget =
+        TimeSpan.FromSeconds(9.5);
     private static readonly TimeSpan DefaultOfflineTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan DefaultOnlineTimeout = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan DefaultLargeModelTimeout = TimeSpan.FromSeconds(30);
@@ -119,6 +126,37 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         string targetLanguage,
         CancellationToken cancellationToken = default)
     {
+        using var deadlineCancellation =
+            new CancellationTokenSource(TranslationBudget);
+        using var linkedCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken,
+                deadlineCancellation.Token);
+        try
+        {
+            return await TranslateSegmentsCoreAsync(
+                segments,
+                sourceLanguage,
+                targetLanguage,
+                linkedCancellation.Token,
+                deadlineCancellation.Token);
+        }
+        catch (OperationCanceledException) when (
+            deadlineCancellation.IsCancellationRequested &&
+            !cancellationToken.IsCancellationRequested)
+        {
+            return TranslationSegmentsResult.Failure(
+                "整张截图翻译达到 10 秒时间限制，未完成区域保留原文。");
+        }
+    }
+
+    private async Task<TranslationSegmentsResult> TranslateSegmentsCoreAsync(
+        IReadOnlyList<string> segments,
+        string sourceLanguage,
+        string targetLanguage,
+        CancellationToken cancellationToken,
+        CancellationToken deadlineToken)
+    {
         ArgumentNullException.ThrowIfNull(segments);
         if (segments.Count == 0)
         {
@@ -151,7 +189,8 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                     provider.Id,
                     TranslationProviderFactory.LocalLargeModelProviderId,
                     StringComparison.OrdinalIgnoreCase)),
-                cancellationToken);
+                cancellationToken,
+                deadlineToken);
         }
 
         if (providers.Count == 0)
@@ -295,12 +334,9 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         string targetLanguage,
         IReadOnlyList<ITranslationProvider> providers,
         ITranslationProvider? localModelFallback,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CancellationToken deadlineToken)
     {
-        using var translationCancellation =
-            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var translationToken = translationCancellation.Token;
-        var tasks = new List<Task<TranslationSegmentsResult>>(2);
         var offline = providers.FirstOrDefault(provider => string.Equals(
                 provider.Id,
                 TranslationProviderFactory.OfflineProviderId,
@@ -310,35 +346,25 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                 TranslationProviderFactory.OpenAiCompatibleProviderId,
                 StringComparison.OrdinalIgnoreCase));
 
-        // When the installed Bergamot route is available, use it as the
-        // single fast path. Starting an online request in parallel only adds
-        // network latency and can win the race with a valid local result.
-        // Online remains the fallback when the local route is unavailable.
         var offlineRouteAvailable = offline is OfflineTranslationProvider installedOffline &&
             installedOffline.HasInstalledRoute(
                 ResolveLargeCaptureSourceLanguage(segments, sourceLanguage),
                 targetLanguage);
-        if (offline is not null && (offlineRouteAvailable || online is null))
-        {
-            tasks.Add(TranslateLargeCaptureOfflineAsync(
-                offline,
-                segments,
-                sourceLanguage,
-                targetLanguage,
-                translationToken));
-        }
-
-        if (online is not null && !offlineRouteAvailable)
-        {
-            tasks.Add(TranslateLargeCaptureOnlineAsync(
-                online,
-                segments,
-                sourceLanguage,
-                targetLanguage,
-                translationToken));
-        }
-
-        if (tasks.Count == 0)
+        // Keep the exact order selected in Settings. A route that fails or
+        // exceeds its share of the capture budget falls through to the next
+        // configured route; a lower route is never started ahead of a higher
+        // route.
+        var routes = providers
+            .Where(provider =>
+                (ReferenceEquals(provider, offline) && offlineRouteAvailable) ||
+                ReferenceEquals(provider, online) ||
+                string.Equals(
+                    provider.Id,
+                    TranslationProviderFactory.LocalLargeModelProviderId,
+                    StringComparison.OrdinalIgnoreCase))
+            .Distinct()
+            .ToArray();
+        if (routes.Length == 0)
         {
             return TranslationSegmentsResult.Failure(
                 "大截图需要已安装的目标语言包或可用的在线翻译服务。");
@@ -346,34 +372,72 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
 
         var errors = new List<string>();
         TranslationSegmentsResult? bestPartial = null;
-        while (tasks.Count > 0)
+        // The configured order is the priority order. Do not divide the
+        // ten-second budget evenly: a slow first route used to leave a valid
+        // second route with only half a budget, which made large captures
+        // report "online translation cancelled" even when that route had
+        // available quota. The shared deadline still caps the whole call;
+        // each route may use the remaining time before fallback.
+        var routeBudget = TranslationBudget;
+        foreach (var route in routes)
         {
-            // The ten-second figure is a performance target, not a reason to
-            // discard a valid translation. Each provider batch has its own
-            // bounded timeout; remaining batches are allowed to finish so a
-            // slow OCR fragment cannot erase the completed parts of a page.
-            var completed = (Task<TranslationSegmentsResult>)
-                await Task.WhenAny(tasks);
             cancellationToken.ThrowIfCancellationRequested();
-
-            tasks.Remove(completed);
+            using var routeBudgetCancellation =
+                new CancellationTokenSource(routeBudget);
+            using var routeCancellation =
+                CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken,
+                    routeBudgetCancellation.Token,
+                    deadlineToken);
+            var routeToken = routeCancellation.Token;
             TranslationSegmentsResult result;
-            try
+            if (ReferenceEquals(route, offline))
             {
-                result = await completed;
+                result = await TranslateLargeCaptureOfflineAsync(
+                    route,
+                    segments,
+                    sourceLanguage,
+                    targetLanguage,
+                    routeToken,
+                    deadlineToken);
             }
-            catch (OperationCanceledException) when (
-                translationCancellation.IsCancellationRequested &&
-                !cancellationToken.IsCancellationRequested)
+            else if (string.Equals(
+                         route.Id,
+                         TranslationProviderFactory.LocalLargeModelProviderId,
+                         StringComparison.OrdinalIgnoreCase))
             {
-                continue;
+                try
+                {
+                    result = await TranslateLargeCaptureLocalModelAsync(
+                        route,
+                        segments,
+                        sourceLanguage,
+                        targetLanguage,
+                        routeToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    result = TranslationSegmentsResult.Failure(
+                        deadlineToken.IsCancellationRequested
+                            ? "翻译达到时间限制，未完成区域保留原文。"
+                            : "本机离线翻译已取消。");
+                }
+            }
+            else
+            {
+                result = await TranslateLargeCaptureOnlineAsync(
+                    route,
+                    segments,
+                    sourceLanguage,
+                    targetLanguage,
+                    routeToken,
+                    deadlineToken);
             }
             if (IsCompleteValidTranslation(
                 segments,
                 result,
                 targetLanguage))
             {
-                translationCancellation.Cancel();
                 return result;
             }
 
@@ -389,7 +453,6 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                     result.Segments,
                     targetLanguage))
             {
-                translationCancellation.Cancel();
                 return result;
             }
 
@@ -405,6 +468,11 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
             if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
             {
                 errors.Add(result.ErrorMessage);
+            }
+
+            if (deadlineToken.IsCancellationRequested)
+            {
+                break;
             }
         }
 
@@ -504,7 +572,8 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         IReadOnlyList<string> segments,
         string sourceLanguage,
         string targetLanguage,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CancellationToken deadlineToken)
     {
         // Bergamot is fast for short batches but becomes disproportionately
         // slow when an entire screen is sent in one native call. Keep the
@@ -529,19 +598,29 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         var failures = new List<string>();
         foreach (var batch in batches)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var result = await InvokeSegmentsWithTimeoutAsync(
-                offline,
-                batch.Segments,
-                effectiveSourceLanguage,
-                targetLanguage,
-                GetTimeout(offline, batch.Segments.Count),
-                cancellationToken);
-            // Do not retry individual OCR rows for a full-screen capture.
-            // Bergamot already translates the whole bounded batch in one
-            // native call; row retries are what previously pushed an
-            // otherwise fast result past the ten-second interaction budget.
-            RecordBatchResult(batch, result, translated, failures);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var result = await InvokeSegmentsWithTimeoutAsync(
+                    offline,
+                    batch.Segments,
+                    effectiveSourceLanguage,
+                    targetLanguage,
+                    GetTimeout(offline, batch.Segments.Count),
+                    cancellationToken);
+                // Do not retry individual OCR rows for a full-screen capture.
+                // Bergamot already translates the whole bounded batch in one
+                // native call; row retries are what previously pushed an
+                // otherwise fast result past the ten-second interaction budget.
+                RecordBatchResult(batch, result, translated, failures);
+            }
+            catch (OperationCanceledException)
+            {
+                failures.Add(deadlineToken.IsCancellationRequested
+                    ? "翻译达到时间限制，未完成区域保留原文。"
+                    : "翻译已取消，未完成区域保留原文。");
+                break;
+            }
         }
 
         return CreateCombinedResult(segments, translated, failures);
@@ -710,8 +789,9 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
 
     private static bool ShouldRetryFailedBatch(string? errorMessage)
     {
-        return IsTransientTimeout(errorMessage) ||
-               IsSplittableBatchFailure(errorMessage);
+        return !IsProviderConfigurationFailure(errorMessage) &&
+               (IsTransientTimeout(errorMessage) ||
+                IsSplittableBatchFailure(errorMessage));
     }
 
     private async Task<TranslationSegmentsResult> TranslateLargeCaptureOnlineAsync(
@@ -719,7 +799,8 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         IReadOnlyList<string> segments,
         string sourceLanguage,
         string targetLanguage,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CancellationToken deadlineToken)
     {
         var normalizedSegments = segments
             .Select(NormalizeLargeCaptureSegment)
@@ -731,17 +812,24 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         var translated = new string[normalizedSegments.Length];
         var failures = new List<string>();
         using var throttle = new SemaphoreSlim(MaximumConcurrentOnlineBatches);
+        using var providerCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var providerToken = providerCancellation.Token;
+        var providerFailureLock = new object();
+        string? providerFailureMessage = null;
         var tasks = batches.Select(async batch =>
         {
-            await throttle.WaitAsync(cancellationToken);
+            var entered = false;
             try
             {
+                await throttle.WaitAsync(providerToken);
+                entered = true;
                 var result = await InvokeSegmentsWithSplitRetriesAsync(
                     online,
                     batch.Segments,
                     sourceLanguage,
                     targetLanguage,
-                    cancellationToken);
+                    providerToken);
                 if (!result.IsSuccess &&
                     batch.Segments.Count > 1 &&
                     ShouldRetryFailedBatch(result.ErrorMessage))
@@ -751,31 +839,74 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                         batch.Segments,
                         sourceLanguage,
                         targetLanguage,
-                        cancellationToken);
+                        providerToken);
+                }
+
+                if (!result.IsSuccess &&
+                    IsProviderConfigurationFailure(result.ErrorMessage))
+                {
+                    lock (providerFailureLock)
+                    {
+                        providerFailureMessage ??= result.ErrorMessage;
+                    }
+
+                    // Billing/authentication failures are deterministic. Do
+                    // not spend requests on every remaining batch.
+                    providerCancellation.Cancel();
                 }
                 return (Batch: batch, Result: result);
             }
+            catch (OperationCanceledException)
+            {
+                string? configurationFailure;
+                lock (providerFailureLock)
+                {
+                    configurationFailure = providerFailureMessage;
+                }
+                return (Batch: batch, Result:
+                    TranslationSegmentsResult.Failure(
+                        deadlineToken.IsCancellationRequested
+                            ? "翻译达到时间限制，未完成区域保留原文。"
+                            : configurationFailure is not null
+                                ? "在线翻译已停止。"
+                            : "在线翻译已取消。"));
+            }
             finally
             {
-                throttle.Release();
+                if (entered)
+                {
+                    throttle.Release();
+                }
             }
         }).ToArray();
 
-        try
+        foreach (var completed in await Task.WhenAll(tasks))
         {
-            foreach (var completed in await Task.WhenAll(tasks))
+            string? configurationFailure;
+            lock (providerFailureLock)
             {
-                RecordBatchResult(
-                    completed.Batch,
-                    completed.Result,
-                    translated,
-                    failures);
+                configurationFailure = providerFailureMessage;
             }
+            if (configurationFailure is not null &&
+                !completed.Result.IsSuccess)
+            {
+                // Report the billing/authentication problem once below,
+                // rather than once for every request that was cancelled.
+                continue;
+            }
+            RecordBatchResult(
+                completed.Batch,
+                completed.Result,
+                translated,
+                failures);
         }
-        catch (OperationCanceledException)
+
+        lock (providerFailureLock)
         {
-            return TranslationSegmentsResult.Failure(
-                "在线翻译已取消，未完成全部分段。");
+            if (!string.IsNullOrWhiteSpace(providerFailureMessage))
+            {
+                failures.Add(providerFailureMessage);
+            }
         }
 
         var combined = CreateCombinedResult(
@@ -1185,32 +1316,21 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         IReadOnlyList<ITranslationProvider> providers,
         int segmentCount)
     {
-        if (segmentCount < PreferFastProvidersSegmentThreshold ||
-            providers.Count < 2)
-        {
-            return providers;
-        }
+        // The order in Settings is the contract. Performance tuning may
+        // change batching and concurrency, but it must never silently move
+        // an online provider ahead of the user's selected offline model (or
+        // skip that model for a large capture).
+        return providers;
+    }
 
-        var slow = providers
-            .Where(provider => string.Equals(
-                provider.Id,
-                TranslationProviderFactory.LocalLargeModelProviderId,
-                StringComparison.OrdinalIgnoreCase))
-            .ToArray();
-        if (slow.Length == 0)
-        {
-            return providers;
-        }
-
-        // General-purpose Qwen is useful for short prose but cannot reliably
-        // meet the screenshot interaction budget on CPU. Large captures use
-        // Bergamot first and the configured online model as the fallback.
-        return providers
-            .Where(provider => !string.Equals(
-                provider.Id,
-                TranslationProviderFactory.LocalLargeModelProviderId,
-                StringComparison.OrdinalIgnoreCase))
-            .ToArray();
+    private static bool IsProviderConfigurationFailure(string? errorMessage)
+    {
+        return !string.IsNullOrWhiteSpace(errorMessage) &&
+               (errorMessage.Contains("余额不足", StringComparison.Ordinal) ||
+                errorMessage.Contains("HTTP 402", StringComparison.Ordinal) ||
+                errorMessage.Contains("HTTP 401", StringComparison.Ordinal) ||
+                errorMessage.Contains("HTTP 403", StringComparison.Ordinal) ||
+                errorMessage.Contains("拒绝了凭据", StringComparison.Ordinal));
     }
 
     /// <summary>

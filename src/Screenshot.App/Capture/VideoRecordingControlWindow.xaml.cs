@@ -37,7 +37,6 @@ public partial class VideoRecordingControlWindow : Window
 {
     private static WeakReference<VideoRecordingControlWindow>? _activeWindow;
     private const int TopmostWindow = -1;
-    private const double ActiveControlWidth = 700;
     private const uint DoNotResize = 0x0001;
     private const uint DoNotMove = 0x0002;
     private const uint DoNotActivate = 0x0010;
@@ -62,9 +61,16 @@ public partial class VideoRecordingControlWindow : Window
     private RecordingInputMonitor? _inputMonitor;
     private RecordingInputOverlayWindow? _inputOverlay;
     private RecordingAnnotationOverlayWindow? _annotationOverlay;
+    private CameraPreviewOverlayWindow? _cameraOverlay;
+    private string? _microphoneDeviceId;
+    private string? _cameraDeviceId;
+    private int _cameraConnectionVersion;
+    private bool _cameraToggleInProgress;
     private bool _allowClose;
     private bool _isCompleting;
+    private bool _isStarting;
     private bool _isInitializingOptions = true;
+    private bool _isInitializingDevices;
     private bool _hasSavedWindowPlacement;
     private Action _resetWindowPlacement = static () => { };
     private readonly ToolbarDragHintBehavior _toolbarDragHint;
@@ -78,6 +84,9 @@ public partial class VideoRecordingControlWindow : Window
     private ArrowToolMode _recordingArrowToolMode = ArrowToolMode.Straight;
     private ShapeToolMode _recordingShapeToolMode = ShapeToolMode.Rectangle;
     private int[] _customColorPalette = [];
+    private int _mouseMoveDispatchPending;
+    private int _latestMouseX;
+    private int _latestMouseY;
 
     private VideoRecordingControlWindow(
         RegionVideoRecorder recorder,
@@ -89,6 +98,9 @@ public partial class VideoRecordingControlWindow : Window
         bool showKeyboardInput,
         bool showMouseInput,
         bool showMouseTrail,
+        bool showCamera,
+        string? microphoneDeviceId,
+        string? cameraDeviceId,
         VideoRecordingOutputFormat outputFormat,
         RecordingInputOverlayWindow inputOverlay,
         RecordingAnnotationOverlayWindow annotationOverlay,
@@ -124,7 +136,10 @@ public partial class VideoRecordingControlWindow : Window
             showKeyboardInput,
             showMouseInput,
             showMouseTrail,
-            outputFormat);
+            outputFormat,
+            showCamera,
+            microphoneDeviceId,
+            cameraDeviceId);
         _recorder = recorder;
         _inputOverlay = inputOverlay;
         _annotationOverlay = annotationOverlay;
@@ -136,6 +151,12 @@ public partial class VideoRecordingControlWindow : Window
         _elapsedTimer.Tick += OnElapsedTimerTick;
         _recorder.Failed += OnRecorderFailed;
         InitializeComponent();
+        // ComboBox selection changes are routed through the options panel so
+        // the toolbar can resize immediately without leaving and reopening
+        // the recording session.
+        RecordingOptionsPanel.AddHandler(
+            System.Windows.Controls.Primitives.Selector.SelectionChangedEvent,
+            new SelectionChangedEventHandler(OnRecordingComboBoxSelectionChanged));
         ApplySavedAnnotationPreferences(annotationPreferences.StrokeWidth);
         PopulateRecordingEmojiMenu();
         _toolbarDragHint = new ToolbarDragHintBehavior(
@@ -153,10 +174,13 @@ public partial class VideoRecordingControlWindow : Window
                 CultureInfo.InvariantCulture);
         SystemAudioCheckBox.IsChecked = recordSystemAudio;
         MicrophoneCheckBox.IsChecked = recordMicrophone;
+        _microphoneDeviceId = microphoneDeviceId;
+        _cameraDeviceId = cameraDeviceId;
         InputDisplayModeComboBox.SelectedValue = ResolveInputDisplayMode(
             showKeyboardInput,
             showMouseInput).ToString();
         MouseTrailCheckBox.IsChecked = showMouseTrail;
+        ShowCameraCheckBox.IsChecked = showCamera;
         UpdateFormatDependentControls();
         _isInitializingOptions = false;
         SourceInitialized += OnSourceInitialized;
@@ -173,7 +197,10 @@ public partial class VideoRecordingControlWindow : Window
         bool showKeyboardInput,
         bool showMouseInput,
         bool showMouseTrail,
+        bool showCamera,
         VideoRecordingOutputFormat outputFormat = VideoRecordingOutputFormat.Mp4,
+        string? microphoneDeviceId = null,
+        string? cameraDeviceId = null,
         Action<VideoRecordingPreferences>? recordingPreferencesChanged = null,
         VideoRecordingAnnotationPreferences? annotationPreferences = null,
         Action<VideoRecordingAnnotationPreferences>?
@@ -195,7 +222,8 @@ public partial class VideoRecordingControlWindow : Window
                 recordSystemAudio,
                 recordMicrophone,
                 codec,
-                frameRate));
+                frameRate,
+                microphoneDeviceId));
         }
         catch
         {
@@ -216,6 +244,9 @@ public partial class VideoRecordingControlWindow : Window
                 showKeyboardInput,
                 showMouseInput,
                 showMouseTrail,
+                showCamera,
+                microphoneDeviceId,
+                cameraDeviceId,
                 outputFormat,
                 inputOverlay,
                 annotationOverlay,
@@ -241,6 +272,11 @@ public partial class VideoRecordingControlWindow : Window
         window.Show();
         window.UpdateLayout();
         window.EnsureControlVisibleAndTopmost();
+        await window.InitializeRecordingDevicesAsync();
+        if (showCamera)
+        {
+            await window.SetCameraVisibilityAsync(visible: true);
+        }
         _activeWindow = new WeakReference<VideoRecordingControlWindow>(window);
         try
         {
@@ -377,22 +413,32 @@ public partial class VideoRecordingControlWindow : Window
         return destination;
     }
 
-    private void OnStartClick(object sender, RoutedEventArgs e)
+    private async void OnStartClick(object sender, RoutedEventArgs e)
     {
         if (_isCompleting ||
+            _isStarting ||
             _recorder.State != RegionVideoRecorderState.Ready)
         {
             return;
         }
 
+        _isStarting = true;
+        StartButton.IsEnabled = false;
+        RecordingStatusText.Text = "正在启动录制";
+        RecordingStatusText.ToolTip =
+            "正在初始化屏幕捕获和编码器，首次启动可能需要几秒。";
         try
         {
             var preferences = GetRecordingPreferences();
-            ReplaceRecorder(preferences);
+            await ReplaceRecorderAsync(preferences);
             _recordingPreferencesChanged?.Invoke(preferences);
+            await _recorder.StartAsync();
             StartInputFeedback(preferences);
             StartAnnotationOverlay();
-            _recorder.Start();
+            if (preferences.ShowCamera)
+            {
+                await SetCameraVisibilityAsync(visible: true);
+            }
             _elapsed.Restart();
             _elapsedTimer.Start();
             RecordingStatusText.Text = "正在录屏";
@@ -410,19 +456,25 @@ public partial class VideoRecordingControlWindow : Window
             CancelRecordingButton.IsEnabled = true;
             FinishAndEditButton.Visibility = Visibility.Visible;
             FinishAndEditButton.IsEnabled = true;
-            Width = ActiveControlWidth;
+            Height = 38;
+            FitAnnotationToolbarWidth();
             _ = Dispatcher.BeginInvoke(
                 DispatcherPriority.Loaded,
                 () =>
                 {
                     RepositionAutomaticControl();
                     EnsureControlVisibleAndTopmost();
-                });
+            });
             UpdateLowProfileOpacity();
         }
         catch (Exception exception)
         {
+            StartButton.IsEnabled = true;
             _ = CompleteAfterFailureAsync(exception.Message);
+        }
+        finally
+        {
+            _isStarting = false;
         }
     }
 
@@ -468,13 +520,265 @@ public partial class VideoRecordingControlWindow : Window
 
     private void OnRecordingOptionChanged(object sender, RoutedEventArgs e)
     {
-        if (_isInitializingOptions || _recorder.State != RegionVideoRecorderState.Ready)
+        if (_isInitializingOptions)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(sender, ShowCameraCheckBox))
+        {
+            // The camera is also configurable before recording starts. Keep
+            // this path independent from the recorder state so checking the
+            // box immediately creates the live preview.
+            _ = SetCameraVisibilityAsync(ShowCameraCheckBox.IsChecked == true);
+            if (_recorder.State != RegionVideoRecorderState.Ready)
+            {
+                return;
+            }
+        }
+
+        if (_recorder.State != RegionVideoRecorderState.Ready)
         {
             return;
         }
 
         UpdateFormatDependentControls();
         _recordingPreferencesChanged?.Invoke(GetRecordingPreferences());
+        ScheduleToolbarLayout();
+    }
+
+    private void OnRecordingComboBoxSelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_isInitializingDevices ||
+            e.OriginalSource is not System.Windows.Controls.ComboBox comboBox)
+        {
+            return;
+        }
+
+        FitComboBoxToContent(comboBox);
+        ScheduleToolbarLayout();
+    }
+
+    private async Task InitializeRecordingDevicesAsync()
+    {
+        _isInitializingDevices = true;
+        try
+        {
+            var microphones = await Task.Run(
+                RegionVideoRecorder.GetAudioInputDevices);
+            MicrophoneDeviceComboBox.ItemsSource = microphones;
+            if (!string.IsNullOrWhiteSpace(_microphoneDeviceId) &&
+                MicrophoneDeviceComboBox.Items.Cast<RecordingDeviceOption>()
+                    .Any(device => device.Id == _microphoneDeviceId))
+            {
+                MicrophoneDeviceComboBox.SelectedValue = _microphoneDeviceId;
+            }
+            else if (MicrophoneDeviceComboBox.Items.Count > 0)
+            {
+                MicrophoneDeviceComboBox.SelectedIndex = 0;
+                _microphoneDeviceId =
+                    (MicrophoneDeviceComboBox.SelectedItem as RecordingDeviceOption)?.Id;
+            }
+
+            FitComboBoxToContent(MicrophoneDeviceComboBox);
+
+            var cameras = await CameraCaptureService.GetDevicesAsync();
+            CameraDeviceComboBox.ItemsSource = cameras;
+            if (!string.IsNullOrWhiteSpace(_cameraDeviceId) &&
+                cameras.Any(device => device.Id == _cameraDeviceId))
+            {
+                CameraDeviceComboBox.SelectedValue = _cameraDeviceId;
+            }
+            else if (cameras.Count > 0)
+            {
+                CameraDeviceComboBox.SelectedIndex = 0;
+                _cameraDeviceId =
+                    (CameraDeviceComboBox.SelectedItem as RecordingDeviceOption)?.Id;
+            }
+            CameraDeviceComboBox.IsEnabled = cameras.Count > 0;
+            ShowCameraCheckBox.IsEnabled = cameras.Count > 0;
+            if (cameras.Count == 0)
+            {
+                ShowCameraCheckBox.ToolTip = "没有检测到可用摄像头";
+            }
+
+            FitComboBoxToContent(CodecComboBox);
+            FitComboBoxToContent(FrameRateComboBox);
+            FitComboBoxToContent(InputDisplayModeComboBox);
+            FitComboBoxToContent(CameraDeviceComboBox);
+            ScheduleToolbarLayout();
+        }
+        catch
+        {
+            MicrophoneDeviceComboBox.ItemsSource = Array.Empty<RecordingDeviceOption>();
+            CameraDeviceComboBox.ItemsSource = Array.Empty<RecordingDeviceOption>();
+            CameraDeviceComboBox.IsEnabled = false;
+            ShowCameraCheckBox.IsEnabled = false;
+            ShowCameraCheckBox.IsChecked = false;
+            ScheduleToolbarLayout();
+        }
+        finally
+        {
+            _isInitializingDevices = false;
+        }
+    }
+
+    private void FitComboBoxToContent(System.Windows.Controls.ComboBox comboBox)
+    {
+        var (minimum, maximum) = comboBox.Name switch
+        {
+            nameof(CodecComboBox) => (116d, 190d),
+            nameof(FrameRateComboBox) => (68d, 100d),
+            nameof(InputDisplayModeComboBox) => (108d, 180d),
+            nameof(MicrophoneDeviceComboBox) => (132d, 360d),
+            nameof(CameraDeviceComboBox) => (132d, 360d),
+            _ => (96d, 360d),
+        };
+
+        if (comboBox.Items.Count == 0)
+        {
+            comboBox.Width = minimum;
+            return;
+        }
+
+        var dpi = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+        var typeface = new Typeface(
+            comboBox.FontFamily,
+            comboBox.FontStyle,
+            comboBox.FontWeight,
+            comboBox.FontStretch);
+        var selectedText = comboBox.SelectedItem is RecordingDeviceOption selectedDevice
+            ? selectedDevice.Name
+            : comboBox.SelectedItem is ComboBoxItem selectedItem
+                ? selectedItem.Content?.ToString()
+                : comboBox.SelectedItem?.ToString();
+        var texts = !string.IsNullOrWhiteSpace(selectedText)
+            ? new[] { selectedText }
+            : comboBox.Items.Cast<object>()
+                .Select(item => item is RecordingDeviceOption device
+                    ? device.Name
+                    : item is ComboBoxItem comboItem
+                        ? comboItem.Content?.ToString()
+                        : item?.ToString());
+        var widest = texts
+            .Where(text => !string.IsNullOrWhiteSpace(text))
+            .Select(text => new FormattedText(
+                text!,
+                CultureInfo.CurrentUICulture,
+                System.Windows.FlowDirection.LeftToRight,
+                typeface,
+                comboBox.FontSize,
+                System.Windows.Media.Brushes.White,
+                dpi).Width)
+            .DefaultIfEmpty(0)
+            .Max();
+
+        // Reserve room for the left/right padding and the native drop-down arrow.
+        comboBox.Width = Math.Clamp(Math.Ceiling(widest + 48), minimum, maximum);
+    }
+
+    private void FitOptionsToolbarWidth()
+    {
+        if (!IsLoaded || RecordingOptionsPanel.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        RecordingOptionsPanel.Width = double.NaN;
+        RecordingOptionsPanel.Measure(
+            new System.Windows.Size(double.PositiveInfinity, 54));
+        RecordingOptionsPanel.Width = Math.Ceiling(RecordingOptionsPanel.DesiredSize.Width);
+        UpdateLayout();
+        var width = RecordingStatusPanel.ActualWidth +
+            RecordingOptionsPanel.ActualWidth +
+            RecordingActionPanel.ActualWidth + 36;
+        Width = Math.Max(360, Math.Ceiling(width));
+    }
+
+    private void FitAnnotationToolbarWidth()
+    {
+        if (!IsLoaded || AnnotationToolsPanel.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        AnnotationToolsPanel.Measure(new System.Windows.Size(
+            double.PositiveInfinity,
+            double.PositiveInfinity));
+        var width = RecordingStatusPanel.ActualWidth +
+            AnnotationToolsPanel.DesiredSize.Width +
+            RecordingActionPanel.ActualWidth + 36;
+        Width = Math.Max(360, Math.Ceiling(width));
+    }
+
+    private void ScheduleToolbarLayout()
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Render,
+            () =>
+            {
+                if (RecordingOptionsPanel.Visibility == Visibility.Visible)
+                {
+                    FitOptionsToolbarWidth();
+                }
+                else if (AnnotationToolsPanel.Visibility == Visibility.Visible)
+                {
+                    FitAnnotationToolbarWidth();
+                }
+
+                RepositionAutomaticControl();
+                EnsureControlVisibleAndTopmost();
+            });
+    }
+
+    private void OnMicrophoneDeviceChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isInitializingDevices || MicrophoneDeviceComboBox.SelectedItem is not RecordingDeviceOption device)
+        {
+            return;
+        }
+
+        _microphoneDeviceId = device.Id;
+        if (!_isInitializingOptions)
+        {
+            _recordingPreferencesChanged?.Invoke(GetRecordingPreferences());
+        }
+    }
+
+    private async void OnCameraDeviceChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isInitializingDevices ||
+            CameraDeviceComboBox.SelectedItem is not RecordingDeviceOption device)
+        {
+            return;
+        }
+
+        _cameraDeviceId = device.Id;
+        if (!_isInitializingOptions)
+        {
+            _recordingPreferencesChanged?.Invoke(GetRecordingPreferences());
+        }
+
+        if (ShowCameraCheckBox.IsChecked != true)
+        {
+            return;
+        }
+
+        if (_cameraOverlay is not null)
+        {
+            _cameraConnectionVersion++;
+            _cameraOverlay.Close();
+            _cameraOverlay = null;
+        }
+
+        await SetCameraVisibilityAsync(visible: true);
     }
 
     private VideoRecordingPreferences GetRecordingPreferences()
@@ -513,7 +817,10 @@ public partial class VideoRecordingControlWindow : Window
             ShowsKeyboardInput(inputDisplayMode),
             ShowsMouseInput(inputDisplayMode),
             MouseTrailCheckBox.IsChecked == true,
-            outputFormat);
+            outputFormat,
+            ShowCameraCheckBox.IsChecked == true,
+            _microphoneDeviceId,
+            _cameraDeviceId);
     }
 
     private void UpdateFormatDependentControls()
@@ -553,7 +860,7 @@ public partial class VideoRecordingControlWindow : Window
         mode is RecordingInputDisplayMode.Mouse or
             RecordingInputDisplayMode.KeyboardAndMouse;
 
-    private void ReplaceRecorder(VideoRecordingPreferences preferences)
+    private async Task ReplaceRecorderAsync(VideoRecordingPreferences preferences)
     {
         if (!RequiresRecorderReplacement(_recorderPreferences, preferences))
         {
@@ -561,18 +868,26 @@ public partial class VideoRecordingControlWindow : Window
             return;
         }
 
-        var replacement = new RegionVideoRecorder(
-            _recorder.Region,
-            _saveDirectory,
-            preferences.RecordSystemAudio,
-            preferences.RecordMicrophone,
-            preferences.Codec,
-            preferences.FrameRate);
+        var region = _recorder.Region;
+        var saveDirectory = _saveDirectory;
+        var replacement = await Task.Factory.StartNew(
+            () => new RegionVideoRecorder(
+                region,
+                saveDirectory,
+                preferences.RecordSystemAudio,
+                preferences.RecordMicrophone,
+                preferences.Codec,
+                preferences.FrameRate,
+                preferences.MicrophoneDeviceId),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
         replacement.Failed += OnRecorderFailed;
-        _recorder.Failed -= OnRecorderFailed;
-        _recorder.Dispose();
+        var previous = _recorder;
+        previous.Failed -= OnRecorderFailed;
         _recorder = replacement;
         _recorderPreferences = preferences;
+        previous.Dispose();
     }
 
     internal static bool RequiresRecorderReplacement(
@@ -581,7 +896,11 @@ public partial class VideoRecordingControlWindow : Window
         current.Codec != replacement.Codec ||
         current.FrameRate != replacement.FrameRate ||
         current.RecordSystemAudio != replacement.RecordSystemAudio ||
-        current.RecordMicrophone != replacement.RecordMicrophone;
+        current.RecordMicrophone != replacement.RecordMicrophone ||
+        !string.Equals(
+            current.MicrophoneDeviceId,
+            replacement.MicrophoneDeviceId,
+            StringComparison.Ordinal);
 
     private async void OnStopClick(object sender, RoutedEventArgs e)
     {
@@ -716,6 +1035,11 @@ public partial class VideoRecordingControlWindow : Window
         {
             FinishControlSurfaceDrag(ensureVisible: false);
             ResetControlPosition();
+            // Reapply the automatic placement after clearing the saved drag
+            // position. This also covers a double-click that arrives while
+            // the toolbar still owns mouse capture.
+            RepositionAutomaticControl();
+            EnsureControlVisibleAndTopmost();
             e.Handled = true;
             return;
         }
@@ -929,9 +1253,63 @@ public partial class VideoRecordingControlWindow : Window
             return;
         }
 
-        _ = overlay.Dispatcher.BeginInvoke(
-            DispatcherPriority.Render,
-            () => overlay.ShowMousePosition(e.X, e.Y));
+        // The global hook can produce hundreds of events per second. Never
+        // queue one dispatcher callback per event: while a selection or
+        // toolbar is being dragged, that backlog makes the window appear to
+        // stop responding. Keep only the newest point and render it when the
+        // UI thread is idle enough to accept it.
+        System.Threading.Volatile.Write(ref _latestMouseX, e.X);
+        System.Threading.Volatile.Write(ref _latestMouseY, e.Y);
+        QueueLatestMousePosition(overlay);
+    }
+
+    private void QueueLatestMousePosition(RecordingInputOverlayWindow overlay)
+    {
+        if (System.Threading.Interlocked.Exchange(
+                ref _mouseMoveDispatchPending,
+                1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            _ = overlay.Dispatcher.BeginInvoke(
+                DispatcherPriority.Background,
+                new Action(() =>
+                {
+                    var x = System.Threading.Volatile.Read(ref _latestMouseX);
+                    var y = System.Threading.Volatile.Read(ref _latestMouseY);
+                    try
+                    {
+                        if (ReferenceEquals(_inputOverlay, overlay))
+                        {
+                            overlay.ShowMousePosition(x, y);
+                        }
+                    }
+                    finally
+                    {
+                        System.Threading.Interlocked.Exchange(
+                            ref _mouseMoveDispatchPending,
+                            0);
+                        var latestX = System.Threading.Volatile.Read(
+                            ref _latestMouseX);
+                        var latestY = System.Threading.Volatile.Read(
+                            ref _latestMouseY);
+                        if (ReferenceEquals(_inputOverlay, overlay) &&
+                            (latestX != x || latestY != y))
+                        {
+                            QueueLatestMousePosition(overlay);
+                        }
+                    }
+                }));
+        }
+        catch (InvalidOperationException)
+        {
+            System.Threading.Interlocked.Exchange(
+                ref _mouseMoveDispatchPending,
+                0);
+        }
     }
 
     private void OnRecordingInputChanged(
@@ -973,7 +1351,125 @@ public partial class VideoRecordingControlWindow : Window
         _annotationOverlay?.SetStrokeWidth(AnnotationStrokeWidthSlider.Value);
         _annotationOverlay?.SetArrowStyle(_recordingArrowStyle);
         _annotationOverlay?.Show();
+        // The annotation HWND is also topmost. Reassert the camera preview
+        // after it is shown so the preview remains visible and clickable.
+        _cameraOverlay?.EnsureTopmost();
         SelectAnnotationTool(RecordingAnnotationTool.Pointer);
+    }
+
+    private async Task SetCameraVisibilityAsync(bool visible)
+    {
+        if (_cameraToggleInProgress)
+        {
+            return;
+        }
+
+        _cameraToggleInProgress = true;
+        try
+        {
+            if (_cameraOverlay is null && visible)
+            {
+                var overlay = await CameraPreviewOverlayWindow.CreateAsync(
+                    _recorder.Region,
+                    _cameraDeviceId);
+                if (overlay is null)
+                {
+                    CameraToggleButton.IsChecked = false;
+                    RecordingStatusText.ToolTip =
+                        "摄像头初始化失败，可能被其他程序占用或未授予摄像头权限。";
+                    return;
+                }
+
+                _cameraOverlay = overlay;
+                overlay.Owner = this;
+                overlay.Show();
+                var connectionVersion = ++_cameraConnectionVersion;
+                _ = EnsureCameraFirstFrameAsync(
+                    overlay,
+                    _cameraDeviceId,
+                    connectionVersion,
+                    remainingRetries: 2);
+            }
+
+            _cameraOverlay?.SetCameraVisible(visible);
+            if (visible)
+            {
+                _cameraOverlay?.EnsureTopmost();
+            }
+            CameraToggleButton.IsChecked = visible;
+            if (ShowCameraCheckBox.IsChecked != visible)
+            {
+                ShowCameraCheckBox.IsChecked = visible;
+            }
+        }
+        finally
+        {
+            _cameraToggleInProgress = false;
+        }
+    }
+
+    private async Task EnsureCameraFirstFrameAsync(
+        CameraPreviewOverlayWindow overlay,
+        string? cameraDeviceId,
+        int connectionVersion,
+        int remainingRetries)
+    {
+        if (await overlay.WaitForFirstFrameAsync(TimeSpan.FromMilliseconds(1500)) ||
+            _isCompleting ||
+            connectionVersion != _cameraConnectionVersion ||
+            !ReferenceEquals(_cameraOverlay, overlay) ||
+            ShowCameraCheckBox.IsChecked != true ||
+            remainingRetries <= 0)
+        {
+            return;
+        }
+
+        overlay.Close();
+        _cameraOverlay = null;
+        await Task.Delay(150);
+        if (_isCompleting ||
+            connectionVersion != _cameraConnectionVersion ||
+            ShowCameraCheckBox.IsChecked != true ||
+            !string.Equals(
+                cameraDeviceId,
+                _cameraDeviceId,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var replacement = await CameraPreviewOverlayWindow.CreateAsync(
+            _recorder.Region,
+            cameraDeviceId);
+        if (replacement is null ||
+            _isCompleting ||
+            connectionVersion != _cameraConnectionVersion)
+        {
+            replacement?.Close();
+            return;
+        }
+
+        _cameraOverlay = replacement;
+        replacement.Owner = this;
+        replacement.Show();
+        replacement.SetCameraVisible(true);
+        replacement.EnsureTopmost();
+        _ = EnsureCameraFirstFrameAsync(
+            replacement,
+            cameraDeviceId,
+            connectionVersion,
+            remainingRetries - 1);
+    }
+
+    private async void OnCameraToggleClick(object sender, RoutedEventArgs e)
+    {
+        if (_isCompleting)
+        {
+            return;
+        }
+
+        await SetCameraVisibilityAsync(CameraToggleButton.IsChecked == true);
+        e.Handled = true;
     }
 
     private void ApplySavedAnnotationPreferences(int strokeWidth)
@@ -1343,6 +1839,7 @@ public partial class VideoRecordingControlWindow : Window
             _inputOverlay?.Hide();
             _annotationOverlay?.Hide();
             _frameWindow.Hide();
+            _cameraOverlay?.Hide();
             return;
         }
 
@@ -1361,6 +1858,10 @@ public partial class VideoRecordingControlWindow : Window
         }
         _frameWindow.Show();
         _frameWindow.EnsureTopmost();
+        if (CameraToggleButton.IsChecked == true)
+        {
+            _cameraOverlay?.SetCameraVisible(true);
+        }
         if (_annotationOverlay is not null)
         {
             _annotationOverlay.Show();
@@ -1381,6 +1882,11 @@ public partial class VideoRecordingControlWindow : Window
         }
 
         e.Handled = true;
+        if (_isStarting)
+        {
+            return;
+        }
+
         if (_recorder.State == RegionVideoRecorderState.Ready)
         {
             CloseWithResult(new RegionVideoRecordingResult(null, null));
@@ -1396,6 +1902,13 @@ public partial class VideoRecordingControlWindow : Window
         if (!_allowClose)
         {
             e.Cancel = true;
+            if (_isStarting)
+            {
+                RecordingStatusText.ToolTip =
+                    "录制器仍在初始化，请稍候。";
+                return;
+            }
+
             if (_recorder.State == RegionVideoRecorderState.Ready)
             {
                 CloseWithResult(new RegionVideoRecordingResult(null, null));
@@ -1420,6 +1933,8 @@ public partial class VideoRecordingControlWindow : Window
         _recorder.Dispose();
         DisposeInputFeedback();
         DisposeAnnotationOverlay();
+        _cameraOverlay?.Close();
+        _cameraOverlay = null;
         _frameWindow.Close();
         _completion.TrySetResult(new RegionVideoRecordingResult(null, null));
         base.OnClosed(e);

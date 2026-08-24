@@ -393,6 +393,36 @@ public sealed class RegionVideoRecorderTests
             Assert.True(
                 backgroundSamples >= 10,
                 $"透明标注层遮住了原画面，只检测到 {backgroundSamples} 个背景像素。");
+
+            WpfTestHost.Invoke(() =>
+            {
+                var marker = Assert.IsType<WpfRectangle>(
+                    overlay!.DrawingCanvas.Children[0]);
+                marker.Fill = System.Windows.Media.Brushes.Blue;
+                overlay.UpdateLayout();
+            });
+            await Task.Delay(350);
+
+            using var updatedSnapshot = new MemoryStream();
+            Assert.True(recorder.TryTakeSnapshot(updatedSnapshot));
+            updatedSnapshot.Position = 0;
+            using var updatedBitmap = new Bitmap(updatedSnapshot);
+            var blueSamples = 0;
+            for (var y = 70; y < 150; y += 8)
+            {
+                for (var x = 80; x < 200; x += 8)
+                {
+                    var color = updatedBitmap.GetPixel(x, y);
+                    if (color.B > 180 && color.R < 100 && color.G < 140)
+                    {
+                        blueSamples++;
+                    }
+                }
+            }
+
+            Assert.True(
+                blueSamples >= 20,
+                $"录制源没有刷新后续桌面帧，只检测到 {blueSamples} 个更新像素。");
             var result = await recorder.StopAsync();
             Assert.True(result.IsSuccess, result.ErrorMessage);
         }

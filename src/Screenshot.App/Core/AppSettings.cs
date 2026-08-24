@@ -116,7 +116,10 @@ public readonly record struct VideoRecordingPreferences(
     bool ShowKeyboardInput = false,
     bool ShowMouseInput = false,
     bool ShowMouseTrail = false,
-    VideoRecordingOutputFormat OutputFormat = VideoRecordingOutputFormat.Mp4);
+    VideoRecordingOutputFormat OutputFormat = VideoRecordingOutputFormat.Mp4,
+    bool ShowCamera = false,
+    string? MicrophoneDeviceId = null,
+    string? CameraDeviceId = null);
 
 public readonly record struct VideoRecordingAnnotationPreferences(
     ShapeToolMode ShapeToolMode,
@@ -177,6 +180,10 @@ public sealed record AppSettings
 
     public bool RecordMicrophone { get; init; }
 
+    public string? MicrophoneDeviceId { get; init; }
+
+    public string? CameraDeviceId { get; init; }
+
     public VideoRecordingCodec VideoRecordingCodec { get; init; } =
         VideoRecordingCodec.H264;
 
@@ -194,6 +201,8 @@ public sealed record AppSettings
     public bool ShowMouseInputInRecording { get; init; }
 
     public bool ShowMouseTrailInRecording { get; init; }
+
+    public bool ShowCameraInRecording { get; init; }
 
     public bool ShowTaskbarIcon { get; init; } = true;
 

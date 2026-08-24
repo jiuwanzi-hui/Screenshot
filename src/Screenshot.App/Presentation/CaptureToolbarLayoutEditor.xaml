@@ -3,6 +3,30 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              DataContextChanged="OnDataContextChanged">
     <UserControl.Resources>
+        <Geometry x:Key="RectangleIconGeometry">M 2,2 H 16 V 16 H 2 Z</Geometry>
+        <Geometry x:Key="ArrowIconGeometry">M 2,9 H 15 M 10,4 L 15,9 L 10,14</Geometry>
+        <Geometry x:Key="PenIconGeometry">M 3,14 L 4.2,9.8 L 12.6,1.4 L 16.6,5.4 L 8.2,13.8 Z M 11.2,3.8 L 14.2,6.8</Geometry>
+        <Geometry x:Key="TextIconGeometry">M 3,3 H 15 M 9,3 V 16</Geometry>
+        <Geometry x:Key="MosaicIconGeometry">M 2,2 H 16 V 16 H 2 Z M 6.7,2 V 16 M 11.3,2 V 16 M 2,6.7 H 16 M 2,11.3 H 16</Geometry>
+        <Geometry x:Key="RecordIconGeometry">M 2,4 H 12 V 14 H 2 Z M 12,7 L 16,4 V 14 L 12,11 Z</Geometry>
+        <Geometry x:Key="SaveIconGeometry">M 3,2 H 13 L 16,5 V 16 H 3 Z M 5,2 V 7 H 13 V 2 M 6,11 H 13 V 16 H 6 Z</Geometry>
+        <Geometry x:Key="ScrollIconGeometry">M 9,2 V 16 M 6,5 L 9,2 L 12,5 M 6,13 L 9,16 L 12,13</Geometry>
+        <Geometry x:Key="OcrIconGeometry">M 2,5 V 2 H 5 M 13,2 H 16 V 5 M 16,13 V 16 H 13 M 5,16 H 2 V 13 M 5,12 L 8,5 L 11,12 M 6,10 H 10</Geometry>
+        <Geometry x:Key="PinIconGeometry">M 6,2 H 12 L 11,6 L 14,9 L 10,10 L 9,16 L 7,10 L 3,9 L 6,6 Z</Geometry>
+        <Geometry x:Key="UndoIconGeometry">M 8,2 L 2,8 L 8,14 V 11 C 13,11 16,13 17,17 C 17,10 13,6 8,6 Z</Geometry>
+        <Geometry x:Key="CancelIconGeometry">M 4,4 L 14,14 M 14,4 L 4,14</Geometry>
+        <Geometry x:Key="ConfirmIconGeometry">M 3,9 L 7,13 L 15,4</Geometry>
+        <Style x:Key="ToolbarPreviewIcon" TargetType="Path">
+            <Setter Property="Width" Value="16" />
+            <Setter Property="Height" Value="16" />
+            <Setter Property="Stretch" Value="Uniform" />
+            <Setter Property="Fill" Value="Transparent" />
+            <Setter Property="Stroke" Value="{DynamicResource EditorToolbarIconBrush}" />
+            <Setter Property="StrokeThickness" Value="1.7" />
+            <Setter Property="StrokeStartLineCap" Value="Round" />
+            <Setter Property="StrokeEndLineCap" Value="Round" />
+            <Setter Property="StrokeLineJoin" Value="Round" />
+        </Style>
         <Style x:Key="ToolbarDesignerButton" TargetType="ToggleButton">
             <Setter Property="Width" Value="36" />
             <Setter Property="Height" Value="32" />

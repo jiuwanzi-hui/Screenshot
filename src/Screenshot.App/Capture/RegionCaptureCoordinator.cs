@@ -30,6 +30,7 @@ public sealed class RegionCaptureCoordinator
     private readonly Action<int[]>? _customColorPaletteChanged;
     private readonly Action<double, double>? _captureToolbarPositionChanged;
     private readonly Action? _showVideoHistory;
+    private readonly Action? _recordingAlreadyInProgressFeedback;
     private bool _isCaptureInProgress;
     private bool _isRecordingInProgress;
     private ScreenRegion? _lastOrdinaryCaptureRegion;
@@ -52,7 +53,8 @@ public sealed class RegionCaptureCoordinator
         Action<string>? customStrokeColorChanged = null,
         Action<int[]>? customColorPaletteChanged = null,
         Action<double, double>? captureToolbarPositionChanged = null,
-        Action? showVideoHistory = null)
+        Action? showVideoHistory = null,
+        Action? recordingAlreadyInProgressFeedback = null)
     {
         ArgumentNullException.ThrowIfNull(settingsProvider);
         ArgumentNullException.ThrowIfNull(historyService);
@@ -79,6 +81,7 @@ public sealed class RegionCaptureCoordinator
         _customColorPaletteChanged = customColorPaletteChanged;
         _captureToolbarPositionChanged = captureToolbarPositionChanged;
         _showVideoHistory = showVideoHistory;
+        _recordingAlreadyInProgressFeedback = recordingAlreadyInProgressFeedback;
     }
 
     public Task RequestCaptureAsync(
@@ -1039,9 +1042,12 @@ public sealed class RegionCaptureCoordinator
                 settings.ShowKeyboardInputInRecording,
                 settings.ShowMouseInputInRecording,
                 settings.ShowMouseTrailInRecording,
+                settings.ShowCameraInRecording,
                 settings.RecordingOutputFormat,
-                _videoRecordingPreferencesChanged,
-                new VideoRecordingAnnotationPreferences(
+                microphoneDeviceId: settings.MicrophoneDeviceId,
+                cameraDeviceId: settings.CameraDeviceId,
+                recordingPreferencesChanged: _videoRecordingPreferencesChanged,
+                annotationPreferences: new VideoRecordingAnnotationPreferences(
                     settings.ShapeToolMode,
                     settings.ArrowToolMode,
                     settings.ArrowStyle,
@@ -1049,9 +1055,10 @@ public sealed class RegionCaptureCoordinator
                         ? settings.DefaultStrokeColor
                         : settings.CustomStrokeColor,
                     settings.DefaultStrokeWidth),
-                _videoRecordingAnnotationPreferencesChanged,
-                settings.CustomColorPalette,
-                _customColorPaletteChanged);
+                recordingAnnotationPreferencesChanged:
+                    _videoRecordingAnnotationPreferencesChanged,
+                customColorPalette: settings.CustomColorPalette,
+                customColorPaletteChanged: _customColorPaletteChanged);
             if (result.IsSuccess)
             {
                 var completedSettings = _settingsProvider();
@@ -1114,6 +1121,7 @@ public sealed class RegionCaptureCoordinator
     {
         _statusReporter("正在录屏，不能同时开始另一个录屏任务。");
         _ = VideoRecordingControlWindow.TryShowAlreadyRecordingFeedback();
+        _recordingAlreadyInProgressFeedback?.Invoke();
     }
 
     private void ReportRecordingStartFailure(Exception exception)

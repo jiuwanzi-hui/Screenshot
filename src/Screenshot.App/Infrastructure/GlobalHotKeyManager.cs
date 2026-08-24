@@ -2183,6 +2183,12 @@ public sealed class GlobalHotKeyManager : IDisposable
         HotKeyAction action,
         bool allowImmediateContextMenuSnapshot = true)
     {
+        // A pre-capture worker may still be completing while the hotkey is
+        // delivered. Invalidate that worker before detaching the current
+        // frame so it cannot publish the previous desktop image after this
+        // gesture has already started.
+        Interlocked.Increment(ref _preCaptureGeneration);
+
         lock (_immediatePreCaptureLock)
         {
             if (allowImmediateContextMenuSnapshot &&

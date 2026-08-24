@@ -20,6 +20,24 @@
         TextOptions.TextRenderingMode="ClearType"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
+        <Geometry x:Key="SettingsNavigationGeneralIcon">M 9,1 L 10.5,1.5 L 11.1,3.1 L 12.7,3.8 L 14.2,3.1 L 15.5,4.4 L 14.8,5.9 L 15.5,7.5 L 17,8.1 V 9.9 L 15.5,10.5 L 14.8,12.1 L 15.5,13.6 L 14.2,14.9 L 12.7,14.2 L 11.1,14.9 L 10.5,16.5 H 8.5 L 7.9,14.9 L 6.3,14.2 L 4.8,14.9 L 3.5,13.6 L 4.2,12.1 L 3.5,10.5 L 2,9.9 V 8.1 L 3.5,7.5 L 4.2,5.9 L 3.5,4.4 L 4.8,3.1 L 6.3,3.8 L 7.9,3.1 L 8.5,1 Z M 9.5,5.8 A 2.2,2.2 0 1 0 9.5,10.2 A 2.2,2.2 0 1 0 9.5,5.8 Z</Geometry>
+        <Geometry x:Key="SettingsNavigationHotkeyIcon">M 2,4 H 16 V 13 H 2 Z M 4,6 H 5 M 7,6 H 8 M 10,6 H 11 M 13,6 H 14 M 4,9 H 5 M 7,9 H 8 M 10,9 H 11 M 13,9 H 14 M 4,12 H 12</Geometry>
+        <Geometry x:Key="SettingsNavigationOcrIcon">M 3,2 H 15 V 16 H 3 Z M 6,5 H 12 M 6,8 H 12 M 6,11 H 10</Geometry>
+        <Geometry x:Key="SettingsNavigationTranslateIcon">M 3,3 H 15 M 5,6 H 13 M 7,9 H 11 M 10,11 L 15,16</Geometry>
+        <Geometry x:Key="SettingsNavigationUpdateIcon">M 4,5 A 6,6 0 1 1 4,13 M 4,5 V 1 M 4,5 H 8</Geometry>
+        <Geometry x:Key="SettingsNavigationDonateIcon">M 9,15 C 8,14 3,11 3,7 A 3,3 0 0 1 9,5 A 3,3 0 0 1 15,7 C 15,11 10,14 9,15 Z</Geometry>
+        <Geometry x:Key="SettingsNavigationContactIcon">M 2,3 H 16 V 12 H 10 L 6,16 V 12 H 2 Z M 5,6 H 13 M 5,9 H 11</Geometry>
+        <Style x:Key="SettingsNavigationIcon" TargetType="Path">
+            <Setter Property="Width" Value="18" />
+            <Setter Property="Height" Value="18" />
+            <Setter Property="Stretch" Value="Uniform" />
+            <Setter Property="Fill" Value="Transparent" />
+            <Setter Property="Stroke" Value="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=Foreground}" />
+            <Setter Property="StrokeThickness" Value="1.5" />
+            <Setter Property="StrokeStartLineCap" Value="Round" />
+            <Setter Property="StrokeEndLineCap" Value="Round" />
+            <Setter Property="StrokeLineJoin" Value="Round" />
+        </Style>
         <Style x:Key="SecondaryButton" TargetType="Button">
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="MinWidth" Value="76" />
@@ -391,14 +409,8 @@
                                 <ColumnDefinition Width="24" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Height="24"
-                                       FontFamily="Segoe MDL2 Assets"
-                                       FontSize="17"
-                                       LineHeight="24"
-                                       LineStackingStrategy="BlockLineHeight"
-                                       Text="&#xE713;"
-                                       TextAlignment="Center"
-                                       VerticalAlignment="Center" />
+                            <Path Data="{StaticResource SettingsNavigationGeneralIcon}"
+                                  Style="{StaticResource SettingsNavigationIcon}" />
                             <TextBlock Grid.Column="1"
                                        Height="24"
                                        Margin="10,0,0,0"
@@ -414,14 +426,8 @@
                                 <ColumnDefinition Width="24" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Height="24"
-                                       FontFamily="Segoe MDL2 Assets"
-                                       FontSize="17"
-                                       LineHeight="24"
-                                       LineStackingStrategy="BlockLineHeight"
-                                       Text="&#xE765;"
-                                       TextAlignment="Center"
-                                       VerticalAlignment="Center" />
+                            <Path Data="{StaticResource SettingsNavigationHotkeyIcon}"
+                                  Style="{StaticResource SettingsNavigationIcon}" />
                             <TextBlock Grid.Column="1"
                                        Height="24"
                                        Margin="10,0,0,0"
@@ -437,14 +443,8 @@
                                 <ColumnDefinition Width="24" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Height="24"
-                                       FontFamily="Segoe MDL2 Assets"
-                                       FontSize="17"
-                                       LineHeight="24"
-                                       LineStackingStrategy="BlockLineHeight"
-                                       Text="&#xE8A1;"
-                                       TextAlignment="Center"
-                                       VerticalAlignment="Center" />
+                            <Path Data="{StaticResource SettingsNavigationOcrIcon}"
+                                  Style="{StaticResource SettingsNavigationIcon}" />
                             <TextBlock Grid.Column="1"
                                        Height="24"
                                        Margin="10,0,0,0"
@@ -460,14 +460,8 @@
                                 <ColumnDefinition Width="24" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Height="24"
-                                       FontFamily="Segoe MDL2 Assets"
-                                       FontSize="17"
-                                       LineHeight="24"
-                                       LineStackingStrategy="BlockLineHeight"
-                                       Text="&#xE774;"
-                                       TextAlignment="Center"
-                                       VerticalAlignment="Center" />
+                            <Path Data="{StaticResource SettingsNavigationTranslateIcon}"
+                                  Style="{StaticResource SettingsNavigationIcon}" />
                             <TextBlock Grid.Column="1"
                                        Height="24"
                                        Margin="10,0,0,0"
@@ -483,14 +477,8 @@
                                 <ColumnDefinition Width="24" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Height="24"
-                                       FontFamily="Segoe MDL2 Assets"
-                                       FontSize="17"
-                                       LineHeight="24"
-                                       LineStackingStrategy="BlockLineHeight"
-                                       Text="&#xE895;"
-                                       TextAlignment="Center"
-                                       VerticalAlignment="Center" />
+                            <Path Data="{StaticResource SettingsNavigationUpdateIcon}"
+                                  Style="{StaticResource SettingsNavigationIcon}" />
                             <TextBlock x:Name="UpdateNavigationText"
                                        Grid.Column="1"
                                        Height="24"
@@ -507,20 +495,31 @@
                                 <ColumnDefinition Width="24" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Height="24"
-                                       FontFamily="Segoe MDL2 Assets"
-                                       FontSize="17"
-                                       LineHeight="24"
-                                       LineStackingStrategy="BlockLineHeight"
-                                       Text="&#xE8D4;"
-                                       TextAlignment="Center"
-                                       VerticalAlignment="Center" />
+                            <Path Data="{StaticResource SettingsNavigationDonateIcon}"
+                                  Style="{StaticResource SettingsNavigationIcon}" />
                             <TextBlock Grid.Column="1"
                                        Height="24"
                                        Margin="10,0,0,0"
                                        LineHeight="24"
                                        LineStackingStrategy="BlockLineHeight"
                                        Text="打赏支持"
+                                       VerticalAlignment="Center" />
+                        </Grid>
+                    </ListBoxItem>
+                    <ListBoxItem Style="{StaticResource NavigationItem}">
+                        <Grid Height="24">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="24" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Path Data="{StaticResource SettingsNavigationContactIcon}"
+                                  Style="{StaticResource SettingsNavigationIcon}" />
+                            <TextBlock Grid.Column="1"
+                                       Height="24"
+                                       Margin="10,0,0,0"
+                                       LineHeight="24"
+                                       LineStackingStrategy="BlockLineHeight"
+                                       Text="交流联系"
                                        VerticalAlignment="Center" />
                         </Grid>
                     </ListBoxItem>
@@ -2395,6 +2394,64 @@
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
                                Text="打赏仅用于个人非商业项目的持续维护与开发。SnapCut 采用个人非商业许可证，详情请查看仓库中的 LICENSE。"
                                TextWrapping="Wrap" />
+                </StackPanel>
+            </ScrollViewer>
+
+            <ScrollViewer x:Name="ContactSettingsPanel"
+                          Grid.Row="0"
+                          Grid.RowSpan="2"
+                          VerticalScrollBarVisibility="Auto"
+                          Visibility="Collapsed">
+                <StackPanel Margin="0,0,16,24">
+                    <TextBlock FontSize="22"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="交流联系" />
+                    <TextBlock Margin="0,7,0,0"
+                               FontSize="13"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               Text="欢迎加入 SnapCut 交流群，反馈问题、交流使用技巧和功能建议。"
+                               TextWrapping="Wrap" />
+
+                    <Border Margin="0,22,0,0"
+                            Padding="22"
+                            HorizontalAlignment="Left"
+                            Background="{DynamicResource AppPanelBackgroundBrush}"
+                            BorderBrush="{DynamicResource AppBorderBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10">
+                        <StackPanel>
+                            <TextBlock FontSize="17"
+                                       FontWeight="SemiBold"
+                                       Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                       Text="微信加入交流群"
+                                       TextWrapping="Wrap" />
+                            <TextBlock Margin="0,7,0,0"
+                                       FontSize="13"
+                                       Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                       Text="微信搜索或添加：openems"
+                                       TextWrapping="Wrap" />
+                            <Border Margin="0,18,0,0"
+                                    Width="360"
+                                    Height="360"
+                                    Padding="8"
+                                    Background="White"
+                                    BorderBrush="{DynamicResource AppBorderBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6">
+                                <Image x:Name="CommunityQrImage"
+                                       Source="/SnapCut;component/Assets/SnapCutCommunityQr.jpg"
+                                       Stretch="Uniform"
+                                       SnapsToDevicePixels="True" />
+                            </Border>
+                            <TextBlock Margin="0,12,0,0"
+                                       HorizontalAlignment="Center"
+                                       FontSize="12"
+                                       Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                       Text="扫码后按群内提示加入 SnapCut 交流群"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </ScrollViewer>
 

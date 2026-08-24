@@ -49,7 +49,8 @@ internal sealed class RegionVideoRecorder : IDisposable
         bool recordSystemAudio = false,
         bool recordMicrophone = false,
         VideoRecordingCodec codec = VideoRecordingCodec.H264,
-        int frameRate = 30)
+        int frameRate = 30,
+        string? microphoneDeviceId = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(saveDirectory);
 
@@ -70,7 +71,10 @@ internal sealed class RegionVideoRecorder : IDisposable
 
         var recordingSource = new DisplayRecordingSource(deviceName)
         {
-            RecorderApi = RecorderApi.DesktopDuplication,
+            // WGC keeps cropped monitor recordings synchronized with desktop
+            // compositor updates. Desktop Duplication can remain on its first
+            // frame on some display and virtual-display drivers.
+            RecorderApi = RecorderApi.WindowsGraphicsCapture,
             SourceRect = new ScreenRect(
                 sourceRegion.X,
                 sourceRegion.Y,
@@ -107,7 +111,8 @@ internal sealed class RegionVideoRecorder : IDisposable
             },
             AudioOptions = CreateAudioOptions(
                 recordSystemAudio,
-                recordMicrophone),
+                recordMicrophone,
+                microphoneDeviceId),
         };
         _recorder = Recorder.CreateRecorder(options);
         _recorder.OnRecordingComplete += OnRecordingComplete;
@@ -115,6 +120,25 @@ internal sealed class RegionVideoRecorder : IDisposable
     }
 
     public event Action<string>? Failed;
+
+    internal static IReadOnlyList<RecordingDeviceOption> GetAudioInputDevices()
+    {
+        try
+        {
+            return Recorder.GetSystemAudioDevices(AudioDeviceSource.InputDevices)
+                .Select(device => new RecordingDeviceOption(
+                    device.DeviceName,
+                    string.IsNullOrWhiteSpace(device.FriendlyName)
+                        ? device.DeviceName
+                        : device.FriendlyName))
+                .Where(device => !string.IsNullOrWhiteSpace(device.Id))
+                .ToArray();
+        }
+        catch
+        {
+            return [];
+        }
+    }
 
     public ScreenRegion Region { get; }
 
@@ -135,7 +159,8 @@ internal sealed class RegionVideoRecorder : IDisposable
 
     private static AudioOptions CreateAudioOptions(
         bool recordSystemAudio,
-        bool recordMicrophone)
+        bool recordMicrophone,
+        string? microphoneDeviceId)
     {
         var configuration = ResolveAudioConfiguration(
             recordSystemAudio,
@@ -145,6 +170,7 @@ internal sealed class RegionVideoRecorder : IDisposable
             IsAudioEnabled = configuration.IsAudioEnabled,
             IsOutputDeviceEnabled = configuration.IsOutputDeviceEnabled,
             IsInputDeviceEnabled = configuration.IsInputDeviceEnabled,
+            AudioInputDevice = microphoneDeviceId,
         };
     }
 
@@ -258,6 +284,20 @@ internal sealed class RegionVideoRecorder : IDisposable
             CompleteWithFailure("结束录制超时，请检查系统媒体组件是否可用。");
             return await _completion.Task;
         }
+    }
+
+    /// <summary>
+    /// Starts the native recorder away from the WPF dispatcher. Desktop
+    /// duplication, audio devices, and hardware encoders can block while the
+    /// display driver is warming up after boot.
+    /// </summary>
+    public Task StartAsync()
+    {
+        return Task.Factory.StartNew(
+            Start,
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
     }
 
     public async Task CancelAsync()
