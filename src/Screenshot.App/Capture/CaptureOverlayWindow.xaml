@@ -459,6 +459,8 @@
                        MouseLeftButtonUp="OnSelectionRectangleMouseLeftButtonUp" />
 
             <Border x:Name="SelectionSizeBadge"
+                    Width="112"
+                    Height="28"
                     Padding="7,3"
                     Panel.ZIndex="105"
                     Background="{DynamicResource ImageEditorToolbarBackgroundBrush}"
@@ -468,6 +470,8 @@
                     IsHitTestVisible="False"
                     Visibility="Collapsed">
                 <TextBlock x:Name="SelectionSizeText"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
                            FontFamily="Consolas"
                            FontSize="12"
                            FontWeight="SemiBold"

@@ -4593,12 +4593,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         SelectionSizeText.Text = $"{physicalBounds.Width} × {physicalBounds.Height}";
         SelectionSizeBadge.Visibility = Visibility.Visible;
-        SelectionSizeBadge.Measure(new System.Windows.Size(
-            double.PositiveInfinity,
-            double.PositiveInfinity));
-
-        var badgeWidth = SelectionSizeBadge.DesiredSize.Width;
-        var badgeHeight = SelectionSizeBadge.DesiredSize.Height;
+        var badgeWidth = SelectionSizeBadge.Width;
+        var badgeHeight = SelectionSizeBadge.Height;
         var badgeX = Math.Clamp(
             bounds.X,
             0,

@@ -36,12 +36,14 @@ SnapCut（简截）是一款以 Windows 10/11 正式版为主的轻量截图工�
 
 下载最新的 x64 自包含版本。2.3.0 起发布附件统一使用 `SnapCut-Setup-*` 和 `SnapCut-Portable-*`；同时保留旧清单入口，2.1.0 及之后版本仍可在程序内在线更新：
 
-- [安装版 SnapCut Setup 3.6.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.6.0-win-x64.exe)
-- [免安装版 SnapCut Portable 3.6.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.6.0-win-x64.zip)
-- [安装版 SnapCut Setup 3.6.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.6.0/SnapCut-Setup-3.6.0-win-x64.exe)
-- [免安装版 SnapCut Portable 3.6.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.6.0/SnapCut-Portable-3.6.0-win-x64.zip)
+- [安装版 SnapCut Setup 3.6.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.6.1-win-x64.exe)
+- [免安装版 SnapCut Portable 3.6.1（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.6.1-win-x64.zip)
+- [安装版 SnapCut Setup 3.6.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.6.1/SnapCut-Setup-3.6.1-win-x64.exe)
+- [免安装版 SnapCut Portable 3.6.1（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.6.1/SnapCut-Portable-3.6.1-win-x64.zip)
 
 免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET 或 Visual C++ 运行库。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.8.3 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+
+3.6.1 修复 ToDesk 等远程控制环境中截图、钉图和录屏框选拖动掉帧、边框落后鼠标的问题：连接真实显示输出时恢复 WPF GPU 合成，仅在合盖、无显示器或只有虚拟显示输出时使用软件渲染，继续避免白屏。拖动中的分辨率标签改为固定布局，减少每帧重复测量带来的界面开销。
 
 3.6.0 增加录屏摄像头实时预览，支持实体、虚拟摄像头和多麦克风选择；摄像头画面可在录制区域内移动、四角等比例缩放并双击恢复，设备选择会跨录制保留，无首帧时自动重连。录屏框选恢复动态画面，工具栏和输入轨迹交互进一步优化。截图、钉图和录屏的框选边框更跟手，拖动时同步显示分辨率并消除旧画面残留。整图翻译改进分区并行、服务优先级与失败回退，提升复杂页面的速度和覆盖完整性；设置页新增可在线替换二维码的“交流联系”入口。
 
@@ -172,12 +174,14 @@ SnapCut is primarily a lightweight Windows 10/11 capture utility. It combines re
 
 Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-*` and `SnapCut-Portable-*` starting with 2.3.0. The legacy manifest endpoint remains available so versions 2.1.0 and later continue to update in-app:
 
-- [SnapCut Setup 3.6.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.6.0-win-x64.exe)
-- [SnapCut Portable 3.6.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.6.0-win-x64.zip)
-- [SnapCut Setup 3.6.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.6.0/SnapCut-Setup-3.6.0-win-x64.exe)
-- [SnapCut Portable 3.6.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.6.0/SnapCut-Portable-3.6.0-win-x64.zip)
+- [SnapCut Setup 3.6.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.6.1-win-x64.exe)
+- [SnapCut Portable 3.6.1 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.6.1-win-x64.zip)
+- [SnapCut Setup 3.6.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.6.1/SnapCut-Setup-3.6.1-win-x64.exe)
+- [SnapCut Portable 3.6.1 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.6.1/SnapCut-Portable-3.6.1-win-x64.zip)
 
 Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET or Visual C++ runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.8.3 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+
+Version 3.6.1 fixes dropped frames and pointer lag while moving screenshot, pin, and recording selections through ToDesk and similar remote-control tools. WPF GPU composition is restored when a physical display output is available, while lid-closed, display-less, and virtual-display-only hosts retain the software-rendering fallback that prevents blank windows. The live resolution badge now uses a stable layout to avoid repeated measurement work during pointer movement.
 
 Version 3.6.0 adds a live camera preview to region recording with physical and virtual camera support plus selectable microphones. The camera frame stays inside the recording region, moves and resizes at its original aspect ratio, restores on double-click, remembers the selected device, and reconnects automatically when the first frame stalls. Region recording is live again while selecting, and toolbar/input-overlay interaction is smoother. Screenshot, pin, and recording selections now track the pointer more closely, show resolution while dragging, and avoid stale-frame remnants. Full-image translation improves parallel region processing, provider priority, and fallback coverage on complex pages. Settings also gains a Contact page whose QR image can be replaced remotely.
 
