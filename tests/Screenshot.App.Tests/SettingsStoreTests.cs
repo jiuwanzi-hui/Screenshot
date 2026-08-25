@@ -73,6 +73,7 @@ public sealed class SettingsStoreTests : IDisposable
                 CaptureToolbarFeature.Text,
             ],
             CaptureToolbarRows = CaptureToolbarRowCount.Two,
+            ToolbarScalePercent = 135,
         };
 
         store.Save(settings);
@@ -143,6 +144,7 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(
             CaptureToolbarRowCount.Two,
             loadResult.Settings.CaptureToolbarRows);
+        Assert.Equal(135, loadResult.Settings.ToolbarScalePercent);
     }
 
     [Fact]
@@ -209,7 +211,7 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(
             FloatingCaptureClickBehavior.ShowSelection,
             loadResult.Settings.FloatingCaptureClickBehavior);
-        Assert.Equal(13, loadResult.Settings.SettingsVersion);
+        Assert.Equal(15, loadResult.Settings.SettingsVersion);
         Assert.Equal(
             Enum.GetValues<CaptureToolbarFeature>(),
             loadResult.Settings.VisibleCaptureToolbarFeatures);
@@ -240,6 +242,7 @@ public sealed class SettingsStoreTests : IDisposable
                 (CaptureToolbarFeature)999,
             ],
             CaptureToolbarRows = (CaptureToolbarRowCount)999,
+            ToolbarScalePercent = 180,
         }).Normalize();
 
         Assert.Equal(
@@ -254,6 +257,7 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(
             CaptureToolbarRowCount.One,
             normalized.CaptureToolbarRows);
+        Assert.Equal(150, normalized.ToolbarScalePercent);
     }
 
     [Fact]
@@ -282,7 +286,7 @@ public sealed class SettingsStoreTests : IDisposable
             ],
         }).Normalize();
 
-        Assert.Equal(13, normalized.SettingsVersion);
+        Assert.Equal(15, normalized.SettingsVersion);
         Assert.Equal(
             [
                 CaptureToolbarFeature.TextRecognition,
@@ -290,6 +294,7 @@ public sealed class SettingsStoreTests : IDisposable
                 CaptureToolbarFeature.CopyRecognizedText,
                 CaptureToolbarFeature.Number,
                 CaptureToolbarFeature.PrivacyRedaction,
+                CaptureToolbarFeature.CopyTable,
             ],
             normalized.VisibleCaptureToolbarFeatures);
     }
@@ -321,7 +326,7 @@ public sealed class SettingsStoreTests : IDisposable
             VisibleCaptureToolbarFeatures = [CaptureToolbarFeature.Save],
         }).Normalize();
 
-        Assert.Equal(13, upgraded.SettingsVersion);
+        Assert.Equal(15, upgraded.SettingsVersion);
         Assert.Equal(
             [
                 CaptureToolbarFeature.Save,
@@ -351,7 +356,7 @@ public sealed class SettingsStoreTests : IDisposable
         }).Normalize();
 
         Assert.Equal(AnnotationToolMode.CurvedArrow, migrated.LastAnnotationTool);
-        Assert.Equal(13, migrated.SettingsVersion);
+        Assert.Equal(15, migrated.SettingsVersion);
     }
 
     [Fact]

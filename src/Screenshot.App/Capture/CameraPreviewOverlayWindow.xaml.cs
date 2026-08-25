@@ -4,13 +4,14 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media.Imaging;
 using System.Runtime.InteropServices;
 using Screenshot.App.Infrastructure;
+using Screenshot.App.Presentation;
 using DrawingRectangle = System.Drawing.Rectangle;
 using WpfMouseEventArgs = System.Windows.Input.MouseEventArgs;
 using WinForms = System.Windows.Forms;
 
 namespace Screenshot.App.Capture;
 
-internal sealed partial class CameraPreviewOverlayWindow : Window
+internal sealed partial class CameraPreviewOverlayWindow : Window, IDisposable
 {
     private readonly ScreenRegion _recordingRegion;
     private readonly CameraCaptureService _camera;
@@ -18,6 +19,7 @@ internal sealed partial class CameraPreviewOverlayWindow : Window
     private readonly double _dpiY;
     private readonly System.Windows.Threading.DispatcherTimer _frameTimer;
     private readonly System.Windows.Threading.DispatcherTimer _pointerUpdateTimer;
+    private readonly HoverIdleHintBehavior _dragHint;
     private readonly object _frameSync = new();
     private readonly TaskCompletionSource<bool> _firstFrameReceived = new(
         TaskCreationOptions.RunContinuationsAsynchronously);
@@ -58,6 +60,10 @@ internal sealed partial class CameraPreviewOverlayWindow : Window
         _dpiX = Math.Max(1, dpi.X);
         _dpiY = Math.Max(1, dpi.Y);
         InitializeComponent();
+        _dragHint = new HoverIdleHintBehavior(
+            PreviewBorder,
+            "拖动移动摄像头画面；拖动边缘或四角缩放；双击恢复初始位置和大小。",
+            source => source is not Thumb);
         _frameTimer = new System.Windows.Threading.DispatcherTimer(
             System.Windows.Threading.DispatcherPriority.Render)
         {
@@ -82,6 +88,7 @@ internal sealed partial class CameraPreviewOverlayWindow : Window
         ApplyNativeBounds();
         _camera.FrameReady += OnFrameReady;
         SourceInitialized += (_, _) => ApplyNativeBounds();
+        Deactivated += OnWindowDeactivated;
     }
 
     internal static async Task<CameraPreviewOverlayWindow?> CreateAsync(
@@ -123,14 +130,18 @@ internal sealed partial class CameraPreviewOverlayWindow : Window
 
     protected override async void OnClosed(EventArgs e)
     {
+        Dispose();
         _frameTimer.Stop();
         _pointerUpdateTimer.Stop();
         _pointerUpdateTimer.Tick -= OnPointerUpdateTimerTick;
+        Deactivated -= OnWindowDeactivated;
         _camera.FrameReady -= OnFrameReady;
         _firstFrameReceived.TrySetResult(false);
         await _camera.DisposeAsync();
         base.OnClosed(e);
     }
+
+    public void Dispose() => _dragHint.Dispose();
 
     private void OnFrameReady(BitmapSource image)
     {
@@ -227,28 +238,40 @@ internal sealed partial class CameraPreviewOverlayWindow : Window
             return;
         }
 
-        _dragging = false;
         ApplyPendingPointerUpdate();
-        _pointerUpdateTimer.Stop();
-        ReleaseMouseCapture();
-        ClampToRecordingRegion();
-        ApplyNativeBounds(applySize: false);
+        FinishPointerInteraction();
         e.Handled = true;
+    }
+
+    private void OnWindowDeactivated(object? sender, EventArgs e)
+    {
+        if (_dragging || _resizing)
+        {
+            FinishPointerInteraction();
+        }
     }
 
     private void OnPreviewMouseCaptureLost(object sender, WpfMouseEventArgs e)
     {
-        // Repositioning a borderless HWND can make Windows revoke capture.
-        // Clear the drag state immediately so a lost button-up cannot leave
-        // the preview consuming subsequent input indefinitely.
-        if (_resizing || !_dragging)
-        {
-            return;
-        }
-
+        // Repositioning a borderless HWND can make Windows revoke capture
+        // before the button-up reaches this window. Always release both WPF
+        // and Win32 capture; otherwise the preview keeps swallowing clicks
+        // until the user clicks outside it.
         _dragging = false;
+        _resizing = false;
+        _activeResizeName = null;
         _pointerUpdatePending = false;
         _pointerUpdateTimer.Stop();
+        if (ReferenceEquals(Mouse.Captured, this))
+        {
+            Mouse.Capture(null);
+        }
+
+        var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero && NativeMethods.GetCapture() == handle)
+        {
+            _ = NativeMethods.ReleaseCapture();
+        }
     }
 
     private void OnResizeDragStarted(object sender, DragStartedEventArgs e)
@@ -462,6 +485,12 @@ internal sealed partial class CameraPreviewOverlayWindow : Window
 
     private void OnPointerUpdateTimerTick(object? sender, EventArgs e)
     {
+        if ((_dragging || _resizing) && !IsLeftButtonPressed())
+        {
+            FinishPointerInteraction();
+            return;
+        }
+
         if (!_pointerUpdatePending)
         {
             return;
@@ -489,6 +518,32 @@ internal sealed partial class CameraPreviewOverlayWindow : Window
 
         ApplyNativeBounds(applySize: false);
     }
+
+    private void FinishPointerInteraction()
+    {
+        _dragging = false;
+        _resizing = false;
+        _activeResizeName = null;
+        _pointerUpdatePending = false;
+        _pointerUpdateTimer.Stop();
+        if (Mouse.Captured is not null)
+        {
+            Mouse.Capture(null);
+        }
+
+        var handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero && NativeMethods.GetCapture() == handle)
+        {
+            _ = NativeMethods.ReleaseCapture();
+        }
+
+        ClampToRecordingRegion();
+        ApplyNativeBounds(applySize: false);
+    }
+
+    private static bool IsLeftButtonPressed() =>
+        (NativeMethods.GetAsyncKeyState(NativeMethods.LeftButtonVirtualKey) &
+            NativeMethods.LeftButtonDownMask) != 0;
 
     private void ClampToRecordingRegion()
     {
@@ -552,6 +607,8 @@ internal sealed partial class CameraPreviewOverlayWindow : Window
         internal const uint SwpNoOwnerZOrder = 0x0200;
         internal const uint SwpNoSendChanging = 0x0400;
         internal const uint SwpAsyncWindowPos = 0x4000;
+        internal const int LeftButtonVirtualKey = 0x01;
+        internal const short LeftButtonDownMask = unchecked((short)0x8000);
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -563,5 +620,16 @@ internal sealed partial class CameraPreviewOverlayWindow : Window
             int cx,
             int cy,
             uint flags);
+
+        [DllImport("user32.dll")]
+        internal static extern short GetAsyncKeyState(int virtualKey);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static extern bool ReleaseCapture();
+
+        [DllImport("user32.dll")]
+        internal static extern IntPtr GetCapture();
+
     }
 }

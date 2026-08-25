@@ -10,4 +10,5 @@ public enum HotKeyAction
     VideoRecording = 6,
     TranslateSelectedText = 7,
     CompleteCapture = 8,
+    EndVideoRecording = 9,
 }

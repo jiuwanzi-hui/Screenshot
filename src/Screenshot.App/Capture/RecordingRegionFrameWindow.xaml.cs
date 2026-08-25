@@ -9,6 +9,8 @@ namespace Screenshot.App.Capture;
 public partial class RecordingRegionFrameWindow : Window
 {
     private const int ExtendedWindowStyleIndex = -20;
+    private const int NonClientHitTestMessage = 0x0084;
+    private const int HitTestTransparent = -1;
     private const long ExtendedStyleTransparent = 0x00000020L;
     private const long ExtendedStyleToolWindow = 0x00000080L;
     private const long ExtendedStyleNoActivate = 0x08000000L;
@@ -20,6 +22,7 @@ public partial class RecordingRegionFrameWindow : Window
     // second recording frame.
     private const int FrameMargin = 3;
     private readonly ScreenRegion _windowRegion;
+    private HwndSource? _windowSource;
 
     public RecordingRegionFrameWindow(ScreenRegion recordingRegion)
     {
@@ -44,6 +47,8 @@ public partial class RecordingRegionFrameWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         var handle = new WindowInteropHelper(this).Handle;
+        _windowSource = HwndSource.FromHwnd(handle);
+        _windowSource?.AddHook(OnWindowMessage);
         var extendedStyle = NativeMethods.GetWindowLongPtr(
             handle,
             ExtendedWindowStyleIndex).ToInt64();
@@ -63,6 +68,30 @@ public partial class RecordingRegionFrameWindow : Window
             _windowRegion.Width,
             _windowRegion.Height,
             DoNotActivate | DoNotChangeOwnerZOrder);
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        SourceInitialized -= OnSourceInitialized;
+        _windowSource?.RemoveHook(OnWindowMessage);
+        _windowSource = null;
+        base.OnClosed(e);
+    }
+
+    private IntPtr OnWindowMessage(
+        IntPtr window,
+        int message,
+        IntPtr wordParameter,
+        IntPtr longParameter,
+        ref bool handled)
+    {
+        if (message != NonClientHitTestMessage)
+        {
+            return IntPtr.Zero;
+        }
+
+        handled = true;
+        return new IntPtr(HitTestTransparent);
     }
 
     internal void EnsureTopmost()

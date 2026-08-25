@@ -93,6 +93,10 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
         {
             Refresh();
         }
+        else if (e.PropertyName == nameof(SettingsViewModel.ToolbarScalePercent))
+        {
+            ApplyToolbarScale();
+        }
     }
 
     private void OnFeatureCollectionChanged(
@@ -166,11 +170,34 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
                 _viewModel.CaptureToolbarRows == CaptureToolbarRowCount.Two;
             BuildEditorRows();
             BuildPreviewRows();
+            ApplyToolbarScale();
         }
         finally
         {
             _isRefreshing = false;
         }
+    }
+
+    private void ApplyToolbarScale()
+    {
+        var scale = _viewModel is null ||
+                    !double.IsFinite(_viewModel.ToolbarScalePercent)
+            ? 1
+            : Math.Clamp(_viewModel.ToolbarScalePercent / 100d, 0.5, 1.5);
+        ApplyScale(EditorRowsHost, scale);
+        ApplyScale(PreviewRowsHost, scale);
+    }
+
+    private static void ApplyScale(FrameworkElement element, double scale)
+    {
+        if (element.LayoutTransform is ScaleTransform transform)
+        {
+            transform.ScaleX = scale;
+            transform.ScaleY = scale;
+            return;
+        }
+
+        element.LayoutTransform = new ScaleTransform(scale, scale);
     }
 
     private void BuildEditorRows()
@@ -262,7 +289,7 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
             ToolTip = toolTip ?? item.Label,
             Cursor = System.Windows.Input.Cursors.Hand,
             AllowDrop = true,
-            Content = CreateToolbarIcon(item.Feature, glyph ?? item.Glyph, 15),
+            Content = CreateToolbarIcon(item.Feature, glyph ?? item.Glyph, 20),
         };
         button.SetResourceReference(ForegroundProperty,
             item.IsVisible ? "EditorToolbarIconBrush" : "AppTextSecondaryBrush");
@@ -289,7 +316,7 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
             Padding = new Thickness(0),
             IsHitTestVisible = false,
             ToolTip = toolTip,
-            Content = CreateToolbarIcon(feature, glyph, 14),
+            Content = CreateToolbarIcon(feature, glyph, 20),
         };
         button.SetResourceReference(BackgroundProperty,
             "EditorToolbarButtonBackgroundBrush");
@@ -325,8 +352,8 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
         {
             return new EmojiStickerImage
             {
-                Width = size,
-                Height = size,
+                Width = size + 2,
+                Height = size + 2,
                 Sticker = "😊",
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
                 VerticalAlignment = System.Windows.VerticalAlignment.Center,
@@ -337,15 +364,15 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
         {
             return new Border
             {
-                Width = size + 4,
-                Height = size + 4,
+                Width = size - 1,
+                Height = size - 1,
                 Background = ResolveBrush("EditorToolbarIconBrush", Colors.DimGray),
-                CornerRadius = new CornerRadius((size + 4) / 2),
+                CornerRadius = new CornerRadius((size - 1) / 2),
                 Child = new TextBlock
                 {
                     Text = "1",
                     Foreground = ResolveBrush("EditorToolbarButtonBackgroundBrush", Colors.White),
-                    FontSize = size - 1,
+                    FontSize = 12,
                     FontWeight = FontWeights.Bold,
                     HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
                     VerticalAlignment = System.Windows.VerticalAlignment.Center,
@@ -362,7 +389,7 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
             {
                 Text = glyph,
                 FontFamily = new MediaFontFamily("Microsoft YaHei UI"),
-                FontSize = size,
+                FontSize = 18,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = ResolveBrush("EditorToolbarIconBrush", Colors.DimGray),
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
@@ -380,25 +407,38 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
             CaptureToolbarFeature.VideoRecording => "RecordIconGeometry",
             CaptureToolbarFeature.Save => "SaveIconGeometry",
             CaptureToolbarFeature.ScrollCapture => "ScrollIconGeometry",
+            CaptureToolbarFeature.CopyTable => "TableIconGeometry",
             CaptureToolbarFeature.TextRecognition or
                 CaptureToolbarFeature.CopyRecognizedText => "OcrIconGeometry",
             CaptureToolbarFeature.PinImage => "PinIconGeometry",
+            CaptureToolbarFeature.UndoRedo when glyph == "↷" => "RedoIconGeometry",
             CaptureToolbarFeature.UndoRedo => "UndoIconGeometry",
+            null when glyph == "×" => "CancelIconGeometry",
+            null when glyph == "✓" => "ConfirmIconGeometry",
             _ => null,
         };
         if (resourceKey is not null && TryFindResource(resourceKey) is Geometry geometry)
         {
             var path = new WpfPath { Data = geometry };
             path.SetResourceReference(StyleProperty, "ToolbarPreviewIcon");
-            path.Width = size;
-            path.Height = size;
+            path.Width = size - 2;
+            path.Height = size - 2;
+            if (feature is null)
+            {
+                path.Stroke = ResolveBrush(
+                    glyph == "✓"
+                        ? "EditorToolbarConfirmIconBrush"
+                        : "EditorToolbarCancelIconBrush",
+                    Colors.White);
+            }
+
             return path;
         }
 
         return new TextBlock
         {
             Text = glyph,
-            FontSize = size,
+            FontSize = 18,
             FontWeight = FontWeights.SemiBold,
             HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
             VerticalAlignment = System.Windows.VerticalAlignment.Center,

@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -7,6 +8,7 @@ using System.Windows.Threading;
 using Screenshot.App.Capture;
 using Screenshot.App.Infrastructure;
 using Screenshot.App.Core;
+using Screenshot.App.Text;
 using WpfButton = System.Windows.Controls.Button;
 using WpfColor = System.Windows.Media.Color;
 using WpfColorConverter = System.Windows.Media.ColorConverter;
@@ -25,6 +27,7 @@ public partial class ImageEditorWindow : Window
     private readonly Action<string>? _customStrokeColorChanged;
     private readonly Action<int[]>? _customColorPaletteChanged;
     private readonly Action<BitmapSource>? _appliedImage;
+    private readonly Func<CapturedImage, Task<OcrRecognitionResult>>? _recognizeTextAsync;
     private ArrowStyle _arrowStyle;
     private ArrowToolMode _arrowToolMode;
     private ShapeToolMode _shapeToolMode;
@@ -53,7 +56,8 @@ public partial class ImageEditorWindow : Window
         ShapeToolMode shapeToolMode = ShapeToolMode.Rectangle,
         Action<ShapeToolMode>? shapeToolModeChanged = null,
         AnnotationToolMode lastAnnotationTool = AnnotationToolMode.Rectangle,
-        Action<AnnotationToolMode>? lastAnnotationToolChanged = null)
+        Action<AnnotationToolMode>? lastAnnotationToolChanged = null,
+        Func<CapturedImage, Task<OcrRecognitionResult>>? recognizeTextAsync = null)
     {
         ArgumentNullException.ThrowIfNull(capturedImage);
         ArgumentException.ThrowIfNullOrWhiteSpace(saveDirectory);
@@ -81,9 +85,13 @@ public partial class ImageEditorWindow : Window
         _customColorPalette = NormalizeCustomColorPalette(customColorPalette);
         _customColorPaletteChanged = customColorPaletteChanged;
         _appliedImage = appliedImage;
+        _recognizeTextAsync = recognizeTextAsync;
 
         InitializeComponent();
         ApplyButton.Visibility = _appliedImage is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        CopyTableButton.Visibility = _recognizeTextAsync is null
             ? Visibility.Collapsed
             : Visibility.Visible;
         ApplyThemedContextMenu(ShapeToolButton.ContextMenu);
@@ -200,6 +208,7 @@ public partial class ImageEditorWindow : Window
 
         UpdateShapeMenuState();
         menu.PlacementTarget = ShapeToolButton;
+        menu.Placement = PlacementMode.Bottom;
         menu.IsOpen = true;
         e.Handled = true;
     }
@@ -215,6 +224,7 @@ public partial class ImageEditorWindow : Window
 
         UpdateArrowMenuState();
         menu.PlacementTarget = ArrowToolButton;
+        menu.Placement = PlacementMode.Bottom;
         menu.IsOpen = true;
         e.Handled = true;
     }
@@ -728,6 +738,56 @@ public partial class ImageEditorWindow : Window
         catch
         {
             StatusText.Text = "无法复制图片，请重试。";
+        }
+    }
+
+    private async void OnCopyTableClick(object sender, RoutedEventArgs e)
+    {
+        if (!_isInitialized || _recognizeTextAsync is null)
+        {
+            StatusText.Text = "编辑画布仍在准备中。";
+            return;
+        }
+
+        CopyTableButton.IsEnabled = false;
+        StatusText.Text = "正在识别表格…";
+        try
+        {
+            using var image = CapturedImage.FromBitmapSource(
+                EditorCanvas.RenderEditedImage());
+            var recognition = await _recognizeTextAsync(image);
+            var table = TableRecognitionService.BuildTsv(
+                recognition,
+                image.Bitmap,
+                await TableSupplementaryOcrService.RecognizeAsync(
+                    image,
+                    recognition.Words));
+            if (!table.IsSuccess)
+            {
+                StatusText.Text = table.ErrorMessage ?? "未识别到表格。";
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(table.ClipboardHtml))
+            {
+                await ClipboardTextService.SetHtmlAsync(table.ClipboardHtml, table.Content);
+            }
+            else
+            {
+                await ClipboardTextService.SetTextAsync(table.Content);
+            }
+            StatusText.Text = "表格已识别并复制。";
+        }
+        catch
+        {
+            StatusText.Text = "表格识别或复制失败，请重试。";
+        }
+        finally
+        {
+            if (!_isClosed)
+            {
+                CopyTableButton.IsEnabled = true;
+            }
         }
     }
 

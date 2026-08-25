@@ -171,10 +171,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private ShapeToolMode _shapeToolMode;
     private AnnotationToolMode _lastAnnotationTool;
     private CaptureToolbarRowCount _captureToolbarRows;
+    private double _toolbarScalePercent;
     private string _customStrokeColor;
     private int[] _customColorPalette;
     private int _defaultStrokeWidth;
     private bool _launchAtStartup;
+    private bool _openSettingsOnStartup;
     private bool _requestAdministratorPrivileges;
     private WindowCloseBehavior _closeBehavior;
     private AppTheme _theme;
@@ -189,6 +191,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private string _regionCaptureHotKey;
     private string _completeCaptureHotKey;
     private string _videoRecordingHotKey;
+    private string _endVideoRecordingHotKey;
     private string _scrollCaptureHotKey;
     private string _ocrHotKey;
     private string _textTranslationHotKey;
@@ -235,6 +238,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _shapeToolMode = settings.ShapeToolMode;
         _lastAnnotationTool = settings.LastAnnotationTool;
         _captureToolbarRows = settings.CaptureToolbarRows;
+        _toolbarScalePercent = settings.ToolbarScalePercent;
         SetCaptureToolbarFeatures(
             settings.VisibleCaptureToolbarFeatures,
             settings.CaptureToolbarFeatureOrder);
@@ -242,6 +246,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _customColorPalette = settings.CustomColorPalette.ToArray();
         _defaultStrokeWidth = settings.DefaultStrokeWidth;
         _launchAtStartup = settings.LaunchAtStartup;
+        _openSettingsOnStartup = settings.OpenSettingsOnStartup;
         _requestAdministratorPrivileges = settings.RequestAdministratorPrivileges;
         _closeBehavior = settings.CloseBehavior;
         _theme = settings.Theme;
@@ -264,6 +269,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _regionCaptureHotKey = settings.RegionCaptureHotKey;
         _completeCaptureHotKey = settings.CompleteCaptureHotKey;
         _videoRecordingHotKey = settings.VideoRecordingHotKey;
+        _endVideoRecordingHotKey = settings.EndVideoRecordingHotKey;
         _scrollCaptureHotKey = settings.ScrollCaptureHotKey;
         _ocrHotKey = settings.OcrHotKey;
         _textTranslationHotKey = settings.TextTranslationHotKey;
@@ -649,6 +655,24 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _videoRecordingHotKey, value);
     }
 
+    public double ToolbarScalePercent
+    {
+        get => _toolbarScalePercent;
+        set => SetProperty(ref _toolbarScalePercent, value);
+    }
+
+    public bool OpenSettingsOnStartup
+    {
+        get => _openSettingsOnStartup;
+        set => SetProperty(ref _openSettingsOnStartup, value);
+    }
+
+    public string EndVideoRecordingHotKey
+    {
+        get => _endVideoRecordingHotKey;
+        set => SetProperty(ref _endVideoRecordingHotKey, value);
+    }
+
     public string ScrollCaptureHotKey
     {
         get => _scrollCaptureHotKey;
@@ -787,10 +811,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
                 .Select(item => item.Feature)
                 .ToArray(),
             CaptureToolbarRows = CaptureToolbarRows,
+            ToolbarScalePercent = ToolbarScalePercent,
             CustomStrokeColor = CustomStrokeColor,
             CustomColorPalette = CustomColorPalette.ToArray(),
             DefaultStrokeWidth = DefaultStrokeWidth,
             LaunchAtStartup = LaunchAtStartup,
+            OpenSettingsOnStartup = OpenSettingsOnStartup,
             RequestAdministratorPrivileges = RequestAdministratorPrivileges,
             CloseBehavior = CloseBehavior,
             Theme = Theme,
@@ -813,6 +839,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             RegionCaptureHotKey = RegionCaptureHotKey,
             CompleteCaptureHotKey = CompleteCaptureHotKey,
             VideoRecordingHotKey = VideoRecordingHotKey,
+            EndVideoRecordingHotKey = EndVideoRecordingHotKey,
             ScrollCaptureHotKey = ScrollCaptureHotKey,
             OcrHotKey = OcrHotKey,
             TextTranslationHotKey = TextTranslationHotKey,
@@ -864,6 +891,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         ShapeToolMode = settings.ShapeToolMode;
         LastAnnotationTool = settings.LastAnnotationTool;
         CaptureToolbarRows = settings.CaptureToolbarRows;
+        ToolbarScalePercent = settings.ToolbarScalePercent;
         SetCaptureToolbarFeatures(
             settings.VisibleCaptureToolbarFeatures,
             settings.CaptureToolbarFeatureOrder);
@@ -871,6 +899,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         CustomColorPalette = settings.CustomColorPalette.ToArray();
         DefaultStrokeWidth = settings.DefaultStrokeWidth;
         LaunchAtStartup = settings.LaunchAtStartup;
+        OpenSettingsOnStartup = settings.OpenSettingsOnStartup;
         RequestAdministratorPrivileges = settings.RequestAdministratorPrivileges;
         CloseBehavior = settings.CloseBehavior;
         Theme = settings.Theme;
@@ -895,6 +924,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         RegionCaptureHotKey = settings.RegionCaptureHotKey;
         CompleteCaptureHotKey = settings.CompleteCaptureHotKey;
         VideoRecordingHotKey = settings.VideoRecordingHotKey;
+        EndVideoRecordingHotKey = settings.EndVideoRecordingHotKey;
         ScrollCaptureHotKey = settings.ScrollCaptureHotKey;
         OcrHotKey = settings.OcrHotKey;
         TextTranslationHotKey = settings.TextTranslationHotKey;
@@ -975,6 +1005,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             [CaptureToolbarFeature.Save] = ("保存图片", "▣", CaptureToolbarFeatureGroup.Action),
             [CaptureToolbarFeature.ScrollCapture] = ("长截图", "↕", CaptureToolbarFeatureGroup.Action),
             [CaptureToolbarFeature.TextRecognition] = ("文字识别", "文", CaptureToolbarFeatureGroup.Action),
+            [CaptureToolbarFeature.CopyTable] = ("表格复制", "表", CaptureToolbarFeatureGroup.Action),
             [CaptureToolbarFeature.CopyRecognizedText] = ("文字识别并复制", "取", CaptureToolbarFeatureGroup.Action),
             [CaptureToolbarFeature.Translation] = ("翻译", "译", CaptureToolbarFeatureGroup.Action),
             [CaptureToolbarFeature.PrivacyRedaction] = ("一键隐私打码", "隐", CaptureToolbarFeatureGroup.Action),
@@ -1049,6 +1080,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         {
             TranslationModelOptions.Add(model);
         }
+    }
+
+    public void ClearTranslationModels()
+    {
+        TranslationModelOptions.Clear();
+        TranslationModel = string.Empty;
     }
 
     public void UpdateTranslationProviderAvailability(

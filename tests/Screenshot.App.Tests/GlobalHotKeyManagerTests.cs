@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Threading;
 using Screenshot.App.Capture;
 using Screenshot.App.Core;
@@ -7,6 +8,50 @@ namespace Screenshot.App.Tests;
 
 public sealed class GlobalHotKeyManagerTests
 {
+    [Fact]
+    public void DiscardsOrdinaryPreCaptureWhilePreviousOverlayIsSettling()
+    {
+        var closedAt = Stopwatch.GetTimestamp();
+
+        Assert.True(GlobalHotKeyManager.ShouldDiscardStandardPreCapture(
+            closedAt,
+            closedAt + Stopwatch.Frequency / 4));
+        Assert.False(GlobalHotKeyManager.ShouldDiscardStandardPreCapture(
+            closedAt,
+            closedAt + Stopwatch.Frequency));
+    }
+
+    [Fact]
+    public void RightButtonCancelFromCaptureOverlayDoesNotBecomeContextMenuGesture()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var manager = new GlobalHotKeyManager();
+            manager.SetCaptureOverlayActive(true);
+
+            Assert.False(manager.ShouldSuppressContextMenuGestureForTest(
+                isButtonDown: true));
+
+            manager.SetCaptureOverlayActive(false);
+
+            Assert.True(manager.ShouldSuppressContextMenuGestureForTest(
+                isButtonDown: false));
+            Assert.False(manager.HasRecentContextMenuGestureForTest());
+        });
+    }
+
+    [Fact]
+    public void RightButtonReleaseOutsideCaptureOverlayRemainsContextMenuEligible()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var manager = new GlobalHotKeyManager();
+
+            Assert.False(manager.ShouldSuppressContextMenuGestureForTest(
+                isButtonDown: false));
+        });
+    }
+
     [Theory]
     [InlineData(8)]
     [InlineData(9)]

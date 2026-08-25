@@ -234,6 +234,13 @@ public static class WindowPlacementService
                TryRestore(window, placement);
     }
 
+    public static bool EnsurePositionVisible(Window window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        return TryCapture(window, out var placement) &&
+               TryRestorePosition(window, placement);
+    }
+
     internal static bool TrackPosition(
         Window window,
         string key,

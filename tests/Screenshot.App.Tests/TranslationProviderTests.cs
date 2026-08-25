@@ -182,8 +182,8 @@ public sealed class TranslationProviderTests
         Assert.Contains("hello", handler.RequestBody);
         Assert.Contains("world", handler.RequestBody);
         Assert.Contains("translations", handler.RequestBody);
-        Assert.Contains("same screenshot or document", handler.RequestBody);
-        Assert.Contains("never mix in untranslated source-language", handler.RequestBody);
+        Assert.Contains("ordered screenshot-text segment", handler.RequestBody);
+        Assert.Contains("exactly one non-empty string", handler.RequestBody);
     }
 
     [Fact]
@@ -911,6 +911,52 @@ public sealed class TranslationProviderTests
     }
 
     [Fact]
+    public async Task OrderedProviderGivesOnlineCaptureItsOwnCompletionBudget()
+    {
+        var source = Enumerable.Range(1, 8)
+            .Select(index => $"English sentence {index}")
+            .ToArray();
+        var online = new DelayedTranslationProvider(
+            TranslationProviderFactory.OpenAiCompatibleProviderId,
+            TimeSpan.FromMilliseconds(140));
+        var provider = new OrderedTranslationProvider(
+            [online],
+            offlineTimeout: TimeSpan.FromSeconds(1),
+            onlineTimeout: TimeSpan.FromSeconds(1),
+            translationBudget: TimeSpan.FromMilliseconds(40),
+            onlineTranslationBudget: TimeSpan.FromMilliseconds(500));
+
+        var result = await provider.TranslateSegmentsAsync(
+            source,
+            "auto",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(8, result.Segments.Count);
+        Assert.All(result.Segments, text => Assert.StartsWith("译文 ", text));
+    }
+
+    [Fact]
+    public async Task OrderedProviderKeepsTheOriginalBudgetForOfflineOnlyWork()
+    {
+        var offline = new NeverCompletingTranslationProvider("OfflineBergamot");
+        var provider = new OrderedTranslationProvider(
+            [offline],
+            offlineTimeout: TimeSpan.FromSeconds(1),
+            onlineTimeout: TimeSpan.FromSeconds(1),
+            translationBudget: TimeSpan.FromMilliseconds(50),
+            onlineTranslationBudget: TimeSpan.FromMilliseconds(500));
+
+        var result = await provider.TranslateSegmentsAsync(
+            ["source"],
+            "auto",
+            "zh-Hans");
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("10 秒时间限制", result.ErrorMessage);
+    }
+
+    [Fact]
     public async Task OrderedProviderProbesAFailedProviderOnlyOnceAcrossBatches()
     {
         // 90 segments split into batches of at most 24. The failing first
@@ -1410,6 +1456,36 @@ public sealed class TranslationProviderTests
                 WasCancelled = true;
                 throw;
             }
+        }
+    }
+
+    private sealed class DelayedTranslationProvider(
+        string id,
+        TimeSpan delay) : ITranslationProvider
+    {
+        public string Id { get; } = id;
+
+        public async Task<TranslationResult> TranslateAsync(
+            string text,
+            string sourceLanguage,
+            string targetLanguage,
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(delay, cancellationToken);
+            return new TranslationResult(true, "译文 " + text, null);
+        }
+
+        public async Task<TranslationSegmentsResult> TranslateSegmentsAsync(
+            IReadOnlyList<string> segments,
+            string sourceLanguage,
+            string targetLanguage,
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(delay, cancellationToken);
+            return new TranslationSegmentsResult(
+                true,
+                segments.Select(text => "译文 " + text).ToArray(),
+                null);
         }
     }
 

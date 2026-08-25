@@ -35,7 +35,7 @@ public sealed class HistoryRetentionTests
             VideoHistoryLimit = 1,
         }).Normalize();
 
-        Assert.Equal(13, normalized.SettingsVersion);
+        Assert.Equal(15, normalized.SettingsVersion);
         Assert.Equal(7, normalized.ScreenshotHistoryRetentionDays);
         Assert.Equal(7, normalized.VideoHistoryRetentionDays);
         Assert.Equal(50, normalized.HistoryLimit);

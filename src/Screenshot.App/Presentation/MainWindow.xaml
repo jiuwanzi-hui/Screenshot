@@ -768,9 +768,35 @@
 
                 <StackPanel x:Name="GeneralCaptureToolbarGroup">
                     <TextBlock Style="{StaticResource GeneralGroupTitle}"
-                               Text="截图工具栏" />
+                               Text="工具栏" />
                     <TextBlock Style="{StaticResource GeneralGroupDescription}"
-                               Text="长按功能按钮可拖拽；配置普通截图与钉图共用的工具顺序、显隐和行数" />
+                               Text="长按功能按钮可拖拽；配置截图、钉图与录屏期间共用的工具栏大小，以及截图工具顺序、显隐和行数" />
+                    <Grid Margin="0,16,0,0" MaxWidth="430" HorizontalAlignment="Left">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="250" />
+                            <ColumnDefinition Width="58" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Margin="0,0,14,0"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource GeneralFieldLabel}"
+                                   Text="工具栏大小" />
+                        <Slider Grid.Column="1"
+                                Style="{StaticResource MouseDurationSlider}"
+                                Minimum="50"
+                                Maximum="150"
+                                TickFrequency="1"
+                                SmallChange="1"
+                                LargeChange="1"
+                                IsSnapToTickEnabled="True"
+                                Value="{Binding ToolbarScalePercent, Mode=TwoWay, UpdateSourceTrigger=Explicit}"
+                                ValueChanged="OnToolbarScaleChanged" />
+                        <TextBlock Grid.Column="2"
+                                   Margin="12,0,0,0"
+                                   VerticalAlignment="Center"
+                                   Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                   Text="{Binding ToolbarScalePercent, StringFormat={}{0:0}%}" />
+                    </Grid>
                     <local:CaptureToolbarLayoutEditor Margin="0,12,0,0"
                                                       LayoutChanged="OnCaptureToolbarLayoutChanged" />
                 </StackPanel>
@@ -818,6 +844,15 @@
                               Checked="OnImmediateSettingChanged"
                               Unchecked="OnImmediateSettingChanged"
                               Content="显示通知区域图标" />
+                    <CheckBox MinHeight="30"
+                              Margin="0,8,0,0"
+                              FontSize="14"
+                              Foreground="{DynamicResource AppTextPrimaryBrush}"
+                              IsChecked="{Binding OpenSettingsOnStartup}"
+                              Checked="OnImmediateSettingChanged"
+                              Unchecked="OnImmediateSettingChanged"
+                              Content="启动时打开设置页面"
+                              ToolTip="不勾选时启动后最小化到后台" />
                     <CheckBox MinHeight="30"
                               Margin="0,8,0,0"
                               FontSize="14"
@@ -1288,6 +1323,54 @@
                                     Style="{StaticResource SecondaryButton}"
                                     Tag="VideoRecordingHotKeyBox"
                                     ToolTip="不设置视频录制快捷键">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,17,0,0">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="结束录制" />
+                        <TextBlock Margin="0,4,16,0"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                   TextWrapping="Wrap"
+                                   Text="录制过程中触发此快捷键会保存并结束当前视频，默认 Alt+2。" />
+                        <Grid Margin="0,8,16,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <local:HotKeyCaptureBox x:Name="EndVideoRecordingHotKeyBox"
+                                                    Height="34"
+                                                    Padding="10,3"
+                                                    BorderBrush="{DynamicResource AppBorderBrush}"
+                                                    GotKeyboardFocus="OnHotKeyCaptureGotKeyboardFocus"
+                                                    HotKeyCaptured="OnHotKeyCaptured"
+                                                    HotKeyCaptureCanceled="OnHotKeyCaptureCanceled"
+                                                    LostKeyboardFocus="OnHotKeyCaptureLostKeyboardFocus"
+                                                    Tag="EndVideoRecordingHotKey"
+                                                    Text="{Binding EndVideoRecordingHotKey}"
+                                                    TextAlignment="Center"
+                                                    ToolTip="单击后按下结束录制快捷键" />
+                            <Button Grid.Column="1"
+                                    Width="68"
+                                    Margin="8,0,0,0"
+                                    Click="OnBeginHotKeyEditClick"
+                                    Content="修改"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="EndVideoRecordingHotKeyBox"
+                                    ToolTip="修改结束录制快捷键" />
+                            <Button Grid.Column="2"
+                                    Width="34"
+                                    Margin="6,0,0,0"
+                                    Click="OnClearHotKeyClick"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="EndVideoRecordingHotKeyBox"
+                                    ToolTip="不设置结束录制快捷键">
                                 <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
                             </Button>
                         </Grid>
@@ -1887,6 +1970,7 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <ComboBox x:Name="TranslationModelComboBox"
                                           Grid.Column="0"
@@ -1904,7 +1988,15 @@
                                         Padding="12,3"
                                         Click="OnFetchTranslationModelsClick"
                                         Content="获取模型"
-                                        ToolTip="使用当前服务地址和 API Key 获取模型列表" />
+                                        ToolTip="使用当前服务地址和 API Key 获取模型列表；服务不开放列表时请手动输入并测试模型" />
+                                <Button x:Name="TestTranslationModelButton"
+                                        Grid.Column="2"
+                                        MinWidth="82"
+                                        Margin="8,0,0,0"
+                                        Padding="12,3"
+                                        Click="OnTestTranslationModelClick"
+                                        Content="测试模型"
+                                        ToolTip="用当前模型发送一条最小请求，确认模型是否真正可用" />
                             </Grid>
                         </StackPanel>
 

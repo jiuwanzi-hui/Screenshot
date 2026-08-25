@@ -115,6 +115,22 @@ public sealed class TranslationModelCatalogServiceTests
         Assert.Contains("model listing is disabled", result.ErrorMessage);
     }
 
+    [Fact]
+    public async Task FetchesModelsFromNestedVendorResponse()
+    {
+        var handler = new ModelListHandler(
+            """{"data":{"model_list":[{"model_id":"vendor-nested"}]}}""");
+        using var client = new HttpClient(handler);
+
+        var result = await TranslationModelCatalogService.FetchAsync(
+            "https://vendor.example/v1",
+            "vendor-key",
+            client);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(["vendor-nested"], result.Models);
+    }
+
     private sealed class ModelListHandler : HttpMessageHandler
     {
         private readonly string _responseBody;

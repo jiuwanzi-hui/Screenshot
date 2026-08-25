@@ -148,6 +148,8 @@ public sealed class CaptureOverlayOptions
 
     public CaptureToolbarRowCount ToolbarRows { get; init; } =
         CaptureToolbarRowCount.One;
+
+    public double ToolbarScalePercent { get; init; } = 100;
 }
 
 public partial class CaptureOverlayWindow : Window, IDisposable
@@ -237,6 +239,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private double _toolbarPositionXRatio = -1;
     private double _toolbarPositionYRatio = -1;
     private readonly ToolbarDragHintBehavior _toolbarDragHint;
+    private readonly double _toolbarScale;
     private WpfColor _inlineColorPanelPreviewColor = WpfColor.FromRgb(0, 127, 115);
     private WpfColor? _inlineCustomColor;
     private int[] _inlineCustomColorPalette = [];
@@ -251,6 +254,12 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         CapturePointerContinuation? initialPointerContinuation = null)
     {
         _options = options;
+        _toolbarScale = Math.Clamp(
+            double.IsFinite(options?.ToolbarScalePercent ?? 100)
+                ? (options?.ToolbarScalePercent ?? 100) / 100d
+                : 1,
+            0.5,
+            1.5);
         var completionHotKey = string.IsNullOrWhiteSpace(options?.CompletionHotKey)
             ? AppSettings.DefaultCompleteCaptureHotKey
             : options!.CompletionHotKey;
@@ -279,6 +288,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         // capture. Its drag position is intentionally session-local.
         _hasCustomToolbarPosition = false;
         InitializeComponent();
+        CaptureToolbar.LayoutTransform = new System.Windows.Media.ScaleTransform(
+            _toolbarScale,
+            _toolbarScale);
         _toolbarDragHint = new ToolbarDragHintBehavior(
             CaptureToolbar,
             CaptureToolbar);
@@ -474,6 +486,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         _lifetimeCancellationSource.Cancel();
         _isSelecting = false;
         _continuedSelectionButton = null;
+        StopSelectionPreviewRendering();
         ReleaseOverlayMouseCapture();
         _windowSnapTimer.Stop();
         _windowSnapTimer.Tick -= OnWindowSnapTimerTick;
@@ -2327,7 +2340,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
             var table = TableRecognitionService.BuildTsv(
                 recognition,
-                image.Bitmap);
+                image.Bitmap,
+                await TableSupplementaryOcrService.RecognizeAsync(
+                    image,
+                    recognition.Words,
+                    cancellationToken: _lifetimeCancellationSource.Token));
             _inlineTableResult = table;
             if (!table.IsSuccess)
             {
@@ -2339,7 +2356,16 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
             try
             {
-                await ClipboardTextService.SetTextAsync(table.Content);
+                if (!string.IsNullOrWhiteSpace(table.ClipboardHtml))
+                {
+                    await ClipboardTextService.SetHtmlAsync(
+                        table.ClipboardHtml,
+                        table.Content);
+                }
+                else
+                {
+                    await ClipboardTextService.SetTextAsync(table.Content);
+                }
             }
             catch
             {
@@ -3163,6 +3189,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         SetVisibility(SaveButton, CaptureToolbarFeature.Save);
         SetVisibility(ScrollCaptureButton, CaptureToolbarFeature.ScrollCapture);
         SetVisibility(OcrButton, CaptureToolbarFeature.TextRecognition);
+        SetVisibility(CopyTableButton, CaptureToolbarFeature.CopyTable);
         SetVisibility(
             CopyRecognizedTextButton,
             CaptureToolbarFeature.CopyRecognizedText);
@@ -3253,6 +3280,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             [CaptureToolbarFeature.Save] = [SaveButton],
             [CaptureToolbarFeature.ScrollCapture] = [ScrollCaptureButton],
             [CaptureToolbarFeature.TextRecognition] = [OcrButton],
+            [CaptureToolbarFeature.CopyTable] = [CopyTableButton],
             [CaptureToolbarFeature.CopyRecognizedText] =
                 [CopyRecognizedTextButton],
             [CaptureToolbarFeature.Translation] = [TranslateButton],
@@ -3290,6 +3318,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             CaptureToolbarFeature.Save,
             CaptureToolbarFeature.ScrollCapture,
             CaptureToolbarFeature.TextRecognition,
+            CaptureToolbarFeature.CopyTable,
             CaptureToolbarFeature.CopyRecognizedText,
             CaptureToolbarFeature.Translation,
             CaptureToolbarFeature.PrivacyRedaction,
@@ -3498,6 +3527,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         UpdateInlineShapeMenuState();
         menu.PlacementTarget = InlineShapeToolButton;
+        menu.Placement = PlacementMode.Bottom;
         menu.IsOpen = true;
         e.Handled = true;
     }
@@ -3513,6 +3543,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         UpdateInlineArrowMenuState();
         menu.PlacementTarget = InlineArrowToolButton;
+        menu.Placement = PlacementMode.Bottom;
         menu.IsOpen = true;
         e.Handled = true;
     }
@@ -3841,7 +3872,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         var panelY = toolbarY - InlineCustomColorPanel.ActualHeight - 8;
         if (panelY < 8)
         {
-            panelY = toolbarY + CaptureToolbar.ActualHeight + 8;
+            panelY = toolbarY + GetCaptureToolbarHeight() + 8;
         }
 
         Canvas.SetLeft(InlineCustomColorPanel, panelX);
@@ -4255,30 +4286,45 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return;
         }
 
-        // Pointer events can arrive much faster than WPF can arrange the four
-        // masks, resize handles, and toolbar. Coalesce them to one render
-        // callback and always render only the latest pointer position.
+        // Do not queue this at Render priority. That priority runs before the
+        // next input event, so a high-polling-rate mouse would still force a
+        // complete layout pass for every raw sample. CompositionTarget renders
+        // once per display frame and therefore presents only the latest point.
         if (_selectionBoundsUpdateScheduled)
         {
             return;
         }
 
         _selectionBoundsUpdateScheduled = true;
-        _ = Dispatcher.BeginInvoke(
-            DispatcherPriority.Render,
-            new Action(() =>
-            {
-                _selectionBoundsUpdateScheduled = false;
-                if (_pendingSelectionBounds is { } bounds)
-                {
-                    _pendingSelectionBounds = null;
-                    ApplySelectionPreviewBounds(bounds);
-                }
-            }));
+        System.Windows.Media.CompositionTarget.Rendering +=
+            OnSelectionPreviewRendering;
+    }
+
+    private void OnSelectionPreviewRendering(object? sender, EventArgs e)
+    {
+        StopSelectionPreviewRendering();
+        if (_pendingSelectionBounds is { } bounds)
+        {
+            _pendingSelectionBounds = null;
+            ApplySelectionPreviewBounds(bounds);
+        }
+    }
+
+    private void StopSelectionPreviewRendering()
+    {
+        if (!_selectionBoundsUpdateScheduled)
+        {
+            return;
+        }
+
+        _selectionBoundsUpdateScheduled = false;
+        System.Windows.Media.CompositionTarget.Rendering -=
+            OnSelectionPreviewRendering;
     }
 
     private void FlushSelectionBoundsUpdate()
     {
+        StopSelectionPreviewRendering();
         if (_pendingSelectionBounds is not { } bounds)
         {
             return;
@@ -4309,10 +4355,17 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         SelectionRectangle.Width = bounds.Width;
         SelectionRectangle.Height = bounds.Height;
 
-        // These are direct Canvas property writes and do not measure the
-        // captured bitmap. Keep the border, handles, toolbar, and lightweight
-        // physical-size badge aligned while the pointer is moving.
-        UpdateSelectionControlPositions(bounds);
+        // During the initial drag the handles and toolbar are hidden. Avoid
+        // moving those invisible controls for every rendered frame; they are
+        // positioned once when the completed selection exposes them.
+        if (TopLeftResizeThumb.Visibility == Visibility.Visible ||
+            CaptureToolbar.Visibility == Visibility.Visible)
+        {
+            UpdateSelectionControlPositions(bounds);
+        }
+
+        // Keep the lightweight size badge and the dimming mask in sync with
+        // the live border. These are the only visuals required while drawing.
         UpdateSelectionSizeBadge(bounds);
         UpdateSelectionMask(bounds);
 
@@ -4439,13 +4492,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         var toolbarX = CalculateAutomaticToolbarX(
             bounds,
-            CaptureToolbar.ActualWidth,
+            GetCaptureToolbarWidth(),
             CaptureSurface.ActualWidth);
         var toolbarY = bounds.Bottom + 10;
 
-        if (toolbarY + CaptureToolbar.ActualHeight > CaptureSurface.ActualHeight)
+        if (toolbarY + GetCaptureToolbarHeight() > CaptureSurface.ActualHeight)
         {
-            toolbarY = Math.Max(0, bounds.Y - CaptureToolbar.ActualHeight - 10);
+            toolbarY = Math.Max(0, bounds.Y - GetCaptureToolbarHeight() - 10);
         }
 
         SetCaptureToolbarPosition(toolbarX, toolbarY);
@@ -4564,11 +4617,17 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private double GetToolbarMaximumX() => Math.Max(
         0,
-        CaptureSurface.ActualWidth - CaptureToolbar.ActualWidth);
+        CaptureSurface.ActualWidth - GetCaptureToolbarWidth());
 
     private double GetToolbarMaximumY() => Math.Max(
         0,
-        CaptureSurface.ActualHeight - CaptureToolbar.ActualHeight);
+        CaptureSurface.ActualHeight - GetCaptureToolbarHeight());
+
+    private double GetCaptureToolbarWidth() =>
+        CaptureToolbar.ActualWidth * _toolbarScale;
+
+    private double GetCaptureToolbarHeight() =>
+        CaptureToolbar.ActualHeight * _toolbarScale;
 
     private void SetCaptureToolbarPosition(double x, double y)
     {

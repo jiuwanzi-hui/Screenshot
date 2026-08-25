@@ -185,10 +185,21 @@ public partial class RecordingAnnotationOverlayWindow : Window
             _windowBounds.Width,
             _windowBounds.Height,
             DoNotActivate | DoNotChangeOwnerZOrder);
+        UpdateInputTransparency();
     }
 
     private void UpdateInputTransparency()
     {
+        var shouldPassThrough = _isPaused || _tool == RecordingAnnotationTool.Pointer;
+        // Pointer mode displays annotations only. Make the complete WPF
+        // window input-transparent as well as its HWND, so it cannot retain
+        // an editor cursor after recording begins.
+        IsHitTestVisible = !shouldPassThrough;
+        DrawingCanvas.IsHitTestVisible = !shouldPassThrough;
+        DrawingCanvas.Background = shouldPassThrough
+            ? System.Windows.Media.Brushes.Transparent
+            : new SolidColorBrush(WpfColor.FromArgb(1, 255, 255, 255));
+
         var handle = new WindowInteropHelper(this).Handle;
         if (handle == IntPtr.Zero)
         {
@@ -198,10 +209,6 @@ public partial class RecordingAnnotationOverlayWindow : Window
         var style = NativeMethods.GetWindowLongPtr(
             handle,
             ExtendedWindowStyleIndex).ToInt64();
-        var shouldPassThrough = _isPaused || _tool == RecordingAnnotationTool.Pointer;
-        DrawingCanvas.Background = shouldPassThrough
-            ? System.Windows.Media.Brushes.Transparent
-            : new SolidColorBrush(WpfColor.FromArgb(1, 255, 255, 255));
         style = shouldPassThrough
             ? style | ExtendedStyleTransparent
             : style & ~ExtendedStyleTransparent;

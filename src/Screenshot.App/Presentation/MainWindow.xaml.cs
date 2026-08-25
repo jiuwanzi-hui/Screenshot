@@ -68,8 +68,10 @@ public partial class MainWindow : Window, IDisposable
     private ApplicationReleaseInfo? _selectedRelease;
     private OfflineTranslationModelPlan? _offlineTranslationPlan;
     private string? _onlineModelCatalogFingerprint;
+    private string? _onlineTestedModelFingerprint;
     private IReadOnlyList<string> _verifiedTranslationModels = [];
     private string? _onlineModelCatalogError;
+    private int _onlineValidationRevision;
     private HotKeyCaptureBox? _activeHotKeyCaptureBox;
     private int _automaticUpdateCheckInProgress;
     private int _onlineAvailabilityCheckInProgress;
@@ -138,6 +140,7 @@ public partial class MainWindow : Window, IDisposable
                      RegionCaptureHotKeyBox,
                      CompleteCaptureHotKeyBox,
                      VideoRecordingHotKeyBox,
+                     EndVideoRecordingHotKeyBox,
                      OcrHotKeyBox,
                      TextTranslationHotKeyBox,
                      PinHotKeyBox,
@@ -1091,6 +1094,14 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
+        // A new catalog request must start from a blank model selection. Do
+        // not carry the previous provider's model into the new result list.
+        _settingsViewModel.ClearTranslationModels();
+        _verifiedTranslationModels = [];
+        _onlineModelCatalogError = null;
+        _onlineTestedModelFingerprint = null;
+        Interlocked.Increment(ref _onlineValidationRevision);
+
         _settingsViewModel.UpdateTranslationProviderAvailability(
             TranslationProviderKind.Online,
             isAvailable: false,
@@ -1120,6 +1131,8 @@ public partial class MainWindow : Window, IDisposable
                 _verifiedTranslationModels = [];
                 _onlineModelCatalogError =
                     result.ErrorMessage ?? "获取模型失败。";
+                SetTranslationModelsPreservingSelection(
+                    GetSuggestedTranslationModels(_settingsViewModel.TranslationEndpoint));
                 RefreshOnlineTranslationAvailability();
                 _settingsViewModel.SetStatus(
                     result.ErrorMessage ?? "获取模型失败。");
@@ -1128,7 +1141,11 @@ public partial class MainWindow : Window, IDisposable
 
             _onlineModelCatalogError = null;
             _verifiedTranslationModels = result.Models;
-            SetTranslationModelsPreservingSelection(result.Models);
+            SetTranslationModelsPreservingSelection(
+                MergeTranslationModelOptions(
+                    result.Models,
+                    GetSuggestedTranslationModels(
+                        _settingsViewModel.TranslationEndpoint)));
             if (result.Models.Count == 1)
             {
                 _settingsViewModel.TranslationModel = result.Models[0];
@@ -1148,12 +1165,117 @@ public partial class MainWindow : Window, IDisposable
             _verifiedTranslationModels = [];
             _onlineModelCatalogError =
                 "获取模型失败，请检查服务地址和网络连接。";
+            SetTranslationModelsPreservingSelection(
+                GetSuggestedTranslationModels(_settingsViewModel.TranslationEndpoint));
             RefreshOnlineTranslationAvailability();
             _settingsViewModel.SetStatus("获取模型失败，请检查服务地址和网络连接。");
         }
         finally
         {
             button.Content = "获取模型";
+            button.IsEnabled = true;
+        }
+    }
+
+    private static IReadOnlyList<string> GetSuggestedTranslationModels(string endpoint)
+    {
+        if (endpoint.Contains("bigmodel.cn", StringComparison.OrdinalIgnoreCase) ||
+            endpoint.Contains("zhipu", StringComparison.OrdinalIgnoreCase))
+        {
+            return [
+                "glm-4-flashx",
+                "glm-4-flash",
+                "glm-4-air",
+                "glm-4-plus",
+                "glm-4-long",
+            ];
+        }
+
+        if (endpoint.Contains("dashscope.aliyuncs.com", StringComparison.OrdinalIgnoreCase) ||
+            endpoint.Contains("aliyuncs.com", StringComparison.OrdinalIgnoreCase))
+        {
+            return [
+                "qwen-flash",
+                "qwen-turbo",
+                "qwen-plus",
+                "qwen-max",
+                "qwen3-8b",
+                "qwen3-32b",
+            ];
+        }
+
+        return [];
+    }
+
+    private static string[] MergeTranslationModelOptions(
+        IReadOnlyList<string> catalogModels,
+        IReadOnlyList<string> suggestedModels)
+    {
+        return catalogModels
+            .Concat(suggestedModels)
+            .Where(model => !string.IsNullOrWhiteSpace(model))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(model => model, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private async void OnTestTranslationModelClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (_isApplyingSettings ||
+            sender is not System.Windows.Controls.Button button)
+        {
+            return;
+        }
+
+        if (!ApplySettingsImmediately())
+        {
+            return;
+        }
+
+        var requestFingerprint = CreateOnlineConfigurationFingerprint();
+        var testedModelFingerprint = CreateOnlineModelFingerprint();
+        var validationRevision = Interlocked.Increment(
+            ref _onlineValidationRevision);
+        button.IsEnabled = false;
+        button.Content = "测试中...";
+        _settingsViewModel.SetStatus("正在测试当前模型...");
+        try
+        {
+            var result = await TranslationModelCatalogService.TestAsync(
+                _settingsViewModel.TranslationEndpoint,
+                _settingsViewModel.TranslationModel,
+                TranslationApiKeyBox.Password,
+                _modelCatalogHttpClient);
+            if (validationRevision != Volatile.Read(ref _onlineValidationRevision) ||
+                !string.Equals(
+                    testedModelFingerprint,
+                    CreateOnlineModelFingerprint(),
+                    StringComparison.Ordinal))
+            {
+                RefreshOnlineTranslationAvailability();
+                return;
+            }
+
+            _settingsViewModel.SetStatus(result.Message);
+            _onlineModelCatalogFingerprint = requestFingerprint;
+            _onlineModelCatalogError = result.IsSuccess ? null : result.Message;
+            _onlineTestedModelFingerprint = result.IsSuccess
+                ? testedModelFingerprint
+                : null;
+            _verifiedTranslationModels = result.IsSuccess
+                ? [_settingsViewModel.TranslationModel.Trim()]
+                : [];
+            RefreshOnlineTranslationAvailability();
+        }
+        catch
+        {
+            _settingsViewModel.SetStatus("模型测试失败，请检查服务地址、API Key 和模型名称。");
+        }
+        finally
+        {
+            button.Content = "测试模型";
             button.IsEnabled = true;
         }
     }
@@ -1860,6 +1982,21 @@ public partial class MainWindow : Window, IDisposable
         ScheduleSettingsApply();
     }
 
+    private void OnToolbarScaleChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (!IsLoaded || _isApplyingSettings ||
+            sender is not System.Windows.Controls.Slider slider)
+        {
+            return;
+        }
+
+        slider.GetBindingExpression(
+            System.Windows.Controls.Slider.ValueProperty)?.UpdateSource();
+        ScheduleSettingsApply();
+    }
+
     private void OnThemeOptionChecked(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded || _isApplyingSettings ||
@@ -1996,6 +2133,19 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
+        var testedModelFingerprint = CreateOnlineModelFingerprint();
+        if (string.Equals(
+                testedModelFingerprint,
+                _onlineTestedModelFingerprint,
+                StringComparison.Ordinal))
+        {
+            _settingsViewModel.UpdateTranslationProviderAvailability(
+                TranslationProviderKind.Online,
+                isAvailable: true,
+                $"已实测，模型 {model} 可用");
+            return;
+        }
+
         var fingerprint = CreateOnlineConfigurationFingerprint();
         if (!string.Equals(
                 fingerprint,
@@ -2053,18 +2203,28 @@ public partial class MainWindow : Window, IDisposable
             }
 
             var requestFingerprint = CreateOnlineConfigurationFingerprint();
-            _settingsViewModel.UpdateTranslationProviderAvailability(
-                TranslationProviderKind.Online,
-                isAvailable: false,
-                "正在自动验证在线模型");
-            var result = await TranslationModelCatalogService.FetchAsync(
+            var testedModelFingerprint = CreateOnlineModelFingerprint();
+            if (string.Equals(
+                    testedModelFingerprint,
+                    _onlineTestedModelFingerprint,
+                    StringComparison.Ordinal))
+            {
+                RefreshOnlineTranslationAvailability();
+                return;
+            }
+
+            var validationRevision = Volatile.Read(ref _onlineValidationRevision);
+            var result = await TranslationModelCatalogService.TestAsync(
                 endpoint,
+                model,
                 apiKey,
                 _modelCatalogHttpClient,
                 _updateCancellationSource.Token);
-            if (_disposed || !string.Equals(
-                    requestFingerprint,
-                    CreateOnlineConfigurationFingerprint(),
+            if (_disposed ||
+                validationRevision != Volatile.Read(ref _onlineValidationRevision) ||
+                !string.Equals(
+                    testedModelFingerprint,
+                    CreateOnlineModelFingerprint(),
                     StringComparison.Ordinal))
             {
                 return;
@@ -2072,11 +2232,14 @@ public partial class MainWindow : Window, IDisposable
 
             _onlineModelCatalogFingerprint = requestFingerprint;
             _verifiedTranslationModels = result.IsSuccess
-                ? result.Models
+                ? [model]
                 : [];
+            _onlineTestedModelFingerprint = result.IsSuccess
+                ? testedModelFingerprint
+                : null;
             _onlineModelCatalogError = result.IsSuccess
                 ? null
-                : result.ErrorMessage ?? "无法获取在线模型列表";
+                : result.Message;
             RefreshOnlineTranslationAvailability();
         }
         catch (OperationCanceledException)
@@ -2151,6 +2314,16 @@ public partial class MainWindow : Window, IDisposable
             SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     }
 
+    private string CreateOnlineModelFingerprint()
+    {
+        var value = string.Join(
+            "\n",
+            CreateOnlineConfigurationFingerprint(),
+            _settingsViewModel.TranslationModel.Trim());
+        return Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+    }
+
     private void OnHotKeyCaptured(object? sender, HotKeyCapturedEventArgs e)
     {
         if (sender is not System.Windows.Controls.Control { Tag: string settingName })
@@ -2170,6 +2343,9 @@ public partial class MainWindow : Window, IDisposable
                 break;
             case nameof(SettingsViewModel.VideoRecordingHotKey):
                 _settingsViewModel.VideoRecordingHotKey = e.Gesture;
+                break;
+            case nameof(SettingsViewModel.EndVideoRecordingHotKey):
+                _settingsViewModel.EndVideoRecordingHotKey = e.Gesture;
                 break;
             case nameof(SettingsViewModel.ScrollCaptureHotKey):
                 _settingsViewModel.ScrollCaptureHotKey = e.Gesture;
@@ -2441,6 +2617,10 @@ public partial class MainWindow : Window, IDisposable
             case nameof(SettingsViewModel.VideoRecordingHotKey):
                 _settingsViewModel.VideoRecordingHotKey = _savedSettings.VideoRecordingHotKey;
                 break;
+            case nameof(SettingsViewModel.EndVideoRecordingHotKey):
+                _settingsViewModel.EndVideoRecordingHotKey =
+                    _savedSettings.EndVideoRecordingHotKey;
+                break;
             case nameof(SettingsViewModel.ScrollCaptureHotKey):
                 _settingsViewModel.ScrollCaptureHotKey = _savedSettings.ScrollCaptureHotKey;
                 break;
@@ -2470,6 +2650,8 @@ public partial class MainWindow : Window, IDisposable
                 HotKeyAction.CompleteCapture,
             nameof(SettingsViewModel.VideoRecordingHotKey) =>
                 HotKeyAction.VideoRecording,
+            nameof(SettingsViewModel.EndVideoRecordingHotKey) =>
+                HotKeyAction.EndVideoRecording,
             nameof(SettingsViewModel.ScrollCaptureHotKey) =>
                 HotKeyAction.ScrollCapture,
             nameof(SettingsViewModel.OcrHotKey) =>

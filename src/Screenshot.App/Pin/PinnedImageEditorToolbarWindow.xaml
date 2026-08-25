@@ -28,6 +28,7 @@
         <Geometry x:Key="PenIconGeometry">M 3,14 L 4.2,9.8 L 12.6,1.4 L 16.6,5.4 L 8.2,13.8 Z M 11.2,3.8 L 14.2,6.8</Geometry>
         <Geometry x:Key="MosaicIconGeometry">M 2,2 H 16 V 16 H 2 Z M 6.7,2 V 16 M 11.3,2 V 16 M 2,6.7 H 16 M 2,11.3 H 16</Geometry>
         <Geometry x:Key="TextIconGeometry">M 3,3 H 15 M 9,3 V 16</Geometry>
+        <Geometry x:Key="TableIconGeometry">M 2,2 H 16 V 16 H 2 Z M 2,6 H 16 M 7,6 V 16 M 12,6 V 16 M 7,11 H 16</Geometry>
         <Geometry x:Key="SaveIconGeometry">M 3,2 H 13 L 16,5 V 16 H 3 Z M 5,2 V 7 H 13 V 2 M 6,11 H 13 V 16 H 6 Z</Geometry>
         <Geometry x:Key="ScissorsIconGeometry">M 4,3 A 2,2 0 1 0 4,7 A 2,2 0 1 0 4,3 M 4,11 A 2,2 0 1 0 4,15 A 2,2 0 1 0 4,11 M 5.6,6.3 L 15.5,13 M 5.6,11.7 L 10.2,8.6</Geometry>
         <Style x:Key="ToolbarIconPath" TargetType="Path">
@@ -40,6 +41,17 @@
             <Setter Property="StrokeStartLineCap" Value="Round" />
             <Setter Property="StrokeEndLineCap" Value="Round" />
             <Setter Property="StrokeLineJoin" Value="Round" />
+        </Style>
+        <Style x:Key="ToolbarGlyphIcon" TargetType="TextBlock">
+            <Setter Property="Width" Value="20" />
+            <Setter Property="Height" Value="20" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="TextAlignment" Value="Center" />
+            <Setter Property="FontFamily" Value="Microsoft YaHei UI" />
+            <Setter Property="FontSize" Value="18" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="{DynamicResource EditorToolbarIconBrush}" />
         </Style>
         <Style x:Key="ToolbarToggle" TargetType="RadioButton">
             <Setter Property="Width" Value="36" />
@@ -218,8 +230,8 @@
                                 <MenuItem x:Name="EllipseShapeMenuItem" Tag="Ellipse" IsCheckable="True" Click="OnShapeMenuItemClick"><MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource EllipseIconGeometry}" Style="{StaticResource ToolbarIconPath}" /><TextBlock VerticalAlignment="Center" Text="椭圆" /></StackPanel></MenuItem.Header></MenuItem>
                             </ContextMenu>
                         </RadioButton.ContextMenu>
-                        <Grid Width="27">
-                            <Path x:Name="ShapeToolIcon" Width="17" Height="17" HorizontalAlignment="Left" Data="{StaticResource RectangleIconGeometry}" Style="{StaticResource ToolbarIconPath}" />
+                        <Grid Width="29">
+                            <Path x:Name="ShapeToolIcon" Width="18" Height="18" HorizontalAlignment="Left" Data="{StaticResource RectangleIconGeometry}" Style="{StaticResource ToolbarIconPath}" />
                             <TextBlock HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="9" Foreground="{DynamicResource EditorToolbarIconBrush}" Text="▾" PreviewMouseLeftButtonDown="OnShapeMenuArrowMouseDown" />
                         </Grid>
                     </RadioButton>
@@ -232,17 +244,17 @@
                                 <MenuItem x:Name="CurvedHollowArrowMenuItem" Tag="CurvedArrow,Hollow" IsCheckable="True" Click="OnArrowVariantMenuItemClick"><MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource CurvedHollowArrowIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.8" /><TextBlock VerticalAlignment="Center" Text="弧形空心箭头" /></StackPanel></MenuItem.Header></MenuItem>
                             </ContextMenu>
                         </RadioButton.ContextMenu>
-                        <Grid Width="27">
-                            <Path x:Name="ArrowToolIcon" Width="17" Height="17" HorizontalAlignment="Left" Data="{StaticResource StraightFilledArrowIconGeometry}" Style="{StaticResource ToolbarIconPath}" />
+                        <Grid Width="29">
+                            <Path x:Name="ArrowToolIcon" Width="18" Height="18" HorizontalAlignment="Left" Data="{StaticResource StraightFilledArrowIconGeometry}" Style="{StaticResource ToolbarIconPath}" />
                             <TextBlock HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="9" Foreground="{DynamicResource EditorToolbarIconBrush}" Text="▾" PreviewMouseLeftButtonDown="OnArrowMenuArrowMouseDown" />
                         </Grid>
                     </RadioButton>
                     <RadioButton x:Name="EmojiToolButton" GroupName="PinnedEditorTool" Tag="Emoji" Checked="OnToolChecked" Style="{StaticResource ToolbarToggle}" ToolTip="表情">
-                        <editor:EmojiStickerImage Width="21" Height="21" Sticker="😊" />
+                        <editor:EmojiStickerImage Width="22" Height="22" Sticker="😊" />
                     </RadioButton>
                     <RadioButton x:Name="NumberToolButton" GroupName="PinnedEditorTool" Tag="Number" Checked="OnToolChecked" Style="{StaticResource ToolbarToggle}" ToolTip="序号">
-                        <Border Width="19" Height="19" Background="{DynamicResource EditorToolbarIconBrush}" CornerRadius="10">
-                            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource AppPanelBackgroundBrush}" FontSize="11" FontWeight="Bold" Text="1" />
+                        <Border Width="19" Height="19" Background="{DynamicResource EditorToolbarIconBrush}" CornerRadius="9.5">
+                            <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource AppPanelBackgroundBrush}" FontSize="12" FontWeight="Bold" Text="1" />
                         </Border>
                     </RadioButton>
                     <RadioButton x:Name="BrushToolButton" GroupName="PinnedEditorTool" Tag="Brush" Checked="OnToolChecked" Style="{StaticResource ToolbarToggle}" ToolTip="画笔">
@@ -259,33 +271,34 @@
                         <Path Data="{StaticResource SaveIconGeometry}" Style="{StaticResource ToolbarIconPath}" />
                     </Button>
                     <Button x:Name="OcrButton" Click="OnOcrClick" Style="{StaticResource ToolbarButton}" ToolTip="识别文字并在原位置选择复制">
-                        <TextBlock FontSize="14" FontWeight="SemiBold" Text="文" />
+                        <TextBlock Style="{StaticResource ToolbarGlyphIcon}" Text="文" />
+                    </Button>
+                    <Button x:Name="CopyTableButton" Click="OnCopyTableClick" Style="{StaticResource ToolbarButton}" ToolTip="识别表格并复制为制表符格式">
+                        <Path Data="{StaticResource TableIconGeometry}" Style="{StaticResource ToolbarIconPath}" />
                     </Button>
                     <Button x:Name="CopyTextButton" Click="OnCopyTextClick" Style="{StaticResource ToolbarButton}" ToolTip="识别并复制全部文字">
-                        <TextBlock FontSize="14" FontWeight="SemiBold" Text="取" />
+                        <TextBlock Style="{StaticResource ToolbarGlyphIcon}" Text="取" />
                     </Button>
                     <Button x:Name="TranslateActionButton" Click="OnTranslateClick" Style="{StaticResource ToolbarButton}" ToolTip="识别并翻译图片文字">
-                        <TextBlock FontSize="14" FontWeight="SemiBold" Text="译" />
+                        <TextBlock Style="{StaticResource ToolbarGlyphIcon}" Text="译" />
                     </Button>
                     <Button x:Name="PrivacyButton" Click="OnPrivacyClick" Style="{StaticResource ToolbarButton}" ToolTip="识别敏感信息，确认后批量打码">
-                        <TextBlock FontSize="14" FontWeight="SemiBold" Text="隐" />
+                        <TextBlock Style="{StaticResource ToolbarGlyphIcon}" Text="隐" />
                     </Button>
                     <Border x:Name="ActionHistorySeparator" Style="{StaticResource ToolbarSeparator}" />
                     <Button x:Name="CropToolButton" Click="OnCropClick" Style="{StaticResource ToolbarButton}" ToolTip="框选裁剪">
-                        <Grid Width="21" Height="18">
+                        <Grid Width="23" Height="20">
                             <Path x:Name="ScissorsIcon" Data="{StaticResource ScissorsIconGeometry}" Style="{StaticResource ToolbarIconPath}" />
-                            <Line X1="10" Y1="8.5" X2="21" Y2="8.5" Stroke="{DynamicResource EditorToolbarIconBrush}" StrokeThickness="1.5" StrokeDashArray="2,2" />
+                            <Line X1="11" Y1="9.5" X2="23" Y2="9.5" Stroke="{DynamicResource EditorToolbarIconBrush}" StrokeThickness="1.5" StrokeDashArray="2,2" />
                         </Grid>
                     </Button>
                     <Button x:Name="UndoButton" Click="OnUndoClick" Style="{StaticResource ToolbarButton}" ToolTip="撤销">
                         <Path Data="{StaticResource UndoIconGeometry}"
-                              Fill="{DynamicResource EditorToolbarIconBrush}"
-                              Stroke="Transparent"
-                              StrokeThickness="0" />
+                              Style="{StaticResource ToolbarIconPath}" />
                     </Button>
                     <Border x:Name="HistoryFinishSeparator" Style="{StaticResource ToolbarSeparator}" />
                     <Button x:Name="CancelEditButton" Click="OnCancelClick" Style="{StaticResource ToolbarButton}" ToolTip="取消编辑">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{DynamicResource EditorToolbarCancelIconBrush}" Text="&#xE711;" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="18" Foreground="{DynamicResource EditorToolbarCancelIconBrush}" Text="&#xE711;" />
                     </Button>
                     <Button x:Name="EditApplyButton"
                             Click="OnApplyClick"
@@ -293,7 +306,7 @@
                             BorderBrush="{DynamicResource EditorToolbarConfirmBorderBrush}"
                             Style="{StaticResource ToolbarButton}"
                             ToolTip="应用编辑">
-                        <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="16" Foreground="{DynamicResource EditorToolbarConfirmIconBrush}" Text="&#xE73E;" />
+                        <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="18" Foreground="{DynamicResource EditorToolbarConfirmIconBrush}" Text="&#xE73E;" />
                     </Button>
                 </StackPanel>
                 <StackPanel x:Name="EditToolsRow2"

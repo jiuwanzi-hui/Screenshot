@@ -317,6 +317,7 @@ public sealed class PinnedImageManagerTests
                 CustomStrokeColor = "#F2C94C",
                 CustomColorPalette = [0xF2C94C, 0x2F80ED],
                 DefaultStrokeWidth = 7,
+                ToolbarScalePercent = 125,
                 VisibleCaptureToolbarFeatures =
                 [
                     CaptureToolbarFeature.Shape,
@@ -344,6 +345,10 @@ public sealed class PinnedImageManagerTests
                 System.Windows.Input.Cursors.SizeAll,
                 toolbarSurface.Cursor);
             Assert.Null(toolbarSurface.ToolTip);
+            var toolbarScale = Assert.IsType<System.Windows.Media.ScaleTransform>(
+                toolbarSurface.LayoutTransform);
+            Assert.Equal(1.25, toolbarScale.ScaleX);
+            Assert.Equal(1.25, toolbarScale.ScaleY);
             Assert.Equal(
                 System.Windows.Media.Color.FromRgb(0xF2, 0xC9, 0x4C),
                 toolbar.SelectedColor);

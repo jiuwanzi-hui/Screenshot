@@ -1,5 +1,7 @@
 using System.IO;
 using System.Drawing;
+using System.Runtime.InteropServices;
+using System.Windows.Interop;
 using Screenshot.App.Capture;
 using Screenshot.App.Core;
 using WinForms = System.Windows.Forms;
@@ -36,6 +38,53 @@ public sealed class RegionVideoRecorderTests
         Assert.Equal(100 + ((800 - 760) / 2), expanded.X);
         Assert.Equal(100 + ((800 - 520) / 2), compact.X);
         Assert.Equal(region.Y + region.Height + 10, compact.Y);
+    }
+
+    [Theory]
+    [InlineData(50, 0.5)]
+    [InlineData(84, 0.84)]
+    [InlineData(100, 1)]
+    [InlineData(150, 1.5)]
+    [InlineData(10, 0.5)]
+    [InlineData(200, 1.5)]
+    public void RecordingToolbarUsesTheSharedScaleSetting(
+        double percent,
+        double expectedScale)
+    {
+        Assert.Equal(
+            expectedScale,
+            VideoRecordingControlWindow.NormalizeToolbarScale(percent),
+            precision: 2);
+    }
+
+    [Theory]
+    [InlineData(50, 30)]
+    [InlineData(100, 46)]
+    [InlineData(150, 62)]
+    public void ActiveRecordingToolbarUsesComfortableVerticalPadding(
+        double percent,
+        double expectedHeight)
+    {
+        Assert.Equal(
+            expectedHeight,
+            VideoRecordingControlWindow.CalculateExpandedToolbarHeight(
+                percent,
+                annotationMode: true));
+    }
+
+    [Theory]
+    [InlineData(50, 41)]
+    [InlineData(100, 68)]
+    [InlineData(150, 95)]
+    public void RecordingOptionsToolbarAlsoUsesComfortableVerticalPadding(
+        double percent,
+        double expectedHeight)
+    {
+        Assert.Equal(
+            expectedHeight,
+            VideoRecordingControlWindow.CalculateExpandedToolbarHeight(
+                percent,
+                annotationMode: false));
     }
 
     [Theory]
@@ -198,16 +247,22 @@ public sealed class RegionVideoRecorderTests
                     new ScreenRegion(40, 40, 320, 240));
                 overlay.EnsureWindowHandle();
                 overlay.Show();
+                Assert.False(overlay.IsHitTestVisible);
+                Assert.False(overlay.DrawingCanvas.IsHitTestVisible);
                 overlay.SelectTool(RecordingAnnotationTool.Rectangle);
 
                 var brush = Assert.IsType<System.Windows.Media.SolidColorBrush>(
                     overlay.DrawingCanvas.Background);
                 Assert.Equal(1, brush.Color.A);
+                Assert.True(overlay.IsHitTestVisible);
+                Assert.True(overlay.DrawingCanvas.IsHitTestVisible);
 
                 overlay.SelectTool(RecordingAnnotationTool.Pointer);
                 Assert.Same(
                     System.Windows.Media.Brushes.Transparent,
                     overlay.DrawingCanvas.Background);
+                Assert.False(overlay.IsHitTestVisible);
+                Assert.False(overlay.DrawingCanvas.IsHitTestVisible);
             });
         }
         finally
@@ -216,6 +271,61 @@ public sealed class RegionVideoRecorderTests
             {
                 WpfTestHost.Invoke(overlay.Close);
             }
+        }
+    }
+
+    [Fact]
+    public void PassiveRecordingOverlaysAreNativeHitTestTransparent()
+    {
+        const int nonClientHitTestMessage = 0x0084;
+        const int hitTestTransparent = -1;
+        RecordingInputOverlayWindow? inputOverlay = null;
+        RecordingAnnotationOverlayWindow? annotationOverlay = null;
+        RecordingRegionFrameWindow? frameOverlay = null;
+
+        try
+        {
+            WpfTestHost.Invoke(() =>
+            {
+                var region = new ScreenRegion(40, 40, 320, 240);
+                inputOverlay = new RecordingInputOverlayWindow(region);
+                annotationOverlay = new RecordingAnnotationOverlayWindow(region);
+                frameOverlay = new RecordingRegionFrameWindow(region);
+                inputOverlay.Show();
+                annotationOverlay.Show();
+                frameOverlay.Show();
+
+                Assert.Equal(
+                    new IntPtr(hitTestTransparent),
+                    NativeMethods.SendMessage(
+                        new WindowInteropHelper(inputOverlay).Handle,
+                        nonClientHitTestMessage,
+                        IntPtr.Zero,
+                        IntPtr.Zero));
+                Assert.Equal(
+                    new IntPtr(hitTestTransparent),
+                    NativeMethods.SendMessage(
+                        new WindowInteropHelper(annotationOverlay).Handle,
+                        nonClientHitTestMessage,
+                        IntPtr.Zero,
+                        IntPtr.Zero));
+                Assert.Equal(
+                    new IntPtr(hitTestTransparent),
+                    NativeMethods.SendMessage(
+                        new WindowInteropHelper(frameOverlay).Handle,
+                        nonClientHitTestMessage,
+                        IntPtr.Zero,
+                        IntPtr.Zero));
+            });
+        }
+        finally
+        {
+            WpfTestHost.Invoke(() =>
+            {
+                inputOverlay?.Close();
+                annotationOverlay?.Close();
+                frameOverlay?.Close();
+            });
         }
     }
 
@@ -506,4 +616,14 @@ public sealed class RegionVideoRecorderTests
 
         Assert.False(RegionVideoRecorder.IsNearlyBlackFrame(bitmap));
     }
+}
+
+internal static class NativeMethods
+{
+    [DllImport("user32.dll")]
+    internal static extern IntPtr SendMessage(
+        IntPtr window,
+        int message,
+        IntPtr wordParameter,
+        IntPtr longParameter);
 }

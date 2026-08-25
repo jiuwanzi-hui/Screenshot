@@ -8,6 +8,9 @@ public sealed record ContentRecognitionResult(
 {
     public RecognizedContentRegion? Region { get; init; }
 
+    /// <summary>Optional rich clipboard representation for structured results.</summary>
+    public string? ClipboardHtml { get; init; }
+
     public static ContentRecognitionResult Failure(
         string title,
         string errorMessage)

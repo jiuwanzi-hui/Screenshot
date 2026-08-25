@@ -1,6 +1,7 @@
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using Screenshot.App.Core;
@@ -178,6 +179,58 @@ public sealed class OptionalModelTests : IDisposable
         Assert.StartsWith("SnapCut/", handler.UserAgent);
     }
 
+    [Fact]
+    public async Task UsesTheNextMirrorWhenTheFirstCompleteFileFailsHashValidation()
+    {
+        var content = Encoding.UTF8.GetBytes("verified model");
+        var file = new DownloadableModelFile(
+            "测试模型",
+            "model.bin",
+            content.Length,
+            Convert.ToHexString(SHA256.HashData(content)),
+            ["https://first.example/model.bin", "https://second.example/model.bin"]);
+        var handler = new MirrorDownloadHandler(content);
+        using var client = new HttpClient(handler);
+        var downloader = new ResumableModelDownloader(client);
+
+        await downloader.DownloadAsync(
+            [file],
+            _testDirectory,
+            progress: null,
+            CancellationToken.None);
+
+        Assert.Equal(["first.example", "second.example"], handler.RequestHosts);
+        Assert.Equal(
+            content,
+            await File.ReadAllBytesAsync(Path.Combine(_testDirectory, file.FileName)));
+    }
+
+    [Fact]
+    public async Task ResumesFromBytesWrittenBeforeThePreviousMirrorDisconnected()
+    {
+        var content = Encoding.UTF8.GetBytes("a model file whose first mirror disconnects");
+        var file = new DownloadableModelFile(
+            "测试模型",
+            "model.bin",
+            content.Length,
+            Convert.ToHexString(SHA256.HashData(content)),
+            ["https://first.example/model.bin", "https://second.example/model.bin"]);
+        var handler = new DisconnectingMirrorHandler(content, firstChunkLength: 11);
+        using var client = new HttpClient(handler);
+        var downloader = new ResumableModelDownloader(client);
+
+        await downloader.DownloadAsync(
+            [file],
+            _testDirectory,
+            progress: null,
+            CancellationToken.None);
+
+        Assert.Equal(11, handler.SecondMirrorRangeStart);
+        Assert.Equal(
+            content,
+            await File.ReadAllBytesAsync(Path.Combine(_testDirectory, file.FileName)));
+    }
+
     private static DownloadableModelFile CreateDownloadableFile(byte[] content)
     {
         return new DownloadableModelFile(
@@ -214,6 +267,109 @@ public sealed class OptionalModelTests : IDisposable
                 Content = new ByteArrayContent(content),
             });
         }
+    }
+
+    private sealed class MirrorDownloadHandler(byte[] content) : HttpMessageHandler
+    {
+        public List<string> RequestHosts { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var host = request.RequestUri!.Host;
+            RequestHosts.Add(host);
+            var responseContent = host == "first.example"
+                ? Encoding.UTF8.GetBytes("corrupt! model")
+                : content;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(responseContent),
+            });
+        }
+    }
+
+    private sealed class DisconnectingMirrorHandler(byte[] content, int firstChunkLength)
+        : HttpMessageHandler
+    {
+        public long? SecondMirrorRangeStart { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            if (request.RequestUri!.Host == "first.example")
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StreamContent(new DisconnectingReadStream(
+                        content.AsMemory(0, firstChunkLength).ToArray())),
+                });
+            }
+
+            SecondMirrorRangeStart = request.Headers.Range?.Ranges.Single().From;
+            var start = (int)(SecondMirrorRangeStart ?? 0);
+            var response = new HttpResponseMessage(
+                start > 0 ? HttpStatusCode.PartialContent : HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(content[start..]),
+            };
+            if (start > 0)
+            {
+                response.Content.Headers.ContentRange = new ContentRangeHeaderValue(
+                    start,
+                    content.Length - 1,
+                    content.Length);
+            }
+
+            return Task.FromResult(response);
+        }
+    }
+
+    private sealed class DisconnectingReadStream(byte[] prefix) : Stream
+    {
+        private readonly MemoryStream _inner = new(prefix, writable: false);
+        private bool _hasDisconnected;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            if (_inner.Position < _inner.Length)
+            {
+                return await _inner.ReadAsync(buffer, cancellationToken);
+            }
+
+            if (!_hasDisconnected)
+            {
+                _hasDisconnected = true;
+                throw new IOException("Connection was interrupted.");
+            }
+
+            return 0;
+        }
+
+        public override void Flush() => throw new NotSupportedException();
+        public override Task FlushAsync(CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
     }
 
     public void Dispose()

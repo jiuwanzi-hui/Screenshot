@@ -3,9 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:editor="clr-namespace:Screenshot.App.Editor"
         MinWidth="360"
-        Height="72"
-        MinHeight="38"
-        MaxHeight="72"
+        Height="64"
+        MinHeight="28"
         SizeToContent="Width"
         AllowsTransparency="True"
         Background="Transparent"
@@ -34,7 +33,8 @@
         <Geometry x:Key="RectangleIconGeometry">M 2,2 H 16 V 16 H 2 Z</Geometry>
         <Geometry x:Key="EllipseIconGeometry">M 9,2 C 13.5,2 17,5.1 17,9 C 17,12.9 13.5,16 9,16 C 4.5,16 1,12.9 1,9 C 1,5.1 4.5,2 9,2 Z</Geometry>
         <Geometry x:Key="StraightFilledArrowIconGeometry">M 1,7 H 11 V 3 L 18,9 L 11,15 V 11 H 1 Z</Geometry>
-        <Geometry x:Key="StraightHollowArrowIconGeometry">M 2,7 C 1,7 1,11 2,11 H 10 V 15 L 18,9 L 10,3 V 7 Z</Geometry>
+        <!-- Keep the original arrow outline and hollow it through transparent fill. -->
+        <Geometry x:Key="StraightHollowArrowIconGeometry">M 1,7 H 11 V 3 L 18,9 L 11,15 V 11 H 1 Z</Geometry>
         <Geometry x:Key="CurvedFilledArrowIconGeometry">M 1,4 C 2,11 7,15 13,11 L 11,8 L 18,10 L 14,17 L 13,14 C 5,19 1,13 1,4 Z</Geometry>
         <Geometry x:Key="CurvedHollowArrowIconGeometry">M 1,4 C 2,11 7,15 13,11 L 11,8 L 18,10 L 14,17 L 13,14 C 5,19 1,13 1,4 Z</Geometry>
         <Geometry x:Key="PenIconGeometry">M 3,14 L 4.2,9.8 L 12.6,1.4 L 16.6,5.4 L 8.2,13.8 Z M 11.2,3.8 L 14.2,6.8</Geometry>
@@ -55,11 +55,11 @@
             <Setter Property="StrokeLineJoin" Value="Round" />
         </Style>
         <Style x:Key="RecordingControlButton" TargetType="Button">
-            <Setter Property="Width" Value="30" />
-            <Setter Property="Height" Value="30" />
+            <Setter Property="Width" Value="36" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Margin" Value="4,0,0,0" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Background" Value="{DynamicResource EditorToolbarButtonBackgroundBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource EditorToolbarButtonBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
@@ -70,7 +70,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="5">
+                                CornerRadius="8">
                             <ContentPresenter HorizontalAlignment="Center"
                                               VerticalAlignment="Center" />
                         </Border>
@@ -92,11 +92,11 @@
             </Setter>
         </Style>
         <Style x:Key="RecordingToolButton" TargetType="ToggleButton">
-            <Setter Property="Width" Value="30" />
-            <Setter Property="Height" Value="30" />
+            <Setter Property="Width" Value="36" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Margin" Value="3,0,0,0" />
             <Setter Property="Padding" Value="0" />
-            <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Background" Value="{DynamicResource EditorToolbarButtonBackgroundBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource EditorToolbarButtonBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
@@ -107,7 +107,7 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="5">
+                                CornerRadius="8">
                             <ContentPresenter HorizontalAlignment="Center"
                                               VerticalAlignment="Center" />
                         </Border>
@@ -130,9 +130,32 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="RecordingDockButton" TargetType="Button">
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Height" Value="28" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppControlForegroundBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3"
+                                Opacity="0.94">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         <Style x:Key="RecordingEditorSlider" TargetType="Slider">
             <Setter Property="Height" Value="20" />
-            <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Slider">
@@ -222,6 +245,9 @@
         </ResourceDictionary>
     </Window.Resources>
 
+    <Grid x:Name="WindowRoot"
+          Background="Transparent"
+          ClipToBounds="False">
     <Border x:Name="ControlSurface"
             Padding="7,6"
             Background="{DynamicResource AppPanelBackgroundBrush}"
@@ -229,17 +255,29 @@
             BorderThickness="1"
             CornerRadius="6"
             Cursor="SizeAll">
-        <Grid>
+        <Border.RenderTransform>
+            <ScaleTransform x:Name="ToolbarVisualScale" ScaleX="1" ScaleY="1" />
+        </Border.RenderTransform>
+        <Grid x:Name="ToolbarGrid">
+            <Grid.LayoutTransform>
+                <ScaleTransform x:Name="ToolbarLayoutScale"
+                                ScaleX="1"
+                                ScaleY="1" />
+            </Grid.LayoutTransform>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="88" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <StackPanel x:Name="RecordingStatusPanel"
-                        VerticalAlignment="Center"
-                        Orientation="Horizontal">
+            <Grid x:Name="RecordingStatusPanel"
+                  VerticalAlignment="Center">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
                 <TextBlock x:Name="RecordingStatusText"
+                           Grid.Row="0"
                            FontSize="10"
                            FontWeight="SemiBold"
                            Foreground="{DynamicResource AppTextPrimaryBrush}"
@@ -248,16 +286,18 @@
                            Text="准备录制"
                            TextTrimming="CharacterEllipsis" />
                 <TextBlock x:Name="ElapsedTimeText"
-                           Margin="5,0,0,0"
+                           Grid.Row="1"
+                           Margin="0,1,0,0"
                            FontFamily="Consolas"
                            FontSize="11"
                            Foreground="{DynamicResource AppTextSecondaryBrush}"
                            LineHeight="12"
                            LineStackingStrategy="BlockLineHeight"
-                           Text="00:00" />
-            </StackPanel>
+                           Text="00:00"
+                           Visibility="Collapsed" />
+             </Grid>
 
-            <Grid x:Name="RecordingOptionsPanel"
+             <Grid x:Name="RecordingOptionsPanel"
                         Grid.Column="1"
                         Margin="8,0,4,0"
                         Height="54"
@@ -303,8 +343,8 @@
                     <CheckBox x:Name="SystemAudioCheckBox"
                           Margin="0,0,4,0"
                           VerticalAlignment="Center"
-                          FontSize="11"
                           Cursor="Hand"
+                          FontSize="11"
                           Checked="OnRecordingOptionChanged"
                           Unchecked="OnRecordingOptionChanged"
                           Content="系统"
@@ -313,8 +353,8 @@
                     <CheckBox x:Name="MicrophoneCheckBox"
                           Margin="0,0,4,0"
                           VerticalAlignment="Center"
-                          FontSize="11"
                           Cursor="Hand"
+                          FontSize="11"
                           Checked="OnRecordingOptionChanged"
                           Unchecked="OnRecordingOptionChanged"
                           Content="麦克"
@@ -355,8 +395,8 @@
                     <CheckBox x:Name="MouseTrailCheckBox"
                           Margin="0,0,4,0"
                           VerticalAlignment="Center"
-                          FontSize="11"
                           Cursor="Hand"
+                          FontSize="11"
                           Checked="OnRecordingOptionChanged"
                           Unchecked="OnRecordingOptionChanged"
                           Content="鼠标移动轨迹"
@@ -367,8 +407,8 @@
                     <CheckBox x:Name="ShowCameraCheckBox"
                           Margin="4,0,0,0"
                           VerticalAlignment="Center"
-                          FontSize="11"
                           Cursor="Hand"
+                          FontSize="11"
                           Checked="OnRecordingOptionChanged"
                           Unchecked="OnRecordingOptionChanged"
                           Content="相机"
@@ -402,6 +442,8 @@
                               <Path Data="{StaticResource CameraIconGeometry}"
                           Style="{StaticResource RecordingIconPath}" />
                 </ToggleButton>
+                <Border Width="1" Height="18" Margin="4,0,3,0"
+                        Background="{DynamicResource AppBorderBrush}" />
                 <ToggleButton x:Name="ShapeToolButton"
                               Click="OnAnnotationToolClick"
                               Style="{StaticResource RecordingToolButton}"
@@ -421,9 +463,9 @@
                             </MenuItem>
                         </ContextMenu>
                     </ToggleButton.ContextMenu>
-                    <Grid Width="20">
+                    <Grid Width="29">
                         <Path x:Name="ShapeToolIcon"
-                              Width="14" Height="14"
+                              Width="18" Height="18"
                               HorizontalAlignment="Left"
                               Data="{StaticResource RectangleIconGeometry}"
                               Style="{StaticResource RecordingIconPath}" />
@@ -449,9 +491,9 @@
                             <MenuItem Tag="CurvedArrow,Hollow" Style="{StaticResource ThemedMenuItemStyle}" Click="OnRecordingArrowMenuItemClick"><MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource CurvedHollowArrowIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.8" /><TextBlock VerticalAlignment="Center" Text="弧形空心箭头" /></StackPanel></MenuItem.Header></MenuItem>
                         </ContextMenu>
                     </ToggleButton.ContextMenu>
-                    <Grid Width="20">
+                    <Grid Width="29">
                         <Path x:Name="ArrowToolIcon"
-                              Width="15" Height="15"
+                              Width="18" Height="18"
                               HorizontalAlignment="Left"
                               Data="{StaticResource StraightFilledArrowIconGeometry}"
                               Fill="{DynamicResource EditorToolbarIconBrush}"
@@ -475,9 +517,9 @@
                                      ItemContainerStyle="{StaticResource RecordingEmojiHostMenuItem}"
                                      Style="{StaticResource ThemedContextMenuStyle}" />
                     </ToggleButton.ContextMenu>
-                    <Grid Width="20">
+                    <Grid Width="29">
                         <editor:EmojiStickerImage x:Name="EmojiToolIcon"
-                                                  Width="16" Height="16"
+                                                  Width="22" Height="22"
                                                   HorizontalAlignment="Left"
                                                   Sticker="😊" />
                         <TextBlock HorizontalAlignment="Right"
@@ -494,12 +536,12 @@
                               Style="{StaticResource RecordingToolButton}"
                               Tag="Number"
                               ToolTip="序号标注">
-                    <Border Width="16" Height="16"
+                    <Border Width="19" Height="19"
                             Background="{DynamicResource EditorToolbarIconBrush}"
-                            CornerRadius="8">
+                            CornerRadius="9.5">
                         <TextBlock HorizontalAlignment="Center"
                                    VerticalAlignment="Center"
-                                   FontSize="10" FontWeight="Bold"
+                                   FontSize="12" FontWeight="Bold"
                                    Foreground="{DynamicResource AppPanelBackgroundBrush}"
                                    Text="1" />
                     </Border>
@@ -535,7 +577,7 @@
                         Style="{StaticResource RecordingControlButton}"
                         ToolTip="标注颜色">
                     <Ellipse x:Name="AnnotationColorSwatch"
-                             Width="14" Height="14"
+                             Width="18" Height="18"
                              Fill="#F04455"
                              Stroke="{DynamicResource AppBorderBrush}"
                              StrokeThickness="1" />
@@ -552,6 +594,8 @@
                         PreviewMouseLeftButtonUp="OnAnnotationStrokeWidthCommitted"
                         LostKeyboardFocus="OnAnnotationStrokeWidthCommitted"
                         ToolTip="标注大小" />
+                <Border Width="1" Height="18" Margin="4,0,3,0"
+                        Background="{DynamicResource AppBorderBrush}" />
                 <Button Click="OnAnnotationUndoClick"
                         Style="{StaticResource RecordingControlButton}"
                         ToolTip="撤销上一项标注">
@@ -568,7 +612,8 @@
                         Style="{StaticResource RecordingControlButton}"
                         ToolTip="清除所有标记">
                     <TextBlock FontFamily="Segoe MDL2 Assets"
-                               FontSize="14"
+                               FontSize="18"
+                               Foreground="{DynamicResource EditorToolbarIconBrush}"
                                Text="&#xE74D;" />
                 </Button>
             </StackPanel>
@@ -577,11 +622,37 @@
                         Grid.Column="2"
                         VerticalAlignment="Center"
                         Orientation="Horizontal">
+                <Border Width="1" Height="18" Margin="3,0,4,0"
+                        Background="{DynamicResource AppBorderBrush}" />
+                <Button x:Name="DockToolbarButton"
+                        Click="OnDockToolbarClick"
+                        Visibility="Collapsed"
+                        Style="{StaticResource RecordingControlButton}"
+                        ToolTip="折叠到屏幕边缘">
+                    <Grid Width="18" Height="16">
+                        <Border Width="14" Height="2.5" Margin="0,0,4,0"
+                                HorizontalAlignment="Left" VerticalAlignment="Top"
+                                CornerRadius="1.25"
+                                Background="{DynamicResource EditorToolbarIconBrush}" />
+                        <Border Width="10" Height="2.5" Margin="0,6.5,8,0"
+                                HorizontalAlignment="Left" VerticalAlignment="Top"
+                                CornerRadius="1.25"
+                                Background="{DynamicResource EditorToolbarIconBrush}" />
+                        <Border Width="14" Height="2.5" Margin="0,13,4,0"
+                                HorizontalAlignment="Left" VerticalAlignment="Top"
+                                CornerRadius="1.25"
+                                Background="{DynamicResource EditorToolbarIconBrush}" />
+                        <Path Width="7" Height="9" Margin="11,3.5,0,0"
+                              HorizontalAlignment="Left" VerticalAlignment="Top"
+                              Data="M 0,0 L 7,4.5 L 0,9 Z"
+                              Fill="{DynamicResource EditorToolbarIconBrush}" />
+                    </Grid>
+                </Button>
                 <Button x:Name="StartButton"
                         Click="OnStartClick"
                         Style="{StaticResource RecordingControlButton}"
                         ToolTip="开始录制">
-                    <Ellipse Width="14" Height="14" Fill="#F04455" />
+                    <Ellipse Width="18" Height="18" Fill="#F04455" />
                 </Button>
                 <Button x:Name="PauseButton"
                         Click="OnPauseClick"
@@ -590,8 +661,8 @@
                         Style="{StaticResource RecordingControlButton}"
                         ToolTip="暂停录制">
                     <Path x:Name="PauseIcon"
-                          Width="16"
-                          Height="16"
+                          Width="18"
+                          Height="18"
                           Data="{StaticResource PauseIconGeometry}"
                           Fill="Transparent"
                           Stroke="{DynamicResource EditorToolbarIconBrush}"
@@ -606,8 +677,8 @@
                         Style="{StaticResource RecordingControlButton}"
                         ToolTip="取消">
                     <Path x:Name="StopIcon"
-                          Width="16"
-                          Height="16"
+                          Width="18"
+                          Height="18"
                           Data="{StaticResource CancelIconGeometry}"
                           Fill="Transparent"
                           Stroke="#F04455"
@@ -623,7 +694,7 @@
                         Visibility="Collapsed"
                         Style="{StaticResource RecordingControlButton}"
                         ToolTip="取消录制并删除本次视频">
-                    <Path Width="16" Height="16"
+                    <Path Width="18" Height="18"
                           Data="{StaticResource CancelIconGeometry}"
                           Fill="Transparent"
                           Stroke="#F04455"
@@ -637,11 +708,46 @@
                         Style="{StaticResource RecordingControlButton}"
                         ToolTip="结束录制并打开裁剪与导出">
                     <TextBlock FontFamily="Segoe MDL2 Assets"
-                               FontSize="15"
+                               FontSize="18"
                                Foreground="{DynamicResource EditorToolbarIconBrush}"
                                Text="&#xE70F;" />
                 </Button>
             </StackPanel>
         </Grid>
     </Border>
+    <Button x:Name="CollapsedToolbarButton"
+            Width="28"
+            Height="28"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            PreviewMouseLeftButtonDown="OnCollapsedToolbarMouseLeftButtonDown"
+            PreviewMouseMove="OnCollapsedToolbarMouseMove"
+            PreviewMouseLeftButtonUp="OnCollapsedToolbarMouseLeftButtonUp"
+            Click="OnCollapsedToolbarClick"
+            Visibility="Collapsed"
+            Panel.ZIndex="999"
+            Style="{StaticResource RecordingDockButton}"
+            ToolTip="点击展开工具栏；按住拖动调整贴边位置">
+        <Button.RenderTransform>
+            <TransformGroup>
+                <TranslateTransform x:Name="CollapsedToolbarDockTransform" />
+                <ScaleTransform x:Name="CollapsedToolbarScale" ScaleX="1" ScaleY="1" />
+            </TransformGroup>
+        </Button.RenderTransform>
+        <Grid Width="24" Height="20">
+            <Border Width="18" Height="13"
+                    HorizontalAlignment="Left" VerticalAlignment="Center"
+                    CornerRadius="2"
+                    BorderBrush="{DynamicResource AppControlForegroundBrush}"
+                    BorderThickness="1.5" />
+            <Path Width="8" Height="11" Margin="15,0,0,0"
+                  HorizontalAlignment="Left" VerticalAlignment="Center"
+                  Data="M 0,1 L 8,0 L 8,11 L 0,10 Z"
+                  Fill="{DynamicResource AppControlForegroundBrush}" />
+            <Ellipse Width="4" Height="4" Margin="5,0,0,0"
+                     HorizontalAlignment="Left" VerticalAlignment="Center"
+                     Fill="#F04455" />
+        </Grid>
+    </Button>
+    </Grid>
 </Window>

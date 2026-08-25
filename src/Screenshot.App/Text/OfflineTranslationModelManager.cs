@@ -54,7 +54,9 @@ public sealed class OfflineTranslationModelManager : IDisposable
             installationDirectory ?? AppMetadata.TranslationModelsDirectoryPath);
         _httpClient = httpClient ?? CreateHttpClient();
         _ownsHttpClient = httpClient is null;
-        _catalogService = new MozillaOfflineTranslationCatalogService(_httpClient);
+        _catalogService = new MozillaOfflineTranslationCatalogService(
+            _httpClient,
+            InstallationDirectory);
     }
 
     public static OfflineTranslationModelManager Shared => SharedManager.Value;
@@ -213,7 +215,14 @@ public sealed class OfflineTranslationModelManager : IDisposable
                     "安装目录所在磁盘空间不足，请释放空间后重试。");
             }
 
-            if (string.IsNullOrWhiteSpace(plan.BaseUrl))
+            var downloadBaseUrls = (plan.DownloadBaseUrls ?? [plan.BaseUrl])
+                .Where(baseUrl => Uri.TryCreate(
+                    baseUrl,
+                    UriKind.Absolute,
+                    out var uri) && uri.Scheme == Uri.UriSchemeHttps)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (downloadBaseUrls.Length == 0)
             {
                 return OfflineTranslationInstallationResult.Failure(
                     "离线模型下载地址无效，请重新读取模型信息。");
@@ -224,7 +233,7 @@ public sealed class OfflineTranslationModelManager : IDisposable
             foreach (var direction in missingDirections)
             {
                 await InstallDirectionAsync(
-                    plan.BaseUrl,
+                    downloadBaseUrls,
                     direction,
                     downloadedBytes,
                     requiredDownloadSize,
@@ -259,7 +268,7 @@ public sealed class OfflineTranslationModelManager : IDisposable
     }
 
     private async Task InstallDirectionAsync(
-        string baseUrl,
+        IReadOnlyList<string> downloadBaseUrls,
         OfflineTranslationDirection direction,
         long previouslyDownloaded,
         long totalDownloadSize,
@@ -282,7 +291,7 @@ public sealed class OfflineTranslationModelManager : IDisposable
             foreach (var file in direction.Files)
             {
                 await DownloadAndExtractWithRetryAsync(
-                    baseUrl,
+                    downloadBaseUrls,
                     file,
                     stagingDirectory,
                     previouslyDownloaded + directionDownloaded,
@@ -375,7 +384,7 @@ public sealed class OfflineTranslationModelManager : IDisposable
     }
 
     private async Task DownloadAndExtractWithRetryAsync(
-        string baseUrl,
+        IReadOnlyList<string> downloadBaseUrls,
         OfflineTranslationModelFile file,
         string directionDirectory,
         long previouslyDownloaded,
@@ -394,7 +403,7 @@ public sealed class OfflineTranslationModelManager : IDisposable
             try
             {
                 await DownloadAndExtractAsync(
-                    baseUrl,
+                    downloadBaseUrls[(attempt - 1) % downloadBaseUrls.Count],
                     file,
                     attemptPath,
                     previouslyDownloaded,

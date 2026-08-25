@@ -1,8 +1,10 @@
 using System.Buffers.Binary;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
+using System.Security.Authentication;
 using System.Text;
 using System.Text.Json;
 
@@ -13,7 +15,8 @@ internal sealed record OfflineTranslationModelPlan(
     string TargetCode,
     string DisplayName,
     string BaseUrl,
-    IReadOnlyList<OfflineTranslationDirection> Directions)
+    IReadOnlyList<OfflineTranslationDirection> Directions,
+    IReadOnlyList<string>? DownloadBaseUrls = null)
 {
     public long DownloadSize => Directions.Sum(direction =>
         direction.Files.Sum(file => file.DownloadSize));
@@ -34,11 +37,27 @@ internal sealed record OfflineTranslationModelPlanResult(
 
 internal sealed class MozillaOfflineTranslationCatalogService : IDisposable
 {
+    private const int MaximumRegistryAttempts = 3;
+    private const string RegistryCacheFileName = "mozilla-model-registry-cache.json";
+    private const string StorageBucketName =
+        "moz-fx-translations-data--303e-prod-translations-data";
     internal static readonly Uri RegistryUri = new(
         "https://storage.googleapis.com/" +
-        "moz-fx-translations-data--303e-prod-translations-data/db/models.json");
+        StorageBucketName + "/db/models.json");
+    private static readonly Uri VirtualHostedRegistryUri = new(
+        "https://" + StorageBucketName +
+        ".storage.googleapis.com/db/models.json");
+    private static readonly Uri GoogleApiRegistryUri = new(
+        "https://www.googleapis.com/download/storage/v1/b/" +
+        StorageBucketName + "/o/db%2Fmodels.json?alt=media");
+    private static readonly string[] DownloadBaseUrls =
+    [
+        "https://storage.googleapis.com/" + StorageBucketName + "/",
+        "https://" + StorageBucketName + ".storage.googleapis.com/",
+    ];
 
     private readonly HttpClient _httpClient;
+    private readonly string? _registryCachePath;
     private readonly object _snapshotLock = new();
     private readonly object _targetPlanLock = new();
     private readonly Dictionary<string, Task<OfflineTranslationModelPlanResult>>
@@ -46,9 +65,14 @@ internal sealed class MozillaOfflineTranslationCatalogService : IDisposable
     private readonly SemaphoreSlim _directionMetadataGate = new(8, 8);
     private Task<RegistrySnapshot>? _snapshotTask;
 
-    public MozillaOfflineTranslationCatalogService(HttpClient httpClient)
+    public MozillaOfflineTranslationCatalogService(
+        HttpClient httpClient,
+        string? registryCacheDirectory = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _registryCachePath = string.IsNullOrWhiteSpace(registryCacheDirectory)
+            ? null
+            : Path.Combine(registryCacheDirectory, RegistryCacheFileName);
     }
 
     public async Task<OfflineTranslationModelPlanResult> CreatePlanAsync(
@@ -82,6 +106,7 @@ internal sealed class MozillaOfflineTranslationCatalogService : IDisposable
                     targetCode,
                     displayName,
                     string.Empty,
+                    [],
                     []),
                 null);
         }
@@ -125,7 +150,8 @@ internal sealed class MozillaOfflineTranslationCatalogService : IDisposable
                     targetCode,
                     displayName,
                     snapshot.BaseUrl,
-                    directions),
+                    directions,
+                    snapshot.DownloadBaseUrls),
                 null);
         }
         catch (OperationCanceledException)
@@ -138,7 +164,7 @@ internal sealed class MozillaOfflineTranslationCatalogService : IDisposable
                 InvalidDataException)
         {
             return OfflineTranslationModelPlanResult.Failure(
-                $"无法读取 Mozilla 离线模型清单：{exception.Message}");
+                $"无法读取 Mozilla 离线模型清单：{DescribeCatalogReadFailure(exception)}");
         }
     }
 
@@ -212,7 +238,8 @@ internal sealed class MozillaOfflineTranslationCatalogService : IDisposable
                     targetCode,
                     displayName,
                     snapshot.BaseUrl,
-                    directions),
+                    directions,
+                    snapshot.DownloadBaseUrls),
                 null);
         }
         catch (Exception exception) when (
@@ -220,7 +247,7 @@ internal sealed class MozillaOfflineTranslationCatalogService : IDisposable
                 InvalidDataException)
         {
             return OfflineTranslationModelPlanResult.Failure(
-                $"无法读取 Mozilla 离线模型清单：{exception.Message}");
+                $"无法读取 Mozilla 离线模型清单：{DescribeCatalogReadFailure(exception)}");
         }
     }
 
@@ -300,13 +327,79 @@ internal sealed class MozillaOfflineTranslationCatalogService : IDisposable
 
     private async Task<RegistrySnapshot> LoadSnapshotAsync()
     {
-        using var response = await _httpClient.GetAsync(
+        Exception? lastError = null;
+        for (var attempt = 1; attempt <= MaximumRegistryAttempts; attempt++)
+        {
+            foreach (var registryUri in GetRegistryUrisForAttempt(attempt))
+            {
+                try
+                {
+                    var snapshot = await LoadSnapshotOnceAsync(registryUri);
+                    await TryWriteSnapshotCacheAsync(snapshot);
+                    return snapshot;
+                }
+                catch (Exception exception) when (
+                    exception is HttpRequestException or IOException or JsonException or
+                        InvalidDataException)
+                {
+                    lastError = exception;
+                }
+            }
+
+            if (attempt < MaximumRegistryAttempts)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(500 * attempt));
+            }
+        }
+
+        var cachedSnapshot = await TryReadSnapshotCacheAsync();
+        if (cachedSnapshot is not null)
+        {
+            return cachedSnapshot;
+        }
+
+        throw lastError ?? new HttpRequestException("无法连接 Mozilla 模型清单服务器。");
+    }
+
+    private static IEnumerable<Uri> GetRegistryUrisForAttempt(int attempt)
+    {
+        // Rotate the preferred endpoint so a temporary failure on one official
+        // Google endpoint does not make every retry repeat the same TLS path.
+        var registryUris = new[]
+        {
             RegistryUri,
+            VirtualHostedRegistryUri,
+            GoogleApiRegistryUri,
+        };
+        var offset = (attempt - 1) % registryUris.Length;
+        for (var index = 0; index < registryUris.Length; index++)
+        {
+            yield return registryUris[(offset + index) % registryUris.Length];
+        }
+    }
+
+    private async Task<RegistrySnapshot> LoadSnapshotOnceAsync(Uri registryUri)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, registryUri)
+        {
+            // Some enterprise proxies fail during HTTP/2 TLS negotiation with
+            // Google Cloud Storage. The registry is a small static document,
+            // so HTTP/1.1 is the most compatible transport here.
+            Version = HttpVersion.Version11,
+            VersionPolicy = HttpVersionPolicy.RequestVersionOrLower,
+        };
+        using var response = await _httpClient.SendAsync(
+            request,
             HttpCompletionOption.ResponseHeadersRead,
             CancellationToken.None);
         response.EnsureSuccessStatusCode();
-        await using var stream = await response.Content.ReadAsStreamAsync();
-        using var document = await JsonDocument.ParseAsync(stream);
+        var payload = await response.Content.ReadAsStringAsync();
+        return ParseSnapshot(payload, registryUri);
+    }
+
+    private static RegistrySnapshot ParseSnapshot(string payload, Uri registryUri)
+    {
+        using var document = JsonDocument.Parse(payload);
         var root = document.RootElement;
         var baseUrl = root.GetProperty("baseUrl").GetString();
         if (string.IsNullOrWhiteSpace(baseUrl) ||
@@ -315,9 +408,128 @@ internal sealed class MozillaOfflineTranslationCatalogService : IDisposable
             throw new InvalidDataException("Mozilla 模型清单缺少必要字段。");
         }
 
+        var preferredBaseUrl = GetPreferredDownloadBaseUrl(registryUri, baseUrl);
+        var downloadBaseUrls = new[] { preferredBaseUrl }
+            .Concat(DownloadBaseUrls.Where(baseUrl => !string.Equals(
+                baseUrl,
+                preferredBaseUrl,
+                StringComparison.OrdinalIgnoreCase)))
+            .ToArray();
         return new RegistrySnapshot(
-            baseUrl.TrimEnd('/') + "/",
+            preferredBaseUrl,
+            downloadBaseUrls,
+            payload,
             models.Clone());
+    }
+
+    private static string GetPreferredDownloadBaseUrl(
+        Uri registryUri,
+        string manifestBaseUrl)
+    {
+        if (string.Equals(
+                registryUri.Host,
+                VirtualHostedRegistryUri.Host,
+                StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(
+                registryUri.Host,
+                GoogleApiRegistryUri.Host,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return DownloadBaseUrls[1];
+        }
+
+        return NormalizeBaseUrl(manifestBaseUrl);
+    }
+
+    private static string NormalizeBaseUrl(string baseUrl) =>
+        baseUrl.TrimEnd('/') + "/";
+
+    private async Task TryWriteSnapshotCacheAsync(RegistrySnapshot snapshot)
+    {
+        if (string.IsNullOrWhiteSpace(_registryCachePath))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_registryCachePath)!);
+            var cache = new CachedRegistrySnapshot(
+                snapshot.BaseUrl,
+                snapshot.DownloadBaseUrls,
+                snapshot.Payload);
+            await File.WriteAllTextAsync(
+                _registryCachePath,
+                JsonSerializer.Serialize(cache));
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            // A cache miss only affects resilience. The current trusted
+            // network response remains usable when its directory is read-only.
+        }
+    }
+
+    private async Task<RegistrySnapshot?> TryReadSnapshotCacheAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_registryCachePath) ||
+            !File.Exists(_registryCachePath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var content = await File.ReadAllTextAsync(_registryCachePath);
+            var cache = JsonSerializer.Deserialize<CachedRegistrySnapshot>(content);
+            if (cache is null || string.IsNullOrWhiteSpace(cache.Payload) ||
+                string.IsNullOrWhiteSpace(cache.BaseUrl) ||
+                cache.DownloadBaseUrls is not { Count: > 0 })
+            {
+                return null;
+            }
+
+            var snapshot = ParseSnapshot(cache.Payload, RegistryUri);
+            return snapshot with
+            {
+                BaseUrl = NormalizeBaseUrl(cache.BaseUrl),
+                DownloadBaseUrls = cache.DownloadBaseUrls
+                    .Where(baseUrl => Uri.TryCreate(
+                        baseUrl,
+                        UriKind.Absolute,
+                        out var uri) && uri.Scheme == Uri.UriSchemeHttps)
+                    .Select(NormalizeBaseUrl)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray(),
+            };
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string DescribeCatalogReadFailure(Exception exception)
+    {
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is AuthenticationException)
+            {
+                return "无法建立安全连接。请检查 Windows 日期时间、根证书和公司代理/安全软件；" +
+                       "该网络未能安全访问 Mozilla 模型服务器。";
+            }
+        }
+
+        var root = exception;
+        while (root.InnerException is not null)
+        {
+            root = root.InnerException;
+        }
+
+        return string.IsNullOrWhiteSpace(root.Message)
+            ? exception.Message
+            : root.Message;
     }
 
     private static JsonElement? SelectBestCandidate(JsonElement candidates)
@@ -524,7 +736,16 @@ internal sealed class MozillaOfflineTranslationCatalogService : IDisposable
             : fileName;
     }
 
-    private sealed record RegistrySnapshot(string BaseUrl, JsonElement Models);
+    private sealed record RegistrySnapshot(
+        string BaseUrl,
+        IReadOnlyList<string> DownloadBaseUrls,
+        string Payload,
+        JsonElement Models);
+
+    private sealed record CachedRegistrySnapshot(
+        string BaseUrl,
+        IReadOnlyList<string> DownloadBaseUrls,
+        string Payload);
 
     public void Dispose()
     {
