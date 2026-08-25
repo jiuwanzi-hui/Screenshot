@@ -25,12 +25,19 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
     // whole translation request, not an independent timeout per provider.
     private static readonly TimeSpan TranslationBudget =
         TimeSpan.FromSeconds(9.5);
+    // Network models have request and generation latency that the local
+    // Bergamot path does not. Keep the local interaction target unchanged,
+    // but do not cancel a healthy online response just before it completes.
+    private static readonly TimeSpan OnlineTranslationBudget =
+        TimeSpan.FromSeconds(24);
     private static readonly TimeSpan DefaultOfflineTimeout = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan DefaultOnlineTimeout = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan DefaultLargeModelTimeout = TimeSpan.FromSeconds(30);
     private readonly IReadOnlyList<ITranslationProvider> _providers;
     private readonly TimeSpan _offlineTimeout;
     private readonly TimeSpan _onlineTimeout;
+    private readonly TimeSpan _translationBudget;
+    private readonly TimeSpan _onlineTranslationBudget;
 
     public OrderedTranslationProvider(IReadOnlyList<ITranslationProvider> providers)
         : this(providers, DefaultOfflineTimeout, DefaultOnlineTimeout)
@@ -41,6 +48,21 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         IReadOnlyList<ITranslationProvider> providers,
         TimeSpan offlineTimeout,
         TimeSpan onlineTimeout)
+        : this(
+            providers,
+            offlineTimeout,
+            onlineTimeout,
+            TranslationBudget,
+            OnlineTranslationBudget)
+    {
+    }
+
+    internal OrderedTranslationProvider(
+        IReadOnlyList<ITranslationProvider> providers,
+        TimeSpan offlineTimeout,
+        TimeSpan onlineTimeout,
+        TimeSpan translationBudget,
+        TimeSpan onlineTranslationBudget)
     {
         ArgumentNullException.ThrowIfNull(providers);
         if (providers.Count == 0)
@@ -55,6 +77,12 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         _onlineTimeout = onlineTimeout > TimeSpan.Zero
             ? onlineTimeout
             : throw new ArgumentOutOfRangeException(nameof(onlineTimeout));
+        _translationBudget = translationBudget > TimeSpan.Zero
+            ? translationBudget
+            : throw new ArgumentOutOfRangeException(nameof(translationBudget));
+        _onlineTranslationBudget = onlineTranslationBudget > TimeSpan.Zero
+            ? onlineTranslationBudget
+            : throw new ArgumentOutOfRangeException(nameof(onlineTranslationBudget));
     }
 
     public string Id => "OrderedFallback";
@@ -126,8 +154,14 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         string targetLanguage,
         CancellationToken cancellationToken = default)
     {
+        var hasOnlineProvider = _providers.Any(IsOnlineProvider);
+        var hasLocalProvider = _providers.Any(provider =>
+            !IsOnlineProvider(provider));
+        var captureBudget =
+            (hasLocalProvider ? _translationBudget : TimeSpan.Zero) +
+            (hasOnlineProvider ? _onlineTranslationBudget : TimeSpan.Zero);
         using var deadlineCancellation =
-            new CancellationTokenSource(TranslationBudget);
+            new CancellationTokenSource(captureBudget);
         using var linkedCancellation =
             CancellationTokenSource.CreateLinkedTokenSource(
                 cancellationToken,
@@ -146,7 +180,9 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
             !cancellationToken.IsCancellationRequested)
         {
             return TranslationSegmentsResult.Failure(
-                "整张截图翻译达到 10 秒时间限制，未完成区域保留原文。");
+                hasOnlineProvider
+                    ? "在线整张截图翻译超时，未完成区域保留原文。"
+                    : "整张截图翻译达到 10 秒时间限制，未完成区域保留原文。");
         }
     }
 
@@ -378,10 +414,12 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         // report "online translation cancelled" even when that route had
         // available quota. The shared deadline still caps the whole call;
         // each route may use the remaining time before fallback.
-        var routeBudget = TranslationBudget;
         foreach (var route in routes)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            var routeBudget = IsOnlineProvider(route)
+                ? _onlineTranslationBudget
+                : _translationBudget;
             using var routeBudgetCancellation =
                 new CancellationTokenSource(routeBudget);
             using var routeCancellation =
@@ -745,55 +783,6 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         return sourceLanguage;
     }
 
-    private async Task<TranslationSegmentsResult> RetryBatchIndividuallyAsync(
-        ITranslationProvider provider,
-        IReadOnlyList<string> segments,
-        string sourceLanguage,
-        string targetLanguage,
-        CancellationToken cancellationToken)
-    {
-        var translated = segments.ToArray();
-        var failures = new List<string>();
-        for (var index = 0; index < segments.Count; index++)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(
-                    segments[index],
-                    targetLanguage))
-            {
-                continue;
-            }
-
-            var result = await InvokeSegmentsWithTimeoutAsync(
-                provider,
-                [segments[index]],
-                sourceLanguage,
-                targetLanguage,
-                GetTimeout(provider, 1),
-                cancellationToken);
-            if (result.IsSuccess && result.Segments.Count == 1 &&
-                !string.IsNullOrWhiteSpace(result.Segments[0]))
-            {
-                translated[index] = result.Segments[0];
-            }
-            else
-            {
-                failures.Add(
-                    $"第 {index + 1} 行：" +
-                    (result.ErrorMessage ?? "翻译结果不完整"));
-            }
-        }
-
-        return CreateCombinedResult(segments, translated, failures);
-    }
-
-    private static bool ShouldRetryFailedBatch(string? errorMessage)
-    {
-        return !IsProviderConfigurationFailure(errorMessage) &&
-               (IsTransientTimeout(errorMessage) ||
-                IsSplittableBatchFailure(errorMessage));
-    }
-
     private async Task<TranslationSegmentsResult> TranslateLargeCaptureOnlineAsync(
         ITranslationProvider online,
         IReadOnlyList<string> segments,
@@ -830,18 +819,6 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                     sourceLanguage,
                     targetLanguage,
                     providerToken);
-                if (!result.IsSuccess &&
-                    batch.Segments.Count > 1 &&
-                    ShouldRetryFailedBatch(result.ErrorMessage))
-                {
-                    result = await RetryBatchIndividuallyAsync(
-                        online,
-                        batch.Segments,
-                        sourceLanguage,
-                        targetLanguage,
-                        providerToken);
-                }
-
                 if (!result.IsSuccess &&
                     IsProviderConfigurationFailure(result.ErrorMessage))
                 {
@@ -1310,6 +1287,14 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
     {
         return !string.IsNullOrWhiteSpace(errorMessage) &&
                errorMessage.Contains("超时", StringComparison.Ordinal);
+    }
+
+    private static bool IsOnlineProvider(ITranslationProvider provider)
+    {
+        return string.Equals(
+            provider.Id,
+            TranslationProviderFactory.OpenAiCompatibleProviderId,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static IReadOnlyList<ITranslationProvider> PreferFastProvidersForLargeCaptures(

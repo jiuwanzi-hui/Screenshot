@@ -17,6 +17,10 @@ public static class HotKeyConfiguration
         AddBinding(bindings, HotKeyAction.RegionCapture, settings.RegionCaptureHotKey);
         AddBinding(bindings, HotKeyAction.CompleteCapture, settings.CompleteCaptureHotKey);
         AddBinding(bindings, HotKeyAction.VideoRecording, settings.VideoRecordingHotKey);
+        AddBinding(
+            bindings,
+            HotKeyAction.EndVideoRecording,
+            settings.EndVideoRecordingHotKey);
         AddBinding(bindings, HotKeyAction.RecognizeText, settings.OcrHotKey);
         AddBinding(
             bindings,
@@ -107,6 +111,7 @@ public static class HotKeyConfiguration
             HotKeyAction.RegionCapture => "区域截图",
             HotKeyAction.CompleteCapture => "完成截图",
             HotKeyAction.VideoRecording => "视频录制",
+            HotKeyAction.EndVideoRecording => "结束录制",
             HotKeyAction.ScrollCapture => "长截图",
             HotKeyAction.RecognizeText => "翻译",
             HotKeyAction.TranslateSelectedText => "选中文字翻译",

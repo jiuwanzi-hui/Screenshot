@@ -142,12 +142,31 @@ public sealed class RegionCaptureCoordinator
         }
 
         ScreenRegion? selection = null;
+        CapturedImage? overlaySnapshot = null;
         SetCaptureInProgress(true);
         try
         {
             await WaitForCaptureChromeToHideAsync();
+            // Opening the region picker used to let its constructor take the
+            // first full-screen snapshot on the dispatcher. That is most
+            // noticeable on the first video hotkey after boot, when GDI/DWM
+            // has not been touched yet. Keep the picker responsive by using
+            // the same background snapshot handoff as ordinary screenshots.
+            try
+            {
+                overlaySnapshot = await Task.Run(() =>
+                    ScreenCaptureService.Capture(VirtualScreen.GetBounds()));
+            }
+            catch
+            {
+                // The overlay retains its own synchronous fallback for the
+                // rare case where a desktop snapshot is temporarily unavailable.
+            }
+
             selection = await CaptureOverlayWindow.SelectAsync(
-                pointerContinuation);
+                pointerContinuation,
+                overlaySnapshot);
+            overlaySnapshot = null;
         }
         catch (Exception exception)
         {
@@ -155,6 +174,7 @@ public sealed class RegionCaptureCoordinator
         }
         finally
         {
+            overlaySnapshot?.Dispose();
             SetCaptureInProgress(false);
             _ = Task.Run(Core.MemoryFootprint.TrimAfterHeavyOperation);
         }
@@ -367,6 +387,7 @@ public sealed class RegionCaptureCoordinator
                     ToolbarFeatureOrder =
                         settings.CaptureToolbarFeatureOrder.ToArray(),
                     ToolbarRows = settings.CaptureToolbarRows,
+                    ToolbarScalePercent = settings.ToolbarScalePercent,
                     ArrowStyleChanged = _arrowStyleChanged,
                     ArrowToolModeChanged = _arrowToolModeChanged,
                     ShapeToolModeChanged = _shapeToolModeChanged,
@@ -837,7 +858,8 @@ public sealed class RegionCaptureCoordinator
                                 shapeToolMode: settings.ShapeToolMode,
                                 shapeToolModeChanged: _shapeToolModeChanged,
                                 lastAnnotationTool: settings.LastAnnotationTool,
-                                lastAnnotationToolChanged: _lastAnnotationToolChanged);
+                                lastAnnotationToolChanged: _lastAnnotationToolChanged,
+                                recognizeTextAsync: RecognizeTextAsync);
                             editor.Show();
                             completedImage = null;
 
@@ -949,7 +971,8 @@ public sealed class RegionCaptureCoordinator
                 shapeToolMode: _settingsProvider().ShapeToolMode,
                 shapeToolModeChanged: _shapeToolModeChanged,
                 lastAnnotationTool: _settingsProvider().LastAnnotationTool,
-                lastAnnotationToolChanged: _lastAnnotationToolChanged);
+                lastAnnotationToolChanged: _lastAnnotationToolChanged,
+                recognizeTextAsync: RecognizeTextAsync);
             editor.Show();
             preview.Close();
         };
@@ -1058,10 +1081,13 @@ public sealed class RegionCaptureCoordinator
                 recordingAnnotationPreferencesChanged:
                     _videoRecordingAnnotationPreferencesChanged,
                 customColorPalette: settings.CustomColorPalette,
-                customColorPaletteChanged: _customColorPaletteChanged);
+                customColorPaletteChanged: _customColorPaletteChanged,
+                endRecordingHotKey: settings.EndVideoRecordingHotKey,
+                toolbarScalePercent: settings.ToolbarScalePercent);
             if (result.IsSuccess)
             {
                 var completedSettings = _settingsProvider();
+                var savedVideoPath = result.FilePath;
                 if (result.OpenEditor)
                 {
                     _statusReporter($"视频已保存：{result.FilePath}");
@@ -1084,6 +1110,7 @@ public sealed class RegionCaptureCoordinator
                                 duration,
                                 AnimatedImageFormat.Gif);
                         File.Delete(result.FilePath!);
+                        savedVideoPath = gifPath;
                         _statusReporter($"GIF 已保存：{gifPath}");
                     }
                     catch (Exception exception)
@@ -1095,6 +1122,20 @@ public sealed class RegionCaptureCoordinator
                 else
                 {
                     _statusReporter($"视频已保存：{result.FilePath}");
+                }
+
+                if (!string.IsNullOrWhiteSpace(savedVideoPath) &&
+                    File.Exists(savedVideoPath))
+                {
+                    try
+                    {
+                        await ClipboardFileService.SetFileAsync(savedVideoPath);
+                    }
+                    catch
+                    {
+                        // Saving the recording must succeed even if another
+                        // application temporarily owns the clipboard.
+                    }
                 }
 
                 VideoHistoryService.ApplyRetentionPolicy(

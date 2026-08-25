@@ -422,7 +422,7 @@
                         <Grid Background="Transparent">
                             <Track x:Name="PART_Track"
                                    Orientation="{TemplateBinding Orientation}"
-                                   IsDirectionReversed="True">
+                                   IsDirectionReversed="False">
                                 <Track.Thumb>
                                     <Thumb Background="{DynamicResource AppAccentMutedBrush}"
                                            BorderBrush="{DynamicResource AppBorderBrush}"
@@ -447,6 +447,7 @@
                             <Trigger Property="Orientation" Value="Vertical">
                                 <Setter TargetName="PART_Track" Property="Width" Value="8" />
                                 <Setter TargetName="PART_Track" Property="HorizontalAlignment" Value="Center" />
+                                <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="True" />
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>

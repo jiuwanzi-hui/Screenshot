@@ -20,12 +20,26 @@
         </ResourceDictionary.MergedDictionaries>
         <Geometry x:Key="UndoIconGeometry">M 8,2 L 2,8 L 8,14 V 11 C 13,11 16,13 17,17 C 17,10 13,6 8,6 Z</Geometry>
         <Geometry x:Key="RedoIconGeometry">M 12,2 L 18,8 L 12,14 V 11 C 7,11 4,13 3,17 C 3,10 7,6 12,6 Z</Geometry>
+        <Geometry x:Key="TableIconGeometry">M 2,2 H 16 V 16 H 2 Z M 2,6 H 16 M 7,6 V 16 M 12,6 V 16 M 7,11 H 16</Geometry>
         <Geometry x:Key="RectangleIconGeometry">M 2,2 H 16 V 16 H 2 Z</Geometry>
         <Geometry x:Key="EllipseIconGeometry">M 9,2 C 13.5,2 17,5.1 17,9 C 17,12.9 13.5,16 9,16 C 4.5,16 1,12.9 1,9 C 1,5.1 4.5,2 9,2 Z</Geometry>
         <Geometry x:Key="StraightFilledArrowIconGeometry">M 1,7 H 11 V 3 L 18,9 L 11,15 V 11 H 1 Z</Geometry>
-        <Geometry x:Key="StraightHollowArrowIconGeometry">M 2,7 C 1,7 1,11 2,11 H 10 V 15 L 18,9 L 10,3 V 7 Z</Geometry>
+        <!-- Hollow uses the exact same closed outline as the original filled arrow;
+             the presentation switches the fill to transparent and keeps only the stroke. -->
+        <Geometry x:Key="StraightHollowArrowIconGeometry">M 1,7 H 11 V 3 L 18,9 L 11,15 V 11 H 1 Z</Geometry>
         <Geometry x:Key="CurvedFilledArrowIconGeometry">M 1,4 C 2,11 7,15 13,11 L 11,8 L 18,10 L 14,17 L 13,14 C 5,19 1,13 1,4 Z</Geometry>
         <Geometry x:Key="CurvedHollowArrowIconGeometry">M 1,4 C 2,11 7,15 13,11 L 11,8 L 18,10 L 14,17 L 13,14 C 5,19 1,13 1,4 Z</Geometry>
+        <Style x:Key="ImageEditorToolbarPath" TargetType="Path">
+            <Setter Property="Width" Value="18" />
+            <Setter Property="Height" Value="18" />
+            <Setter Property="Stretch" Value="Uniform" />
+            <Setter Property="Fill" Value="Transparent" />
+            <Setter Property="Stroke" Value="{DynamicResource ImageEditorToolbarIconBrush}" />
+            <Setter Property="StrokeThickness" Value="1.7" />
+            <Setter Property="StrokeStartLineCap" Value="Round" />
+            <Setter Property="StrokeEndLineCap" Value="Round" />
+            <Setter Property="StrokeLineJoin" Value="Round" />
+        </Style>
         <Style x:Key="GlassButton" TargetType="Button">
             <Setter Property="Height" Value="32" />
             <Setter Property="MinWidth" Value="38" />
@@ -276,11 +290,11 @@
                             </RadioButton.ContextMenu>
                             <Grid VerticalAlignment="Center">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="20" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <Path x:Name="ShapeToolIcon" Width="17" Height="17" HorizontalAlignment="Center" VerticalAlignment="Center" Data="{StaticResource RectangleIconGeometry}" Fill="Transparent" Stroke="{DynamicResource ImageEditorToolbarIconBrush}" StrokeThickness="1.6" Stretch="Uniform" />
+                                <Path x:Name="ShapeToolIcon" HorizontalAlignment="Center" VerticalAlignment="Center" Data="{StaticResource RectangleIconGeometry}" Style="{StaticResource ImageEditorToolbarPath}" />
                                 <TextBlock x:Name="ShapeToolLabel" Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="矩形" />
                                 <TextBlock Grid.Column="2"
                                            Margin="5,0,0,0"
@@ -332,11 +346,11 @@
                             </RadioButton.ContextMenu>
                             <Grid VerticalAlignment="Center">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="20" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <Path x:Name="ArrowToolIcon" Width="17" Height="17" HorizontalAlignment="Center" VerticalAlignment="Center" Data="{StaticResource StraightFilledArrowIconGeometry}" Fill="{DynamicResource ImageEditorToolbarIconBrush}" Stretch="Uniform" />
+                                <Path x:Name="ArrowToolIcon" HorizontalAlignment="Center" VerticalAlignment="Center" Data="{StaticResource StraightFilledArrowIconGeometry}" Fill="{DynamicResource ImageEditorToolbarIconBrush}" Stroke="Transparent" Style="{StaticResource ImageEditorToolbarPath}" />
                                 <TextBlock x:Name="ArrowToolLabel" Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="直线实心" />
                                 <TextBlock Grid.Column="2"
                                            Margin="5,0,0,0"
@@ -356,10 +370,10 @@
                                      Style="{StaticResource GlassTool}">
                             <Grid VerticalAlignment="Center">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="20" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe UI Symbol" FontSize="16" Text="✎" TextAlignment="Center" />
+                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe UI Symbol" FontSize="18" Text="✎" TextAlignment="Center" />
                                 <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="画笔" />
                             </Grid>
                         </RadioButton>
@@ -370,10 +384,10 @@
                                      Style="{StaticResource GlassTool}">
                             <Grid VerticalAlignment="Center">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="20" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe UI Symbol" FontSize="16" Text="▧" TextAlignment="Center" />
+                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe UI Symbol" FontSize="18" Text="▧" TextAlignment="Center" />
                                 <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="马赛克" />
                             </Grid>
                         </RadioButton>
@@ -384,10 +398,10 @@
                                      Style="{StaticResource GlassTool}">
                             <Grid VerticalAlignment="Center">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="20" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe UI" FontWeight="SemiBold" Text="T" TextAlignment="Center" />
+                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontFamily="Segoe UI" FontSize="18" FontWeight="SemiBold" Text="T" TextAlignment="Center" />
                                 <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="文字" />
                             </Grid>
                         </RadioButton>
@@ -398,10 +412,10 @@
                                      Style="{StaticResource GlassTool}">
                             <Grid VerticalAlignment="Center">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="20" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <editor:EmojiStickerImage Width="17" Height="17" HorizontalAlignment="Center" VerticalAlignment="Center" Sticker="😊" />
+                                <editor:EmojiStickerImage Width="22" Height="22" HorizontalAlignment="Center" VerticalAlignment="Center" Sticker="😊" />
                                 <TextBlock Grid.Column="1" Margin="5,0,0,0" VerticalAlignment="Center" Text="表情" />
                             </Grid>
                         </RadioButton>
@@ -412,17 +426,17 @@
                                      Style="{StaticResource GlassTool}">
                             <Grid VerticalAlignment="Center">
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="20" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <Border Width="17"
-                                        Height="17"
+                                <Border Width="19"
+                                        Height="19"
                                         Background="{DynamicResource ImageEditorToolbarIconBrush}"
-                                        CornerRadius="9">
+                                        CornerRadius="9.5">
                                     <TextBlock HorizontalAlignment="Center"
                                                VerticalAlignment="Center"
                                                Foreground="{DynamicResource ImageEditorToolbarBackgroundBrush}"
-                                               FontSize="10"
+                                               FontSize="12"
                                                FontWeight="Bold"
                                                Text="1" />
                                 </Border>
@@ -437,16 +451,26 @@
                                 Content="裁剪"
                                 ToolTip="按上、右、下、左四边裁剪图片"
                                 Style="{StaticResource GlassButton}" />
+                        <Button x:Name="CopyTableButton"
+                                Click="OnCopyTableClick"
+                                ToolTip="识别表格并复制为制表符格式"
+                                Style="{StaticResource GlassButton}">
+                            <Path Width="18"
+                                  Height="18"
+                                  Data="{StaticResource TableIconGeometry}"
+                                  Fill="Transparent"
+                                  Stroke="{DynamicResource ImageEditorToolbarIconBrush}"
+                                  StrokeThickness="1.7"
+                                  StrokeLineJoin="Round"
+                                  Stretch="Uniform" />
+                        </Button>
                         <Button x:Name="UndoButton"
                                 Click="OnUndoClick"
                                 ToolTip="撤销"
                                 Style="{StaticResource GlassButton}">
                             <Viewbox Width="18" Height="18" Stretch="Uniform">
-                                <Path Width="20" Height="20"
-                                      Data="{StaticResource UndoIconGeometry}"
-                                      Fill="{DynamicResource ImageEditorToolbarIconBrush}"
-                                      Stroke="Transparent"
-                                      StrokeThickness="0" />
+                                <Path Data="{StaticResource UndoIconGeometry}"
+                                      Style="{StaticResource ImageEditorToolbarPath}" />
                             </Viewbox>
                         </Button>
                         <Button x:Name="RedoButton"
@@ -454,11 +478,8 @@
                                 ToolTip="重做"
                                 Style="{StaticResource GlassButton}">
                             <Viewbox Width="18" Height="18" Stretch="Uniform">
-                                <Path Width="20" Height="20"
-                                      Data="{StaticResource RedoIconGeometry}"
-                                      Fill="{DynamicResource ImageEditorToolbarIconBrush}"
-                                      Stroke="Transparent"
-                                      StrokeThickness="0" />
+                                <Path Data="{StaticResource RedoIconGeometry}"
+                                      Style="{StaticResource ImageEditorToolbarPath}" />
                             </Viewbox>
                         </Button>
                         </StackPanel>
@@ -469,17 +490,17 @@
                                     Click="OnTopmostClick"
                                     ToolTip="让编辑窗口保持在其他窗口上方"
                                     Style="{StaticResource GlassButton}">
-                                <TextBlock x:Name="TopmostGlyph" FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE840;" />
+                                <TextBlock x:Name="TopmostGlyph" FontFamily="Segoe MDL2 Assets" FontSize="18" Text="&#xE840;" />
                             </Button>
                             <Button Click="OnCopyClick"
                                     ToolTip="复制"
                                     Style="{StaticResource GlassButton}">
-                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE8C8;" />
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="18" Text="&#xE8C8;" />
                             </Button>
                             <Button Click="OnSaveClick"
                                     ToolTip="保存"
                                     Style="{StaticResource GlassButton}">
-                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74E;" />
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="18" Text="&#xE74E;" />
                             </Button>
                             <Button x:Name="ApplyButton"
                                     Click="OnApplyClick"

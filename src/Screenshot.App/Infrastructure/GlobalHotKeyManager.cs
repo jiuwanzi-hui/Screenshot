@@ -137,6 +137,8 @@ public sealed class GlobalHotKeyManager : IDisposable
     private const uint VirtualKeyLeftAlt = 0xA4;
     private const uint VirtualKeyRightAlt = 0xA5;
     private static readonly TimeSpan PreCaptureLifetime = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan PostCaptureCompositionSettleWindow =
+        TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan ContextMenuCaptureWindow = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan ContextMenuCaptureDelay =
         TimeSpan.FromMilliseconds(80);
@@ -184,6 +186,9 @@ public sealed class GlobalHotKeyManager : IDisposable
     private int _preCaptureCaptureInFlight;
     private long _lastRightButtonUpTimestamp;
     private long _contextMenuCaptureGeneration;
+    private long _lastCaptureClosedTimestamp;
+    private int _captureOverlayActive;
+    private int _captureOverlayRightButtonDown;
     private TimeSpan _mouseLongPressDuration = TimeSpan.FromMilliseconds(700);
     private bool _mouseSideButtonsUseLongPress;
     private bool _areMouseShortcutsSuspended;
@@ -653,7 +658,8 @@ public sealed class GlobalHotKeyManager : IDisposable
                 out var isButtonDown))
             {
                 if (virtualKey == HotKeyGesture.VirtualKeyMouseRight &&
-                    !isButtonDown)
+                    !isButtonDown &&
+                    !ShouldSuppressContextMenuGesture(isButtonDown))
                 {
                     MarkRecentContextMenuGesture();
                 }
@@ -1204,6 +1210,11 @@ public sealed class GlobalHotKeyManager : IDisposable
         int y = 0,
         HotKeyModifiers? modifiers = null)
     {
+        if (virtualKey == HotKeyGesture.VirtualKeyMouseRight)
+        {
+            _ = ShouldSuppressContextMenuGesture(isButtonDown);
+        }
+
         return ProcessMouseButtonInput(
             virtualKey,
             isButtonDown,
@@ -2221,6 +2232,21 @@ public sealed class GlobalHotKeyManager : IDisposable
             }
         }
 
+        if (ShouldDiscardStandardPreCapture(
+                Volatile.Read(ref _lastCaptureClosedTimestamp),
+                Stopwatch.GetTimestamp()))
+        {
+            // The previous layered overlay may still be present in DWM's
+            // desktop image for a short time after WPF reports it closed.
+            // A rapid next hotkey can pre-capture that retired overlay and
+            // make the next selection show the previous screenshot. Keep
+            // immediate menu snapshots above, but discard an ordinary frame
+            // here so the coordinator waits for composition and captures a
+            // fresh desktop image.
+            ClearStandardPreCapturedScreen();
+            return null;
+        }
+
         if (_preCapturedScreen is null ||
             !_preCapturedActions.Contains(action) ||
             DateTimeOffset.UtcNow - _preCapturedAt > PreCaptureLifetime)
@@ -2234,6 +2260,77 @@ public sealed class GlobalHotKeyManager : IDisposable
         _preCapturedActions.Clear();
         _preCaptureExpiryTimer.Stop();
         return snapshot;
+    }
+
+    internal void NotifyCaptureClosed()
+    {
+        Volatile.Write(ref _captureOverlayActive, 0);
+        Volatile.Write(
+            ref _lastCaptureClosedTimestamp,
+            Stopwatch.GetTimestamp());
+        Volatile.Write(ref _lastRightButtonUpTimestamp, 0);
+        Interlocked.Increment(ref _contextMenuCaptureGeneration);
+        Interlocked.Increment(ref _preCaptureGeneration);
+        ClearStandardPreCapturedScreen();
+        ClearImmediatePreCapturedScreen();
+    }
+
+    internal void SetCaptureOverlayActive(bool active)
+    {
+        Volatile.Write(ref _captureOverlayActive, active ? 1 : 0);
+        if (active)
+        {
+            return;
+        }
+
+        NotifyCaptureClosed();
+    }
+
+    private bool ShouldSuppressContextMenuGesture(bool isButtonDown)
+    {
+        if (isButtonDown)
+        {
+            if (Volatile.Read(ref _captureOverlayActive) != 0)
+            {
+                Volatile.Write(ref _captureOverlayRightButtonDown, 1);
+            }
+            else
+            {
+                // A new physical right-button gesture cannot be the release
+                // of an older gesture that started in the overlay.
+                Volatile.Write(ref _captureOverlayRightButtonDown, 0);
+            }
+
+            return false;
+        }
+
+        var startedInCapture = Interlocked.Exchange(
+            ref _captureOverlayRightButtonDown,
+            0) != 0;
+        return Volatile.Read(ref _captureOverlayActive) != 0 ||
+            startedInCapture;
+    }
+
+    internal bool ShouldSuppressContextMenuGestureForTest(bool isButtonDown) =>
+        ShouldSuppressContextMenuGesture(isButtonDown);
+
+    internal bool HasRecentContextMenuGestureForTest() =>
+        HasRecentContextMenuGesture();
+
+    internal static bool ShouldDiscardStandardPreCapture(
+        long captureClosedTimestamp,
+        long currentTimestamp)
+    {
+        if (captureClosedTimestamp <= 0 ||
+            currentTimestamp < captureClosedTimestamp)
+        {
+            return false;
+        }
+
+        var elapsedTicks = currentTimestamp - captureClosedTimestamp;
+        return elapsedTicks <=
+            PostCaptureCompositionSettleWindow.TotalSeconds *
+            Stopwatch.Frequency;
     }
 
     private static CapturedImage? CaptureCurrentScreen(HotKeyAction action)
@@ -3200,7 +3297,9 @@ public sealed class GlobalHotKeyManager : IDisposable
             return;
         }
 
-        if (virtualKey == HotKeyGesture.VirtualKeyMouseRight && !isButtonDown)
+        if (virtualKey == HotKeyGesture.VirtualKeyMouseRight &&
+            !isButtonDown &&
+            !ShouldSuppressContextMenuGesture(isButtonDown))
         {
             MarkRecentContextMenuGesture();
         }

@@ -81,6 +81,15 @@ public partial class PinnedImageEditorToolbarWindow : Window
         _shapeToolModeChanged = shapeToolModeChanged;
         _lastAnnotationToolChanged = lastAnnotationToolChanged;
         InitializeComponent();
+        var toolbarScale = Math.Clamp(
+            double.IsFinite(settings?.ToolbarScalePercent ?? 100)
+                ? (settings?.ToolbarScalePercent ?? 100) / 100d
+                : 1,
+            0.5,
+            1.5);
+        ToolbarSurface.LayoutTransform = new ScaleTransform(
+            toolbarScale,
+            toolbarScale);
         _toolbarDragHint = new ToolbarDragHintBehavior(
             ToolbarSurface,
             ToolbarSurface);
@@ -118,6 +127,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
     public event EventHandler? SaveRequested;
 
     public event EventHandler? OcrRequested;
+
+    public event EventHandler? CopyTableRequested;
 
     public event EventHandler? CopyTextRequested;
 
@@ -606,6 +617,9 @@ public partial class PinnedImageEditorToolbarWindow : Window
     private void OnOcrClick(object sender, RoutedEventArgs e) =>
         OcrRequested?.Invoke(this, EventArgs.Empty);
 
+    private void OnCopyTableClick(object sender, RoutedEventArgs e) =>
+        CopyTableRequested?.Invoke(this, EventArgs.Empty);
+
     private void OnCopyTextClick(object sender, RoutedEventArgs e) =>
         CopyTextRequested?.Invoke(this, EventArgs.Empty);
 
@@ -954,6 +968,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
         SetVisibility(MosaicToolButton, CaptureToolbarFeature.Mosaic);
         SetVisibility(SaveButton, CaptureToolbarFeature.Save);
         SetVisibility(OcrButton, CaptureToolbarFeature.TextRecognition);
+        SetVisibility(CopyTableButton, CaptureToolbarFeature.CopyTable);
         SetVisibility(CopyTextButton, CaptureToolbarFeature.CopyRecognizedText);
         SetVisibility(TranslateActionButton, CaptureToolbarFeature.Translation);
         SetVisibility(PrivacyButton, CaptureToolbarFeature.PrivacyRedaction);
@@ -1009,6 +1024,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
             [CaptureToolbarFeature.Mosaic] = [MosaicToolButton],
             [CaptureToolbarFeature.Save] = [SaveButton],
             [CaptureToolbarFeature.TextRecognition] = [OcrButton],
+            [CaptureToolbarFeature.CopyTable] = [CopyTableButton],
             [CaptureToolbarFeature.CopyRecognizedText] = [CopyTextButton],
             [CaptureToolbarFeature.Translation] = [TranslateActionButton],
             [CaptureToolbarFeature.PrivacyRedaction] = [PrivacyButton],
@@ -1040,6 +1056,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
         {
             CaptureToolbarFeature.Save,
             CaptureToolbarFeature.TextRecognition,
+            CaptureToolbarFeature.CopyTable,
             CaptureToolbarFeature.CopyRecognizedText,
             CaptureToolbarFeature.Translation,
             CaptureToolbarFeature.PrivacyRedaction,
@@ -1169,6 +1186,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
         {
             SaveButton,
             OcrButton,
+            CopyTableButton,
             CopyTextButton,
             TranslateActionButton,
             PrivacyButton,

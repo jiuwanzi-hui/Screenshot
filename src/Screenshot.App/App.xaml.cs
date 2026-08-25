@@ -97,7 +97,6 @@ public partial class App : System.Windows.Application, IDisposable
 
         var dataMigrationResult = InstalledDataMigration.TryMigrateLegacyData();
         WindowPlacementService.Initialize(AppMetadata.WindowPlacementsPath);
-        var isFirstRun = !File.Exists(settingsStore.SettingsPath);
         var loadResult = settingsStore.Load();
         var credentialStore = new DpapiTranslationCredentialStore();
         var loadedSettings = MigrateLegacySaveDirectory(
@@ -230,8 +229,12 @@ public partial class App : System.Windows.Application, IDisposable
         _trayIconService.SetVisible(_currentSettings.ShowNotificationIcon);
         UpdateFloatingCaptureWindow();
 
-        if (!startInBackground ||
-            isFirstRun ||
+        if (startInBackground || !_currentSettings.OpenSettingsOnStartup)
+        {
+            _ = StartupFeedbackWindow.ShowAsync("已最小化启动");
+        }
+
+        if ((!startInBackground && _currentSettings.OpenSettingsOnStartup) ||
             hotKeyWarning is not null ||
             elevationWarning is not null)
         {
@@ -241,6 +244,39 @@ public partial class App : System.Windows.Application, IDisposable
         _ = Dispatcher.BeginInvoke(
             System.Windows.Threading.DispatcherPriority.ApplicationIdle,
             Core.MemoryFootprint.TrimAfterHeavyOperation);
+        _ = Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+            new Action(PrewarmVideoRecordingAsync));
+    }
+
+    private async void PrewarmVideoRecordingAsync()
+    {
+        // Let startup paint and settle before loading capture drivers. This is
+        // deliberately best-effort and never changes the visible startup flow.
+        await Task.Delay(TimeSpan.FromSeconds(1));
+        var recorderWarmUp = RegionVideoRecorder.WarmUpAsync(
+            _currentSettings.VideoRecordingCodec,
+            _currentSettings.VideoRecordingFrameRate,
+            _currentSettings.RecordSystemAudio,
+            _currentSettings.RecordMicrophone,
+            _currentSettings.MicrophoneDeviceId);
+        var snapshotWarmUp = Task.Run(() =>
+        {
+            try
+            {
+                // The recording region picker displays a frozen desktop
+                // snapshot. Touch the GDI capture path here and release it
+                // immediately so the first video hotkey does not have to
+                // initialize it while the user is waiting for the overlay.
+                using var snapshot = ScreenCaptureService.Capture(
+                    VirtualScreen.GetBounds());
+            }
+            catch
+            {
+                // The real picker retains its normal capture fallback.
+            }
+        });
+        await Task.WhenAll(recorderWarmUp, snapshotWarmUp);
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -584,6 +620,7 @@ public partial class App : System.Windows.Application, IDisposable
         }
 
         _isCaptureInProgress = isInProgress;
+        _hotKeyManager?.SetCaptureOverlayActive(isInProgress);
         VideoRecordingControlWindow.SetCaptureInteractionActive(isInProgress);
         _floatingCaptureWindow?.SetCaptureInProgress(isInProgress);
     }
@@ -712,6 +749,10 @@ public partial class App : System.Windows.Application, IDisposable
         else if (e.Action == HotKeyAction.VideoRecording)
         {
             _ = RequestVideoRecordingAsync(e.CapturePointerContinuation);
+        }
+        else if (e.Action == HotKeyAction.EndVideoRecording)
+        {
+            _ = VideoRecordingControlWindow.TryEndActiveRecording();
         }
         else if (e.Action == HotKeyAction.OpenSettings)
         {

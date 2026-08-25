@@ -5,21 +5,39 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Documents;
+using System.Windows.Media.Imaging;
+using System.Drawing.Imaging;
 using Screenshot.App.Infrastructure;
+using Screenshot.App.Presentation;
 using WpfButton = System.Windows.Controls.Button;
+using WpfComboBox = System.Windows.Controls.ComboBox;
+using WpfDataObject = System.Windows.DataObject;
+using WpfDataFormats = System.Windows.DataFormats;
+using WpfDragDrop = System.Windows.DragDrop;
+using WpfDragDropEffects = System.Windows.DragDropEffects;
 using WpfKeyEventArgs = System.Windows.Input.KeyEventArgs;
+using WpfMouseEventArgs = System.Windows.Input.MouseEventArgs;
+using WpfPoint = System.Windows.Point;
 using WpfTextBox = System.Windows.Controls.TextBox;
 
 namespace Screenshot.App.Capture;
 
-public partial class CaptureHistoryWindow : Window
+public partial class CaptureHistoryWindow : Window, IDisposable
 {
     private readonly CaptureHistoryService _captureHistoryService;
     private readonly VideoHistoryService _videoHistoryService = new();
+    private readonly Dictionary<FrameworkElement, HoverIdleHintBehavior>
+        _historyDragHints = [];
     private string _saveDirectory;
     private string _videoDirectory;
     private VideoHistorySortMode _videoSortMode = VideoHistorySortMode.NewestFirst;
     private bool _isCommittingVideoName;
+    private CancellationTokenSource _videoThumbnailCancellation = new();
+    private VideoHistoryItem? _draggingVideoItem;
+    private WpfPoint _videoDragStart;
+    private CaptureHistoryItem? _draggingScreenshotItem;
+    private WpfPoint _screenshotDragStart;
 
     public CaptureHistoryWindow(
         CaptureHistoryService historyService,
@@ -119,6 +137,13 @@ public partial class CaptureHistoryWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        foreach (var hint in _historyDragHints.Values)
+        {
+            hint.Dispose();
+        }
+
+        _historyDragHints.Clear();
+        Dispose();
         _captureHistoryService.Items.CollectionChanged -= OnHistoryItemsChanged;
         _videoHistoryService.Items.CollectionChanged -= OnHistoryItemsChanged;
         VideoSortComboBox.SelectionChanged -= OnVideoSortSelectionChanged;
@@ -291,12 +316,285 @@ public partial class CaptureHistoryWindow : Window
     private void RefreshVideoHistory(bool updateStatus)
     {
         _videoHistoryService.Refresh(_videoDirectory, _videoSortMode);
+        _videoThumbnailCancellation.Cancel();
+        _videoThumbnailCancellation.Dispose();
+        _videoThumbnailCancellation = new CancellationTokenSource();
+        _ = LoadVideoThumbnailsAsync(
+            _videoHistoryService.Items.ToArray(),
+            _videoThumbnailCancellation.Token);
         if (updateStatus)
         {
             HistoryStatusText.Text = VideoItems.Count == 0
                 ? "视频保存目录中暂无录屏。"
                 : $"已读取 {VideoItems.Count} 个录屏文件。";
         }
+    }
+
+    private static async Task LoadVideoThumbnailsAsync(
+        IReadOnlyList<VideoHistoryItem> items,
+        CancellationToken cancellationToken)
+    {
+        foreach (var item in items)
+        {
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!File.Exists(item.FilePath))
+                {
+                    continue;
+                }
+
+                var session = await VideoPreviewSession.CreateAsync(item.FilePath);
+                item.SetMediaMetadata(session.Duration, 0, 0);
+                var bytes = await session.GetFrameAsync(TimeSpan.Zero, 320);
+                cancellationToken.ThrowIfCancellationRequested();
+                var thumbnail = CreateThumbnailBitmap(bytes);
+                item.SetMediaMetadata(
+                    session.Duration,
+                    thumbnail.PixelWidth,
+                    thumbnail.PixelHeight);
+                item.Thumbnail = thumbnail;
+            }
+            catch (OperationCanceledException) when (
+                cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch
+            {
+                // Keep the video icon when a codec cannot expose a first frame.
+            }
+        }
+    }
+
+    private static BitmapImage CreateThumbnailBitmap(byte[] bytes)
+    {
+        using var stream = new MemoryStream(bytes, writable: false);
+        var bitmap = new BitmapImage();
+        bitmap.BeginInit();
+        bitmap.CacheOption = BitmapCacheOption.OnLoad;
+        bitmap.StreamSource = stream;
+        bitmap.EndInit();
+        bitmap.Freeze();
+        return bitmap;
+    }
+
+    private async void OnCopyVideoHistoryItemClick(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is not WpfButton { Tag: VideoHistoryItem item })
+        {
+            return;
+        }
+
+        try
+        {
+            await ClipboardFileService.SetFileAsync(item.FilePath);
+            HistoryStatusText.Text = "已复制录屏文件到剪贴板。";
+        }
+        catch (Exception exception) when (
+            exception is IOException
+                or UnauthorizedAccessException
+                or System.Runtime.InteropServices.ExternalException)
+        {
+            HistoryStatusText.Text = "复制失败，剪贴板可能正被其他程序使用。";
+        }
+    }
+
+    private void OnVideoCardMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: VideoHistoryItem item } ||
+            IsInteractiveVideoElement(e.OriginalSource as DependencyObject))
+        {
+            return;
+        }
+
+        _draggingVideoItem = item;
+        _videoDragStart = e.GetPosition(this);
+    }
+
+    private void OnVideoCardMouseMove(object sender, WpfMouseEventArgs e)
+    {
+        if (_draggingVideoItem is not { } item ||
+            e.LeftButton != MouseButtonState.Pressed ||
+            !File.Exists(item.FilePath))
+        {
+            return;
+        }
+
+        var current = e.GetPosition(this);
+        if (Math.Abs(current.X - _videoDragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(current.Y - _videoDragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        _draggingVideoItem = null;
+        var data = new WpfDataObject(WpfDataFormats.FileDrop, new[] { item.FilePath });
+        WpfDragDrop.DoDragDrop(
+            (DependencyObject)sender,
+            data,
+            WpfDragDropEffects.Copy);
+        e.Handled = true;
+    }
+
+    private void OnVideoCardMouseLeftButtonUp(object sender, MouseButtonEventArgs e) =>
+        _draggingVideoItem = null;
+
+    private void OnScreenshotCardMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement
+            {
+                DataContext: CaptureHistoryItem item,
+            } || IsInteractiveVideoElement(e.OriginalSource as DependencyObject))
+        {
+            return;
+        }
+
+        _draggingScreenshotItem = item;
+        _screenshotDragStart = e.GetPosition(this);
+    }
+
+    private void OnHistoryDragHintLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement element ||
+            _historyDragHints.ContainsKey(element))
+        {
+            return;
+        }
+
+        _historyDragHints[element] = new HoverIdleHintBehavior(
+            element,
+            "按住拖拽，可复制到其他位置。",
+            source => !IsInteractiveVideoElement(source));
+    }
+
+    private void OnHistoryDragHintUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement element ||
+            !_historyDragHints.Remove(element, out var hint))
+        {
+            return;
+        }
+
+        hint.Dispose();
+    }
+
+    private void OnScreenshotCardMouseMove(object sender, WpfMouseEventArgs e)
+    {
+        if (_draggingScreenshotItem is not { } item ||
+            e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var current = e.GetPosition(this);
+        if (Math.Abs(current.X - _screenshotDragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(current.Y - _screenshotDragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        var path = EnsureScreenshotDragPath(item);
+        _draggingScreenshotItem = null;
+        if (path is null)
+        {
+            HistoryStatusText.Text = "截图文件还在准备中，请稍后再拖拽。";
+            return;
+        }
+
+        var data = new WpfDataObject(WpfDataFormats.FileDrop, new[] { path });
+        WpfDragDrop.DoDragDrop(
+            (DependencyObject)sender,
+            data,
+            WpfDragDropEffects.Copy);
+        e.Handled = true;
+    }
+
+    private void OnScreenshotCardMouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e) =>
+        _draggingScreenshotItem = null;
+
+    private static string? EnsureScreenshotDragPath(CaptureHistoryItem item)
+    {
+        var path = item.ImagePath;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
+        if (File.Exists(path))
+        {
+            return path;
+        }
+
+        try
+        {
+            var directory = Path.GetDirectoryName(path);
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                return null;
+            }
+
+            Directory.CreateDirectory(directory);
+            using var image = item.CreateCapturedImage();
+            image.Bitmap.Save(path, ImageFormat.Png);
+            return File.Exists(path) ? path : null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsInteractiveVideoElement(DependencyObject? element)
+    {
+        while (element is not null)
+        {
+            if (element is WpfButton or WpfTextBox or WpfComboBox)
+            {
+                return true;
+            }
+
+            element = element switch
+            {
+                System.Windows.Media.Visual visual =>
+                    System.Windows.Media.VisualTreeHelper.GetParent(visual),
+                System.Windows.Media.Media3D.Visual3D visual3D =>
+                    System.Windows.Media.VisualTreeHelper.GetParent(visual3D),
+                FrameworkContentElement frameworkContentElement =>
+                    frameworkContentElement.Parent,
+                ContentElement contentElement =>
+                    ContentOperations.GetParent(contentElement),
+                _ => null,
+            };
+        }
+
+        return false;
+    }
+
+    public void Dispose()
+    {
+        if (_videoThumbnailCancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
+        _videoThumbnailCancellation.Cancel();
+        _videoThumbnailCancellation.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     private void OnViewVideoHistoryItemClick(object sender, RoutedEventArgs e)

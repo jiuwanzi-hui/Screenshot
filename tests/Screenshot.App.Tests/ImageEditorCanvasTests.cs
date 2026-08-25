@@ -15,6 +15,77 @@ namespace Screenshot.App.Tests;
 public sealed class ImageEditorCanvasTests
 {
     [Fact]
+    public void PointerPreviewCoalescesHighFrequencyUpdatesToTheLatestPoint()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var editor = new ImageEditorCanvas();
+            editor.InitializeAnnotationOverlay(
+                pixelWidth: 320,
+                pixelHeight: 240,
+                displayWidth: 320,
+                displayHeight: 240);
+            editor.SelectTool(EditorTool.Rectangle);
+
+            var drawingField = typeof(ImageEditorCanvas).GetField(
+                "_isDrawing",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var startField = typeof(ImageEditorCanvas).GetField(
+                "_drawingStartPoint",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var previewField = typeof(ImageEditorCanvas).GetField(
+                "_drawingPreview",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var pendingField = typeof(ImageEditorCanvas).GetField(
+                "_hasPendingPointerUpdate",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var subscribedField = typeof(ImageEditorCanvas).GetField(
+                "_isPointerRenderingSubscribed",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var createPreview = typeof(ImageEditorCanvas).GetMethod(
+                "CreateDrawingPreview",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var queueUpdate = typeof(ImageEditorCanvas).GetMethod(
+                "QueuePointerUpdate",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var renderUpdate = typeof(ImageEditorCanvas).GetMethod(
+                "OnPointerRendering",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.NotNull(drawingField);
+            Assert.NotNull(startField);
+            Assert.NotNull(previewField);
+            Assert.NotNull(pendingField);
+            Assert.NotNull(subscribedField);
+            Assert.NotNull(createPreview);
+            Assert.NotNull(queueUpdate);
+            Assert.NotNull(renderUpdate);
+
+            drawingField.SetValue(editor, true);
+            startField.SetValue(editor, new WpfPoint(0, 0));
+            createPreview.Invoke(editor, [new WpfPoint(0, 0)]);
+            var preview = Assert.IsType<System.Windows.Shapes.Rectangle>(
+                previewField.GetValue(editor));
+
+            for (var index = 1; index < 8_000; index++)
+            {
+                queueUpdate.Invoke(editor, [new WpfPoint(index % 320, index % 240)]);
+            }
+
+            Assert.True(double.IsNaN(preview.Width));
+            Assert.True(Assert.IsType<bool>(pendingField.GetValue(editor)));
+            Assert.True(Assert.IsType<bool>(subscribedField.GetValue(editor)));
+
+            renderUpdate.Invoke(editor, [null, EventArgs.Empty]);
+
+            Assert.Equal(319, preview.Width);
+            Assert.Equal(79, preview.Height);
+            Assert.False(Assert.IsType<bool>(pendingField.GetValue(editor)));
+            Assert.True(editor.CancelActiveOperation());
+            Assert.False(Assert.IsType<bool>(subscribedField.GetValue(editor)));
+        });
+    }
+
+    [Fact]
     public void TransparentAnnotationOverlayRendersAndEditsWithoutCapturedImage()
     {
         WpfTestHost.Invoke(() =>

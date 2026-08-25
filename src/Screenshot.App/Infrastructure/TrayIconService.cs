@@ -41,7 +41,7 @@ public sealed class TrayIconService : IDisposable
             Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular),
             ShowCheckMargin = false,
             ShowImageMargin = false,
-            Padding = new Padding(4),
+            Padding = new Padding(2),
             DropShadowEnabled = true,
         };
         _menuItems =
@@ -141,9 +141,9 @@ public sealed class TrayIconService : IDisposable
             item.ForeColor = foreground;
             item.Padding = item is ToolStripSeparator
                 ? Padding.Empty
-                : new Padding(12, 7, 18, 7);
+                : new Padding(8, 6, 10, 6);
             item.Margin = item is ToolStripSeparator
-                ? new Padding(6, 3, 6, 3)
+                ? new Padding(4, 2, 4, 2)
                 : new Padding(0, 1, 0, 1);
         }
     }
@@ -327,6 +327,22 @@ public sealed class TrayIconService : IDisposable
     private sealed class RoundedContextMenuStrip : ContextMenuStrip
     {
         public const int CornerRadius = 8;
+        private const int MaximumMenuWidth = 128;
+
+        protected override void SetBoundsCore(
+            int x,
+            int y,
+            int width,
+            int height,
+            BoundsSpecified specified)
+        {
+            base.SetBoundsCore(
+                x,
+                y,
+                Math.Min(width, MaximumMenuWidth),
+                height,
+                specified);
+        }
 
         protected override void OnHandleCreated(EventArgs e)
         {

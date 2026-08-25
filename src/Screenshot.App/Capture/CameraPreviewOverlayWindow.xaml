@@ -17,8 +17,7 @@
             CornerRadius="6"
             Padding="2"
             IsHitTestVisible="True"
-            ToolTip="拖动移动摄像头画面；拖动边缘或四角缩放；双击恢复初始位置和大小"
-            MouseLeftButtonDown="OnPreviewMouseLeftButtonDown"
+             MouseLeftButtonDown="OnPreviewMouseLeftButtonDown"
             MouseMove="OnPreviewMouseMove"
             MouseLeftButtonUp="OnPreviewMouseLeftButtonUp"
             LostMouseCapture="OnPreviewMouseCaptureLost">

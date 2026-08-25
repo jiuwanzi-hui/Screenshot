@@ -36,6 +36,44 @@ public sealed class CaptureOverlayWindowTests
     }
 
     [Fact]
+    public void CaptureToolbarAppliesConfiguredScale()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var pinnedImageManager = new PinnedImageManager();
+            var overlay = CaptureOverlayWindow.ShowInteractive(
+                new CaptureOverlayOptions
+                {
+                    SaveDirectory = Path.GetTempPath(),
+                    KeepHistory = false,
+                    HistoryLimit = 0,
+                    HistoryService = new CaptureHistoryService(),
+                    PinnedImageManager = pinnedImageManager,
+                    StartOcrAsync = image =>
+                    {
+                        image.Dispose();
+                        return Task.CompletedTask;
+                    },
+                    ToolbarScalePercent = 150,
+                });
+
+            try
+            {
+                var toolbar = Assert.IsType<Border>(
+                    overlay.FindName("CaptureToolbar"));
+                var scale = Assert.IsType<System.Windows.Media.ScaleTransform>(
+                    toolbar.LayoutTransform);
+                Assert.Equal(1.5, scale.ScaleX);
+                Assert.Equal(1.5, scale.ScaleY);
+            }
+            finally
+            {
+                overlay.Close();
+            }
+        });
+    }
+
+    [Fact]
     public void ColorPickerKeepsWindowSnappingActive()
     {
         WpfTestHost.Invoke(() =>
@@ -831,6 +869,64 @@ public sealed class CaptureOverlayWindowTests
     }
 
     [Fact]
+    public void SelectionPreviewCoalescesHighFrequencyPointerUpdates()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var pinnedImageManager = new PinnedImageManager();
+            var overlay = CaptureOverlayWindow.ShowInteractive(
+                new CaptureOverlayOptions
+                {
+                    SaveDirectory = Path.GetTempPath(),
+                    KeepHistory = false,
+                    HistoryLimit = 0,
+                    HistoryService = new CaptureHistoryService(),
+                    PinnedImageManager = pinnedImageManager,
+                    StartOcrAsync = image =>
+                    {
+                        image.Dispose();
+                        return Task.CompletedTask;
+                    },
+                });
+
+            try
+            {
+                var queueMethod = typeof(CaptureOverlayWindow).GetMethod(
+                    "QueueSelectionBoundsUpdate",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var renderMethod = typeof(CaptureOverlayWindow).GetMethod(
+                    "OnSelectionPreviewRendering",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var boundsMethod = typeof(CaptureOverlayWindow).GetMethod(
+                    "GetSelectionBounds",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                var scheduledField = typeof(CaptureOverlayWindow).GetField(
+                    "_selectionBoundsUpdateScheduled",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.NotNull(queueMethod);
+                Assert.NotNull(renderMethod);
+                Assert.NotNull(boundsMethod);
+                Assert.NotNull(scheduledField);
+
+                queueMethod.Invoke(overlay, [new Rect(12, 18, 40, 30)]);
+                queueMethod.Invoke(overlay, [new Rect(96, 72, 180, 110)]);
+                Assert.True(Assert.IsType<bool>(scheduledField.GetValue(overlay)));
+
+                renderMethod.Invoke(overlay, [null, EventArgs.Empty]);
+
+                Assert.Equal(
+                    new Rect(96, 72, 180, 110),
+                    Assert.IsType<Rect>(boundsMethod.Invoke(overlay, null)));
+                Assert.False(Assert.IsType<bool>(scheduledField.GetValue(overlay)));
+            }
+            finally
+            {
+                overlay.Close();
+            }
+        });
+    }
+
+    [Fact]
     public void ContinuedSelectionUsesOriginalButtonDownPoint()
     {
         WpfTestHost.Invoke(() =>
@@ -1032,16 +1128,16 @@ public sealed class CaptureOverlayWindowTests
                     item => Equals(item.Tag, "CurvedArrow,Filled"));
                 var ocrButton = Assert.IsType<Button>(
                     overlay.FindName("OcrButton"));
-                Assert.Single(ocrButton.ContextMenu.Items);
-                var tableMenuItem = Assert.IsType<MenuItem>(
-                    ocrButton.ContextMenu.Items[0]);
+                Assert.Null(ocrButton.ContextMenu);
+                var tableButton = Assert.IsType<Button>(
+                    overlay.FindName("CopyTableButton"));
+                Assert.Equal(Visibility.Visible, tableButton.Visibility);
                 var copyTextButton = Assert.IsType<Button>(
                     overlay.FindName("CopyRecognizedTextButton"));
                 Assert.Equal(Visibility.Visible, copyTextButton.Visibility);
                 Assert.Equal(
                     "识别全部文字、复制到剪贴板并关闭截图",
                     copyTextButton.ToolTip);
-                Assert.Equal("表格复制", tableMenuItem.Header);
                 Assert.NotNull(overlay.FindName("ContentRecognitionOverlay"));
                 Assert.NotNull(overlay.FindName("SelectionMessageToast"));
                 var frozenScreen = Assert.IsType<System.Windows.Controls.Image>(

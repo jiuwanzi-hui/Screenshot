@@ -9,29 +9,36 @@ using Screenshot.App.Infrastructure;
 using DrawingRectangle = System.Drawing.Rectangle;
 using WpfPoint = System.Windows.Point;
 using WpfColor = System.Windows.Media.Color;
+using WinForms = System.Windows.Forms;
 
 namespace Screenshot.App.Capture;
 
 public partial class RecordingInputOverlayWindow : Window
 {
     private const int ExtendedWindowStyleIndex = -20;
+    private const int NonClientHitTestMessage = 0x0084;
+    private const int HitTestTransparent = -1;
     private const long ExtendedStyleTransparent = 0x00000020L;
     private const long ExtendedStyleToolWindow = 0x00000080L;
     private const long ExtendedStyleNoActivate = 0x08000000L;
     private const int TopmostWindow = -1;
     private const uint DoNotActivate = 0x0010;
     private const uint DoNotChangeOwnerZOrder = 0x0200;
+    private const uint DoNotMove = 0x0002;
+    private const uint DoNotResize = 0x0001;
     private const int MaximumTrailSegments = 32;
     private static readonly TimeSpan TrailLifetime = TimeSpan.FromMilliseconds(320);
 
     private readonly DispatcherTimer _clearTimer;
     private readonly DispatcherTimer _trailTimer;
+    private readonly DispatcherTimer _mousePositionTimer;
     private readonly DrawingRectangle _windowBounds;
     private readonly MonitorDpiScale _dpi;
     private readonly Queue<TrailSegment> _trailSegments = [];
     private bool _showMouseTrail;
     private WpfPoint? _lastTrailPoint;
     private bool _isPaused;
+    private HwndSource? _windowSource;
 
     public RecordingInputOverlayWindow(
         ScreenRegion recordingRegion)
@@ -58,6 +65,11 @@ public partial class RecordingInputOverlayWindow : Window
             Interval = TimeSpan.FromMilliseconds(33),
         };
         _trailTimer.Tick += OnTrailTimerTick;
+        _mousePositionTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(33),
+        };
+        _mousePositionTimer.Tick += OnMousePositionTimerTick;
         SourceInitialized += OnSourceInitialized;
     }
 
@@ -95,25 +107,61 @@ public partial class RecordingInputOverlayWindow : Window
         _isPaused = isPaused;
         if (isPaused)
         {
+            _mousePositionTimer.Stop();
             ClearInput();
             ClearMouseTrail();
+        }
+        else if (_showMouseTrail)
+        {
+            _mousePositionTimer.Start();
         }
     }
 
     public void SetMouseTrailEnabled(bool isEnabled)
     {
         _showMouseTrail = isEnabled;
-        if (!isEnabled)
+        if (isEnabled && !_isPaused)
         {
+            _mousePositionTimer.Start();
+        }
+        else
+        {
+            _mousePositionTimer.Stop();
             ClearMouseTrail();
         }
     }
 
+    internal void EnsureTopmost()
+    {
+        if (!IsLoaded)
+        {
+            return;
+        }
+
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _ = NativeMethods.SetWindowPos(
+            handle,
+            new IntPtr(TopmostWindow),
+            0,
+            0,
+            0,
+            0,
+            DoNotActivate |
+            DoNotChangeOwnerZOrder |
+            DoNotMove |
+            DoNotResize);
+    }
+
     public void ShowMousePosition(int screenX, int screenY)
     {
-        if (_isPaused || !_showMouseTrail ||
-            !_windowBounds.Contains(screenX, screenY))
+        if (_isPaused || !_windowBounds.Contains(screenX, screenY))
         {
+            _lastTrailPoint = null;
             return;
         }
 
@@ -158,10 +206,14 @@ public partial class RecordingInputOverlayWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         SourceInitialized -= OnSourceInitialized;
+        _windowSource?.RemoveHook(OnWindowMessage);
+        _windowSource = null;
         _clearTimer.Stop();
         _clearTimer.Tick -= OnClearTimerTick;
         _trailTimer.Stop();
         _trailTimer.Tick -= OnTrailTimerTick;
+        _mousePositionTimer.Stop();
+        _mousePositionTimer.Tick -= OnMousePositionTimerTick;
         _trailSegments.Clear();
         base.OnClosed(e);
     }
@@ -169,6 +221,8 @@ public partial class RecordingInputOverlayWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         var handle = new WindowInteropHelper(this).Handle;
+        _windowSource = HwndSource.FromHwnd(handle);
+        _windowSource?.AddHook(OnWindowMessage);
         var extendedStyle = NativeMethods.GetWindowLongPtr(
             handle,
             ExtendedWindowStyleIndex).ToInt64();
@@ -188,6 +242,24 @@ public partial class RecordingInputOverlayWindow : Window
             _windowBounds.Width,
             _windowBounds.Height,
             DoNotActivate | DoNotChangeOwnerZOrder);
+    }
+
+    private IntPtr OnWindowMessage(
+        IntPtr window,
+        int message,
+        IntPtr wordParameter,
+        IntPtr longParameter,
+        ref bool handled)
+    {
+        if (message != NonClientHitTestMessage)
+        {
+            return IntPtr.Zero;
+        }
+
+        // This window only draws input feedback inside the video. It must
+        // never become the target of Windows cursor or mouse processing.
+        handled = true;
+        return new IntPtr(HitTestTransparent);
     }
 
     private void OnClearTimerTick(object? sender, EventArgs e)
@@ -211,6 +283,12 @@ public partial class RecordingInputOverlayWindow : Window
         {
             ClearMouseTrail();
         }
+    }
+
+    private void OnMousePositionTimerTick(object? sender, EventArgs e)
+    {
+        var cursor = WinForms.Cursor.Position;
+        ShowMousePosition(cursor.X, cursor.Y);
     }
 
     private void ClearInput()

@@ -770,6 +770,7 @@ public partial class PinnedImageGroupWindow : Window
         toolbar.CropRequested += (_, _) => OnCropClick(this, new RoutedEventArgs());
         toolbar.SaveRequested += (_, _) => SaveCurrentImage();
         toolbar.OcrRequested += async (_, _) => await ShowRecognizedTextAsync();
+        toolbar.CopyTableRequested += async (_, _) => await CopyTableAsync();
         toolbar.CopyTextRequested += async (_, _) => await CopyRecognizedTextAsync();
         toolbar.TranslateRequested += async (_, _) => await TranslateCurrentImageAsync();
         toolbar.PrivacyRequested += async (_, _) => await RedactPrivacyAsync();
@@ -880,6 +881,48 @@ public partial class PinnedImageGroupWindow : Window
         {
             System.Windows.Clipboard.SetText(recognition.Text);
             HeaderStatusText.Text = "钉图编组 · 文字已复制";
+        }
+        catch (COMException)
+        {
+            HeaderStatusText.Text = "钉图编组 · 剪贴板正忙";
+        }
+    }
+
+    private async Task CopyTableAsync()
+    {
+        HeaderStatusText.Text = "钉图编组 · 正在识别表格…";
+        var member = _members.Count > 0 ? _members[0] : null;
+        if (member is null)
+        {
+            HeaderStatusText.Text = "钉图编组 · 编组中没有钉图";
+            return;
+        }
+
+        using var image = CapturedImage.FromBitmapSource(GetCurrentToolbarImage());
+        var recognition = await member.RecognizeImageAsync(image);
+        var table = TableRecognitionService.BuildTsv(
+            recognition,
+            image.Bitmap,
+            await TableSupplementaryOcrService.RecognizeAsync(
+                image,
+                recognition.Words));
+        if (!table.IsSuccess)
+        {
+            HeaderStatusText.Text = table.ErrorMessage ?? "钉图编组 · 未识别到表格";
+            return;
+        }
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(table.ClipboardHtml))
+            {
+                await ClipboardTextService.SetHtmlAsync(table.ClipboardHtml, table.Content);
+            }
+            else
+            {
+                await ClipboardTextService.SetTextAsync(table.Content);
+            }
+            HeaderStatusText.Text = "钉图编组 · 表格已复制";
         }
         catch (COMException)
         {

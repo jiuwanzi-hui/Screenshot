@@ -1197,7 +1197,15 @@ internal sealed class VideoPostProcessWindow : Window
             var progress = new Progress<double>(value =>
                 _progress.Value = Math.Clamp(value, 0, 1) * 100);
             var output = await operation(progress);
-            _statusText.Text = $"已生成：{output}";
+            try
+            {
+                await ClipboardFileService.SetFileAsync(output);
+                _statusText.Text = $"已生成并复制：{output}";
+            }
+            catch
+            {
+                _statusText.Text = $"已生成：{output}（复制到剪贴板失败）";
+            }
         }
         catch (Exception exception)
         {

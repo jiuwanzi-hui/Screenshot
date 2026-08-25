@@ -83,6 +83,7 @@ public enum CaptureToolbarFeature
     Save,
     ScrollCapture,
     TextRecognition,
+    CopyTable,
     CopyRecognizedText,
     Translation,
     PrivacyRedaction,
@@ -164,13 +165,17 @@ public enum OfflineTranslationEngine
 public sealed record AppSettings
 {
     public const string DefaultCompleteCaptureHotKey = "Ctrl+C";
+    public const string DefaultEndVideoRecordingHotKey = "Alt+2";
 
     public const int MaximumHistoryItems = 100;
 
+    // Version 14 changes the default end-recording shortcut. Previous
+    // configurations that still contain the old generated default are
+    // migrated, while an explicitly customized shortcut is preserved.
     // Version 13 adds a durable "last annotation tool" preference. Previous
     // configurations already remember arrow/shape variants, so they can be
     // upgraded without resetting the toolbar to its default rectangle.
-    public int SettingsVersion { get; init; } = 13;
+    public int SettingsVersion { get; init; } = 15;
 
     public string SaveDirectory { get; init; } = GetDefaultSaveDirectory();
 
@@ -234,7 +239,15 @@ public sealed record AppSettings
     public CaptureToolbarRowCount CaptureToolbarRows { get; init; } =
         CaptureToolbarRowCount.One;
 
+    public double ToolbarScalePercent { get; init; } = 100;
+
     public bool LaunchAtStartup { get; init; }
+
+    /// <summary>
+    /// When disabled, every normal launch stays in the tray and the settings
+    /// window can be opened from the tray menu or its hotkey.
+    /// </summary>
+    public bool OpenSettingsOnStartup { get; init; }
 
     /// <summary>
     /// Requests UAC at the next app launch, including a Windows startup launch.
@@ -258,6 +271,9 @@ public sealed record AppSettings
     public string CompleteCaptureHotKey { get; init; } = DefaultCompleteCaptureHotKey;
 
     public string VideoRecordingHotKey { get; init; } = string.Empty;
+
+    public string EndVideoRecordingHotKey { get; init; } =
+        DefaultEndVideoRecordingHotKey;
 
     public string ScrollCaptureHotKey { get; init; } = string.Empty;
 
@@ -408,12 +424,30 @@ public sealed record AppSettings
             visibleCaptureToolbarFeatures.Add(
                 CaptureToolbarFeature.PrivacyRedaction);
         }
+        if (SettingsVersion < 15 &&
+            visibleCaptureToolbarFeatures.Contains(
+                CaptureToolbarFeature.TextRecognition) &&
+            !visibleCaptureToolbarFeatures.Contains(CaptureToolbarFeature.CopyTable))
+        {
+            visibleCaptureToolbarFeatures.Add(CaptureToolbarFeature.CopyTable);
+        }
 
         var captureToolbarFeatureOrder =
             (CaptureToolbarFeatureOrder ?? defaults.CaptureToolbarFeatureOrder)
             .Where(Enum.IsDefined)
             .Distinct()
             .ToList();
+        if (SettingsVersion < 15 &&
+            !captureToolbarFeatureOrder.Contains(CaptureToolbarFeature.CopyTable))
+        {
+            var textRecognitionIndex = captureToolbarFeatureOrder.IndexOf(
+                CaptureToolbarFeature.TextRecognition);
+            captureToolbarFeatureOrder.Insert(
+                textRecognitionIndex >= 0
+                    ? textRecognitionIndex + 1
+                    : captureToolbarFeatureOrder.Count,
+                CaptureToolbarFeature.CopyTable);
+        }
         foreach (var feature in Enum.GetValues<CaptureToolbarFeature>())
         {
             if (!captureToolbarFeatureOrder.Contains(feature))
@@ -422,9 +456,15 @@ public sealed record AppSettings
             }
         }
 
+        var migrateLegacyEndRecordingShortcut = SettingsVersion < 14 &&
+            string.Equals(
+                EndVideoRecordingHotKey,
+                "Ctrl+Alt+E",
+                StringComparison.OrdinalIgnoreCase);
+
         return this with
         {
-            SettingsVersion = Math.Max(SettingsVersion, 13),
+            SettingsVersion = Math.Max(SettingsVersion, 15),
             Theme = NormalizeTheme(Theme),
             CloseBehavior = Enum.IsDefined(CloseBehavior)
                 ? CloseBehavior
@@ -459,6 +499,9 @@ public sealed record AppSettings
             CaptureToolbarRows = Enum.IsDefined(CaptureToolbarRows)
                 ? CaptureToolbarRows
                 : defaults.CaptureToolbarRows,
+            ToolbarScalePercent = double.IsFinite(ToolbarScalePercent)
+                ? Math.Clamp(ToolbarScalePercent, 50, 150)
+                : defaults.ToolbarScalePercent,
             VideoRecordingCodec = Enum.IsDefined(VideoRecordingCodec)
                 ? VideoRecordingCodec
                 : defaults.VideoRecordingCodec,
@@ -485,6 +528,14 @@ public sealed record AppSettings
                 ? defaults.CompleteCaptureHotKey
                 : CompleteCaptureHotKey.Trim(),
             VideoRecordingHotKey = VideoRecordingHotKey?.Trim() ?? string.Empty,
+            // Keep an explicitly cleared shortcut disabled. New settings get
+            // the default from the property initializer; only a missing/null
+            // value from an older file falls back to the default.
+            EndVideoRecordingHotKey = migrateLegacyEndRecordingShortcut
+                ? defaults.EndVideoRecordingHotKey
+                : EndVideoRecordingHotKey is null
+                    ? defaults.EndVideoRecordingHotKey
+                    : EndVideoRecordingHotKey.Trim(),
             ScrollCaptureHotKey = ScrollCaptureHotKey?.Trim() ?? string.Empty,
             OcrHotKey = OcrHotKey?.Trim() ?? string.Empty,
             TextTranslationHotKey = TextTranslationHotKey?.Trim() ?? string.Empty,

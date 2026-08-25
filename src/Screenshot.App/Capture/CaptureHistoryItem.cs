@@ -1,4 +1,5 @@
 using System.IO;
+using System.ComponentModel;
 using System.Windows.Media.Imaging;
 
 namespace Screenshot.App.Capture;
@@ -10,7 +11,7 @@ namespace Screenshot.App.Capture;
 /// full-resolution bitmap per entry kept hundreds of megabytes resident in
 /// an application that is meant to idle in the tray.
 /// </summary>
-public sealed class CaptureHistoryItem
+public sealed class CaptureHistoryItem : INotifyPropertyChanged
 {
     private readonly object _imageSync = new();
     private BitmapSource? _pendingImage;
@@ -55,6 +56,34 @@ public sealed class CaptureHistoryItem
 
     public int PixelHeight { get; }
 
+    public string FormatText =>
+        Path.GetExtension(ImagePath ?? ".png").TrimStart('.').ToUpperInvariant();
+
+    public string FileSizeText
+    {
+        get
+        {
+            var path = ImagePath;
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return "内存缓存";
+            }
+
+            try
+            {
+                return FormatFileSize(new FileInfo(path).Length);
+            }
+            catch (IOException)
+            {
+                return "内存缓存";
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return "内存缓存";
+            }
+        }
+    }
+
     public bool IsCopied { get; private set; }
 
     public string? SavedPath { get; private set; }
@@ -97,6 +126,8 @@ public sealed class CaptureHistoryItem
 
             _imagePath = imagePath;
             _pendingImage = null;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ImagePath)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(FileSizeText)));
             return true;
         }
     }
@@ -114,6 +145,23 @@ public sealed class CaptureHistoryItem
             _imagePath = null;
             return path;
         }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private static string FormatFileSize(long bytes)
+    {
+        var size = Math.Max(0, bytes);
+        var unit = 0;
+        var display = (double)size;
+        string[] units = ["B", "KB", "MB", "GB"];
+        while (display >= 1024 && unit < units.Length - 1)
+        {
+            display /= 1024;
+            unit++;
+        }
+
+        return $"{display:0.##} {units[unit]}";
     }
 
     public CapturedImage CreateCapturedImage()

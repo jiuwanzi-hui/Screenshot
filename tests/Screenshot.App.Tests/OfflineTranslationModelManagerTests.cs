@@ -17,6 +17,28 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public async Task UsesOfficialFallbackEndpointWhenThePrimaryRegistryIsUnavailable()
+    {
+        var handler = new MozillaRegistryFallbackHandler();
+        using var client = new HttpClient(handler);
+        using var catalog = new MozillaOfflineTranslationCatalogService(client);
+
+        var result = await catalog.CreatePlanAsync("en", "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.NotNull(result.Plan);
+        Assert.Equal(
+            "https://moz-fx-translations-data--303e-prod-translations-data.storage.googleapis.com/",
+            result.Plan!.BaseUrl);
+        Assert.Equal(
+            "storage.googleapis.com",
+            handler.RequestHosts[0]);
+        Assert.Contains(
+            "moz-fx-translations-data--303e-prod-translations-data.storage.googleapis.com",
+            handler.RequestHosts);
+    }
+
+    [Fact]
     public async Task DownloadsValidatesAndInstallsPackTransactionally()
     {
         var firstContent = Encoding.UTF8.GetBytes("first offline model");
@@ -260,7 +282,7 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
 
         Assert.Equal(TranslationMode.Automatic, settings.TranslationMode);
         Assert.True(settings.SendTextToOnlineTranslation);
-        Assert.Equal(13, settings.SettingsVersion);
+        Assert.Equal(15, settings.SettingsVersion);
         Assert.Equal(
             [TranslationProviderKind.Online, TranslationProviderKind.Offline],
             settings.TranslationProviderPriority);
@@ -552,6 +574,77 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
             {
                 Content = new ByteArrayContent(content),
             });
+        }
+    }
+
+    private sealed class MozillaRegistryFallbackHandler : HttpMessageHandler
+    {
+        private const string VirtualStorageHost =
+            "moz-fx-translations-data--303e-prod-translations-data.storage.googleapis.com";
+
+        public List<string> RequestHosts { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            var uri = request.RequestUri!;
+            RequestHosts.Add(uri.Host);
+            if (string.Equals(
+                    uri.Host,
+                    "storage.googleapis.com",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new HttpRequestException("模拟主地址 TLS 握手失败。");
+            }
+
+            if (request.Method == HttpMethod.Get &&
+                string.Equals(uri.Host, VirtualStorageHost,
+                    StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(uri.AbsolutePath, "/db/models.json",
+                    StringComparison.Ordinal))
+            {
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""
+                    {
+                      "baseUrl":"https://storage.googleapis.com/moz-fx-translations-data--303e-prod-translations-data",
+                      "models": {
+                        "en-zh": [
+                          {
+                            "architecture":"base",
+                            "files": {
+                              "model": {
+                                "path":"models/en-zh/model.gz",
+                                "uncompressedSize":1,
+                                "uncompressedHash":"00"
+                              },
+                              "vocab": {
+                                "path":"models/en-zh/vocab.gz",
+                                "uncompressedSize":1
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                    """),
+                });
+            }
+
+            if (request.Method == HttpMethod.Head &&
+                string.Equals(uri.Host, VirtualStorageHost,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                var response = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent([]),
+                };
+                response.Content.Headers.ContentLength = 1;
+                return Task.FromResult(response);
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
         }
     }
 

@@ -44,6 +44,9 @@ public sealed class ImageEditorCanvas : Canvas
     private bool _isEditingAnnotation;
     private WpfPoint _annotationEditStartPoint;
     private EditorAnnotation? _annotationEditOriginal;
+    private WpfPoint _latestPointerPoint;
+    private bool _hasPendingPointerUpdate;
+    private bool _isPointerRenderingSubscribed;
     private double _baseDisplayWidth;
     private double _baseDisplayHeight;
     private double _zoom = 1;
@@ -635,6 +638,7 @@ public sealed class ImageEditorCanvas : Canvas
         if (_isDrawing)
         {
             _isDrawing = false;
+            StopPointerRendering();
             ReleaseMouseCapture();
             _brushPoints = null;
 
@@ -673,6 +677,7 @@ public sealed class ImageEditorCanvas : Canvas
         _activeAnnotationHandle = -1;
         _isEditingAnnotation = false;
         _annotationEditOriginal = null;
+        StopPointerRendering();
         _baseDisplayWidth = 0;
         _baseDisplayHeight = 0;
         _zoom = 1;
@@ -767,9 +772,12 @@ public sealed class ImageEditorCanvas : Canvas
 
         if (_selectedTool == EditorTool.Number)
         {
+            var numberSize = Math.Max(24, _strokeWidth * 9);
             _document.Add(new NumberAnnotation(
-                point,
-                Math.Max(24, _strokeWidth * 9),
+                new WpfPoint(
+                    point.X - (numberSize / 2),
+                    point.Y - (numberSize / 2)),
+                numberSize,
                 _selectedColor));
             RebuildCanvas();
             RaiseHistoryChanged();
@@ -805,12 +813,75 @@ public sealed class ImageEditorCanvas : Canvas
     {
         base.OnMouseMove(e);
         var point = ClampPoint(e.GetPosition(this));
-        UpdateInteractionCursor(point);
 
         if (_isEditingAnnotation)
         {
-            UpdateAnnotationEdit(point);
+            UpdateInteractionCursor(point);
+            QueuePointerUpdate(point);
             e.Handled = true;
+            return;
+        }
+
+        if (!_isDrawing || _drawingPreview is null)
+        {
+            UpdateInteractionCursor(point);
+            return;
+        }
+
+        QueuePointerUpdate(point);
+    }
+
+    private void QueuePointerUpdate(WpfPoint point)
+    {
+        _latestPointerPoint = point;
+        _hasPendingPointerUpdate = true;
+        if (_isPointerRenderingSubscribed)
+        {
+            return;
+        }
+
+        _isPointerRenderingSubscribed = true;
+        CompositionTarget.Rendering += OnPointerRendering;
+    }
+
+    private void OnPointerRendering(object? sender, EventArgs e)
+    {
+        if (!_hasPendingPointerUpdate ||
+            (!_isDrawing && !_isEditingAnnotation))
+        {
+            StopPointerRendering();
+            return;
+        }
+
+        _hasPendingPointerUpdate = false;
+        ApplyPointerUpdate(_latestPointerPoint);
+    }
+
+    private void FlushPointerUpdate(WpfPoint point)
+    {
+        _latestPointerPoint = point;
+        _hasPendingPointerUpdate = false;
+        ApplyPointerUpdate(point);
+        StopPointerRendering();
+    }
+
+    private void StopPointerRendering()
+    {
+        _hasPendingPointerUpdate = false;
+        if (!_isPointerRenderingSubscribed)
+        {
+            return;
+        }
+
+        CompositionTarget.Rendering -= OnPointerRendering;
+        _isPointerRenderingSubscribed = false;
+    }
+
+    private void ApplyPointerUpdate(WpfPoint point)
+    {
+        if (_isEditingAnnotation)
+        {
+            UpdateAnnotationEdit(point);
             return;
         }
 
@@ -858,7 +929,7 @@ public sealed class ImageEditorCanvas : Canvas
         if (_isEditingAnnotation)
         {
             var point = ClampPoint(e.GetPosition(this));
-            UpdateAnnotationEdit(point);
+            FlushPointerUpdate(point);
             CommitAnnotationEdit();
             UpdateInteractionCursor(point);
             e.Handled = true;
@@ -870,9 +941,10 @@ public sealed class ImageEditorCanvas : Canvas
             return;
         }
 
+        var endPoint = ClampPoint(e.GetPosition(this));
+        FlushPointerUpdate(endPoint);
         _isDrawing = false;
         ReleaseMouseCapture();
-        var endPoint = ClampPoint(e.GetPosition(this));
 
         if (_drawingPreview is not null)
         {
@@ -1064,6 +1136,7 @@ public sealed class ImageEditorCanvas : Canvas
         _isEditingAnnotation = false;
         _activeAnnotationHandle = -1;
         _annotationEditOriginal = null;
+        StopPointerRendering();
 
         if (index >= 0 && original is not null && current is not null &&
             !Equals(original, current))
@@ -1098,6 +1171,7 @@ public sealed class ImageEditorCanvas : Canvas
         _isEditingAnnotation = false;
         _activeAnnotationHandle = -1;
         _annotationEditOriginal = null;
+        StopPointerRendering();
         RebuildCanvas();
     }
 

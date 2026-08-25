@@ -523,6 +523,7 @@ public sealed class ImmediateSettingsTests : IDisposable
                 CaptureToolbarFeature.Translation,
             ],
             CaptureToolbarRows = CaptureToolbarRowCount.Two,
+            ToolbarScalePercent = 125,
         });
 
         Assert.True(Assert.Single(
@@ -538,6 +539,7 @@ public sealed class ImmediateSettingsTests : IDisposable
             CaptureToolbarFeature.Text,
             viewModel.CaptureToolbarFeatureItems[0].Feature);
         Assert.Equal(CaptureToolbarRowCount.Two, viewModel.CaptureToolbarRows);
+        Assert.Equal(125, viewModel.ToolbarScalePercent);
 
         Assert.True(viewModel.MoveCaptureToolbarFeature(
             CaptureToolbarFeature.Shape,
@@ -563,6 +565,38 @@ public sealed class ImmediateSettingsTests : IDisposable
         Assert.Equal(
             CaptureToolbarRowCount.Two,
             viewModel.CreateSettings().CaptureToolbarRows);
+        Assert.Equal(125, viewModel.CreateSettings().ToolbarScalePercent);
+    }
+
+    [Fact]
+    public void CaptureToolbarSettingsPreviewsScaleImmediately()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var viewModel = new SettingsViewModel(CreateSettings() with
+            {
+                ToolbarScalePercent = 100,
+            });
+            var editor = new CaptureToolbarLayoutEditor
+            {
+                DataContext = viewModel,
+            };
+            var layout = Assert.IsType<System.Windows.Controls.StackPanel>(
+                editor.FindName("EditorRowsHost"));
+            var preview = Assert.IsType<System.Windows.Controls.StackPanel>(
+                editor.FindName("PreviewRowsHost"));
+
+            viewModel.ToolbarScalePercent = 65;
+
+            var layoutScale = Assert.IsType<System.Windows.Media.ScaleTransform>(
+                layout.LayoutTransform);
+            var previewScale = Assert.IsType<System.Windows.Media.ScaleTransform>(
+                preview.LayoutTransform);
+            Assert.Equal(0.65, layoutScale.ScaleX);
+            Assert.Equal(0.65, layoutScale.ScaleY);
+            Assert.Equal(0.65, previewScale.ScaleX);
+            Assert.Equal(0.65, previewScale.ScaleY);
+        });
     }
 
     [Fact]

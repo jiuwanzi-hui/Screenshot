@@ -29,6 +29,12 @@ internal sealed class ResumableModelDownloader
         TimeSpan.FromMilliseconds(250);
     private readonly HttpClient _httpClient;
 
+    private sealed class ModelHashMismatchException(string downloadUrl)
+        : IOException("下载文件的完整性校验失败。")
+    {
+        public string DownloadUrl { get; } = downloadUrl;
+    }
+
     public ResumableModelDownloader(HttpClient httpClient)
     {
         _httpClient = httpClient ??
@@ -66,25 +72,30 @@ internal sealed class ResumableModelDownloader
             var partialPath = destinationPath + ".part";
             Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
             Exception? lastError = null;
+            var rejectedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (var attempt = 1; attempt <= MaximumAttempts; attempt++)
             {
                 try
                 {
-                    await DownloadOneAsync(
+                    var source = await DownloadOneAsync(
                         file,
                         partialPath,
                         completedBytes,
                         totalBytes,
                         progress,
+                        attempt - 1,
                         cancellationToken);
+                    progress?.Report(new ModelDownloadProgress(
+                        completedBytes + file.Size,
+                        totalBytes,
+                        $"{file.DisplayName}（正在校验）"));
                     if (!await HasExpectedHashAsync(
                             partialPath,
                             file.Sha256,
                             cancellationToken))
                     {
                         File.Delete(partialPath);
-                        throw new InvalidDataException(
-                            $"{file.DisplayName} 校验失败，已丢弃损坏文件。");
+                        throw new ModelHashMismatchException(source);
                     }
 
                     File.Move(partialPath, destinationPath, overwrite: true);
@@ -103,6 +114,14 @@ internal sealed class ResumableModelDownloader
                         OperationCanceledException)
                 {
                     lastError = exception;
+                    if (exception is ModelHashMismatchException hashMismatch)
+                    {
+                        rejectedSources.Add(hashMismatch.DownloadUrl);
+                        if (rejectedSources.Count >= file.DownloadUrls.Count)
+                        {
+                            break;
+                        }
+                    }
                     if (attempt < MaximumAttempts)
                     {
                         await Task.Delay(
@@ -115,6 +134,14 @@ internal sealed class ResumableModelDownloader
 
             if (lastError is not null)
             {
+                if (lastError is ModelHashMismatchException &&
+                    rejectedSources.Count > 0)
+                {
+                    throw new IOException(
+                        $"{file.DisplayName} 已从 {rejectedSources.Count} 个下载源完成传输，" +
+                        "但完整性校验均未通过。请稍后重试，或检查网络代理、下载加速器是否篡改了文件。",
+                        lastError);
+                }
                 throw new IOException(
                     $"{file.DisplayName} 下载失败：{GetUsefulErrorMessage(lastError)}" +
                     "。已保留断点文件供下次继续。",
@@ -123,12 +150,13 @@ internal sealed class ResumableModelDownloader
         }
     }
 
-    private async Task DownloadOneAsync(
+    private async Task<string> DownloadOneAsync(
         DownloadableModelFile file,
         string partialPath,
         long completedBytes,
         long totalBytes,
         IProgress<ModelDownloadProgress>? progress,
+        int sourceOffset,
         CancellationToken cancellationToken)
     {
         var existingLength = File.Exists(partialPath)
@@ -146,7 +174,7 @@ internal sealed class ResumableModelDownloader
                 completedBytes + file.Size,
                 totalBytes,
                 file.DisplayName));
-            return;
+            return partialPath;
         }
 
         if (existingLength > 0)
@@ -158,8 +186,10 @@ internal sealed class ResumableModelDownloader
         }
 
         Exception? lastError = null;
-        foreach (var downloadUrl in file.DownloadUrls)
+        for (var sourceIndex = 0; sourceIndex < file.DownloadUrls.Count; sourceIndex++)
         {
+            var downloadUrl = file.DownloadUrls[
+                (sourceOffset + sourceIndex) % file.DownloadUrls.Count];
             try
             {
                 using var request = new HttpRequestMessage(
@@ -189,8 +219,14 @@ internal sealed class ResumableModelDownloader
                 }
                 var append = existingLength > 0 &&
                              response.StatusCode == HttpStatusCode.PartialContent;
-                if (append && response.Content.Headers.ContentRange?.From !=
-                    existingLength)
+                var contentRange = response.Content.Headers.ContentRange;
+                if (contentRange?.Length is { } totalLength &&
+                    totalLength != file.Size)
+                {
+                    throw new IOException(
+                        $"{file.DisplayName} 的服务器返回了错误的文件大小。");
+                }
+                if (append && contentRange?.From != existingLength)
                 {
                     throw new IOException(
                         $"{file.DisplayName} 的服务器续传起点不正确。");
@@ -198,6 +234,13 @@ internal sealed class ResumableModelDownloader
                 if (!append)
                 {
                     existingLength = 0;
+                }
+                var expectedContentLength = file.Size - existingLength;
+                if (response.Content.Headers.ContentLength is { } contentLength &&
+                    contentLength != expectedContentLength)
+                {
+                    throw new IOException(
+                        $"{file.DisplayName} 的服务器返回了不完整的文件内容。");
                 }
 
                 await using var source = await response.Content
@@ -257,7 +300,7 @@ internal sealed class ResumableModelDownloader
                         $"{file.DisplayName} 文件大小不完整。");
                 }
 
-                return;
+                return downloadUrl;
             }
             catch (Exception exception) when (
                 exception is HttpRequestException or IOException or
@@ -267,6 +310,23 @@ internal sealed class ResumableModelDownloader
                 if (cancellationToken.IsCancellationRequested)
                 {
                     throw;
+                }
+
+                // A network failure may happen after part of the response was
+                // already committed to disk. Continue the next mirror from the
+                // file's actual length, rather than appending that range twice.
+                existingLength = File.Exists(partialPath)
+                    ? new FileInfo(partialPath).Length
+                    : 0;
+                if (existingLength > file.Size)
+                {
+                    throw new IOException(
+                        $"{file.DisplayName} 的断点文件大小异常，已停止自动重试。",
+                        exception);
+                }
+                if (existingLength == file.Size)
+                {
+                    return downloadUrl;
                 }
             }
         }

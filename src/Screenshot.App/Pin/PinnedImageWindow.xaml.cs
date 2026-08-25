@@ -361,6 +361,45 @@ public partial class PinnedImageWindow : Window
         }
     }
 
+    private async Task CopyTableFromToolbarAsync()
+    {
+        HeaderStatusText.Text = "正在识别表格…";
+        var image = CapturedImage.FromBitmapSource(
+            _isEditorMode ? InlineEditorCanvas.RenderEditedImage() : _capturedImage.Preview);
+        using (image)
+        {
+            var recognition = await RecognizeImageAsync(image);
+            var table = TableRecognitionService.BuildTsv(
+                recognition,
+                image.Bitmap,
+                await TableSupplementaryOcrService.RecognizeAsync(
+                    image,
+                    recognition.Words));
+            if (!table.IsSuccess)
+            {
+                HeaderStatusText.Text = table.ErrorMessage ?? "未识别到表格";
+                return;
+            }
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(table.ClipboardHtml))
+                {
+                    await ClipboardTextService.SetHtmlAsync(table.ClipboardHtml, table.Content);
+                }
+                else
+                {
+                    await ClipboardTextService.SetTextAsync(table.Content);
+                }
+                HeaderStatusText.Text = "钉图 · 表格已复制";
+            }
+            catch (COMException)
+            {
+                HeaderStatusText.Text = "钉图 · 剪贴板正忙";
+            }
+        }
+    }
+
     private async Task TranslateFromToolbarAsync()
     {
         if (InlineEditorCanvas.HasTranslationOverlay)
@@ -1263,6 +1302,8 @@ public partial class PinnedImageWindow : Window
         toolbar.SaveRequested += (_, _) => SaveCurrentImage();
         toolbar.OcrRequested += async (_, _) =>
             await ShowRecognizedTextFromToolbarAsync();
+        toolbar.CopyTableRequested += async (_, _) =>
+            await CopyTableFromToolbarAsync();
         toolbar.CopyTextRequested += async (_, _) =>
             await CopyRecognizedTextFromToolbarAsync();
         toolbar.TranslateRequested += async (_, _) =>

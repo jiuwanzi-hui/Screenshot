@@ -34,6 +34,8 @@ internal readonly record struct RegionVideoAudioConfiguration(
 
 internal sealed class RegionVideoRecorder : IDisposable
 {
+    private static readonly object WarmUpSync = new();
+    private static Task? _warmUpTask;
     private readonly object _sync = new();
     private readonly string _outputPath;
     private readonly Recorder _recorder;
@@ -137,6 +139,79 @@ internal sealed class RegionVideoRecorder : IDisposable
         catch
         {
             return [];
+        }
+    }
+
+    /// <summary>
+    /// Loads the native capture/encoder stack while the application is idle.
+    /// Creating a recorder performs no capture and does not open a camera, but
+    /// it avoids making the first user-triggered recording pay the driver and
+    /// encoder initialization cost on the visible workflow.
+    /// </summary>
+    internal static Task WarmUpAsync(
+        VideoRecordingCodec codec,
+        int frameRate,
+        bool recordSystemAudio,
+        bool recordMicrophone,
+        string? microphoneDeviceId)
+    {
+        lock (WarmUpSync)
+        {
+            return _warmUpTask ??= Task.Factory.StartNew(
+                () => WarmUpCore(
+                    codec,
+                    frameRate,
+                    recordSystemAudio,
+                    recordMicrophone,
+                    microphoneDeviceId),
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
+        }
+    }
+
+    private static void WarmUpCore(
+        VideoRecordingCodec codec,
+        int frameRate,
+        bool recordSystemAudio,
+        bool recordMicrophone,
+        string? microphoneDeviceId)
+    {
+        try
+        {
+            // Device enumeration itself loads the audio component without
+            // touching an input stream.
+            _ = GetAudioInputDevices();
+
+            var screen = WinForms.Screen.AllScreens.FirstOrDefault();
+            if (screen is null || screen.Bounds.Width < 2 || screen.Bounds.Height < 2)
+            {
+                return;
+            }
+
+            var warmUpDirectory = Path.Combine(
+                Path.GetTempPath(),
+                "SnapCut",
+                "RecorderWarmup");
+            var region = new ScreenRegion(
+                screen.Bounds.X,
+                screen.Bounds.Y,
+                2,
+                2);
+            using var recorder = new RegionVideoRecorder(
+                region,
+                warmUpDirectory,
+                recordSystemAudio,
+                recordMicrophone,
+                codec,
+                frameRate,
+                microphoneDeviceId);
+        }
+        catch
+        {
+            // Pre-warming is opportunistic. A driver may only initialize after
+            // an interactive desktop is available; recording will still show
+            // its normal actionable error if it cannot start later.
         }
     }
 

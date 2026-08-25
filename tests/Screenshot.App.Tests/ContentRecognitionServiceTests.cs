@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Text.RegularExpressions;
 using Screenshot.App.Core;
 using Screenshot.App.Capture;
 using Screenshot.App.Editor;
@@ -223,6 +224,372 @@ public sealed class ContentRecognitionServiceTests
 
         Assert.False(result.IsSuccess);
         Assert.Contains("双栏", result.ErrorMessage);
+    }
+
+    [Fact]
+    public void GridTablePreservesBlankCellsMergedCellsAndBackgroundColors()
+    {
+        using var image = new Bitmap(301, 151);
+        using (var graphics = Graphics.FromImage(image))
+        {
+            graphics.Clear(Color.White);
+            using var headerBrush = new SolidBrush(Color.FromArgb(0, 120, 200));
+            using var statusBrush = new SolidBrush(Color.Yellow);
+            using var gridPen = new Pen(Color.FromArgb(180, 190, 198));
+            graphics.FillRectangle(headerBrush, 5, 5, 290, 40);
+            graphics.FillRectangle(statusBrush, 185, 45, 60, 40);
+            graphics.DrawRectangle(gridPen, 5, 5, 290, 140);
+            graphics.DrawLine(gridPen, 5, 45, 295, 45);
+            graphics.DrawLine(gridPen, 65, 85, 295, 85);
+            graphics.DrawLine(gridPen, 65, 5, 65, 145);
+            graphics.DrawLine(gridPen, 125, 5, 125, 45);
+            graphics.DrawLine(gridPen, 125, 85, 125, 145);
+            graphics.DrawLine(gridPen, 185, 5, 185, 145);
+            graphics.DrawLine(gridPen, 245, 5, 245, 145);
+        }
+
+        var ocr = new OcrRecognitionResult(true, string.Empty, null)
+        {
+            Words =
+            [
+                new OcrWordRegion("项目", 15, 15, 30, 18),
+                new OcrWordRegion("计划", 78, 15, 30, 18),
+                new OcrWordRegion("状态", 198, 15, 30, 18),
+                new OcrWordRegion("场地", 15, 55, 30, 18),
+                new OcrWordRegion("合并内容", 78, 55, 72, 18),
+                new OcrWordRegion("进行中", 194, 55, 42, 18),
+                new OcrWordRegion("空白右侧", 252, 95, 36, 18),
+            ],
+        };
+
+        var result = TableRecognitionService.BuildTsv(ocr, image);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Contains("colspan=\"2\"", result.ClipboardHtml);
+        Assert.Contains("rowspan=\"2\"", result.ClipboardHtml);
+        Assert.Contains("background-color:#0078C8", result.ClipboardHtml);
+        Assert.Contains("background-color:#FFFF00", result.ClipboardHtml);
+        Assert.Contains("<td", result.ClipboardHtml);
+    }
+
+    [Fact]
+    public void GridTableIgnoresDistributedTextStrokesAndKeepsPartialBorders()
+    {
+        using var image = new Bitmap(401, 241);
+        using (var graphics = Graphics.FromImage(image))
+        {
+            graphics.Clear(Color.White);
+            using var gridPen = new Pen(Color.FromArgb(180, 190, 198));
+            using var textStrokePen = new Pen(Color.FromArgb(20, 30, 40));
+            foreach (var y in new[] { 5, 55, 175, 235 })
+            {
+                graphics.DrawLine(gridPen, 5, y, 395, y);
+            }
+            graphics.DrawLine(gridPen, 55, 115, 395, 115);
+            foreach (var x in new[] { 5, 55, 105, 235, 395 })
+            {
+                graphics.DrawLine(gridPen, x, 5, x, 235);
+            }
+            graphics.DrawLine(gridPen, 155, 5, 155, 55);
+            graphics.DrawLine(gridPen, 155, 175, 155, 235);
+            graphics.DrawLine(gridPen, 315, 5, 315, 115);
+            graphics.DrawLine(gridPen, 315, 175, 315, 235);
+
+            // Many aligned short strokes have a high total edge count but are
+            // not a table border because no individual stroke is continuous.
+            for (var x = 12; x < 390; x += 18)
+            {
+                graphics.DrawLine(textStrokePen, x, 85, x + 7, 85);
+            }
+        }
+
+        var ocr = new OcrRecognitionResult(true, string.Empty, null)
+        {
+            Words =
+            [
+                new OcrWordRegion("项目", 12, 16, 28, 18),
+                new OcrWordRegion("开始", 65, 16, 28, 18),
+                new OcrWordRegion("计划", 170, 16, 28, 18),
+                new OcrWordRegion("场地", 12, 72, 28, 18),
+                new OcrWordRegion("阶段一", 120, 72, 42, 18),
+                new OcrWordRegion("横向说明文字", 12, 72, 376, 18),
+                new OcrWordRegion("阶段二", 250, 132, 42, 18),
+                new OcrWordRegion("设备", 12, 192, 28, 18),
+            ],
+        };
+
+        var result = TableRecognitionService.BuildTsv(ocr, image);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(4, Regex.Matches(result.ClipboardHtml!, "<tr\\b").Count);
+        Assert.Contains("rowspan=\"2\"", result.ClipboardHtml);
+        Assert.Contains("colspan=", result.ClipboardHtml);
+    }
+
+    [Fact]
+    public void GridTableRestoresFirstRowAndColumnAtCaptureBoundary()
+    {
+        using var image = new Bitmap(301, 161);
+        using (var graphics = Graphics.FromImage(image))
+        {
+            graphics.Clear(Color.White);
+            using var gridPen = new Pen(Color.FromArgb(180, 190, 198));
+            foreach (var x in new[] { 60, 120, 180, 240, 299 })
+            {
+                graphics.DrawLine(gridPen, x, 0, x, 159);
+            }
+            foreach (var y in new[] { 40, 80, 120, 159 })
+            {
+                graphics.DrawLine(gridPen, 0, y, 299, y);
+            }
+        }
+
+        var ocr = new OcrRecognitionResult(true, string.Empty, null)
+        {
+            Words =
+            [
+                new OcrWordRegion("项目", 12, 10, 30, 18),
+                new OcrWordRegion("开始时间", 68, 10, 44, 18),
+                new OcrWordRegion("场地", 12, 50, 30, 18),
+                new OcrWordRegion("7月28日", 68, 50, 44, 18),
+                new OcrWordRegion("设备", 12, 90, 30, 18),
+                new OcrWordRegion("7月29日", 68, 90, 44, 18),
+                new OcrWordRegion("人力", 12, 130, 30, 18),
+                new OcrWordRegion("8月26日", 68, 130, 44, 18),
+            ],
+        };
+
+        var result = TableRecognitionService.BuildTsv(ocr, image);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(4, Regex.Matches(result.ClipboardHtml!, "<tr\\b").Count);
+        Assert.Contains("项目", result.ClipboardHtml);
+        Assert.Contains("场地", result.ClipboardHtml);
+        Assert.StartsWith("项目\t开始时间", result.Content);
+    }
+
+    [Fact]
+    public void GridTableUsesSupplementaryWordsForVerticalNumbersAndDates()
+    {
+        using var image = new Bitmap(246, 186);
+        using (var graphics = Graphics.FromImage(image))
+        {
+            graphics.Clear(Color.White);
+            using var gridPen = new Pen(Color.FromArgb(180, 190, 198));
+            foreach (var x in new[] { 5, 65, 125, 185, 240 })
+            {
+                graphics.DrawLine(gridPen, x, 5, x, 180);
+            }
+            foreach (var y in new[] { 5, 65, 125, 180 })
+            {
+                graphics.DrawLine(gridPen, 5, y, 240, y);
+            }
+        }
+
+        var primary = new OcrRecognitionResult(true, string.Empty, null)
+        {
+            Words =
+            [
+                new OcrWordRegion("I9", 78, 15, 20, 42),
+                new OcrWordRegion("7", 18, 70, 12, 10),
+                new OcrWordRegion("月", 18, 82, 12, 10),
+                new OcrWordRegion("8", 18, 94, 12, 10),
+                new OcrWordRegion("2", 18, 106, 12, 10),
+                new OcrWordRegion("日", 18, 118, 12, 5),
+                new OcrWordRegion("%9", 142, 78, 22, 20),
+                new OcrWordRegion("项目", 12, 140, 30, 18),
+                new OcrWordRegion("2", 202, 16, 10, 14),
+                new OcrWordRegion("3", 202, 38, 10, 14),
+            ],
+        };
+        OcrWordRegion[] supplementary =
+        [
+            new("51", 82, 10, 20, 50),
+            new("28", 18, 88, 12, 24),
+            new("5", 142, 78, 12, 18),
+            new("2531", 188, 8, 48, 52),
+        ];
+
+        var result = TableRecognitionService.BuildTsv(
+            primary,
+            image,
+            supplementary);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Contains("5<br>1", result.ClipboardHtml);
+        Assert.Contains("2<br>3", result.ClipboardHtml);
+        Assert.DoesNotContain("2<br>5<br>3<br>1", result.ClipboardHtml);
+        Assert.Contains("7月28日", result.ClipboardHtml);
+        Assert.Contains("5%", result.ClipboardHtml);
+    }
+
+    [Fact]
+    public void GridTableKeepsNarrowVerticalTextTogetherWhenCopied()
+    {
+        using var image = new Bitmap(181, 241);
+        using (var graphics = Graphics.FromImage(image))
+        {
+            graphics.Clear(Color.White);
+            using var gridPen = new Pen(Color.FromArgb(180, 190, 198));
+            foreach (var x in new[] { 5, 45, 105, 175 })
+            {
+                graphics.DrawLine(gridPen, x, 5, x, 235);
+            }
+            foreach (var y in new[] { 5, 55, 175, 235 })
+            {
+                graphics.DrawLine(gridPen, 5, y, 175, y);
+            }
+        }
+
+        var primary = new OcrRecognitionResult(true, string.Empty, null)
+        {
+            Words =
+            [
+                new OcrWordRegion("项目", 10, 18, 28, 18),
+                new OcrWordRegion("日期", 60, 18, 28, 18),
+                new OcrWordRegion("状态", 120, 18, 28, 18),
+                new OcrWordRegion("开", 18, 68, 14, 16),
+                new OcrWordRegion("始", 18, 88, 14, 16),
+                new OcrWordRegion("时", 18, 108, 14, 16),
+                new OcrWordRegion("间", 18, 128, 14, 16),
+                new OcrWordRegion("7", 68, 68, 10, 16),
+                new OcrWordRegion("月", 68, 88, 14, 16),
+                new OcrWordRegion("28", 64, 108, 22, 16),
+                new OcrWordRegion("日", 68, 128, 14, 16),
+                new OcrWordRegion("On-", 120, 68, 28, 16),
+                new OcrWordRegion("go", 120, 88, 22, 16),
+                new OcrWordRegion("in", 120, 108, 18, 16),
+                new OcrWordRegion("g", 120, 128, 10, 16),
+                new OcrWordRegion("场地", 10, 196, 28, 18),
+                new OcrWordRegion("12月5日", 58, 196, 42, 18),
+                new OcrWordRegion("完成", 120, 196, 28, 18),
+            ],
+        };
+
+        var result = TableRecognitionService.BuildTsv(primary, image);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Contains(">开始时间</td>", result.ClipboardHtml);
+        Assert.Contains(">7月28日</td>", result.ClipboardHtml);
+        Assert.Contains(">On-going</td>", result.ClipboardHtml);
+        Assert.DoesNotContain("开<br>始", result.ClipboardHtml);
+        Assert.Contains("white-space:nowrap", result.ClipboardHtml);
+    }
+
+    [Fact]
+    public void GridTableDoesNotTreatHeaderTextEdgeAsASeparator()
+    {
+        using var image = new Bitmap(186, 111);
+        using (var graphics = Graphics.FromImage(image))
+        {
+            graphics.Clear(Color.White);
+            using var gridPen = new Pen(Color.FromArgb(180, 190, 198));
+            using var textPen = new Pen(Color.FromArgb(20, 30, 40));
+            graphics.DrawRectangle(gridPen, 5, 5, 175, 100);
+            graphics.DrawLine(gridPen, 5, 55, 180, 55);
+            graphics.DrawLine(gridPen, 65, 55, 65, 105);
+            graphics.DrawLine(gridPen, 125, 55, 125, 105);
+            graphics.DrawLine(textPen, 125, 15, 125, 45);
+        }
+
+        var ocr = new OcrRecognitionResult(true, string.Empty, null)
+        {
+            Words =
+            [
+                new OcrWordRegion("8月9月", 88, 14, 38, 32),
+                new OcrWordRegion("1", 28, 70, 10, 16),
+                new OcrWordRegion("2", 88, 70, 10, 16),
+                new OcrWordRegion("3", 148, 70, 10, 16),
+            ],
+        };
+
+        var result = TableRecognitionService.BuildTsv(ocr, image);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Contains("colspan=\"3\"", result.ClipboardHtml);
+        Assert.DoesNotContain("8月9月</td><td", result.ClipboardHtml);
+    }
+
+    [Fact]
+    public void GridTableRecoversShortDetailSeparatorsInARegularTimeline()
+    {
+        using var image = new Bitmap(601, 901);
+        using (var graphics = Graphics.FromImage(image))
+        {
+            graphics.Clear(Color.White);
+            using var gridPen = new Pen(Color.FromArgb(180, 190, 198));
+            foreach (var y in new[] { 5, 65, 135, 300, 500, 895 })
+            {
+                graphics.DrawLine(gridPen, 5, y, 595, y);
+            }
+            foreach (var x in new[] { 5, 55, 105, 155, 205, 245, 415, 585, 595 })
+            {
+                graphics.DrawLine(gridPen, x, 5, x, 895);
+            }
+            foreach (var x in new[] { 279, 313, 347, 381, 483, 551 })
+            {
+                graphics.DrawLine(gridPen, x, 65, x, 300);
+            }
+
+            // These separators only exist in the shallow detail row. Their
+            // global edge score is intentionally too low for the first pass.
+            graphics.DrawLine(gridPen, 449, 65, 449, 135);
+            graphics.DrawLine(gridPen, 517, 65, 517, 135);
+        }
+
+        var lines = TableRecognitionService.FindGridLinePositions(image, []);
+
+        Assert.Contains(lines.Vertical, position => Math.Abs(position - 449) <= 2);
+        Assert.Contains(lines.Vertical, position => Math.Abs(position - 517) <= 2);
+    }
+
+    [Fact]
+    public void GridTableNormalizesTimelineNoiseAndPercentageColumn()
+    {
+        using var image = new Bitmap(211, 161);
+        using (var graphics = Graphics.FromImage(image))
+        {
+            graphics.Clear(Color.White);
+            using var gridPen = new Pen(Color.FromArgb(180, 190, 198));
+            graphics.DrawRectangle(gridPen, 5, 5, 200, 150);
+            foreach (var y in new[] { 55, 105 })
+            {
+                graphics.DrawLine(gridPen, 5, y, 205, y);
+            }
+            graphics.DrawLine(gridPen, 55, 5, 55, 155);
+            graphics.DrawLine(gridPen, 105, 55, 105, 155);
+            graphics.DrawLine(gridPen, 155, 55, 155, 155);
+        }
+
+        var primary = new OcrRecognitionResult(true, string.Empty, null)
+        {
+            Words =
+            [
+                new OcrWordRegion("完成比例", 12, 14, 32, 30),
+                new OcrWordRegion("8月9月", 92, 14, 48, 26),
+                new OcrWordRegion("てしヤ", 67, 67, 22, 28),
+                new OcrWordRegion("2", 122, 72, 10, 16),
+                new OcrWordRegion("3", 172, 72, 10, 16),
+                new OcrWordRegion("31", 18, 122, 18, 16),
+                new OcrWordRegion("任务", 82, 122, 30, 16),
+            ],
+        };
+        OcrWordRegion[] supplementary =
+        [
+            new("51", 68, 62, 20, 36),
+        ];
+
+        var result = TableRecognitionService.BuildTsv(
+            primary,
+            image,
+            supplementary);
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Contains("5<br>1", result.ClipboardHtml);
+        Assert.Contains("31%", result.ClipboardHtml);
+        Assert.DoesNotContain("て", result.ClipboardHtml);
+        Assert.DoesNotContain("し", result.ClipboardHtml);
+        Assert.DoesNotContain("ヤ", result.ClipboardHtml);
     }
 
     [Fact]
