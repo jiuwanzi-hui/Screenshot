@@ -1,5 +1,20 @@
 [
   {
+    "tag_name": "v3.7.0",
+    "name": "SnapCut 3.7.0",
+    "body": "- 改进截图、钉图和录屏工具栏的布局、图标缩放与交互状态，增强录屏摄像头预览、历史记录和快捷键配置的稳定性。\n- 翻译设置支持手动模型测试、模型列表刷新和多语言离线包备用地址；离线模型下载在连接中断后按实际断点续传，避免完成后从头重复下载。\n- 表格复制改为独立工具入口，改善合并单元格、背景表格、数字和日期的识别保留；启动设置新增最小化启动及主题化提示。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v3.7.0",
+    "published_at": "2026-08-25T20:00:00+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.0/SnapCut-Update.json" },
+      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.0/Screenshot-Update.json" },
+      { "name": "SnapCut-Setup-3.7.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.0/SnapCut-Setup-3.7.0-win-x64.exe" },
+      { "name": "SnapCut-Portable-3.7.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.0/SnapCut-Portable-3.7.0-win-x64.zip" }
+    ]
+  },
+  {
     "tag_name": "v3.6.1",
     "name": "SnapCut 3.6.1",
     "body": "- 修复 ToDesk 等远程控制环境中截图、钉图和录屏框选拖动掉帧、边框落后鼠标的问题。\n- 有真实显示输出时恢复 WPF GPU 合成，仅在合盖、无显示器或只有虚拟显示输出时保留软件渲染，继续避免白屏。\n- 优化拖动过程中的分辨率标签布局，减少每帧重复测量和界面线程开销。",
