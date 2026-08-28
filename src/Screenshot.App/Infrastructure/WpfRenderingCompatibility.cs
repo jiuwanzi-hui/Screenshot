@@ -25,9 +25,36 @@ internal static class WpfRenderingCompatibility
 
     public static void ConfigureForCurrentSession()
     {
-        RenderOptions.ProcessRenderMode = GetCompatibleRenderMode(
-            EnumerateDisplayAdapters(),
-            Environment.GetCommandLineArgs());
+        var arguments = Environment.GetCommandLineArgs();
+        if (arguments.Any(argument => string.Equals(
+                argument,
+                "--software-rendering",
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
+            return;
+        }
+
+        if (arguments.Any(argument => string.Equals(
+                argument,
+                "--hardware-rendering",
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            RenderOptions.ProcessRenderMode = RenderMode.Default;
+            return;
+        }
+
+        // RenderCapability is the authoritative result for the active WPF
+        // process. On hybrid laptops this also allows the Intel/AMD integrated
+        // adapter to provide the hardware render path when the dGPU is not the
+        // display adapter. Fall back to the adapter-name compatibility check
+        // only when WPF reports Tier 0.
+        RenderOptions.ProcessRenderMode =
+            (RenderCapability.Tier >> 16) > 0
+                ? RenderMode.Default
+                : GetCompatibleRenderMode(
+                    EnumerateDisplayAdapters(),
+                    arguments);
     }
 
     internal static RenderMode GetCompatibleRenderMode(

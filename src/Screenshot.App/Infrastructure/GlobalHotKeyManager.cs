@@ -141,7 +141,10 @@ public sealed class GlobalHotKeyManager : IDisposable
         TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan ContextMenuCaptureWindow = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan ContextMenuCaptureDelay =
-        TimeSpan.FromMilliseconds(80);
+        // One compositor frame is enough for a popup that was already
+        // detected. A long fixed delay makes the menu visibly disappear
+        // before the overlay opens on slower desktop capture paths.
+        TimeSpan.FromMilliseconds(16);
     private static readonly TimeSpan ContextMenuCapturePollInterval =
         TimeSpan.FromMilliseconds(40);
     private static readonly TimeSpan ContextMenuCaptureWait =
@@ -168,6 +171,9 @@ public sealed class GlobalHotKeyManager : IDisposable
     private readonly Dictionary<uint, PendingModifierProbe> _modifierProbeHolds = [];
     private readonly List<RecentMouseEvent> _recentMouseEvents = [];
     private readonly HashSet<uint> _suppressedMouseButtonsUntilUp = [];
+    private readonly HashSet<uint> _suppressedTransientMenuModifiers = [];
+    private readonly HashSet<uint> _suppressedTransientMenuKeys = [];
+    private readonly Dictionary<HotKeyAction, long> _earlyKeyboardHotKeys = [];
     private readonly HashSet<uint> _sideButtonsToReplayUntilUp = [];
     private readonly HashSet<uint> _primaryButtonsToReplayUntilUp = [];
     private readonly HashSet<uint> _primaryButtonsPassedThroughForHold = [];
@@ -289,6 +295,9 @@ public sealed class GlobalHotKeyManager : IDisposable
         _recentMouseEvents.Clear();
         HideModifierProbe();
         _primaryButtonsPassedThroughForHold.Clear();
+        _suppressedTransientMenuModifiers.Clear();
+        _suppressedTransientMenuKeys.Clear();
+        _earlyKeyboardHotKeys.Clear();
         _mouseHoldTimer.Stop();
     }
 
@@ -511,6 +520,9 @@ public sealed class GlobalHotKeyManager : IDisposable
         _primaryButtonsToReplayUntilUp.Clear();
         _primaryButtonsPassedThroughForHold.Clear();
         _suppressedMouseButtonsUntilUp.Clear();
+        _suppressedTransientMenuModifiers.Clear();
+        _suppressedTransientMenuKeys.Clear();
+        _earlyKeyboardHotKeys.Clear();
         foreach (var continuation in _capturePointerContinuations.Values)
         {
             continuation.NotifyReleased();
@@ -535,6 +547,24 @@ public sealed class GlobalHotKeyManager : IDisposable
         if (message == WindowMessageHotKey &&
             _registeredBindings.TryGetValue(wParam.ToInt32(), out var binding))
         {
+            // A transient shell menu can consume Alt (and, depending on the
+            // host, Ctrl/Shift) before RegisterHotKey posts WM_HOTKEY. In
+            // that case the low-level hook has already started this action;
+            // discard the later duplicate notification.
+            if (_earlyKeyboardHotKeys.TryGetValue(
+                    binding.Action,
+                    out var earlyTimestamp))
+            {
+                _earlyKeyboardHotKeys.Remove(binding.Action);
+                var elapsed = Stopwatch.GetTimestamp() - earlyTimestamp;
+                if (elapsed >= 0 &&
+                    elapsed <= Stopwatch.Frequency)
+                {
+                    handled = true;
+                    return IntPtr.Zero;
+                }
+            }
+
             var preCaptured = TakePreCapturedScreen(
                 binding.Action,
                 // The shell can dismiss a context menu while delivering the
@@ -592,6 +622,13 @@ public sealed class GlobalHotKeyManager : IDisposable
                 // shell menu receives the hotkey and dismisses itself.
                 TryPreCaptureTransientUi(keyboardData.VirtualKey);
 
+                if (TryHandleTransientMenuKeyboardInput(
+                        keyboardData.VirtualKey,
+                        GetCurrentModifiersIncluding(keyboardData.VirtualKey)))
+                {
+                    return new IntPtr(1);
+                }
+
                 if (!_isKeyboardCaptureActive &&
                     CaptureOverlayWindow.TryHandleGlobalCompletionKey(
                         keyboardData.VirtualKey,
@@ -599,6 +636,13 @@ public sealed class GlobalHotKeyManager : IDisposable
                 {
                     return new IntPtr(1);
                 }
+            }
+
+            if (!isKeyDown &&
+                TryReleaseTransientMenuKeyboardInput(
+                    keyboardData.VirtualKey))
+            {
+                return new IntPtr(1);
             }
 
             if ((isKeyDown || isKeyUp) &&
@@ -1027,24 +1071,12 @@ public sealed class GlobalHotKeyManager : IDisposable
         if (startedOnTransientMenu &&
             IsTransientUiCaptureAction(holdBinding.Action))
         {
-            // Capture before the target receives this button-down. A menu
-            // already under the cursor may be dismissed by the eventual
-            // button-up, so a later desktop capture is too late.
-            var generation = Interlocked.Increment(
-                ref _contextMenuCaptureGeneration);
-            var action = holdBinding.Action;
-            _ = Task.Run(() =>
-            {
-                var snapshot = CaptureTransientUiScreen();
-                if (generation != Volatile.Read(
-                        ref _contextMenuCaptureGeneration))
-                {
-                    snapshot?.Dispose();
-                    return;
-                }
-
-                StoreImmediatePreCapturedScreen(snapshot, [action]);
-            });
+            // Do not capture synchronously inside WH_MOUSE_LL. A full desktop
+            // GDI capture can block the hook long enough for shell/XAML menus
+            // to repaint or dismiss at button-down. The physical button is
+            // already suppressed below, so the popup remains in place while
+            // this best-effort frame is captured off the hook thread.
+            QueueTransientMenuHoldSnapshot(holdBinding.Action);
             WriteInputDiagnostic(
                 $"mouse-menu-pre-capture action={holdBinding.Action} " +
                 $"point={point.X},{point.Y}");
@@ -1061,15 +1093,19 @@ public sealed class GlobalHotKeyManager : IDisposable
 
         if ((virtualKey is HotKeyGesture.VirtualKeyMouseLeft or
                 HotKeyGesture.VirtualKeyMouseRight) &&
-            (virtualKey == HotKeyGesture.VirtualKeyMouseLeft ||
-             modifiers == HotKeyModifiers.None) &&
+            (modifiers == HotKeyModifiers.None ||
+             !OpensCaptureSelection(holdBinding.Action)) &&
             !IsCaptionButton(point) &&
             !startedOnTransientMenu &&
             holdBinding.Action != HotKeyAction.PinImage)
         {
-            // Preserve the existing physical button sequence for capture and
-            // recording gestures; only pinning owns the primary button early
-            // so a short click can be replayed as a normal click.
+            // Preserve the existing physical button sequence for unmodified
+            // gestures and non-selection actions. Modified capture gestures
+            // must own the button from WM_*BUTTONDOWN; otherwise the
+            // foreground window starts receiving the same drag while the
+            // long-press gesture is waiting to trigger, which makes the later
+            // native selection feel delayed and can leave the source window
+            // in a competing drag state.
             _primaryButtonsPassedThroughForHold.Add(virtualKey);
             WriteInputDiagnostic(
                 $"hold-pending key={FormatMouseKey(virtualKey)} action={holdBinding.Action} modifiers={modifiers} " +
@@ -2038,6 +2074,18 @@ public sealed class GlobalHotKeyManager : IDisposable
 
     private void TryPreCaptureTransientUi(uint virtualKey)
     {
+        // Modifier keys can auto-repeat while the capture overlay is already
+        // active. Starting another full-desktop GDI capture from that path
+        // competes with the native border/mask paint loop and is especially
+        // visible while Ctrl is held during a drag. Pre-capture is only useful
+        // before a capture session starts.
+        if (_disposed ||
+            Volatile.Read(ref _captureOverlayActive) != 0 ||
+            _areMouseShortcutsSuspended)
+        {
+            return;
+        }
+
         var modifiers = GetCurrentModifiersIncluding(virtualKey);
         var candidates = GetPreCaptureActions(
             _registeredBindings.Values,
@@ -2048,47 +2096,49 @@ public sealed class GlobalHotKeyManager : IDisposable
             return;
         }
 
-        if (IsSystemMenuForeground() || HasRecentContextMenuGesture())
+        if (IsTransientMenuWindowVisible() ||
+            IsSystemMenuForeground() ||
+            HasRecentContextMenuGesture())
         {
-            // The modifier key itself can dismiss a shell menu, but the low-
-            // level hook must return immediately. Capture on a worker and
-            // invalidate it when a newer gesture supersedes this request.
+            // A modifier key can dismiss a shell/XAML menu immediately. The
+            // frame must therefore be captured before returning from this
+            // low-level hook; a worker races the dismissal and produces the
+            // visible disappear/reappear effect. This synchronous path is
+            // limited to an already-open menu and runs only once per gesture.
             var menuGeneration = Interlocked.Increment(
                 ref _contextMenuCaptureGeneration);
-            var menuCandidateActions = candidates.ToArray();
-            _ = Task.Run(() =>
+            try
             {
-                try
+                var snapshot = CaptureTransientUiScreen();
+                if (menuGeneration == Volatile.Read(
+                    ref _contextMenuCaptureGeneration))
                 {
-                    CapturedImage? snapshot = CaptureTransientUiScreen();
-
-                    Thread.Sleep(ContextMenuCaptureDelay);
-                    if (IsTransientMenuWindowVisible())
-                    {
-                        var newerSnapshot = CaptureTransientUiScreen();
-                        if (newerSnapshot is not null)
-                        {
-                            snapshot?.Dispose();
-                            snapshot = newerSnapshot;
-                        }
-                    }
-
-                    if (menuGeneration != Volatile.Read(
-                        ref _contextMenuCaptureGeneration))
-                    {
-                        snapshot?.Dispose();
-                        return;
-                    }
-
-                    StoreImmediatePreCapturedScreen(
-                        snapshot,
-                        menuCandidateActions);
+                    StoreImmediatePreCapturedScreen(snapshot, candidates);
                 }
-                catch
+                else
                 {
-                    // Pre-capture is best effort and must never affect input.
+                    snapshot?.Dispose();
                 }
-            });
+            }
+            catch
+            {
+                // Pre-capture is best effort and must never affect input.
+            }
+            return;
+        }
+
+        // A modifier may be held for the whole mouse-selection gesture. If
+        // the matching capture action is itself bound to a mouse button, an
+        // eager full-desktop snapshot here only adds GDI contention before
+        // the long-press path has even opened the native picker. The mouse
+        // trigger captures its own frame when it resolves, so skip this
+        // speculative work for that combination. Keep the menu branch above
+        // intact because it needs the pre-dismissal frame.
+        if (IsModifierKey(virtualKey) &&
+            _registeredBindings.Values.Any(binding =>
+                binding.Gesture.IsMouseButton &&
+                candidates.Contains(binding.Action)))
+        {
             return;
         }
 
@@ -2410,6 +2460,129 @@ public sealed class GlobalHotKeyManager : IDisposable
             HotKeyAction.PinImage;
     }
 
+    private bool TryHandleTransientMenuKeyboardInput(
+        uint virtualKey,
+        HotKeyModifiers modifiers)
+    {
+        if (_disposed ||
+            _isKeyboardCaptureActive ||
+            Volatile.Read(ref _captureOverlayActive) != 0)
+        {
+            return false;
+        }
+
+        if (IsModifierKey(virtualKey) &&
+            _suppressedTransientMenuModifiers.Contains(virtualKey))
+        {
+            return true;
+        }
+
+        if (!IsModifierKey(virtualKey) &&
+            _suppressedTransientMenuKeys.Contains(virtualKey))
+        {
+            return true;
+        }
+
+        if (IsModifierKey(virtualKey))
+        {
+            // Modifier keys must remain visible to the foreground application.
+            // In particular, swallowing Alt here leaves the shell and normal
+            // applications with a stuck/inoperable Alt key. The pre-capture
+            // work is already performed by TryPreCaptureTransientUi before
+            // this method runs, so the modifier itself never needs to be
+            // suppressed. The matching character key below can still consume
+            // the configured screenshot gesture and use that saved frame.
+            return false;
+        }
+
+        var binding = _registeredBindings.Values.FirstOrDefault(
+            candidate =>
+                !candidate.Gesture.IsMouseButton &&
+                IsTransientUiCaptureAction(candidate.Action) &&
+                candidate.Gesture.VirtualKey == virtualKey &&
+                candidate.Gesture.Modifiers == modifiers);
+        if (binding is null)
+        {
+            return false;
+        }
+
+        var hasImmediateMenuSnapshot = false;
+        lock (_immediatePreCaptureLock)
+        {
+            hasImmediateMenuSnapshot = _immediatePreCapturedScreen is not null &&
+                _immediatePreCapturedActions.Contains(binding.Action) &&
+                DateTimeOffset.UtcNow - _immediatePreCapturedAt <=
+                    ContextMenuCaptureWindow;
+        }
+
+        // A shell popup can be removed between the modifier and character
+        // callbacks. The pre-captured frame is the authoritative indication
+        // that this combination started while a menu was visible; accepting
+        // it here prevents the character from reaching the shell and closing
+        // the menu before the overlay opens.
+        if (_suppressedTransientMenuModifiers.Count == 0 &&
+            !IsTransientMenuWindowVisible() &&
+            !IsSystemMenuForeground() &&
+            !hasImmediateMenuSnapshot)
+        {
+            return false;
+        }
+
+        var snapshot = TakePreCapturedScreen(
+                binding.Action,
+                allowImmediateContextMenuSnapshot: true) ??
+            CaptureTransientUiScreen();
+        _earlyKeyboardHotKeys[binding.Action] = Stopwatch.GetTimestamp();
+        _suppressedTransientMenuKeys.Add(virtualKey);
+        // Enter the UI dispatcher synchronously for this already-captured
+        // transient-menu gesture. Returning from the low-level hook first
+        // leaves a compositor gap in which the shell menu disappears and the
+        // desktop briefly shows through before the overlay is created.
+        // RaiseHotKeyPressed only queues the normal capture workflow; it does
+        // not perform a desktop capture on the hook thread.
+        try
+        {
+            var raise = new Action(() =>
+            {
+                if (_disposed)
+                {
+                    snapshot?.Dispose();
+                    return;
+                }
+
+                RaiseHotKeyPressed(binding.Action, snapshot);
+            });
+            if (_messageSource.Dispatcher.CheckAccess())
+            {
+                raise();
+            }
+            else
+            {
+                _messageSource.Dispatcher.Invoke(
+                    DispatcherPriority.Send,
+                    raise);
+            }
+        }
+        catch
+        {
+            // The hook must never propagate dispatcher shutdown failures into
+            // the system input chain. Dispose the frame if the event could
+            // not be handed off.
+            snapshot?.Dispose();
+        }
+        return true;
+    }
+
+    private bool TryReleaseTransientMenuKeyboardInput(uint virtualKey)
+    {
+        if (IsModifierKey(virtualKey))
+        {
+            return _suppressedTransientMenuModifiers.Remove(virtualKey);
+        }
+
+        return _suppressedTransientMenuKeys.Remove(virtualKey);
+    }
+
     private HotKeyModifiers GetCurrentModifiersIncluding(uint virtualKey)
     {
         var modifiers = HotKeyModifiers.None;
@@ -2455,12 +2628,12 @@ public sealed class GlobalHotKeyManager : IDisposable
         CapturedImage? desktop = null;
         try
         {
-            // Tray overflow/context menus are commonly rendered as layered
-            // shell windows. CaptureBlt is required to include those windows
-            // in the bitmap before the hotkey dismisses the menu.
+            // CaptureBlt keeps the menu visible in the same desktop frame.
+            // Do not PrintWindow and alpha-blend it a second time: translucent
+            // PDF/context menus would otherwise become darker or lighter in
+            // the resulting screenshot.
             desktop = ScreenCaptureService.CaptureIncludingLayeredWindows(
                 virtualBounds);
-            CaptureTransientMenuWindowsInto(desktop.Bitmap, virtualBounds);
             return desktop;
         }
         catch
@@ -2669,6 +2842,34 @@ public sealed class GlobalHotKeyManager : IDisposable
             var snapshot = startedOnTransientMenu
                 ? CaptureTransientUiScreen()
                 : CaptureCurrentScreen(action);
+            if (generation != Volatile.Read(
+                    ref _contextMenuCaptureGeneration))
+            {
+                snapshot?.Dispose();
+                return;
+            }
+
+            StoreImmediatePreCapturedScreen(snapshot, [action]);
+        });
+    }
+
+    private void QueueTransientMenuHoldSnapshot(HotKeyAction action)
+    {
+        var generation = Interlocked.Increment(
+            ref _contextMenuCaptureGeneration);
+        _ = Task.Run(() =>
+        {
+            CapturedImage? snapshot = null;
+            try
+            {
+                snapshot = CaptureTransientUiScreen();
+            }
+            catch
+            {
+                // Menu pre-capture is best effort. The hold trigger has a
+                // normal desktop-capture fallback when no frame is ready.
+            }
+
             if (generation != Volatile.Read(
                     ref _contextMenuCaptureGeneration))
             {

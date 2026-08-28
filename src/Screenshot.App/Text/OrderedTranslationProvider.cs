@@ -377,11 +377,6 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                 provider.Id,
                 TranslationProviderFactory.OfflineProviderId,
                 StringComparison.OrdinalIgnoreCase));
-        var online = providers.FirstOrDefault(provider => string.Equals(
-                provider.Id,
-                TranslationProviderFactory.OpenAiCompatibleProviderId,
-                StringComparison.OrdinalIgnoreCase));
-
         var offlineRouteAvailable = offline is OfflineTranslationProvider installedOffline &&
             installedOffline.HasInstalledRoute(
                 ResolveLargeCaptureSourceLanguage(segments, sourceLanguage),
@@ -393,7 +388,7 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         var routes = providers
             .Where(provider =>
                 (ReferenceEquals(provider, offline) && offlineRouteAvailable) ||
-                ReferenceEquals(provider, online) ||
+                IsOnlineProvider(provider) ||
                 string.Equals(
                     provider.Id,
                     TranslationProviderFactory.LocalLargeModelProviderId,
@@ -1701,8 +1696,13 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
         }
 
         if (Uri.TryCreate(value, UriKind.Absolute, out _) ||
-            value.Contains('@') ||
             value.Any(character => character is '\\' or '/' or '_'))
+        {
+            return true;
+        }
+
+        if (value.Contains('@') &&
+            !TranslationTargetLanguageMatcher.HasLatinNaturalLanguageClause(value))
         {
             return true;
         }

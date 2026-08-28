@@ -124,7 +124,15 @@ internal static class TranslationTargetLanguageMatcher
         }
 
         if (Uri.TryCreate(value, UriKind.Absolute, out _) ||
-            value.Contains('@') || value.Contains('\\'))
+            value.Contains('\\'))
+        {
+            return true;
+        }
+
+        // An @-mention can appear inside an ordinary sentence (for example
+        // "I @UseListary every day"). Protect standalone handles, but do not
+        // discard the surrounding prose from translation.
+        if (value.Contains('@') && !HasLatinNaturalLanguageClause(value))
         {
             return true;
         }
@@ -167,7 +175,7 @@ internal static class TranslationTargetLanguageMatcher
         }
 
         return !value.Any(char.IsWhiteSpace) &&
-            (latinWords[0].Length <= 3 || LooksLikeCodeIdentifier(latinWords[0]));
+            LooksLikeCodeIdentifier(latinWords[0]);
     }
 
     private static string[] GetLatinWords(string text)

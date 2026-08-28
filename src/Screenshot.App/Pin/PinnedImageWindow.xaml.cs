@@ -108,6 +108,8 @@ public partial class PinnedImageWindow : Window
 
         SourceInitialized += OnSourceInitialized;
         Loaded += OnLoaded;
+        InlineEditorCanvas.AnnotationSelectionChanged +=
+            OnInlineAnnotationSelectionChanged;
     }
 
     internal Task TextRecognitionTask => _textRecognitionTask;
@@ -246,12 +248,27 @@ public partial class PinnedImageWindow : Window
         EndInlineEditorPanning();
         SourceInitialized -= OnSourceInitialized;
         Loaded -= OnLoaded;
+        InlineEditorCanvas.AnnotationSelectionChanged -=
+            OnInlineAnnotationSelectionChanged;
         CloseEditorToolbar();
         InlineEditorCanvas.Reset();
         _inlineEditorImage?.Dispose();
         _inlineEditorImage = null;
         _capturedImage.Dispose();
         base.OnClosed(e);
+    }
+
+    private void OnInlineAnnotationSelectionChanged(
+        object? sender,
+        EventArgs e)
+    {
+        if (!_isEditorMode || _editorToolbar is null ||
+            InlineEditorCanvas.SelectedAnnotationStrokeWidth is not { } width)
+        {
+            return;
+        }
+
+        _editorToolbar.SetStrokeWidthFromCanvas(width);
     }
 
     private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -533,6 +550,17 @@ public partial class PinnedImageWindow : Window
     {
         if (_isEditorMode)
         {
+            if (InlineEditorCanvas.HasSelectedAnnotation)
+            {
+                var annotationFactor = e.Delta > 0 ? 1.1 : 1 / 1.1;
+                if (InlineEditorCanvas.AdjustSelectedAnnotationScale(
+                        annotationFactor))
+                {
+                    e.Handled = true;
+                    return;
+                }
+            }
+
             ZoomInlineEditor(e);
             e.Handled = true;
             return;

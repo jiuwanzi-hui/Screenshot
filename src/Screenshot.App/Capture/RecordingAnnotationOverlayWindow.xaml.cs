@@ -8,6 +8,7 @@ using Screenshot.App.Infrastructure;
 using DrawingRectangle = System.Drawing.Rectangle;
 using WpfColor = System.Windows.Media.Color;
 using WpfPoint = System.Windows.Point;
+using WinForms = System.Windows.Forms;
 
 namespace Screenshot.App.Capture;
 
@@ -29,6 +30,7 @@ public partial class RecordingAnnotationOverlayWindow : Window
 {
     private const int ExtendedWindowStyleIndex = -20;
     private const int NonClientHitTestMessage = 0x0084;
+    private const int SetCursorMessage = 0x0020;
     private const int HitTestClient = 1;
     private const int HitTestTransparent = -1;
     private const long ExtendedStyleTransparent = 0x00000020L;
@@ -72,6 +74,13 @@ public partial class RecordingAnnotationOverlayWindow : Window
     internal event EventHandler? AnnotationSelectionChanged;
 
     internal bool HasSelectedAnnotation => DrawingCanvas.HasSelectedAnnotation;
+
+    internal WpfColor CurrentSelectedColor => DrawingCanvas.CurrentSelectedColor;
+
+    internal double CurrentStrokeWidth => DrawingCanvas.CurrentStrokeWidth;
+
+    internal double? SelectedAnnotationStrokeWidth =>
+        DrawingCanvas.SelectedAnnotationStrokeWidth;
 
     internal IntPtr EnsureWindowHandle() =>
         new WindowInteropHelper(this).EnsureHandle();
@@ -199,6 +208,16 @@ public partial class RecordingAnnotationOverlayWindow : Window
         DrawingCanvas.Background = shouldPassThrough
             ? System.Windows.Media.Brushes.Transparent
             : new SolidColorBrush(WpfColor.FromArgb(1, 255, 255, 255));
+        if (shouldPassThrough)
+        {
+            // A WPF canvas retains its previous cursor until the next input
+            // hit test. Reset it before returning the complete overlay to
+            // Windows, otherwise a former annotation can leave a Hand cursor
+            // visible during recording.
+            DrawingCanvas.Cursor = System.Windows.Input.Cursors.Arrow;
+            Cursor = System.Windows.Input.Cursors.Arrow;
+            System.Windows.Input.Mouse.UpdateCursor();
+        }
 
         var handle = new WindowInteropHelper(this).Handle;
         if (handle == IntPtr.Zero)
@@ -240,6 +259,14 @@ public partial class RecordingAnnotationOverlayWindow : Window
         IntPtr longParameter,
         ref bool handled)
     {
+        if (message == SetCursorMessage &&
+            (_isPaused || _tool == RecordingAnnotationTool.Pointer))
+        {
+            SetCursor(WinForms.Cursors.Arrow.Handle);
+            handled = true;
+            return IntPtr.Zero;
+        }
+
         if (message != NonClientHitTestMessage)
         {
             return IntPtr.Zero;
@@ -251,6 +278,9 @@ public partial class RecordingAnnotationOverlayWindow : Window
                 ? HitTestTransparent
                 : HitTestClient);
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr SetCursor(IntPtr cursor);
 
     private static EditorTool ToEditorTool(RecordingAnnotationTool tool) => tool switch
     {

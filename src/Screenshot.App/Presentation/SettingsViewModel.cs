@@ -9,6 +9,142 @@ namespace Screenshot.App.Presentation;
 
 public sealed record SettingOption(string Value, string Label);
 
+public sealed class AiTranslationProfileItem : INotifyPropertyChanged
+{
+    private string _name;
+    private bool _isEnabled;
+    private string _provider;
+    private string _endpoint;
+    private string _model;
+    private bool _isAvailable;
+    private bool _hasAvailabilityResult;
+    private bool _isAvailabilityChecking;
+    private string _availabilityReason = "尚未检查可用状态";
+
+    public AiTranslationProfileItem(AiTranslationProfile profile)
+    {
+        Id = profile.Id;
+        _name = profile.Name;
+        _isEnabled = profile.IsEnabled;
+        _provider = profile.Provider;
+        _endpoint = profile.Endpoint;
+        _model = profile.Model;
+        _isAvailable = profile.LastAvailability ?? false;
+        _hasAvailabilityResult = profile.LastAvailability.HasValue;
+        _availabilityReason = string.IsNullOrWhiteSpace(
+                profile.LastAvailabilityReason)
+            ? "尚未检查可用状态"
+            : profile.LastAvailabilityReason;
+    }
+
+    public string Id { get; }
+    public string Name { get => _name; set => Set(ref _name, value); }
+    public bool IsEnabled
+    {
+        get => _isEnabled;
+        set
+        {
+            if (Set(ref _isEnabled, value))
+            {
+                OnPropertyChanged(nameof(AvailabilityLabel));
+            }
+        }
+    }
+    public string Provider
+    {
+        get => _provider;
+        set
+        {
+            if (Set(ref _provider, value))
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(ProviderDisplayName)));
+        }
+    }
+    public string ProviderDisplayName =>
+        TranslationProviderFactory.GetDefinition(Provider).DisplayName;
+    public string Endpoint { get => _endpoint; set => Set(ref _endpoint, value); }
+    public string Model { get => _model; set => Set(ref _model, value); }
+
+    public bool IsAvailable
+    {
+        get => _isAvailable;
+        private set
+        {
+            if (Set(ref _isAvailable, value))
+            {
+                OnPropertyChanged(nameof(AvailabilityLabel));
+            }
+        }
+    }
+
+    public bool IsAvailabilityChecking
+    {
+        get => _isAvailabilityChecking;
+        private set => Set(ref _isAvailabilityChecking, value);
+    }
+
+    public string AvailabilityReason
+    {
+        get => _availabilityReason;
+        private set => Set(ref _availabilityReason, value);
+    }
+
+    public string AvailabilityLabel =>
+        !IsEnabled ? "未启用" :
+        !_hasAvailabilityResult ? "未检测" :
+        IsAvailable ? "可用" : "不可用";
+
+    public void SetAvailabilityChecking()
+    {
+        // Keep the last completed result visible while the next request runs.
+        // Changing the status to "checking" here makes a known-good profile
+        // flash as unavailable whenever the settings page is opened.
+        IsAvailabilityChecking = true;
+    }
+
+    public void SetAvailability(bool isAvailable, string reason)
+    {
+        var previousLabel = AvailabilityLabel;
+        IsAvailabilityChecking = false;
+        // Set() already suppresses notifications when a value is unchanged,
+        // so repeated checks with the same result do not redraw the row.
+        AvailabilityReason = reason;
+        _hasAvailabilityResult = true;
+        IsAvailable = isAvailable;
+        if (previousLabel != AvailabilityLabel &&
+            !IsAvailable)
+        {
+            // IsAvailable only raises the label notification when its boolean
+            // value changes. The first completed false result needs one as
+            // well, because it transitions from "未检测" to "不可用".
+            OnPropertyChanged(nameof(AvailabilityLabel));
+        }
+    }
+
+    public AiTranslationProfile ToProfile() => new()
+    {
+        Id = Id,
+        Name = string.IsNullOrWhiteSpace(Name) ? "在线翻译" : Name.Trim(),
+        IsEnabled = IsEnabled,
+        Provider = Provider?.Trim() ?? string.Empty,
+        Endpoint = Endpoint?.Trim() ?? string.Empty,
+        Model = Model?.Trim() ?? string.Empty,
+        LastAvailability = _hasAvailabilityResult ? IsAvailable : null,
+        LastAvailabilityReason = AvailabilityReason ?? string.Empty,
+    };
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    private void OnPropertyChanged(string name) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+    private bool Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
+        field = value;
+        OnPropertyChanged(name!);
+        return true;
+    }
+}
+
 public enum CaptureToolbarFeatureGroup
 {
     Annotation,
@@ -174,6 +310,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private double _toolbarScalePercent;
     private string _customStrokeColor;
     private int[] _customColorPalette;
+    private AnnotationToolSetting[] _annotationToolSettings;
     private int _defaultStrokeWidth;
     private bool _launchAtStartup;
     private bool _openSettingsOnStartup;
@@ -205,6 +342,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private string _translationEndpoint;
     private string _translationTargetLanguage;
     private string _translationModel;
+    private string _selectedTranslationProfileId = string.Empty;
     private OfflineTranslationQuality _offlineTranslationQuality;
     private OfflineTranslationEngine _offlineTranslationEngine;
     private string _translationApiKey = string.Empty;
@@ -244,6 +382,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             settings.CaptureToolbarFeatureOrder);
         _customStrokeColor = settings.CustomStrokeColor;
         _customColorPalette = settings.CustomColorPalette.ToArray();
+        _annotationToolSettings = settings.AnnotationToolSettings.ToArray();
         _defaultStrokeWidth = settings.DefaultStrokeWidth;
         _launchAtStartup = settings.LaunchAtStartup;
         _openSettingsOnStartup = settings.OpenSettingsOnStartup;
@@ -293,6 +432,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _translationModel = TranslationProviderFactory.NormalizeModel(
             settings.TranslationEndpoint,
             settings.TranslationModel);
+        SetTranslationProfiles(settings);
         _offlineTranslationQuality = settings.OfflineTranslationQuality;
         _offlineTranslationEngine = settings.OfflineTranslationEngine;
         SetTranslationProviderPriority(
@@ -329,6 +469,38 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public ObservableCollection<TranslationPriorityItem>
         TranslationPriorityItems { get; } = [];
+
+    public ObservableCollection<AiTranslationProfileItem>
+        TranslationProfiles { get; } = [];
+
+    public string SelectedTranslationProfileId
+    {
+        get => _selectedTranslationProfileId;
+        set => SetProperty(ref _selectedTranslationProfileId, value);
+    }
+
+    public AiTranslationProfileItem? SelectedTranslationProfile =>
+        TranslationProfiles.FirstOrDefault(profile =>
+            string.Equals(
+                profile.Id,
+                SelectedTranslationProfileId,
+                StringComparison.OrdinalIgnoreCase));
+
+    public void UpdateSelectedTranslationProfileConnection(
+        string provider,
+        string endpoint,
+        string model)
+    {
+        var profile = SelectedTranslationProfile;
+        if (profile is null)
+        {
+            return;
+        }
+
+        profile.Provider = provider?.Trim() ?? string.Empty;
+        profile.Endpoint = endpoint?.Trim() ?? string.Empty;
+        profile.Model = model?.Trim() ?? string.Empty;
+    }
 
     public IReadOnlyList<SettingOption> TranslationTargetLanguageOptions { get; } =
         TranslationLanguageCatalog.Languages
@@ -655,6 +827,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _videoRecordingHotKey, value);
     }
 
+    public AnnotationToolSetting[] AnnotationToolSettings
+    {
+        get => _annotationToolSettings;
+        set => SetProperty(ref _annotationToolSettings, value?.ToArray() ?? []);
+    }
+
     public double ToolbarScalePercent
     {
         get => _toolbarScalePercent;
@@ -777,6 +955,11 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public AppSettings CreateSettings()
     {
+        var profiles = TranslationProfiles.Select(item => item.ToProfile()).ToArray();
+        var selected = profiles.FirstOrDefault(profile =>
+            string.Equals(profile.Id, SelectedTranslationProfileId, StringComparison.OrdinalIgnoreCase))
+            ?? profiles.FirstOrDefault(profile => profile.IsEnabled)
+            ?? profiles.FirstOrDefault();
         return _baseSettings with
         {
             SaveDirectory = SaveDirectory,
@@ -814,6 +997,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             ToolbarScalePercent = ToolbarScalePercent,
             CustomStrokeColor = CustomStrokeColor,
             CustomColorPalette = CustomColorPalette.ToArray(),
+            AnnotationToolSettings = AnnotationToolSettings.ToArray(),
             DefaultStrokeWidth = DefaultStrokeWidth,
             LaunchAtStartup = LaunchAtStartup,
             OpenSettingsOnStartup = OpenSettingsOnStartup,
@@ -854,10 +1038,11 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             TranslationProviderPriority = TranslationPriorityItems
                 .Select(item => item.Provider)
                 .ToArray(),
-            TranslationProvider = TranslationProvider,
-            TranslationEndpoint = TranslationEndpoint,
+            TranslationProvider = selected?.Provider ?? TranslationProvider,
+            TranslationEndpoint = selected?.Endpoint ?? TranslationEndpoint,
             TranslationTargetLanguage = TranslationTargetLanguage,
-            TranslationModel = TranslationModel,
+            TranslationModel = selected?.Model ?? TranslationModel,
+            TranslationProfiles = profiles,
             OfflineTranslationQuality = OfflineTranslationQuality,
             OfflineTranslationEngine = OfflineTranslationEngine,
         };
@@ -897,6 +1082,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             settings.CaptureToolbarFeatureOrder);
         CustomStrokeColor = settings.CustomStrokeColor;
         CustomColorPalette = settings.CustomColorPalette.ToArray();
+        AnnotationToolSettings = settings.AnnotationToolSettings.ToArray();
         DefaultStrokeWidth = settings.DefaultStrokeWidth;
         LaunchAtStartup = settings.LaunchAtStartup;
         OpenSettingsOnStartup = settings.OpenSettingsOnStartup;
@@ -943,6 +1129,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         TranslationModel = TranslationProviderFactory.NormalizeModel(
             settings.TranslationEndpoint,
             settings.TranslationModel);
+        SetTranslationProfiles(settings);
         OfflineTranslationQuality = settings.OfflineTranslationQuality;
         OfflineTranslationEngine = settings.OfflineTranslationEngine;
     }
@@ -1080,6 +1267,108 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         {
             TranslationModelOptions.Add(model);
         }
+    }
+
+    private void SetTranslationProfiles(AppSettings settings)
+    {
+        var existingItems = TranslationProfiles.ToDictionary(
+            item => item.Id,
+            StringComparer.OrdinalIgnoreCase);
+        var profiles = (settings.TranslationProfiles ?? [])
+            .Select(profile => existingItems.TryGetValue(profile.Id, out var existing) &&
+                               Equals(existing.ToProfile(), profile)
+                ? existing
+                : new AiTranslationProfileItem(profile))
+            .ToArray();
+        if (profiles.Length == 0)
+        {
+            profiles =
+            [
+                new AiTranslationProfileItem(new AiTranslationProfile
+                {
+                    Name = "在线翻译",
+                    Provider = TranslationProvider,
+                    Endpoint = TranslationEndpoint,
+                    Model = TranslationModel,
+                }),
+            ];
+        }
+        TranslationProfiles.Clear();
+        foreach (var profile in profiles) TranslationProfiles.Add(profile);
+        if (!profiles.Any(profile => string.Equals(
+                profile.Id,
+                SelectedTranslationProfileId,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            SelectedTranslationProfileId = profiles[0].Id;
+        }
+    }
+
+    public AiTranslationProfileItem AddTranslationProfile()
+    {
+        var item = new AiTranslationProfileItem(new AiTranslationProfile
+        {
+            Name = $"翻译配置 {TranslationProfiles.Count + 1}",
+            Provider = TranslationProviderFactory.OpenAiCompatibleProviderId,
+        });
+        TranslationProfiles.Add(item);
+        SelectedTranslationProfileId = item.Id;
+        return item;
+    }
+
+    public bool RemoveTranslationProfile(AiTranslationProfileItem item)
+    {
+        if (TranslationProfiles.Count <= 1 || !TranslationProfiles.Remove(item)) return false;
+        if (string.Equals(SelectedTranslationProfileId, item.Id, StringComparison.OrdinalIgnoreCase))
+            SelectedTranslationProfileId = TranslationProfiles[0].Id;
+        return true;
+    }
+
+    public bool MoveTranslationProfile(AiTranslationProfileItem item, int offset)
+    {
+        var index = TranslationProfiles.IndexOf(item);
+        var target = index + offset;
+        if (index < 0 || target < 0 || target >= TranslationProfiles.Count) return false;
+        TranslationProfiles.Move(index, target);
+        return true;
+    }
+
+    public bool MoveTranslationProfileTo(AiTranslationProfileItem item, int target)
+    {
+        var current = TranslationProfiles.IndexOf(item);
+        if (current < 0 || target < 0 || target >= TranslationProfiles.Count ||
+            current == target)
+        {
+            return false;
+        }
+
+        TranslationProfiles.Move(current, target);
+        return true;
+    }
+
+    public bool MoveTranslationProfileToInsertionIndex(
+        AiTranslationProfileItem item,
+        int insertionIndex)
+    {
+        var current = TranslationProfiles.IndexOf(item);
+        if (current < 0 || insertionIndex < 0 ||
+            insertionIndex > TranslationProfiles.Count)
+        {
+            return false;
+        }
+
+        // The drop position is calculated before the dragged row is removed.
+        // Moving a row downward therefore shifts the final index by one.
+        var target = insertionIndex > current
+            ? insertionIndex - 1
+            : insertionIndex;
+        if (target == current)
+        {
+            return false;
+        }
+
+        TranslationProfiles.Move(current, target);
+        return true;
     }
 
     public void ClearTranslationModels()

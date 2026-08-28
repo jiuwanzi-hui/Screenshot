@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Windows.Threading;
 using Screenshot.App.Core;
 
 namespace Screenshot.App.Capture;
@@ -50,12 +51,36 @@ internal sealed class RecordingInputMonitor : IDisposable
     private readonly NativeMethods.LowLevelMouseProcedure _mouseProcedure;
     private readonly List<uint> _pressedKeys = [];
     private readonly List<string> _pressedMouseButtons = [];
+    private readonly DispatcherTimer _keyboardStateTimer;
     private IntPtr _keyboardHook;
     private IntPtr _mouseHook;
     private bool _isPaused;
     private bool _disposed;
     private long _lastMouseMoveTimestamp;
     private NativeMethods.NativePoint _lastMousePoint;
+    private static readonly uint[] CommonVirtualKeys =
+    [
+        0x10, 0x11, 0x12, 0x5B, 0x5C,
+        0x08, 0x09, 0x0D, 0x1B, 0x20,
+        0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28,
+        0x2D, 0x2E,
+        0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39,
+        0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4A,
+        0x4B, 0x4C, 0x4D, 0x4E, 0x4F, 0x50, 0x51, 0x52, 0x53, 0x54,
+        0x55, 0x56, 0x57, 0x58, 0x59, 0x5A,
+        0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77,
+        0x78, 0x79, 0x7A, 0x7B, 0x7C, 0x7D, 0x7E, 0x7F, 0x80, 0x81,
+        0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
+    ];
+
+    private static readonly (uint VirtualKey, string Token)[] CommonMouseButtons =
+    [
+        (0x01, "鼠标左键"),
+        (0x02, "鼠标右键"),
+        (0x04, "鼠标中键"),
+        (0x05, "鼠标后退键"),
+        (0x06, "鼠标前进键"),
+    ];
 
     public RecordingInputMonitor(
         bool showKeyboard,
@@ -65,6 +90,11 @@ internal sealed class RecordingInputMonitor : IDisposable
         _showKeyboard = showKeyboard;
         _showMouse = showMouse;
         _showMouseTrail = showMouseTrail;
+        _keyboardStateTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(16),
+        };
+        _keyboardStateTimer.Tick += OnInputStateTimerTick;
         _keyboardProcedure = OnKeyboardInput;
         _mouseProcedure = OnMouseInput;
     }
@@ -94,6 +124,11 @@ internal sealed class RecordingInputMonitor : IDisposable
                 moduleHandle,
                 threadId: 0);
         }
+
+        if ((_showKeyboard || _showMouse) && !_isPaused)
+        {
+            _keyboardStateTimer.Start();
+        }
     }
 
     public void SetPaused(bool isPaused)
@@ -106,6 +141,11 @@ internal sealed class RecordingInputMonitor : IDisposable
         _isPaused = isPaused;
         _pressedKeys.Clear();
         _pressedMouseButtons.Clear();
+        _keyboardStateTimer.Stop();
+        if (!isPaused && (_showKeyboard || _showMouse))
+        {
+            _keyboardStateTimer.Start();
+        }
         PublishCurrent(isTransient: true);
     }
 
@@ -131,6 +171,8 @@ internal sealed class RecordingInputMonitor : IDisposable
 
         _pressedKeys.Clear();
         _pressedMouseButtons.Clear();
+        _keyboardStateTimer.Stop();
+        _keyboardStateTimer.Tick -= OnInputStateTimerTick;
     }
 
     internal static string JoinInputTokens(
@@ -233,6 +275,50 @@ internal sealed class RecordingInputMonitor : IDisposable
             code,
             message,
             dataPointer);
+    }
+
+    private void OnInputStateTimerTick(object? sender, EventArgs e)
+    {
+        if (_isPaused)
+        {
+            return;
+        }
+
+        var changed = false;
+        if (_showKeyboard)
+        {
+            var observedKeys = CommonVirtualKeys
+                .Where(key => (NativeMethods.GetAsyncKeyState((int)key) & 0x8000) != 0)
+                .ToHashSet();
+            if (_pressedKeys.Count != observedKeys.Count ||
+                !_pressedKeys.All(observedKeys.Contains))
+            {
+                _pressedKeys.Clear();
+                _pressedKeys.AddRange(observedKeys);
+                changed = true;
+            }
+        }
+
+        if (_showMouse)
+        {
+            var observedButtons = CommonMouseButtons
+                .Where(button =>
+                    (NativeMethods.GetAsyncKeyState((int)button.VirtualKey) & 0x8000) != 0)
+                .Select(button => button.Token)
+                .ToHashSet(StringComparer.Ordinal);
+            if (_pressedMouseButtons.Count != observedButtons.Count ||
+                !_pressedMouseButtons.All(observedButtons.Contains))
+            {
+                _pressedMouseButtons.Clear();
+                _pressedMouseButtons.AddRange(observedButtons);
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            PublishCurrent(isTransient: false);
+        }
     }
 
     private IntPtr OnMouseInput(int code, IntPtr message, IntPtr dataPointer)
@@ -436,5 +522,8 @@ internal sealed class RecordingInputMonitor : IDisposable
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
         public static extern IntPtr GetModuleHandle(string? moduleName);
+
+        [DllImport("user32.dll")]
+        public static extern short GetAsyncKeyState(int virtualKey);
     }
 }

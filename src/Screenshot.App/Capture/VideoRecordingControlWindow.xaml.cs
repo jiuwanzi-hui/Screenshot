@@ -126,7 +126,8 @@ public partial class VideoRecordingControlWindow : Window
         int[]? customColorPalette,
         Action<int[]>? customColorPaletteChanged,
         string endRecordingHotKey,
-        double toolbarScalePercent)
+        double toolbarScalePercent,
+        RecordingRegionFrameWindow? frameWindow)
     {
         ArgumentNullException.ThrowIfNull(recorder);
         _saveDirectory = saveDirectory;
@@ -164,7 +165,9 @@ public partial class VideoRecordingControlWindow : Window
         _recorder = recorder;
         _inputOverlay = inputOverlay;
         _annotationOverlay = annotationOverlay;
-        _frameWindow = new RecordingRegionFrameWindow(_recorder.Region);
+        _annotationOverlay.AnnotationSelectionChanged +=
+            OnAnnotationSelectionChanged;
+        _frameWindow = frameWindow ?? new RecordingRegionFrameWindow(_recorder.Region);
         _elapsedTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(200),
@@ -242,6 +245,8 @@ public partial class VideoRecordingControlWindow : Window
         // ScreenRecorderLib may initialize Desktop Duplication, hardware
         // encoders, and audio devices synchronously. Keep that native work
         // off WPF's dispatcher so a slow driver cannot freeze the shell.
+        var frameWindow = new RecordingRegionFrameWindow(recordingRegion);
+        frameWindow.Show();
         var inputOverlay = new RecordingInputOverlayWindow(recordingRegion);
         var annotationOverlay = new RecordingAnnotationOverlayWindow(recordingRegion);
         RegionVideoRecorder recorder;
@@ -260,6 +265,7 @@ public partial class VideoRecordingControlWindow : Window
         {
             inputOverlay.Close();
             annotationOverlay.Close();
+            frameWindow.Close();
             throw;
         }
         VideoRecordingControlWindow? window = null;
@@ -292,16 +298,26 @@ public partial class VideoRecordingControlWindow : Window
                 customColorPalette,
                 customColorPaletteChanged,
                 endRecordingHotKey,
-                toolbarScalePercent);
+                toolbarScalePercent,
+                frameWindow);
+            frameWindow = null!;
         }
         catch
         {
             recorder.Dispose();
             inputOverlay.Close();
             annotationOverlay.Close();
+            frameWindow?.Close();
             throw;
         }
-        window._frameWindow.Show();
+        if (!window._frameWindow.IsVisible)
+        {
+            window._frameWindow.Show();
+        }
+        // If recording was launched from an existing capture, keep the old
+        // overlay visible until this native frame is ready, then close it in
+        // the same UI turn so the selection never visibly disappears.
+        CaptureOverlayWindow.CloseActiveInteractiveSelectionForTransition();
         window.Show();
         window.UpdateLayout();
         window.EnsureControlVisibleAndTopmost();
@@ -1154,6 +1170,7 @@ public partial class VideoRecordingControlWindow : Window
 
         EnsureManualPositionTracking();
         _isControlSurfaceDragging = true;
+        Mouse.UpdateCursor();
         _controlPointerStart = WinForms.Cursor.Position;
         _controlWindowStart = bounds;
         var handle = new WindowInteropHelper(this).Handle;
@@ -1171,6 +1188,21 @@ public partial class VideoRecordingControlWindow : Window
         }
 
         e.Handled = true;
+    }
+
+    private void OnControlSurfaceQueryCursor(
+        object sender,
+        QueryCursorEventArgs e)
+    {
+        // The blank toolbar surface is draggable before and during recording.
+        // Do not override the cursor of buttons, sliders, or selectors.
+        if (ToolbarDragInteraction.IsBlankSurface(
+                e.OriginalSource as DependencyObject,
+                ControlSurface))
+        {
+            e.Cursor = System.Windows.Input.Cursors.SizeAll;
+            e.Handled = true;
+        }
     }
 
     private void OnControlSurfaceMouseMove(
@@ -1246,6 +1278,8 @@ public partial class VideoRecordingControlWindow : Window
         _collapsedDragStartCursor = WinForms.Cursor.Position;
         _collapsedToolbarDragMoved = false;
         _isCollapsedToolbarDragging = true;
+        CollapsedToolbarButton.Cursor = System.Windows.Input.Cursors.SizeAll;
+        Mouse.UpdateCursor();
         Mouse.Capture(CollapsedToolbarButton, CaptureMode.SubTree);
         e.Handled = true;
     }
@@ -1276,6 +1310,9 @@ public partial class VideoRecordingControlWindow : Window
             if (_isCollapsedToolbarDragging && e.LeftButton != MouseButtonState.Pressed)
             {
                 _isCollapsedToolbarDragging = false;
+                CollapsedToolbarButton.ClearValue(
+                    System.Windows.Controls.Control.CursorProperty);
+                Mouse.UpdateCursor();
             }
             return;
         }
@@ -1321,6 +1358,9 @@ public partial class VideoRecordingControlWindow : Window
 
         CollapsedToolbarButton.ReleaseMouseCapture();
         _isCollapsedToolbarDragging = false;
+        CollapsedToolbarButton.ClearValue(
+            System.Windows.Controls.Control.CursorProperty);
+        Mouse.UpdateCursor();
         if (_collapsedToolbarDragMoved)
         {
             SnapCollapsedToolbarAfterDrag();
@@ -1331,6 +1371,21 @@ public partial class VideoRecordingControlWindow : Window
         }
 
         e.Handled = true;
+    }
+
+    private void OnCollapsedToolbarLostMouseCapture(
+        object sender,
+        System.Windows.Input.MouseEventArgs e)
+    {
+        if (!_isCollapsedToolbarDragging)
+        {
+            return;
+        }
+
+        _isCollapsedToolbarDragging = false;
+        CollapsedToolbarButton.ClearValue(
+            System.Windows.Controls.Control.CursorProperty);
+        Mouse.UpdateCursor();
     }
 
     private void SnapCollapsedToolbarAfterDrag()
@@ -1656,6 +1711,7 @@ public partial class VideoRecordingControlWindow : Window
     private void FinishControlSurfaceDrag(bool ensureVisible = true)
     {
         _isControlSurfaceDragging = false;
+        Mouse.UpdateCursor();
         var handle = new WindowInteropHelper(this).Handle;
         if (handle != IntPtr.Zero && NativeMethods.GetCapture() == handle)
         {
@@ -1791,7 +1847,8 @@ public partial class VideoRecordingControlWindow : Window
         _inputOverlay?.Show();
         _inputMonitor = new RecordingInputMonitor(
             preferences.ShowKeyboardInput,
-            preferences.ShowMouseInput);
+            preferences.ShowMouseInput,
+            preferences.ShowMouseTrail);
         _inputMonitor.InputChanged += OnRecordingInputChanged;
         _inputMonitor.Start();
     }
@@ -1830,8 +1887,10 @@ public partial class VideoRecordingControlWindow : Window
     private void StartAnnotationOverlay()
     {
         _annotationOverlay?.Clear();
-        _annotationOverlay?.SetSelectedColor(_annotationColor);
-        _annotationOverlay?.SetStrokeWidth(AnnotationStrokeWidthSlider.Value);
+        // Prime the canvas with the persisted rectangle style before entering
+        // pointer mode. Pointer mode intentionally leaves the last drawing
+        // tool selected internally so color/size changes still target it.
+        _annotationOverlay?.SelectTool(RecordingAnnotationTool.Rectangle);
         _annotationOverlay?.SetArrowStyle(_recordingArrowStyle);
         _annotationOverlay?.Show();
         _inputOverlay?.EnsureTopmost();
@@ -2024,8 +2083,26 @@ public partial class VideoRecordingControlWindow : Window
 
     private void DisposeAnnotationOverlay()
     {
+        if (_annotationOverlay is not null)
+        {
+            _annotationOverlay.AnnotationSelectionChanged -=
+                OnAnnotationSelectionChanged;
+        }
         _annotationOverlay?.Close();
         _annotationOverlay = null;
+    }
+
+    private void OnAnnotationSelectionChanged(object? sender, EventArgs e)
+    {
+        if (_annotationOverlay?.SelectedAnnotationStrokeWidth is not { } width)
+        {
+            return;
+        }
+
+        AnnotationStrokeWidthSlider.Value = Math.Clamp(
+            width,
+            AnnotationStrokeWidthSlider.Minimum,
+            AnnotationStrokeWidthSlider.Maximum);
     }
 
     private void OnAnnotationToolClick(object sender, RoutedEventArgs e)
@@ -2060,9 +2137,29 @@ public partial class VideoRecordingControlWindow : Window
         TextToolButton.IsChecked = tool == RecordingAnnotationTool.Text;
         MosaicToolButton.IsChecked = tool == RecordingAnnotationTool.Mosaic;
         _annotationOverlay?.SelectTool(tool);
+        ApplySelectedAnnotationToolStyle(tool);
         _frameWindow.EnsureTopmost();
         _annotationOverlay?.EnsureTopmost();
         EnsureControlVisibleAndTopmost();
+    }
+
+    private void ApplySelectedAnnotationToolStyle(RecordingAnnotationTool tool)
+    {
+        AnnotationColorButton.Visibility = tool == RecordingAnnotationTool.Emoji
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        if (tool == RecordingAnnotationTool.Pointer || _annotationOverlay is null)
+        {
+            return;
+        }
+
+        _annotationColor = _annotationOverlay.CurrentSelectedColor;
+        AnnotationColorSwatch.Fill = new SolidColorBrush(_annotationColor);
+        AnnotationStrokeWidthSlider.Value = Math.Clamp(
+            _annotationOverlay.CurrentStrokeWidth,
+            AnnotationStrokeWidthSlider.Minimum,
+            AnnotationStrokeWidthSlider.Maximum);
     }
 
     private void OnRecordingShapeMenuItemClick(

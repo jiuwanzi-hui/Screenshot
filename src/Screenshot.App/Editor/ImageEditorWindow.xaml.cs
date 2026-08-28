@@ -175,6 +175,7 @@ public partial class ImageEditorWindow : Window
         EditorCanvas.SelectTool(_selectedTool);
         EditorCanvas.Visibility = Visibility.Visible;
         _isInitialized = true;
+        ApplyToolStyleState();
         StatusText.Text = "可以开始编辑。";
         UpdateEditorViewportSize();
         UpdateUndoRedoAvailability();
@@ -263,6 +264,7 @@ public partial class ImageEditorWindow : Window
         ArrowToolButton.Tag = tool.ToString();
         EditorCanvas.SelectArrowStyle(arrowStyle);
         EditorCanvas.SelectTool(tool);
+        ApplyToolStyleState();
         ArrowToolButton.IsChecked = true;
         UpdateArrowButtonPresentation();
         UpdateArrowMenuState();
@@ -322,6 +324,7 @@ public partial class ImageEditorWindow : Window
         if (_isInitialized)
         {
             EditorCanvas.SelectTool(tool);
+            ApplyToolStyleState();
             EditorCanvas.Focus();
         }
     }
@@ -406,6 +409,7 @@ public partial class ImageEditorWindow : Window
             if (_isInitialized)
             {
                 EditorCanvas.SelectTool(tool);
+                ApplyToolStyleState();
             }
         }
     }
@@ -465,7 +469,40 @@ public partial class ImageEditorWindow : Window
 
         var isEmoji = _selectedTool == EditorTool.Emoji;
         EmojiPaletteScroll.Visibility = isEmoji ? Visibility.Visible : Visibility.Collapsed;
-        StrokeOptionsPanel.Visibility = isEmoji ? Visibility.Collapsed : Visibility.Visible;
+        StrokeOptionsPanel.Visibility = Visibility.Visible;
+        var colorVisibility = isEmoji ? Visibility.Collapsed : Visibility.Visible;
+        CyanColorButton.Visibility = colorVisibility;
+        RedColorButton.Visibility = colorVisibility;
+        LightColorButton.Visibility = colorVisibility;
+        CustomColorButton.Visibility = colorVisibility;
+    }
+
+    private void ApplyToolStyleState()
+    {
+        if (!_isInitialized || EditorCanvas is null)
+        {
+            return;
+        }
+
+        _selectedColor = EditorCanvas.CurrentSelectedColor;
+        StrokeWidthSlider.Value = EditorCanvas.CurrentStrokeWidth;
+        UpdateStrokeWidthText(EditorCanvas.CurrentStrokeWidth);
+        if (_selectedColor == WpfColor.FromRgb(46, 175, 165))
+        {
+            UpdateSelectedColorButton(CyanColorButton);
+        }
+        else if (_selectedColor == WpfColor.FromRgb(214, 69, 69))
+        {
+            UpdateSelectedColorButton(RedColorButton);
+        }
+        else if (_selectedColor == WpfColor.FromRgb(235, 240, 246))
+        {
+            UpdateSelectedColorButton(LightColorButton);
+        }
+        else
+        {
+            UpdateSelectedColorButton(CustomColorButton);
+        }
     }
 
     private void PopulateEmojiPalette()
@@ -507,6 +544,7 @@ public partial class ImageEditorWindow : Window
             WpfColorConverter.ConvertFromString(colorValue) is WpfColor color)
         {
             _selectedColor = color;
+            AnnotationToolPreferences.SetColor(_selectedTool, color);
             UpdateSelectedColorButton((WpfButton)sender);
             EditorCanvas.SelectColor(color);
         }
@@ -528,6 +566,7 @@ public partial class ImageEditorWindow : Window
         var brush = new SolidColorBrush(color);
         brush.Freeze();
         _selectedColor = color;
+        AnnotationToolPreferences.SetColor(_selectedTool, color);
         _customColor = color;
         _customColorPalette = NormalizeCustomColorPalette(_customColorPalette.Append(
             color.R << 16 | color.G << 8 | color.B));

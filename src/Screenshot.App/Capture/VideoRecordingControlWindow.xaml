@@ -254,7 +254,7 @@
             BorderBrush="{DynamicResource AppBorderBrush}"
             BorderThickness="1"
             CornerRadius="6"
-            Cursor="SizeAll">
+            QueryCursor="OnControlSurfaceQueryCursor">
         <Border.RenderTransform>
             <ScaleTransform x:Name="ToolbarVisualScale" ScaleX="1" ScaleY="1" />
         </Border.RenderTransform>
@@ -723,6 +723,7 @@
             PreviewMouseLeftButtonDown="OnCollapsedToolbarMouseLeftButtonDown"
             PreviewMouseMove="OnCollapsedToolbarMouseMove"
             PreviewMouseLeftButtonUp="OnCollapsedToolbarMouseLeftButtonUp"
+            LostMouseCapture="OnCollapsedToolbarLostMouseCapture"
             Click="OnCollapsedToolbarClick"
             Visibility="Collapsed"
             Panel.ZIndex="999"

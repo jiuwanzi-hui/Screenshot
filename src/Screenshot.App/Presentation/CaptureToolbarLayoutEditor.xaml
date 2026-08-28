@@ -14,7 +14,7 @@
         <Geometry x:Key="SaveIconGeometry">M 3,2 H 13 L 16,5 V 16 H 3 Z M 5,2 V 7 H 13 V 2 M 6,11 H 13 V 16 H 6 Z</Geometry>
         <Geometry x:Key="ScrollIconGeometry">M 9,2 V 16 M 6,5 L 9,2 L 12,5 M 6,13 L 9,16 L 12,13</Geometry>
         <Geometry x:Key="OcrIconGeometry">M 2,5 V 2 H 5 M 13,2 H 16 V 5 M 16,13 V 16 H 13 M 5,16 H 2 V 13 M 5,12 L 8,5 L 11,12 M 6,10 H 10</Geometry>
-        <Geometry x:Key="PinIconGeometry">M 6,2 H 12 L 11,6 L 14,9 L 10,10 L 9,16 L 7,10 L 3,9 L 6,6 Z</Geometry>
+        <Geometry x:Key="PinIconGeometry">M 6,2 H 12 L 11.5,6 L 14,8.5 L 10,9.5 L 9,16 L 8,9.5 L 4,8.5 L 6.5,6 Z</Geometry>
         <Geometry x:Key="UndoIconGeometry">M 8,2 L 2,8 L 8,14 V 11 C 13,11 16,13 17,17 C 17,10 13,6 8,6 Z</Geometry>
         <Geometry x:Key="CancelIconGeometry">M 4,4 L 14,14 M 14,4 L 4,14</Geometry>
         <Geometry x:Key="ConfirmIconGeometry">M 3,9 L 7,13 L 15,4</Geometry>

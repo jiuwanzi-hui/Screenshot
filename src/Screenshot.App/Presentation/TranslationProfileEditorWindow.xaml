@@ -1,0 +1,77 @@
+<Window x:Class="Screenshot.App.Presentation.TranslationProfileEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="翻译配置"
+        Width="520"
+        SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="{DynamicResource AppWindowBackgroundBrush}"
+        Foreground="{DynamicResource AppTextPrimaryBrush}">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <TextBlock FontSize="20" FontWeight="SemiBold" Text="编辑翻译配置" />
+        <TextBlock Grid.Row="1" Margin="0,18,0,4" Text="配置名称" />
+        <TextBox x:Name="NameBox" Grid.Row="2" Height="32" VerticalContentAlignment="Center" />
+        <TextBlock Grid.Row="3" Margin="0,12,0,4" Text="服务类型" />
+        <ComboBox x:Name="ProviderBox" Grid.Row="4" Height="32" DisplayMemberPath="Label" SelectedValuePath="Value" />
+        <Grid Grid.Row="5" Margin="0,12,0,0">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBlock Text="接口地址" />
+            <TextBox x:Name="EndpointBox" Grid.Row="1" Margin="0,4,0,0" Height="32" VerticalContentAlignment="Center" />
+            <TextBlock Grid.Row="2" Margin="0,10,0,4" Text="模型名称" />
+            <Grid Grid.Row="3">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="8" />
+                    <ColumnDefinition Width="82" />
+                </Grid.ColumnDefinitions>
+                <ComboBox x:Name="ModelBox"
+                          Height="32"
+                          IsEditable="True"
+                          IsTextSearchEnabled="True"
+                          VerticalContentAlignment="Center" />
+                <Button x:Name="FetchModelsButton"
+                        Grid.Column="2"
+                        Height="32"
+                        Content="获取模型"
+                        ToolTip="使用当前接口地址和 API Key 获取模型列表；接口不开放列表时仍可手动填写模型名称。"
+                        Click="OnFetchModelsClick" />
+            </Grid>
+            <TextBlock Grid.Row="4" Margin="0,10,0,4" Text="API Key" />
+            <PasswordBox x:Name="ApiKeyBox" Grid.Row="5" Height="32" VerticalContentAlignment="Center" />
+            <TextBlock x:Name="TestStatusText"
+                       Grid.Row="6"
+                       MinHeight="18"
+                       Margin="0,12,0,0"
+                       VerticalAlignment="Center"
+                       FontSize="12"
+                       Foreground="{DynamicResource AppTextSecondaryBrush}"
+                       TextWrapping="Wrap" />
+            <StackPanel Grid.Row="7"
+                        Margin="0,12,0,0"
+                        HorizontalAlignment="Right"
+                        Orientation="Horizontal">
+                    <Button x:Name="TestButton" Width="86" Margin="0,0,8,0" Content="测试模型" Click="OnTestClick" />
+                    <Button Width="80" Margin="0,0,8,0" Content="取消" Click="OnCancelClick" />
+                    <Button Width="80" Content="保存" IsDefault="True" Click="OnSaveClick" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

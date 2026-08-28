@@ -1708,6 +1708,95 @@
                             Click="OnOpenTextTranslationClick"
                             Content="打开离线文本翻译" />
 
+                    <StackPanel Margin="0,18,0,0">
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock DockPanel.Dock="Left" FontSize="15" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource AppTextPrimaryBrush}" Text="在线模型" />
+                            <Button DockPanel.Dock="Right" Width="152" Height="30" Padding="10,3"
+                                    Content="增加在线模型"
+                                    Click="OnAddTranslationProfileClick" ToolTip="增加在线模型" />
+                        </DockPanel>
+                        <TextBlock Margin="0,0,0,8" FontSize="12"
+                                   Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                   Text="勾选启用项将按列表顺序依次尝试；点击编辑可在独立窗口配置服务。"
+                                   TextWrapping="Wrap" />
+                        <ItemsControl ItemsSource="{Binding TranslationProfiles}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Margin="0,0,0,6" Padding="8,7"
+                                            AllowDrop="True"
+                                            Background="{DynamicResource AppPanelBackgroundBrush}"
+                                            BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1" CornerRadius="6"
+                                            Cursor="SizeAll"
+                                            ToolTip="按住配置空白区域拖动调整顺序"
+                                            PreviewMouseLeftButtonDown="OnTranslationProfileRowPreviewMouseLeftButtonDown"
+                                            PreviewMouseMove="OnTranslationProfileRowPreviewMouseMove"
+                                            DragOver="OnTranslationProfileRowDragOver"
+                                            DragLeave="OnTranslationProfileRowDragLeave"
+                                            Drop="OnTranslationProfileRowDrop">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                            <Border x:Name="TranslationProfileDropMarker"
+                                                    Grid.ColumnSpan="4"
+                                                    Height="3"
+                                                    Panel.ZIndex="2"
+                                                    Background="{DynamicResource AppAccentBrush}"
+                                                    Visibility="Collapsed" />
+                                            <CheckBox VerticalAlignment="Center" IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                      Click="OnTranslationProfileChanged" />
+                                            <StackPanel Grid.Column="1"
+                                                        Margin="8,0,8,0"
+                                                        VerticalAlignment="Center">
+                                                <TextBlock FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                                           VerticalAlignment="Center"
+                                                           Text="{Binding Name}" />
+                                                <TextBlock Margin="0,2,0,0"
+                                                           FontSize="11"
+                                                           Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                                           Text="{Binding ProviderDisplayName}" />
+                                            </StackPanel>
+                                            <Border Grid.Column="2"
+                                                    Margin="0,0,8,0"
+                                                    Padding="7,2"
+                                                    VerticalAlignment="Center"
+                                                    CornerRadius="4"
+                                                    ToolTip="{Binding AvailabilityReason}">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsAvailable}" Value="True">
+                                                                <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <TextBlock FontSize="11" Text="{Binding AvailabilityLabel}">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground" Value="{DynamicResource AppTextSecondaryBrush}" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsAvailable}" Value="True">
+                                                                    <Setter Property="Foreground" Value="White" />
+                                                                    <Setter Property="FontWeight" Value="SemiBold" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                            </Border>
+                                            <StackPanel Grid.Column="3" Orientation="Horizontal">
+                                                <Button Padding="9,3" Content="编辑" Tag="{Binding}" Click="OnEditTranslationProfileClick" />
+                                                <Button Margin="4,0,0,0" Padding="9,3" Content="删除" Tag="{Binding}" Click="OnRemoveTranslationProfileClick" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
                     <TextBlock Margin="0,22,0,0"
                                FontSize="14"
                                FontWeight="SemiBold"
@@ -1911,7 +2000,8 @@
                     </StackPanel>
 
                     <StackPanel x:Name="OnlineTranslationSettingsPanel"
-                                Margin="0,18,0,0">
+                                Margin="0,18,0,0"
+                                Visibility="Collapsed">
                         <Border Padding="14,11"
                                 Background="{DynamicResource AppPanelBackgroundBrush}"
                                 BorderBrush="{DynamicResource AppBorderBrush}"

@@ -372,6 +372,8 @@ public sealed class RegionCaptureCoordinator
                     TranslateTextAfterSelection = translateTextAfterSelection,
                     InitialPointerContinuation = pointerContinuation,
                     StartScrollCaptureAsync = RequestScrollCaptureFromSelectionAsync,
+                    StartScrollCaptureWithSnapshotAsync =
+                        RequestScrollCaptureFromSelectionWithSnapshotAsync,
                     StartVideoRecordingAsync = RequestVideoRecordingFromSelectionAsync,
                     InitialSelection = initialSelection,
                     CaptureCompleted = trackOrdinaryCaptureRegion
@@ -510,6 +512,16 @@ public sealed class RegionCaptureCoordinator
             pointerContinuation: null);
     }
 
+    private Task RequestScrollCaptureFromSelectionWithSnapshotAsync(
+        ScreenRegion selection,
+        CapturedImage? initialScreenSnapshot)
+    {
+        return RequestScrollCaptureAsync(
+            selection,
+            pointerContinuation: null,
+            initialScreenSnapshot);
+    }
+
     private Task<OcrRecognitionResult> RecognizeTextAsync(CapturedImage image)
     {
         return OcrProviderFactory.RecognizeAsync(
@@ -557,7 +569,8 @@ public sealed class RegionCaptureCoordinator
 
     private async Task RequestScrollCaptureAsync(
         ScreenRegion? initialSelection,
-        CapturePointerContinuation? pointerContinuation)
+        CapturePointerContinuation? pointerContinuation,
+        CapturedImage? initialScreenSnapshot = null)
     {
         if (_isCaptureInProgress)
         {
@@ -568,13 +581,24 @@ public sealed class RegionCaptureCoordinator
 
         try
         {
-            await WaitForCaptureChromeToHideAsync();
+            // When long screenshot is launched from an existing capture
+            // selection, the toolbar/overlay has just been closed by the
+            // caller. Waiting the full chrome-settle delay here exposes the
+            // desktop for one visible compositor interval and produces a
+            // flash. A fresh shortcut still needs the delay so its floating
+            // chrome cannot be included in the initial frame.
+            if (initialSelection is null)
+            {
+                await WaitForCaptureChromeToHideAsync();
+            }
             // Scroll target is resolved under the selection when scrolling starts.
             var scrollSelection = initialSelection is null
                 ? await CaptureOverlayWindow.SelectForScrollCaptureAsync(
                     pointerContinuation)
                 : await CaptureOverlayWindow.SelectForScrollCaptureAsync(
-                    initialSelection.Value);
+                    initialSelection.Value,
+                    initialScreenSnapshot);
+            initialScreenSnapshot = null;
 
             if (scrollSelection is null)
             {
@@ -630,11 +654,16 @@ public sealed class RegionCaptureCoordinator
                 progressWindow.CancelRequested += CancelCapture;
                 scrollSelection.CancelRequested += CancelFromSelection;
                 progressWindow.Owner = scrollSelection.OverlayWindow;
-                progressWindow.Show();
                 var initialImage = scrollSelection.CaptureSnapshot();
                 var initialRegion = scrollSelection.CaptureRegion;
                 progressWindow.ConfigureForCaptureRegion(initialRegion);
+                new System.Windows.Interop.WindowInteropHelper(progressWindow)
+                    .EnsureHandle();
                 progressWindow.TryPositionOutside(initialRegion);
+                // Position and size the preview before showing it. Showing the
+                // window first lets WPF place it at the default origin for one
+                // compositor frame, which appears as a flash on the left side.
+                progressWindow.Show();
                 progressWindow.BringToFront();
                 UpdateProgress(
                     progressWindow,
@@ -948,6 +977,7 @@ public sealed class RegionCaptureCoordinator
         }
         finally
         {
+            initialScreenSnapshot?.Dispose();
             SetCaptureInProgress(false);
             Core.MemoryFootprint.TrimAfterHeavyOperation();
         }
@@ -1051,9 +1081,11 @@ public sealed class RegionCaptureCoordinator
         _isRecordingInProgress = true;
         try
         {
-            // Give DWM one composition pass to remove the frozen screenshot
-            // before exposing the live desktop and recording controls.
-            await WaitForCaptureChromeToHideAsync();
+            // The selection overlay has already been closed by the caller.
+            // Only yield one render turn here; the full chrome-settle delay
+            // would expose the desktop for 80 ms before the recording window
+            // appears, which is visible as a flash.
+            await Dispatcher.Yield(DispatcherPriority.Render);
             var settings = _settingsProvider();
             var result = await VideoRecordingControlWindow.ShowSessionAsync(
                 selection,
@@ -1189,10 +1221,10 @@ public sealed class RegionCaptureCoordinator
     private static async Task WaitForCaptureChromeToHideAsync()
     {
         await Dispatcher.Yield(DispatcherPriority.Render);
-        // Layered popups are composed by DWM after WPF has rendered the hide.
-        // Match the overlay's own capture delay so neither the floating button
-        // nor its menu is frozen into the desktop snapshot.
-        await Task.Delay(80);
+        // The popup is closed synchronously before capture starts. One short
+        // compositor interval is enough for DWM to retire the hidden chrome;
+        // a long delay makes the desktop visibly blink between windows.
+        await Task.Delay(16);
     }
 
     private static void UpdateProgress(
