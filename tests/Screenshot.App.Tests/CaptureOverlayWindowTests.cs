@@ -1285,24 +1285,13 @@ public sealed class CaptureOverlayWindowTests
                 Assert.Equal(40, bounds.Height);
                 Assert.Equal(width - 40, bounds.X);
                 Assert.Equal(height - 40, bounds.Y);
-                var shade = Assert.IsType<Border>(overlay.FindName("CaptureShade"));
-                var topMask = Assert.IsType<System.Windows.Shapes.Rectangle>(
-                    overlay.FindName("TopMask"));
-                var rightMask = Assert.IsType<System.Windows.Shapes.Rectangle>(
-                    overlay.FindName("RightMask"));
                 var selectionRectangle = Assert.IsType<System.Windows.Shapes.Rectangle>(
                     overlay.FindName("SelectionRectangle"));
-                Assert.Equal(Visibility.Collapsed, shade.Visibility);
-                Assert.Equal(Visibility.Visible, topMask.Visibility);
-                Assert.Equal(Visibility.Visible, rightMask.Visibility);
-                Assert.Equal(bounds.Top, topMask.Height);
-                Assert.Equal(width - bounds.Right, rightMask.Width);
+                Assert.Null(overlay.FindName("CaptureShade"));
+                Assert.Null(overlay.FindName("TopMask"));
+                Assert.Null(overlay.FindName("RightMask"));
                 Assert.Equal(
-                    System.Windows.Media.Color.FromArgb(0x48, 0, 0, 0),
-                    Assert.IsType<System.Windows.Media.SolidColorBrush>(
-                        topMask.Fill).Color);
-                Assert.Equal(
-                    System.Windows.Media.Color.FromArgb(0x16, 0, 0, 0),
+                    System.Windows.Media.Colors.Transparent,
                     Assert.IsType<System.Windows.Media.SolidColorBrush>(
                         selectionRectangle.Fill).Color);
             }
@@ -2563,10 +2552,6 @@ public sealed class CaptureOverlayWindowTests
                     overlay.FindName("ScrollCaptureOutline"));
                 var selectionRectangle = Assert.IsType<System.Windows.Shapes.Rectangle>(
                     overlay.FindName("SelectionRectangle"));
-                var topMask = Assert.IsType<System.Windows.Shapes.Rectangle>(
-                    overlay.FindName("TopMask"));
-                var shade = Assert.IsType<Border>(
-                    overlay.FindName("CaptureShade"));
                 var frozenScreen = Assert.IsType<Image>(
                     overlay.FindName("FrozenScreenImage"));
                 var selectionLeft = Canvas.GetLeft(selectionRectangle);
@@ -2582,8 +2567,8 @@ public sealed class CaptureOverlayWindowTests
                 Assert.Equal(Visibility.Visible, outline.Visibility);
                 Assert.True(outline.Width > 0);
                 Assert.True(outline.Height > 0);
-                Assert.Equal(Visibility.Visible, topMask.Visibility);
-                Assert.Equal(Visibility.Collapsed, shade.Visibility);
+                Assert.Null(overlay.FindName("TopMask"));
+                Assert.Null(overlay.FindName("CaptureShade"));
                 Assert.Equal(Visibility.Collapsed, frozenScreen.Visibility);
                 Assert.Null(frozenScreen.Source);
                 Assert.True(outlineLeft + outline.StrokeThickness < selectionLeft);

@@ -1,4 +1,18 @@
-[
+[{
+    "tag_name": "v3.7.5",
+    "name": "SnapCut 3.7.5",
+    "body": "- 修复高回报率鼠标下截图、钉图和录屏框选的跟手性、遮罩残留、双边框和切换闪烁；统一原生选区、尺寸标签、遮罩及标注预览更新链路。\n- 修复修饰键和鼠标左右键快捷键对普通应用、托盘菜单和文件右键菜单的误拦截，避免 Alt/Ctrl 被输入钩子吞掉；录屏键盘/鼠标提示、文字编辑与复制、标注工具独立颜色和线宽持久化同步修正。\n- 翻译在线模型按配置顺序失败回退，设置页启动后先显示上次状态并在后台重新检测。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v3.7.5",
+    "published_at": "2026-08-28T13:20:00+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.5/SnapCut-Update.json" },
+      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.5/Screenshot-Update.json" },
+      { "name": "SnapCut-Setup-3.7.5-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.5/SnapCut-Setup-3.7.5-win-x64.exe" },
+      { "name": "SnapCut-Portable-3.7.5-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.5/SnapCut-Portable-3.7.5-win-x64.zip" }
+    ]
+  },
   {
     "tag_name": "v3.7.0",
     "name": "SnapCut 3.7.0",

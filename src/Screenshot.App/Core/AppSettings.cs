@@ -129,6 +129,11 @@ public readonly record struct VideoRecordingAnnotationPreferences(
     string StrokeColor,
     int StrokeWidth);
 
+public readonly record struct AnnotationToolSetting(
+    string Tool,
+    string Color,
+    double StrokeWidth);
+
 public enum TranslationMode
 {
     Disabled,
@@ -160,6 +165,26 @@ public enum OfflineTranslationEngine
 {
     Mozilla,
     QwenLargeModel,
+}
+
+/// <summary>
+/// A named online AI translation configuration. Secrets are kept in the
+/// encrypted credential store and referenced by Id rather than serialized here.
+/// </summary>
+public sealed record AiTranslationProfile
+{
+    public string Id { get; init; } = Guid.NewGuid().ToString("N");
+    public string Name { get; init; } = "在线翻译";
+    public bool IsEnabled { get; init; } = true;
+    public string Provider { get; init; } = "OpenAICompatible";
+    public string Endpoint { get; init; } = string.Empty;
+    public string Model { get; init; } = string.Empty;
+
+    // Cached UI state only.  The service is still checked in the background
+    // on startup; these fields keep the last known result visible until that
+    // check completes instead of flashing every profile as unavailable.
+    public bool? LastAvailability { get; init; }
+    public string LastAvailabilityReason { get; init; } = string.Empty;
 }
 
 public sealed record AppSettings
@@ -310,6 +335,13 @@ public sealed record AppSettings
 
     public int DefaultStrokeWidth { get; init; } = 3;
 
+    /// <summary>
+    /// Last color and size selected for each annotation tool. The tool name is
+    /// stored as text so the settings file remains independent of editor UI
+    /// types and older files can omit the property safely.
+    /// </summary>
+    public AnnotationToolSetting[] AnnotationToolSettings { get; init; } = [];
+
     public string OcrLanguageTag { get; init; } = "zh-Hans";
 
     public OcrEngineMode OcrEngine { get; init; } = OcrEngineMode.Windows;
@@ -321,6 +353,9 @@ public sealed record AppSettings
     public string TranslationTargetLanguage { get; init; } = "zh-Hans";
 
     public string TranslationModel { get; init; } = "gpt-4.1-mini";
+
+    /// <summary>Named online configurations, ordered by preference.</summary>
+    public AiTranslationProfile[] TranslationProfiles { get; init; } = [];
 
     public TranslationMode TranslationMode { get; init; } =
         TranslationMode.Automatic;
@@ -462,6 +497,43 @@ public sealed record AppSettings
                 "Ctrl+Alt+E",
                 StringComparison.OrdinalIgnoreCase);
 
+        var profiles = (TranslationProfiles ?? [])
+            .Where(profile => profile is not null)
+            .Select(profile => profile with
+            {
+                Id = string.IsNullOrWhiteSpace(profile.Id)
+                    ? Guid.NewGuid().ToString("N")
+                    : profile.Id.Trim(),
+                Name = string.IsNullOrWhiteSpace(profile.Name)
+                    ? "在线翻译"
+                    : profile.Name.Trim(),
+                Provider = string.IsNullOrWhiteSpace(profile.Provider)
+                    ? defaults.TranslationProvider
+                    : profile.Provider.Trim(),
+                Endpoint = profile.Endpoint?.Trim() ?? string.Empty,
+                Model = string.IsNullOrWhiteSpace(profile.Model)
+                    ? string.Empty
+                    : profile.Model.Trim(),
+            })
+            .GroupBy(profile => profile.Id, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToArray();
+        if (profiles.Length == 0)
+        {
+            profiles =
+            [
+                new AiTranslationProfile
+                {
+                    Name = "在线翻译",
+                    Provider = string.IsNullOrWhiteSpace(TranslationProvider)
+                        ? defaults.TranslationProvider
+                        : TranslationProvider.Trim(),
+                    Endpoint = TranslationEndpoint?.Trim() ?? string.Empty,
+                    Model = TranslationModel?.Trim() ?? string.Empty,
+                },
+            ];
+        }
+
         return this with
         {
             SettingsVersion = Math.Max(SettingsVersion, 15),
@@ -558,6 +630,20 @@ public sealed record AppSettings
                 .Take(16)
                 .ToArray(),
             DefaultStrokeWidth = Math.Clamp(DefaultStrokeWidth, 1, 24),
+            AnnotationToolSettings = (AnnotationToolSettings ?? [])
+                .Where(setting => !string.IsNullOrWhiteSpace(setting.Tool))
+                .Select(setting => setting with
+                {
+                    Tool = setting.Tool.Trim(),
+                    Color = setting.Color?.Trim() ?? string.Empty,
+                    StrokeWidth = double.IsFinite(setting.StrokeWidth)
+                        ? Math.Clamp(setting.StrokeWidth, 1, 24)
+                        : defaults.DefaultStrokeWidth,
+                })
+                .GroupBy(setting => setting.Tool, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.Last())
+                .Take(16)
+                .ToArray(),
             OcrLanguageTag = string.IsNullOrWhiteSpace(OcrLanguageTag)
                 ? defaults.OcrLanguageTag
                 : OcrLanguageTag.Trim(),
@@ -572,6 +658,7 @@ public sealed record AppSettings
             TranslationModel = string.IsNullOrWhiteSpace(TranslationModel)
                 ? defaults.TranslationModel
                 : TranslationModel.Trim(),
+            TranslationProfiles = profiles,
             TranslationMode = TranslationMode.Automatic,
             TranslationProviderPriority = translationProviderPriority.ToArray(),
             OfflineTranslationQuality = Enum.IsDefined(OfflineTranslationQuality)

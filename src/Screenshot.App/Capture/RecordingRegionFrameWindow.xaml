@@ -9,7 +9,8 @@
         Topmost="True"
         WindowStartupLocation="Manual"
         WindowStyle="None">
-    <Border BorderBrush="{DynamicResource AppAccentBrush}"
+    <Border x:Name="FrameBorder"
+            BorderBrush="{DynamicResource AppAccentBrush}"
             BorderThickness="3"
             CornerRadius="3"
             IsHitTestVisible="False" />

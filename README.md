@@ -36,12 +36,14 @@ SnapCut（简截）是一款以 Windows 10/11 正式版为主的轻量截图工�
 
 下载最新的 x64 自包含版本。2.3.0 起发布附件统一使用 `SnapCut-Setup-*` 和 `SnapCut-Portable-*`；同时保留旧清单入口，2.1.0 及之后版本仍可在程序内在线更新：
 
-- [安装版 SnapCut Setup 3.7.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.7.0-win-x64.exe)
-- [免安装版 SnapCut Portable 3.7.0（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.7.0-win-x64.zip)
-- [安装版 SnapCut Setup 3.7.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.0/SnapCut-Setup-3.7.0-win-x64.exe)
-- [免安装版 SnapCut Portable 3.7.0（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.0/SnapCut-Portable-3.7.0-win-x64.zip)
+- [安装版 SnapCut Setup 3.7.5（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.7.5-win-x64.exe)
+- [免安装版 SnapCut Portable 3.7.5（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.7.5-win-x64.zip)
+- [安装版 SnapCut Setup 3.7.5（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.5/SnapCut-Setup-3.7.5-win-x64.exe)
+- [免安装版 SnapCut Portable 3.7.5（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.5/SnapCut-Portable-3.7.5-win-x64.zip)
 
 免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET 或 Visual C++ 运行库。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.8.3 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
+
+3.7.5 集中修复高回报率鼠标下截图、钉图和录屏框选的跟手性、遮罩残留、双边框和切换闪烁；原生选区、尺寸标签、遮罩及标注预览的更新链路进一步统一。修复修饰键和鼠标左右键快捷键对普通应用、托盘菜单和文件右键菜单的误拦截，避免 Alt/Ctrl 被系统输入钩子吞掉；录屏键盘/鼠标提示、文字编辑与复制、标注工具独立颜色和线宽持久化也同步修正。翻译在线模型按配置顺序失败回退，设置页启动后先显示上次状态并在后台重新检测。
 
 3.7.0 完善截图、钉图和录屏工具栏的布局、图标缩放与交互状态，录屏摄像头预览、历史记录及快捷键配置进一步可靠。翻译设置支持手动模型测试、模型列表刷新和多语言离线包官方备用地址；离线模型下载会在连接中断后按实际断点续传，避免切换下载源时重复拼接文件并在完成后重新下载。表格复制入口改为独立工具，改善合并单元格、背景表格和数字日期的识别保留。启动设置可选择最小化启动并给出主题化提示。
 
@@ -176,12 +178,14 @@ SnapCut is primarily a lightweight Windows 10/11 capture utility. It combines re
 
 Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-*` and `SnapCut-Portable-*` starting with 2.3.0. The legacy manifest endpoint remains available so versions 2.1.0 and later continue to update in-app:
 
-- [SnapCut Setup 3.7.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.7.0-win-x64.exe)
-- [SnapCut Portable 3.7.0 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.7.0-win-x64.zip)
-- [SnapCut Setup 3.7.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.0/SnapCut-Setup-3.7.0-win-x64.exe)
-- [SnapCut Portable 3.7.0 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.0/SnapCut-Portable-3.7.0-win-x64.zip)
+- [SnapCut Setup 3.7.5 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.7.5-win-x64.exe)
+- [SnapCut Portable 3.7.5 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.7.5-win-x64.zip)
+- [SnapCut Setup 3.7.5 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.5/SnapCut-Setup-3.7.5-win-x64.exe)
+- [SnapCut Portable 3.7.5 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.5/SnapCut-Portable-3.7.5-win-x64.zip)
 
 Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET or Visual C++ runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.8.3 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+
+Version 3.7.5 fixes high-report-rate pointer lag, stale masks, duplicate borders, and transition flicker while moving screenshot, pin, and recording selections. Native selection, size, mask, and annotation preview updates now share one path. Modifier and mouse-button shortcuts no longer swallow Alt/Ctrl or disrupt regular applications, tray menus, or Explorer context menus; recording keyboard/mouse hints, text editing and copy, and per-tool color/width persistence are corrected. Online translation providers now fall back in configured order, and the settings page shows the last known availability before refreshing in the background.
 
 Version 3.6.1 fixes dropped frames and pointer lag while moving screenshot, pin, and recording selections through ToDesk and similar remote-control tools. WPF GPU composition is restored when a physical display output is available, while lid-closed, display-less, and virtual-display-only hosts retain the software-rendering fallback that prevents blank windows. The live resolution badge now uses a stable layout to avoid repeated measurement work during pointer movement.
 

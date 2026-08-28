@@ -1,18 +1,18 @@
-{
-  "version": "3.7.0",
-  "releasePage": "https://github.com/jiuwanzi-hui/Screenshot/releases/latest",
-  "installer": {
-    "fileName": "SnapCut-Setup-3.7.0-win-x64.exe",
-    "githubUrl": "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.7.0-win-x64.exe",
-    "giteeUrl": "https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.0/SnapCut-Setup-3.7.0-win-x64.exe",
-    "size": 65510864,
-    "sha256": "27B964297E779254640AAC4AFD637A73F6FC5E6FA45AC5D6EC58FAE5E7FA92AB"
-  },
-  "portable": {
-    "fileName": "SnapCut-Portable-3.7.0-win-x64.zip",
-    "githubUrl": "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.7.0-win-x64.zip",
-    "giteeUrl": "https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.0/SnapCut-Portable-3.7.0-win-x64.zip",
-    "size": 95266572,
-    "sha256": "03919941472E0945BF90C5E115BB8D6AD37E0C118089E682FFCF455BA5A55540"
-  }
+﻿{
+    "version":  "3.7.5",
+    "releasePage":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest",
+    "installer":  {
+                      "fileName":  "SnapCut-Setup-3.7.5-win-x64.exe",
+                      "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.7.5-win-x64.exe",
+                      "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.5/SnapCut-Setup-3.7.5-win-x64.exe",
+                      "size":  65722510,
+                      "sha256":  "697174D598FE19A10BF589415867132809656757A80FA273EE7794B8B8A5B106"
+                  },
+    "portable":  {
+                     "fileName":  "SnapCut-Portable-3.7.5-win-x64.zip",
+                     "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.7.5-win-x64.zip",
+                     "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.5/SnapCut-Portable-3.7.5-win-x64.zip",
+                     "size":  92449004,
+                     "sha256":  "B30A115990505992DF6E42186811FD94C5708AC5D32CD3C3F5F0DBD5CE5EAC41"
+                 }
 }

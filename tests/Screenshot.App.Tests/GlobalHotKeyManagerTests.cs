@@ -1199,6 +1199,40 @@ public sealed class GlobalHotKeyManagerTests
     }
 
     [Fact]
+    public void ModifiedCaptureMouseHoldSuppressesForegroundDragUntilResolved()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var manager = new GlobalHotKeyManager();
+            Assert.True(manager.Apply(
+            [
+                new HotKeyBinding(
+                    HotKeyAction.VideoRecording,
+                    new HotKeyGesture(
+                        HotKeyModifiers.Control,
+                        HotKeyGesture.VirtualKeyMouseLeft)),
+            ]).IsSuccess);
+
+            Assert.True(manager.ProcessMouseButtonInputForTest(
+                HotKeyGesture.VirtualKeyMouseLeft,
+                isButtonDown: true,
+                x: 100,
+                y: 100,
+                modifiers: HotKeyModifiers.Control));
+
+            // A modified capture gesture owns the physical button while its
+            // long-press timer is pending; the source window must not start a
+            // competing drag in the meantime.
+            Assert.True(manager.ProcessMouseButtonInputForTest(
+                HotKeyGesture.VirtualKeyMouseLeft,
+                isButtonDown: false,
+                x: 100,
+                y: 100,
+                modifiers: HotKeyModifiers.Control));
+        });
+    }
+
+    [Fact]
     public void OnePixelMovementCancelsMouseLongPress()
     {
         WpfTestHost.Invoke(() =>

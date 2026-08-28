@@ -37,6 +37,11 @@ public partial class PinnedImageEditorToolbarWindow : Window
     private EditorTool _lastTool = EditorTool.Rectangle;
     private WpfColor _selectedColor = WpfColor.FromRgb(214, 69, 69);
     private static double _lastStrokeWidth = 3;
+    private WpfColor _defaultColor = WpfColor.FromRgb(214, 69, 69);
+    private double _defaultStrokeWidth = 3;
+    private readonly HashSet<EditorTool> _persistedTools = [];
+    private bool _isApplyingToolPreferences;
+    private int _programmaticWidthChangesPending;
     private ArrowToolMode _arrowToolMode = ArrowToolMode.Straight;
     private ShapeToolMode _shapeToolMode = ShapeToolMode.Rectangle;
 
@@ -159,18 +164,39 @@ public partial class PinnedImageEditorToolbarWindow : Window
             ? EditorTool.Ellipse
             : EditorTool.Rectangle;
         SelectToolButton(_lastTool);
+        ApplySelectedToolPreferences();
         UpdateEmojiPaletteVisibility();
         UpdateShapeButtonPresentation();
         UpdateArrowButtonPresentation();
         UpdateArrowMenuState();
-        StrokeWidthSlider.Value = _lastStrokeWidth;
-        StrokeWidthText.Text = $"{_lastStrokeWidth:0.#} px";
-        UpdateSelectedColorButton(ResolveSelectedColorButton(_selectedColor));
         ShowAttached();
         ToolSelected?.Invoke(_lastTool);
         ColorSelected?.Invoke(_selectedColor);
         StrokeWidthChanged?.Invoke(_lastStrokeWidth);
         ArrowStyleSelected?.Invoke(_arrowStyle);
+    }
+
+    internal void SetStrokeWidthFromCanvas(double width)
+    {
+        if (StrokeWidthSlider is null || !double.IsFinite(width))
+        {
+            return;
+        }
+
+        var value = Math.Clamp(
+            width,
+            StrokeWidthSlider.Minimum,
+            StrokeWidthSlider.Maximum);
+        if (!double.Equals(StrokeWidthSlider.Value, value))
+        {
+            _programmaticWidthChangesPending++;
+            StrokeWidthSlider.Value = value;
+        }
+        _lastStrokeWidth = value;
+        if (StrokeWidthText is not null)
+        {
+            StrokeWidthText.Text = $"{value:0.#} px";
+        }
     }
 
     internal void ShowCrop(int pixelWidth, int pixelHeight)
@@ -454,6 +480,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
                     ? ArrowToolMode.Curved
                     : ArrowToolMode.Straight;
             }
+            ApplySelectedToolPreferences();
             _lastAnnotationToolChanged?.Invoke(ToAnnotationToolMode(selected));
             ToolSelected?.Invoke(selected);
             UpdateEmojiPaletteVisibility();
@@ -524,6 +551,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
         {
             _selectedColor = color;
             _customColor = color;
+            _persistedTools.Add(_lastTool);
+            AnnotationToolPreferences.SetColor(_lastTool, color);
             var brush = new SolidColorBrush(color);
             brush.Freeze();
             CustomColorButton.Background = brush;
@@ -585,6 +614,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
     {
         _selectedColor = color;
         _customColor = color;
+        _persistedTools.Add(_lastTool);
+        AnnotationToolPreferences.SetColor(_lastTool, color);
         var brush = new SolidColorBrush(color);
         brush.Freeze();
         CustomColorButton.Background = brush;
@@ -598,6 +629,15 @@ public partial class PinnedImageEditorToolbarWindow : Window
         RoutedPropertyChangedEventArgs<double> e)
     {
         _lastStrokeWidth = e.NewValue;
+        if (_programmaticWidthChangesPending > 0)
+        {
+            _programmaticWidthChangesPending--;
+        }
+        else if (!_isApplyingToolPreferences && !_isInitializing)
+        {
+            _persistedTools.Add(_lastTool);
+            AnnotationToolPreferences.SetWidth(_lastTool, e.NewValue);
+        }
         if (StrokeWidthText is not null)
         {
             StrokeWidthText.Text = $"{e.NewValue:0.#} px";
@@ -894,11 +934,19 @@ public partial class PinnedImageEditorToolbarWindow : Window
         _arrowStyle = settings.ArrowStyle;
         _arrowToolMode = settings.ArrowToolMode;
         _shapeToolMode = settings.ShapeToolMode;
+        foreach (var setting in settings.AnnotationToolSettings)
+        {
+            if (Enum.TryParse<EditorTool>(setting.Tool, true, out var tool))
+            {
+                _persistedTools.Add(tool);
+            }
+        }
         _lastTool = ToEditorTool(
             AnnotationToolMode.Rectangle,
             settings.ArrowToolMode,
             settings.ShapeToolMode);
-        _lastStrokeWidth = Math.Clamp(settings.DefaultStrokeWidth, 1, 12);
+        _defaultStrokeWidth = Math.Clamp(settings.DefaultStrokeWidth, 1, 12);
+        _lastStrokeWidth = _defaultStrokeWidth;
         _customColorPalette = NormalizeCustomColorPalette(
             settings.CustomColorPalette);
         var preferredColor = string.IsNullOrWhiteSpace(settings.CustomStrokeColor)
@@ -910,10 +958,57 @@ public partial class PinnedImageEditorToolbarWindow : Window
         }
 
         _selectedColor = color;
+        _defaultColor = color;
         _customColor = color;
         var brush = new SolidColorBrush(color);
         brush.Freeze();
         CustomColorButton.Background = brush;
+    }
+
+    private void ApplySelectedToolPreferences()
+    {
+        _selectedColor = _persistedTools.Contains(_lastTool)
+            ? AnnotationToolPreferences.GetColor(_lastTool, _defaultColor)
+            : _defaultColor;
+        _lastStrokeWidth = Math.Clamp(
+            _persistedTools.Contains(_lastTool)
+                ? AnnotationToolPreferences.GetWidth(
+                    _lastTool,
+                    _defaultStrokeWidth)
+                : _defaultStrokeWidth,
+            1,
+            12);
+
+        _isApplyingToolPreferences = true;
+        try
+        {
+            if (StrokeWidthSlider is not null)
+            {
+                if (!double.Equals(StrokeWidthSlider.Value, _lastStrokeWidth))
+                {
+                    _programmaticWidthChangesPending++;
+                }
+                StrokeWidthSlider.Value = _lastStrokeWidth;
+            }
+        }
+        finally
+        {
+            _isApplyingToolPreferences = false;
+        }
+
+        if (StrokeWidthText is not null)
+        {
+            StrokeWidthText.Text = $"{_lastStrokeWidth:0.#} px";
+        }
+
+        if (CustomColorButton is not null)
+        {
+            var brush = new SolidColorBrush(_selectedColor);
+            brush.Freeze();
+            CustomColorButton.Background = brush;
+        }
+
+        UpdateSelectedColorButton(ResolveSelectedColorButton(_selectedColor));
     }
 
     private static EditorTool ToEditorTool(

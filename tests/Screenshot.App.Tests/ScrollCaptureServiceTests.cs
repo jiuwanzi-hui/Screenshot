@@ -19,6 +19,12 @@ public sealed class ScrollCaptureServiceTests
             16,
             ScrollCaptureService.GetActiveSampleDelayMilliseconds(
                 configuredDelayMilliseconds: 1,
+                elapsedSinceWheel: TimeSpan.FromMilliseconds(20),
+                directManualWheel: true));
+        Assert.Equal(
+            16,
+            ScrollCaptureService.GetActiveSampleDelayMilliseconds(
+                configuredDelayMilliseconds: 1,
                 elapsedSinceWheel: TimeSpan.FromMilliseconds(120)));
         Assert.Equal(
             80,

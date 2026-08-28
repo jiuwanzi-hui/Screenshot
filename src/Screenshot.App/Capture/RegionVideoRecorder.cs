@@ -73,10 +73,11 @@ internal sealed class RegionVideoRecorder : IDisposable
 
         var recordingSource = new DisplayRecordingSource(deviceName)
         {
-            // WGC keeps cropped monitor recordings synchronized with desktop
-            // compositor updates. Desktop Duplication can remain on its first
-            // frame on some display and virtual-display drivers.
-            RecorderApi = RecorderApi.WindowsGraphicsCapture,
+            // Desktop Duplication uses ScreenRecorderLib's explicit cursor
+            // compositor. WGC composites the desktop cursor into the captured
+            // texture, which can expose a stale overlay cursor as a second
+            // Hand/SizeAll pointer in the recording.
+            RecorderApi = RecorderApi.DesktopDuplication,
             SourceRect = new ScreenRect(
                 sourceRegion.X,
                 sourceRegion.Y,

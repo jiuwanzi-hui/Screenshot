@@ -401,6 +401,43 @@ public sealed class TranslationProviderTests
     }
 
     [Fact]
+    public void ShortWordsAndAtMentionsRemainTranslatable()
+    {
+        Assert.False(TranslationTargetLanguageMatcher.IsLikelyInvariant("Use"));
+        Assert.False(TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(
+            "Use",
+            "zh-Hans"));
+        Assert.False(TranslationTargetLanguageMatcher.IsLikelyInvariant(
+            "I @UseListary every damn day. It has completely changed the way I access my files."));
+        Assert.False(TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(
+            "I @UseListary every damn day. It has completely changed the way I access my files.",
+            "zh-Hans"));
+        Assert.True(TranslationTargetLanguageMatcher.IsLikelyInvariant(
+            "@UseListary"));
+        Assert.False(TranslationTargetLanguageMatcher.IsLikelyInvariant("Windows"));
+        Assert.False(TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(
+            "Windows",
+            "zh-Hans"));
+    }
+
+    [Fact]
+    public async Task StandaloneWindowsGetsDeterministicChineseFallbackWhenModelEchoesIt()
+    {
+        var handler = new RecordingHandler(
+            "{\"choices\":[{\"message\":{\"content\":\"Windows\"}}]}");
+        using var client = new HttpClient(handler);
+        var provider = new OpenAiCompatibleTranslationProvider(
+            "https://translation.example/v1/chat/completions",
+            "test-key",
+            client);
+
+        var result = await provider.TranslateAsync("Windows", "auto", "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal("微软视窗", result.Text);
+    }
+
+    [Fact]
     public void TranslationTermsAreProtectedByShapeAndOccurrence()
     {
         string[] source =
@@ -990,6 +1027,41 @@ public sealed class TranslationProviderTests
             item => Assert.Equal($"译文 English sentence {item.index + 1}", item.text));
         Assert.Equal(0, first.SegmentCallCount);
         Assert.Equal(4, second.SegmentCallCount);
+    }
+
+    [Fact]
+    public async Task LargeCaptureFallsBackToTheNextOnlineProfile()
+    {
+        var source = Enumerable.Range(1, 90)
+            .Select(index => $"English sentence {index}")
+            .ToArray();
+        var first = new StubTranslationProvider(
+            TranslationProviderFactory.OpenAiCompatibleProviderId,
+            segmentsHandler: _ =>
+                TranslationSegmentsResult.Failure("连接失败"));
+        var second = new StubTranslationProvider(
+            TranslationProviderFactory.OpenAiCompatibleProviderId,
+            segmentsHandler: segments => new TranslationSegmentsResult(
+                true,
+                segments.Select(segment => "译文 " + segment).ToArray(),
+                null));
+        var provider = new OrderedTranslationProvider(
+            [first, second],
+            offlineTimeout: TimeSpan.FromSeconds(1),
+            onlineTimeout: TimeSpan.FromSeconds(1),
+            translationBudget: TimeSpan.FromSeconds(1),
+            onlineTranslationBudget: TimeSpan.FromSeconds(3));
+
+        var result = await provider.TranslateSegmentsAsync(
+            source,
+            "auto",
+            "zh-Hans");
+
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(90, result.Segments.Count);
+        Assert.All(result.Segments, text => Assert.StartsWith("译文 ", text));
+        Assert.True(first.SegmentCallCount > 0);
+        Assert.True(second.SegmentCallCount > 0);
     }
 
     [Fact]

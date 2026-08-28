@@ -99,6 +99,9 @@ public sealed class CaptureOverlayOptions
 
     public Func<ScreenRegion, Task>? StartScrollCaptureAsync { get; init; }
 
+    public Func<ScreenRegion, CapturedImage?, Task>?
+        StartScrollCaptureWithSnapshotAsync { get; init; }
+
     public Func<ScreenRegion, Task>? StartVideoRecordingAsync { get; init; }
 
     public ScreenRegion? InitialSelection { get; init; }
@@ -169,6 +172,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private const int RegionCombineDifference = 4;
     private const double MinimumSelectionEdge = 2;
     private const double ResizeThumbHalfSize = 6;
+    // The move affordances sit immediately inside each resize corner. Their
+    // small size leaves the visible corner thumb itself untouched.
+    private const double MoveZoneInset = 14;
 
     private readonly ScreenRegion _virtualScreenBounds;
     private readonly CaptureOverlayOptions? _options;
@@ -180,6 +186,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private readonly TaskCompletionSource<ScrollCaptureSelection?>?
         _scrollCaptureSelectionCompletionSource;
     private readonly DispatcherTimer _windowSnapTimer;
+    private readonly DispatcherTimer _selectionIdleTimer;
+    private readonly NativeSelectionFrameWindow _nativeSelectionFrame;
+    private readonly NativeSelectionMaskWindow _nativeSelectionMask;
+    private readonly NativeSelectionSizeWindow _nativeSelectionSize;
     private readonly CancellationTokenSource _lifetimeCancellationSource = new();
     private WpfPoint _selectionStartPoint;
     private WpfPoint _dragStartPoint;
@@ -187,6 +197,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private Rect? _pendingSelectionBounds;
     private Rect? _lastRenderedSelectionBounds;
     private bool _selectionBoundsUpdateScheduled;
+    private long _lastSelectionPreviewTimestamp;
+    private double _selectionPreviewHz = 120;
+    private int _selectionPreviewStableSamples;
+    private long _lastSelectionBadgeTimestamp;
     private ScreenRegion? _selectionAdjustmentStartPhysicalBounds;
     private Rect? _selectionAdjustmentProtectedBounds;
     private CapturedImage? _inlineEditorImage;
@@ -199,7 +213,17 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private CapturePointerButton? _continuedSelectionButton;
     private Task _continuedSelectionReleaseTask = Task.CompletedTask;
     private bool _isMovingSelection;
+    private bool _toolbarHiddenForMove;
     private bool _isSelectionAdjustmentInProgress;
+    private bool _isResizeDragging;
+    private bool _resizeControlsSuppressed;
+    private bool _resizeLeftEdge;
+    private bool _resizeTopEdge;
+    private bool _resizeRightEdge;
+    private bool _resizeBottomEdge;
+    private DrawingPoint _resizeDragStartCursor;
+    private System.Drawing.Rectangle _resizeDragStartPhysicalBounds;
+    private System.Drawing.Rectangle? _selectionAdjustmentProtectedPhysicalBounds;
     private bool _isActionInProgress;
     private bool _isEditorInitializing;
     private bool _isOcrInitializing;
@@ -288,6 +312,33 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         // capture. Its drag position is intentionally session-local.
         _hasCustomToolbarPosition = false;
         InitializeComponent();
+        _nativeSelectionFrame = new NativeSelectionFrameWindow();
+        _nativeSelectionMask = new NativeSelectionMaskWindow();
+        _nativeSelectionSize = new NativeSelectionSizeWindow();
+        _nativeSelectionFrame.AttachSizeWindow(_nativeSelectionSize);
+        foreach (var resizeThumb in new[]
+        {
+            TopLeftResizeThumb,
+            TopRightResizeThumb,
+            BottomLeftResizeThumb,
+            BottomRightResizeThumb,
+            TopResizeThumb,
+            LeftResizeThumb,
+            RightResizeThumb,
+            BottomResizeThumb,
+        })
+        {
+            resizeThumb.DragStarted += OnSelectionResizeThumbDragStarted;
+        }
+        if (TryGetAccentColors(out var accentStart, out var accentEnd))
+        {
+            _nativeSelectionFrame.SetBorderColors(
+                DrawingColor.FromArgb(accentStart.R, accentStart.G, accentStart.B),
+                DrawingColor.FromArgb(accentEnd.R, accentEnd.G, accentEnd.B));
+            _nativeSelectionSize.SetThemeColors(
+                DrawingColor.FromArgb(accentStart.R, accentStart.G, accentStart.B),
+                DrawingColor.FromArgb(accentEnd.R, accentEnd.G, accentEnd.B));
+        }
         CaptureToolbar.LayoutTransform = new System.Windows.Media.ScaleTransform(
             _toolbarScale,
             _toolbarScale);
@@ -296,6 +347,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             CaptureToolbar);
         ApplyThemedContextMenu(InlineShapeToolButton.ContextMenu);
         ApplyThemedContextMenu(InlineArrowToolButton.ContextMenu);
+        InlineShapeToolButton.ContextMenu.Closed += OnInlineContextMenuClosed;
+        InlineArrowToolButton.ContextMenu.Closed += OnInlineContextMenuClosed;
         if (_selectedInlineTool is EditorTool.Arrow or EditorTool.CurvedArrow)
         {
             InlineShapeToolButton.IsChecked = false;
@@ -339,6 +392,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             Interval = TimeSpan.FromMilliseconds(50),
         };
         _windowSnapTimer.Tick += OnWindowSnapTimerTick;
+        _selectionIdleTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(80),
+        };
+        _selectionIdleTimer.Tick += OnSelectionIdleTimerTick;
         ScrollCaptureButton.Visibility =
             ScrollCaptureButton.Visibility == Visibility.Visible &&
             options?.StartScrollCaptureAsync is not null
@@ -358,6 +416,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             OnInlineEditorCanvasPreviewMouseLeftButtonDown;
 
         _virtualScreenBounds = VirtualScreen.GetBounds();
+        _nativeSelectionFrame.AttachMaskWindow(
+            _nativeSelectionMask,
+            ToDrawingRectangle(_virtualScreenBounds));
         try
         {
             _screenSnapshot = initialScreenSnapshot ??
@@ -403,13 +464,40 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     public static Task<ScrollCaptureSelection?> SelectForScrollCaptureAsync(
         ScreenRegion initialSelection)
     {
+        return SelectForScrollCaptureAsync(initialSelection, initialScreenSnapshot: null);
+    }
+
+    public static Task<ScrollCaptureSelection?> SelectForScrollCaptureAsync(
+        ScreenRegion initialSelection,
+        CapturedImage? initialScreenSnapshot)
+    {
         var overlay = new CaptureOverlayWindow(
             options: null,
-            isScrollCaptureSelection: true);
+            isScrollCaptureSelection: true,
+            initialScreenSnapshot: initialScreenSnapshot);
         overlay.Show();
         overlay.UpdateLayout();
         overlay.ApplyInitialScrollCaptureSelection(initialSelection);
+        CloseActiveInteractiveSelectionForTransition();
         return overlay._scrollCaptureSelectionCompletionSource!.Task;
+    }
+
+    internal static void CloseActiveInteractiveSelectionForTransition()
+    {
+        var overlay = _activeInteractiveOverlay;
+        if (overlay is null || overlay._isDisposed || overlay._isCompleted)
+        {
+            return;
+        }
+
+        if (overlay.Dispatcher.CheckAccess())
+        {
+            overlay.CompleteSelection(result: null);
+            return;
+        }
+
+        _ = overlay.Dispatcher.BeginInvoke(
+            new Action(() => overlay.CompleteSelection(result: null)));
     }
 
     public static CaptureOverlayWindow ShowInteractive(
@@ -490,6 +578,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         ReleaseOverlayMouseCapture();
         _windowSnapTimer.Stop();
         _windowSnapTimer.Tick -= OnWindowSnapTimerTick;
+        _selectionIdleTimer.Stop();
+        _selectionIdleTimer.Tick -= OnSelectionIdleTimerTick;
+        _nativeSelectionFrame.Dispose();
+        _nativeSelectionMask.Dispose();
+        _nativeSelectionSize.Dispose();
         if (_windowSource is not null)
         {
             _windowSource.RemoveHook(OnScrollCaptureWindowMessage);
@@ -537,6 +630,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     {
         var windowHandle = new WindowInteropHelper(this).Handle;
         _windowHandle = windowHandle;
+        _nativeSelectionFrame.SetOwner(windowHandle);
+        _nativeSelectionMask.SetOwner(windowHandle);
+        _nativeSelectionSize.SetOwner(windowHandle);
         _ = NativeMethods.SetWindowPos(
             windowHandle,
             new IntPtr(TopmostWindow),
@@ -550,6 +646,45 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         {
             _windowSource = HwndSource.FromHwnd(windowHandle);
             _windowSource?.AddHook(OnScrollCaptureWindowMessage);
+        }
+    }
+
+    private bool TryGetAccentColors(out WpfColor start, out WpfColor end)
+    {
+        start = WpfColor.FromRgb(46, 175, 165);
+        end = start;
+        if (TryFindResource("AppAccentBrush") is not
+            System.Windows.Media.Brush brush)
+        {
+            return false;
+        }
+
+        switch (brush)
+        {
+            case WpfSolidColorBrush solid:
+                start = solid.Color;
+                end = solid.Color;
+                return true;
+            case System.Windows.Media.GradientBrush gradient
+                when gradient.GradientStops.Count > 0:
+                start = gradient.GradientStops[0].Color;
+                end = gradient.GradientStops[^1].Color;
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void SyncNativeSelectionFrameColor()
+    {
+        if (TryGetAccentColors(out var accentStart, out var accentEnd))
+        {
+            _nativeSelectionFrame.SetBorderColors(
+                DrawingColor.FromArgb(accentStart.R, accentStart.G, accentStart.B),
+                DrawingColor.FromArgb(accentEnd.R, accentEnd.G, accentEnd.B));
+            _nativeSelectionSize.SetThemeColors(
+                DrawingColor.FromArgb(accentStart.R, accentStart.G, accentStart.B),
+                DrawingColor.FromArgb(accentEnd.R, accentEnd.G, accentEnd.B));
         }
     }
 
@@ -628,6 +763,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         else if (e.Key == Key.C &&
                  Keyboard.Modifiers.HasFlag(ModifierKeys.Control) &&
                  HasValidSelection() &&
+                 !InlineEditorCanvas.IsTextInputActive &&
+                 !HasSelectableTextSelection() &&
                  IsDefaultCompletionShortcut())
         {
             // A selectable OCR/translation text box handles Ctrl+C during
@@ -650,6 +787,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             _isColorPickerActive ||
             _isActionInProgress ||
             _isEditorInitializing ||
+            InlineEditorCanvas.IsTextInputActive ||
+            HasSelectableTextSelection() ||
             CaptureToolbar.Visibility != Visibility.Visible ||
             !HasValidSelection())
         {
@@ -903,6 +1042,165 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         CaptureSurface.CaptureMouse();
     }
 
+    private void OnCaptureSurfacePreviewMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (e.Handled ||
+            e.ClickCount == 2 ||
+            _isSelecting ||
+            _isMovingSelection ||
+            _isResizeDragging ||
+            _isColorPickerActive ||
+            _isActionInProgress ||
+            !HasValidSelection())
+        {
+            return;
+        }
+
+        // A selectable OCR surface owns clicks on text, including text that
+        // happens to touch the selection edge. Toolbar and resize controls
+        // must likewise keep their own commands.
+        if (e.OriginalSource is SelectableOcrTextOverlay ||
+            e.OriginalSource is DependencyObject source &&
+            (source == CaptureToolbar ||
+             CaptureToolbar.IsAncestorOf(source) ||
+             OcrTextOverlay.IsAncestorOf(source)))
+        {
+            return;
+        }
+
+        var point = e.GetPosition(CaptureSurface);
+        if (!GetSelectionBounds().Contains(point))
+        {
+            return;
+        }
+
+        var isMoveZone = e.OriginalSource is FrameworkElement moveElement &&
+            moveElement.Name.StartsWith("SelectionMove", StringComparison.Ordinal);
+        if (!isMoveZone &&
+            TryGetResizeHandleAtPoint(point, GetSelectionBounds(), out var resizeHandle))
+        {
+            BeginNativeResize(resizeHandle);
+            e.Handled = true;
+            return;
+        }
+
+        if (InlineEditorCanvas.HasImage && !isMoveZone)
+        {
+            // The editor owns the interior. Moving an edited selection is
+            // available only from the dedicated corner-inset affordances.
+            return;
+        }
+
+        if (!CanMoveSelection())
+        {
+            return;
+        }
+
+        // Keep OCR text and annotation content interactive once edits exist.
+        // Before that point the whole transparent selection surface is a move
+        // affordance, including captures that have not entered the editor.
+        if (InlineEditorCanvas.HasImage && InlineEditorCanvas.CanUndo &&
+            !IsSelectionBorderPoint(point, GetSelectionBounds()))
+        {
+            return;
+        }
+
+        if (InlineEditorCanvas.HasImage && isMoveZone)
+        {
+            OnInlineEditorOutlineMouseLeftButtonDown(InlineEditorOutline, e);
+        }
+        else if (!InlineEditorCanvas.HasImage)
+        {
+            OnSelectionRectangleMouseLeftButtonDown(SelectionRectangle, e);
+        }
+    }
+
+    private void OnSelectionMoveZoneMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (e.Handled || !HasValidSelection() ||
+            _isSelecting || _isMovingSelection || _isResizeDragging ||
+            _isColorPickerActive || _isActionInProgress ||
+            !CanMoveSelection())
+        {
+            return;
+        }
+
+        OnSelectionRectangleMouseLeftButtonDown(SelectionRectangle, e);
+    }
+
+    private static bool IsSelectionBorderPoint(WpfPoint point, Rect bounds)
+    {
+        const double borderHitThickness = 10;
+        if (!bounds.Contains(point))
+        {
+            return false;
+        }
+
+        return point.X - bounds.Left <= borderHitThickness ||
+               bounds.Right - point.X <= borderHitThickness ||
+               point.Y - bounds.Top <= borderHitThickness ||
+               bounds.Bottom - point.Y <= borderHitThickness;
+    }
+
+    private bool TryGetResizeHandleAtPoint(
+        WpfPoint point,
+        Rect bounds,
+        out Thumb handle)
+    {
+        handle = null!;
+        const double hit = 16;
+
+        bool Near(double value, double target) =>
+            Math.Abs(value - target) <= hit;
+
+        if (Near(point.X, bounds.Left) && Near(point.Y, bounds.Top))
+        {
+            handle = TopLeftResizeThumb;
+        }
+        else if (Near(point.X, bounds.Right) && Near(point.Y, bounds.Top))
+        {
+            handle = TopRightResizeThumb;
+        }
+        else if (Near(point.X, bounds.Left) && Near(point.Y, bounds.Bottom))
+        {
+            handle = BottomLeftResizeThumb;
+        }
+        else if (Near(point.X, bounds.Right) && Near(point.Y, bounds.Bottom))
+        {
+            handle = BottomRightResizeThumb;
+        }
+        else if (Near(point.Y, bounds.Top) &&
+                 point.X >= bounds.Left + hit &&
+                 point.X <= bounds.Right - hit)
+        {
+            handle = TopResizeThumb;
+        }
+        else if (Near(point.X, bounds.Left) &&
+                 point.Y >= bounds.Top + hit &&
+                 point.Y <= bounds.Bottom - hit)
+        {
+            handle = LeftResizeThumb;
+        }
+        else if (Near(point.X, bounds.Right) &&
+                 point.Y >= bounds.Top + hit &&
+                 point.Y <= bounds.Bottom - hit)
+        {
+            handle = RightResizeThumb;
+        }
+        else if (Near(point.Y, bounds.Bottom) &&
+                 point.X >= bounds.Left + hit &&
+                 point.X <= bounds.Right - hit)
+        {
+            handle = BottomResizeThumb;
+        }
+
+        return handle is not null;
+    }
+
     private void OnCaptureSurfaceMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (InlineCustomColorPanel.Visibility == Visibility.Visible &&
@@ -1055,6 +1353,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             Math.Clamp(startPoint.Y, 0, CaptureSurface.ActualHeight));
         _continuedSelectionButton = continuedButton;
         _isSelecting = true;
+        ResetSelectionPreviewRate();
         _windowSnapTimer.Stop();
         _isWindowSnapClickPending =
             allowWindowSnap &&
@@ -1066,11 +1365,36 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             UpdateSelectionBounds(new Rect(
                 _selectionStartPoint,
                 _selectionStartPoint));
+            // The WPF rectangle is input-only. Keep it transparent before it
+            // becomes visible so the accent-muted fill cannot flash while the
+            // native gray mask is taking ownership of the pixels.
+            SelectionRectangle.Fill = WpfBrushes.Transparent;
+            SyncNativeSelectionFrameColor();
+            _nativeSelectionFrame.SetMaskEnabled(true);
+            _nativeSelectionFrame.SetSizeEnabled(ShouldShowSelectionSize);
+            _nativeSelectionFrame.StartSelectionTracking(
+                ToPhysicalScreenPoint(_selectionStartPoint),
+                ToDrawingRectangle(_virtualScreenBounds),
+                () => Dispatcher.BeginInvoke(new Action(() =>
+                    _ = CompleteNativePointerSelectionAsync())),
+                captureMouse: !continuedButton.HasValue);
+            SetNativeSelectionVisualSuppressed(true);
             SelectionRectangle.Visibility = Visibility.Visible;
         }
 
-        CaptureSurface.CaptureMouse();
+        if (_isWindowSnapClickPending || continuedButton.HasValue)
+        {
+            // Window-snap needs WPF capture only until the drag crosses the
+            // threshold. A mouse-shortcut continuation also keeps WPF capture
+            // so the global hook can deliver the trigger-button release.
+            CaptureSurface.CaptureMouse();
+        }
         CaptureSurface.Focus();
+        // Subscribe before the first MouseMove so a busy WPF input queue does
+        // not delay the first native-position sample.
+        QueueSelectionBoundsUpdate(new Rect(
+            _selectionStartPoint,
+            _selectionStartPoint));
         Mouse.UpdateCursor();
         if (continuedButton.HasValue)
         {
@@ -1079,6 +1403,17 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 $"button={continuedButton} captured={CaptureSurface.IsMouseCaptured} " +
                 $"start={_selectionStartPoint.X:0.##},{_selectionStartPoint.Y:0.##}");
         }
+    }
+
+    private void OnCaptureSurfacePreviewMouseMove(object sender, WpfMouseEventArgs e)
+    {
+        if (_isColorPickerActive || _isSelecting || _isMovingSelection ||
+            _isResizeDragging || _isActionInProgress || !HasValidSelection())
+        {
+            return;
+        }
+
+        UpdateSelectionInteractionCursor(e.GetPosition(CaptureSurface));
     }
 
     private void OnCaptureSurfaceMouseMove(object sender, WpfMouseEventArgs e)
@@ -1103,6 +1438,18 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
                 _isWindowSnapClickPending = false;
                 HideWindowSnap();
+                SyncNativeSelectionFrameColor();
+                _nativeSelectionFrame.SetMaskEnabled(true);
+                _nativeSelectionFrame.SetSizeEnabled(ShouldShowSelectionSize);
+                _nativeSelectionFrame.StartSelectionTracking(
+                    ToPhysicalScreenPoint(_selectionStartPoint),
+                    ToDrawingRectangle(_virtualScreenBounds),
+                    () => Dispatcher.BeginInvoke(new Action(() =>
+                        _ = CompleteNativePointerSelectionAsync())),
+                    captureMouse: true);
+                SetNativeSelectionVisualSuppressed(true);
+                SelectionRectangle.Fill = WpfBrushes.Transparent;
+                CaptureSurface.ReleaseMouseCapture();
                 QueueSelectionBoundsUpdate(new Rect(
                     _selectionStartPoint,
                     _selectionStartPoint));
@@ -1113,6 +1460,44 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return;
         }
 
+        // The visible frame is native and click-through. Keep the WPF surface
+        // responsible for the interaction cursor even when the transparent
+        // selection layer is hidden by the editor canvas.
+        if (!_isMovingSelection && !_isResizeDragging &&
+            !_isActionInProgress && HasValidSelection())
+        {
+            UpdateSelectionInteractionCursor(e.GetPosition(CaptureSurface));
+        }
+
+    }
+
+    private void UpdateSelectionInteractionCursor(WpfPoint point)
+    {
+        if (TryGetResizeHandleAtPoint(point, GetSelectionBounds(), out var handle))
+        {
+            CaptureSurface.Cursor = handle.Cursor ??
+                System.Windows.Input.Cursors.SizeAll;
+            return;
+        }
+
+        var bounds = GetSelectionBounds();
+        if (!bounds.Contains(point))
+        {
+            CaptureSurface.Cursor = System.Windows.Input.Cursors.Cross;
+            return;
+        }
+
+        // Existing annotation content keeps the interior available for text
+        // and annotation input. Its border is the move affordance; an
+        // unedited capture can be moved from any point inside the selection.
+        if (InlineEditorCanvas.HasImage && InlineEditorCanvas.CanUndo &&
+            !IsSelectionBorderPoint(point, bounds))
+        {
+            CaptureSurface.Cursor = System.Windows.Input.Cursors.Arrow;
+            return;
+        }
+
+        CaptureSurface.Cursor = System.Windows.Input.Cursors.SizeAll;
     }
 
     private async void OnCaptureSurfaceMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -1151,6 +1536,21 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             endPoint,
             enterPickerWhenEmpty: false);
 
+    private async Task CompleteNativePointerSelectionAsync()
+    {
+        if (!_isSelecting)
+        {
+            return;
+        }
+
+        var cursorPosition = WinForms.Cursor.Position;
+        var endPoint = CaptureSurface.PointFromScreen(
+            new WpfPoint(cursorPosition.X, cursorPosition.Y));
+        await CompletePointerSelectionCoreAsync(
+            endPoint,
+            enterPickerWhenEmpty: false);
+    }
+
     private async Task CompletePointerSelectionCoreAsync(
         WpfPoint endPoint,
         bool enterPickerWhenEmpty)
@@ -1161,6 +1561,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         FlushSelectionBoundsUpdate();
         _isWindowSnapClickPending = false;
         _isSelecting = false;
+        _nativeSelectionFrame.StopTracking(hide: false);
+        SetNativeSelectionVisualSuppressed(true);
         _continuedSelectionButton = null;
         CaptureSurface.ReleaseMouseCapture();
         if (snappedBounds.HasValue)
@@ -1185,6 +1587,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                     $"end={endPoint.X:0.##},{endPoint.Y:0.##}");
             }
             HideSelectionControls();
+            _nativeSelectionFrame.SetMaskEnabled(false);
             if (enterPickerWhenEmpty && _options is not null)
             {
                 EnterColorPicker();
@@ -1192,6 +1595,12 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
             return;
         }
+
+        SyncNativeSelectionFrameColor();
+        _nativeSelectionFrame.SetSizeEnabled(ShouldShowSelectionSize);
+        _nativeSelectionFrame.Update(ToDrawingRectangle(
+            GetPhysicalSelectionBounds()));
+        _nativeSelectionFrame.RefreshMask();
 
         if (_isScrollCaptureSelection)
         {
@@ -1316,9 +1725,27 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         _isMovingSelection = true;
-        _dragStartPoint = e.GetPosition(CaptureSurface);
+        HideToolbarForNativeMove();
+        SetResizeControlsSuppressed(true);
+        ResetSelectionPreviewRate();
+        _dragStartPoint = TryGetCaptureSurfacePoint(
+            WinForms.Cursor.Position,
+            out var nativeStartPoint)
+            ? nativeStartPoint
+            : e.GetPosition(CaptureSurface);
         _dragStartBounds = GetSelectionBounds();
-        SelectionRectangle.CaptureMouse();
+        SyncNativeSelectionFrameColor();
+        _nativeSelectionFrame.SetMaskEnabled(true);
+        _nativeSelectionFrame.RefreshMask();
+        _nativeSelectionFrame.StartMoveTracking(
+            WinForms.Cursor.Position,
+            ToDrawingRectangle(GetPhysicalSelectionBounds()),
+            ToDrawingRectangle(_virtualScreenBounds),
+            () => Dispatcher.BeginInvoke(new Action(() =>
+                _ = CompleteNativeMoveAsync())));
+        SetNativeSelectionVisualSuppressed(true);
+        SelectionRectangle.Visibility = Visibility.Hidden;
+        QueueSelectionBoundsUpdate(_dragStartBounds);
         e.Handled = true;
     }
 
@@ -1473,8 +1900,38 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             sample.Dispose();
         }
 
-        var panelX = Math.Clamp(point.X + 20, 8, Math.Max(8, CaptureSurface.ActualWidth - ColorPickerPanel.ActualWidth - 8));
-        var panelY = Math.Clamp(point.Y + 20, 8, Math.Max(8, CaptureSurface.ActualHeight - ColorPickerPanel.ActualHeight - 8));
+        var surfaceWidth = Math.Max(0, CaptureSurface.ActualWidth);
+        var surfaceHeight = Math.Max(0, CaptureSurface.ActualHeight);
+        var panelWidth = Math.Max(
+            ColorPickerPanel.ActualWidth,
+            ColorPickerPanel.DesiredSize.Width);
+        var panelHeight = Math.Max(
+            ColorPickerPanel.ActualHeight,
+            ColorPickerPanel.DesiredSize.Height);
+        const double cursorGap = 20;
+        const double edgeMargin = 8;
+
+        // Prefer the lower-right of the cursor, but move to the upper-left
+        // when that side would overlap the cursor or leave the screen.
+        var rightX = point.X + cursorGap;
+        var leftX = point.X - panelWidth - cursorGap;
+        var panelX = rightX + panelWidth <= surfaceWidth - edgeMargin
+            ? rightX
+            : leftX;
+        var belowY = point.Y + cursorGap;
+        var aboveY = point.Y - panelHeight - cursorGap;
+        var panelY = belowY + panelHeight <= surfaceHeight - edgeMargin
+            ? belowY
+            : aboveY;
+
+        panelX = Math.Clamp(
+            panelX,
+            edgeMargin,
+            Math.Max(edgeMargin, surfaceWidth - panelWidth - edgeMargin));
+        panelY = Math.Clamp(
+            panelY,
+            edgeMargin,
+            Math.Max(edgeMargin, surfaceHeight - panelHeight - edgeMargin));
         Canvas.SetLeft(ColorPickerPanel, panelX);
         Canvas.SetTop(ColorPickerPanel, panelY);
     }
@@ -1513,7 +1970,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         var currentPoint = e.GetPosition(CaptureSurface);
         var delta = currentPoint - _dragStartPoint;
-        var bounds = ClampBoundsToSurface(new Rect(
+        var bounds = ClampMovedBoundsToSurface(new Rect(
             _dragStartBounds.X + delta.X,
             _dragStartBounds.Y + delta.Y,
             _dragStartBounds.Width,
@@ -1521,17 +1978,62 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         QueueSelectionBoundsUpdate(bounds);
     }
 
-    private void OnSelectionRectangleMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    private void SetNativeSelectionVisualSuppressed(bool suppressed)
+    {
+        // These WPF elements are input-only hosts. The visible selection,
+        // mask, and size badge are always owned by the native windows; letting
+        // the WPF rectangle recover opacity would create a second frame.
+        SelectionRectangle.Opacity = 0;
+        SelectionRectangle.Stroke = WpfBrushes.Transparent;
+        SelectionRectangle.Fill = WpfBrushes.Transparent;
+        // Keep the editor outline as an invisible hit-test surface. A null
+        // fill only hits its stroke, so clicks inside the editor image would
+        // bypass the native move path and leave the controls visible.
+        InlineEditorOutline.Fill = WpfBrushes.Transparent;
+        if (InlineEditorOutline.Visibility == Visibility.Visible)
+        {
+            InlineEditorOutline.Opacity = 0;
+        }
+    }
+
+    private async void OnCaptureSurfacePreviewMouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        // The native tracker owns the physical release. WPF can receive a
+        // synthetic preview-up when native capture is changed, which must not
+        // restore stale controls or commit an intermediate rectangle.
+        if (_isResizeDragging && !_nativeSelectionFrame.IsTracking)
+        {
+            e.Handled = true;
+            await CompleteNativeResizeAsync();
+            return;
+        }
+
+        if (_isResizeDragging)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        if (!_isMovingSelection)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        await CompleteNativeMoveAsync();
+    }
+
+    private async void OnSelectionRectangleMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
         if (!_isMovingSelection)
         {
             return;
         }
 
-        _isMovingSelection = false;
-        FlushSelectionBoundsUpdate();
-        SelectionRectangle.ReleaseMouseCapture();
         e.Handled = true;
+        await CompleteNativeMoveAsync();
     }
 
     private void OnInlineEditorOutlineMouseLeftButtonDown(
@@ -1552,10 +2054,28 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         _isMovingSelection = true;
+        HideToolbarForNativeMove();
+        SetResizeControlsSuppressed(true);
+        ResetSelectionPreviewRate();
         BeginSelectionAdjustment();
-        _dragStartPoint = e.GetPosition(CaptureSurface);
+        _dragStartPoint = TryGetCaptureSurfacePoint(
+            WinForms.Cursor.Position,
+            out var nativeStartPoint)
+            ? nativeStartPoint
+            : e.GetPosition(CaptureSurface);
         _dragStartBounds = GetSelectionBounds();
-        InlineEditorOutline.CaptureMouse();
+        SyncNativeSelectionFrameColor();
+        _nativeSelectionFrame.SetMaskEnabled(true);
+        _nativeSelectionFrame.RefreshMask();
+        _nativeSelectionFrame.StartMoveTracking(
+            WinForms.Cursor.Position,
+            ToDrawingRectangle(GetPhysicalSelectionBounds()),
+            ToDrawingRectangle(_virtualScreenBounds),
+            () => Dispatcher.BeginInvoke(new Action(() =>
+                _ = CompleteNativeMoveAsync())));
+        SetNativeSelectionVisualSuppressed(true);
+        InlineEditorOutline.Visibility = Visibility.Hidden;
+        QueueSelectionBoundsUpdate(_dragStartBounds);
         e.Handled = true;
     }
 
@@ -1586,11 +2106,66 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return;
         }
 
-        _isMovingSelection = false;
-        FlushSelectionBoundsUpdate();
-        InlineEditorOutline.ReleaseMouseCapture();
         e.Handled = true;
-        await CompleteSelectionAdjustmentAsync();
+        await CompleteNativeMoveAsync();
+    }
+
+    private async Task CompleteNativeMoveAsync()
+    {
+        if (!_isMovingSelection)
+        {
+            return;
+        }
+
+        var wasSelectionAdjustment = _isSelectionAdjustmentInProgress;
+        _isMovingSelection = false;
+        _nativeSelectionFrame.StopTracking(hide: false);
+        SetNativeSelectionVisualSuppressed(true);
+        // The native tracker owns the clamped rectangle for the entire drag.
+        // Prefer it on release: the WPF cursor sample can be outside the
+        // surface and ClampBoundsToSurface would clip the width/height.
+        if (TryGetNativeFinalSelectionBounds(out var finalBounds, preserveMoveSize: true) ||
+            TryGetMovePreviewBounds(out finalBounds))
+        {
+            // Read the release-time native cursor first. The polling loop may
+            // be one sample behind when a high-report-rate mouse is released.
+            // Its last bounds remain a fallback if the cursor cannot be
+            // converted to the capture surface.
+            UpdateSelectionBounds(finalBounds);
+        }
+        else
+        {
+            FlushSelectionBoundsUpdate();
+        }
+        if (SelectionRectangle.IsMouseCaptured)
+        {
+            SelectionRectangle.ReleaseMouseCapture();
+        }
+        if (InlineEditorOutline.IsMouseCaptured)
+        {
+            InlineEditorOutline.ReleaseMouseCapture();
+        }
+        if (wasSelectionAdjustment)
+        {
+            await CompleteSelectionAdjustmentAsync();
+        }
+        if (_lastRenderedSelectionBounds is { } committedBounds)
+        {
+            UpdateSelectionBounds(committedBounds);
+            UpdateNativeSelectionVisuals(committedBounds);
+        }
+        _nativeSelectionFrame.RefreshMask();
+        if (InlineEditorCanvas.HasImage)
+        {
+            SelectionRectangle.Visibility = Visibility.Collapsed;
+            InlineEditorOutline.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            SelectionRectangle.Visibility = Visibility.Visible;
+        }
+        SetResizeControlsSuppressed(false);
+        RestoreToolbarAfterNativeMove(_lastRenderedSelectionBounds);
     }
 
     private void OnTopLeftResizeThumbDragDelta(object sender, DragDeltaEventArgs e)
@@ -1697,15 +2272,36 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         _isActionInProgress = true;
         CaptureToolbar.IsEnabled = false;
         var startScrollCaptureAsync = _options.StartScrollCaptureAsync;
+        var startScrollCaptureWithSnapshotAsync =
+            _options.StartScrollCaptureWithSnapshotAsync;
+        CapturedImage? initialScreenSnapshot = null;
+        if (startScrollCaptureWithSnapshotAsync is not null &&
+            _screenSnapshot is not null)
+        {
+            initialScreenSnapshot = _screenSnapshot.Clone();
+        }
         CompleteSelection(result: null);
-
         try
         {
-            await startScrollCaptureAsync(selection);
+            if (startScrollCaptureWithSnapshotAsync is not null)
+            {
+                await startScrollCaptureWithSnapshotAsync(
+                    selection,
+                    initialScreenSnapshot);
+                initialScreenSnapshot = null;
+            }
+            else
+            {
+                await startScrollCaptureAsync!(selection);
+            }
         }
         catch
         {
             // The coordinator reports scroll-capture failures in the settings window.
+        }
+        finally
+        {
+            initialScreenSnapshot?.Dispose();
         }
     }
 
@@ -1724,7 +2320,6 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         CaptureToolbar.IsEnabled = false;
         var startVideoRecordingAsync = _options.StartVideoRecordingAsync;
         CompleteSelection(result: null);
-
         try
         {
             await startVideoRecordingAsync(selection);
@@ -1774,16 +2369,21 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 selectionBounds.Width,
                 selectionBounds.Height);
             InlineEditorCanvas.SelectTool(_selectedInlineTool);
-            if (_inlineCustomColor is { } savedColor)
-            {
-                InlineEditorCanvas.SelectColor(savedColor);
-            }
+            ApplyInlineToolStyleState();
             Canvas.SetLeft(InlineEditorCanvas, selectionBounds.X);
             Canvas.SetTop(InlineEditorCanvas, selectionBounds.Y);
             InlineEditorCanvas.Visibility = Visibility.Visible;
             LockSelectionForEditing();
             var topmostApplied = ReassertOverlayTopmost();
             _ = Activate();
+            // ReassertOverlayTopmost can place the WPF owner above the native
+            // selection windows. Submit the complete native visual state again
+            // after activation so the border and size window remain visible
+            // after the first selection enters the editor.
+            if (HasValidSelection())
+            {
+                UpdateNativeSelectionVisuals(GetSelectionBounds());
+            }
             InlineEditorCanvas.Focus();
             Keyboard.Focus(InlineEditorCanvas);
             if (_initialPointerContinuation is not null)
@@ -1855,6 +2455,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             image = null;
             previousImage?.Dispose();
             InlineEditorCanvas.SelectTool(_selectedInlineTool);
+            ApplyInlineToolStyleState();
             Canvas.SetLeft(InlineEditorCanvas, selectionBounds.X);
             Canvas.SetTop(InlineEditorCanvas, selectionBounds.Y);
             InlineEditorCanvas.Visibility = Visibility.Visible;
@@ -1880,14 +2481,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private bool CanMoveSelection()
     {
-        if (!InlineEditorCanvas.HasImage || !InlineEditorCanvas.CanUndo)
-        {
-            return true;
-        }
-
-        CaptureStatusText.Text = "已有标注时不能移动整个选区；可拖动边缘调整，且不会裁掉标注。";
-        CaptureStatusText.Visibility = Visibility.Visible;
-        return false;
+        // Once annotations exist, keep the edited image fixed. Resizing is
+        // still allowed, but moving the whole selection is disabled.
+        return HasValidSelection() &&
+            (!InlineEditorCanvas.HasImage || !InlineEditorCanvas.CanUndo);
     }
 
     private void BeginSelectionAdjustment()
@@ -1900,15 +2497,20 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         _isSelectionAdjustmentInProgress = true;
         _selectionAdjustmentStartPhysicalBounds = GetPhysicalSelectionBounds();
         _selectionAdjustmentProtectedBounds = GetProtectedAnnotationBounds();
+        _selectionAdjustmentProtectedPhysicalBounds =
+            _selectionAdjustmentProtectedBounds is { } protectedBounds
+                ? ToDrawingRectangle(GetPhysicalSelectionBoundsForBounds(
+                    protectedBounds))
+                : null;
         ClearInlineOcrText();
 
-        // Keep the adjustment surface live. The old editor bitmap and its
-        // translation/OCR overlays must not remain visible while the bounds
-        // are being dragged; they belong to the previous selection frame.
-        InlineEditorCanvas.Visibility = Visibility.Collapsed;
+        // Keep the edited image visible while the bounds are being dragged.
+        // The protected annotation bounds below prevent the new selection from
+        // covering or clipping existing edits.
         OcrTextOverlay.Visibility = Visibility.Collapsed;
         ContentRecognitionOverlay.Visibility = Visibility.Collapsed;
         SelectionRectangle.Visibility = Visibility.Collapsed;
+        InlineEditorOutline.Visibility = Visibility.Collapsed;
     }
 
     private Rect? GetProtectedAnnotationBounds()
@@ -1920,11 +2522,31 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         var selection = GetSelectionBounds();
-        var scaleX = selection.Width / InlineEditorCanvas.Width;
-        var scaleY = selection.Height / InlineEditorCanvas.Height;
+        // Annotation coordinates are stored in the editor's pixel space. Use
+        // the configured pixel dimensions first, with ActualWidth/Height as a
+        // fallback during the short interval before the first layout pass.
+        var editorWidth = InlineEditorCanvas.Width;
+        var editorHeight = InlineEditorCanvas.Height;
+        if (!double.IsFinite(editorWidth) || editorWidth <= 0)
+        {
+            editorWidth = InlineEditorCanvas.ActualWidth;
+        }
+
+        if (!double.IsFinite(editorHeight) || editorHeight <= 0)
+        {
+            editorHeight = InlineEditorCanvas.ActualHeight;
+        }
+
+        if (editorWidth <= 0 || editorHeight <= 0)
+        {
+            return null;
+        }
+
+        var scaleX = selection.Width / editorWidth;
+        var scaleY = selection.Height / editorHeight;
         var bounds = Rect.Intersect(
             annotationBounds.Value,
-            new Rect(0, 0, InlineEditorCanvas.Width, InlineEditorCanvas.Height));
+            new Rect(0, 0, editorWidth, editorHeight));
         if (bounds.IsEmpty)
         {
             return null;
@@ -1948,11 +2570,15 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         _isSelectionAdjustmentInProgress = false;
         _selectionAdjustmentStartPhysicalBounds = null;
         _selectionAdjustmentProtectedBounds = null;
+        _selectionAdjustmentProtectedPhysicalBounds = null;
         if (previousSelection.HasValue)
         {
             await RefreshInlineEditorForSelectionAsync(previousSelection.Value);
             if (InlineEditorCanvas.HasImage && !_isCompleted)
             {
+                // Restore the hit-test outline only after the reframe finishes;
+                // a stale WPF border during the drag causes visible flashing.
+                InlineEditorOutline.Visibility = Visibility.Visible;
                 _ = RecognizeLocalInlineContentAsync(
                     _automaticRecognitionGeneration,
                     delayMilliseconds: 350);
@@ -1964,9 +2590,356 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         object sender,
         DragCompletedEventArgs e)
     {
-        FlushSelectionBoundsUpdate();
-        await CompleteSelectionAdjustmentAsync();
+        // Taking capture away from the WPF Thumb raises DragCompleted even
+        // though the physical button is still held. The native tracker owns
+        // the real gesture; its release callback is the only completion point
+        // while tracking is active.
+        if (_nativeSelectionFrame.IsTracking)
+        {
+            return;
+        }
+
+        // WPF can raise DragCompleted when capture changes even though the
+        // physical button is still down. Completing here would restore the
+        // old handles and toolbar in the middle of the native resize.
+        if ((WinForms.Control.MouseButtons & WinForms.MouseButtons.Left) != 0)
+        {
+            return;
+        }
+
+        await CompleteNativeResizeAsync();
     }
+
+    private async Task CompleteNativeResizeAsync()
+    {
+        if (!_isResizeDragging)
+        {
+            return;
+        }
+
+        _isResizeDragging = false;
+        _nativeSelectionFrame.StopTracking(hide: false);
+        SetNativeSelectionVisualSuppressed(true);
+        if (TryGetResizePreviewBounds(out var finalBounds) ||
+            TryGetNativeFinalSelectionBounds(out finalBounds))
+        {
+            UpdateSelectionBounds(finalBounds);
+        }
+        else
+        {
+            FlushSelectionBoundsUpdate();
+        }
+        await CompleteSelectionAdjustmentAsync();
+        if (_lastRenderedSelectionBounds is { } committedBounds)
+        {
+            UpdateSelectionBounds(committedBounds);
+            UpdateNativeSelectionVisuals(committedBounds);
+        }
+        _nativeSelectionFrame.RefreshMask();
+        if (InlineEditorCanvas.HasImage)
+        {
+            SelectionRectangle.Visibility = Visibility.Collapsed;
+            InlineEditorOutline.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            SelectionRectangle.Visibility = Visibility.Visible;
+        }
+        SetResizeControlsSuppressed(false);
+        if (_lastRenderedSelectionBounds is { } finalSelection)
+        {
+            CaptureToolbar.UpdateLayout();
+            UpdateSelectionControlPositions(finalSelection);
+            UpdateSelectionMoveZonePositions(finalSelection);
+        }
+    }
+
+    private void OnSelectionResizeThumbDragStarted(
+        object sender,
+        DragStartedEventArgs e)
+    {
+        BeginNativeResize(sender as Thumb);
+    }
+
+    private void BeginNativeResize(Thumb? resizeHandle)
+    {
+        if (!HasValidSelection() || resizeHandle is null)
+        {
+            return;
+        }
+
+        _isResizeDragging = true;
+        _resizeLeftEdge = resizeHandle == TopLeftResizeThumb ||
+            resizeHandle == BottomLeftResizeThumb ||
+            resizeHandle == LeftResizeThumb;
+        _resizeTopEdge = resizeHandle == TopLeftResizeThumb ||
+            resizeHandle == TopRightResizeThumb ||
+            resizeHandle == TopResizeThumb;
+        _resizeRightEdge = resizeHandle == TopRightResizeThumb ||
+            resizeHandle == BottomRightResizeThumb ||
+            resizeHandle == RightResizeThumb;
+        _resizeBottomEdge = resizeHandle == BottomLeftResizeThumb ||
+            resizeHandle == BottomRightResizeThumb ||
+            resizeHandle == BottomResizeThumb;
+        _resizeDragStartCursor = WinForms.Cursor.Position;
+        _resizeDragStartPhysicalBounds = ToDrawingRectangle(
+            GetPhysicalSelectionBounds());
+
+        BeginSelectionAdjustment();
+        // The native mask is already the only visible dimming layer. Refresh
+        // it before hiding the WPF thumbs so the resize gesture never exposes
+        // the old WPF mask for a frame.
+        _nativeSelectionFrame.SetMaskEnabled(true);
+        _nativeSelectionFrame.RefreshMask();
+        QueueSelectionBoundsUpdate(GetSelectionBounds());
+        SelectionRectangle.Visibility = Visibility.Collapsed;
+        // During the native resize path WPF must not leave its handles,
+        // toolbar, or editor outline on screen. They are still kept alive for
+        // input capture, but are fully transparent so there is only one frame
+        // to compose and paint.
+        SetResizeControlsSuppressed(true);
+        SyncNativeSelectionFrameColor();
+        _nativeSelectionFrame.SetSizeEnabled(ShouldShowSelectionSize);
+        _nativeSelectionFrame.StartCustomTracking(cursor =>
+            ResizePhysicalBoundsFromCursor(cursor),
+            () => Dispatcher.BeginInvoke(new Action(() =>
+                _ = CompleteNativeResizeAsync())));
+        SetNativeSelectionVisualSuppressed(true);
+    }
+
+    private void SetResizeControlsSuppressed(bool suppressed)
+    {
+        _resizeControlsSuppressed = suppressed;
+        var opacity = suppressed ? 0 : 1;
+        // Keep the active Thumb in the tree while native resize is running.
+        // Collapsing it releases WPF mouse capture and fires DragCompleted
+        // before the native tracker has finished.
+        var thumbVisibility = suppressed
+            ? Visibility.Hidden
+            : Visibility.Visible;
+        TopLeftResizeThumb.Opacity = opacity;
+        TopLeftResizeThumb.Visibility = thumbVisibility;
+        TopRightResizeThumb.Opacity = opacity;
+        TopRightResizeThumb.Visibility = thumbVisibility;
+        BottomLeftResizeThumb.Opacity = opacity;
+        BottomLeftResizeThumb.Visibility = thumbVisibility;
+        BottomRightResizeThumb.Opacity = opacity;
+        BottomRightResizeThumb.Visibility = thumbVisibility;
+        TopResizeThumb.Opacity = opacity;
+        TopResizeThumb.Visibility = thumbVisibility;
+        LeftResizeThumb.Opacity = opacity;
+        LeftResizeThumb.Visibility = thumbVisibility;
+        RightResizeThumb.Opacity = opacity;
+        RightResizeThumb.Visibility = thumbVisibility;
+        BottomResizeThumb.Opacity = opacity;
+        BottomResizeThumb.Visibility = thumbVisibility;
+        CaptureToolbar.Opacity = opacity;
+        CaptureToolbar.Visibility = suppressed || _toolbarHiddenForMove
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        InlineEditorOptions.Opacity = opacity;
+        InlineEditorOptions.Visibility = suppressed || !_hasVisibleInlineEditorTools
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        if (suppressed)
+        {
+            SelectionMoveTopLeftZone.Visibility = Visibility.Collapsed;
+            SelectionMoveTopRightZone.Visibility = Visibility.Collapsed;
+            SelectionMoveBottomLeftZone.Visibility = Visibility.Collapsed;
+            SelectionMoveBottomRightZone.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void HideToolbarForNativeMove()
+    {
+        if (_toolbarHiddenForMove)
+        {
+            return;
+        }
+
+        _toolbarHiddenForMove = true;
+        CaptureToolbar.Visibility = Visibility.Collapsed;
+    }
+
+    private void RestoreToolbarAfterNativeMove(Rect? finalBounds = null)
+    {
+        if (!_toolbarHiddenForMove || _isCompleted)
+        {
+            return;
+        }
+
+        _toolbarHiddenForMove = false;
+        CaptureToolbar.Visibility = Visibility.Visible;
+        InlineEditorOptions.Visibility = _hasVisibleInlineEditorTools
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (finalBounds is { } bounds)
+        {
+            UpdateResizeThumbPositions(bounds);
+            UpdateSelectionControlPositions(bounds);
+            UpdateSelectionMoveZonePositions(bounds);
+        }
+    }
+
+    private System.Drawing.Rectangle ResizePhysicalBoundsFromCursor(
+        DrawingPoint cursor)
+    {
+        var bounds = _resizeDragStartPhysicalBounds;
+        var dx = cursor.X - _resizeDragStartCursor.X;
+        var dy = cursor.Y - _resizeDragStartCursor.Y;
+        var minimumEdge = (int)Math.Ceiling(MinimumSelectionEdge);
+        var left = bounds.Left + (_resizeLeftEdge ? dx : 0);
+        var top = bounds.Top + (_resizeTopEdge ? dy : 0);
+        var right = bounds.Right + (_resizeRightEdge ? dx : 0);
+        var bottom = bounds.Bottom + (_resizeBottomEdge ? dy : 0);
+        var surface = ToDrawingRectangle(_virtualScreenBounds);
+        left = Math.Clamp(left, surface.Left, surface.Right);
+        top = Math.Clamp(top, surface.Top, surface.Bottom);
+        right = Math.Clamp(right, surface.Left, surface.Right);
+        bottom = Math.Clamp(bottom, surface.Top, surface.Bottom);
+
+        if (right - left < minimumEdge)
+        {
+            if (_resizeLeftEdge)
+            {
+                left = Math.Max(surface.Left, right - minimumEdge);
+            }
+            else
+            {
+                right = Math.Min(surface.Right, left + minimumEdge);
+            }
+        }
+
+        if (bottom - top < minimumEdge)
+        {
+            if (_resizeTopEdge)
+            {
+                top = Math.Max(surface.Top, bottom - minimumEdge);
+            }
+            else
+            {
+                bottom = Math.Min(surface.Bottom, top + minimumEdge);
+            }
+        }
+
+        if (_selectionAdjustmentProtectedPhysicalBounds is { } protectedBounds)
+        {
+            if (_resizeLeftEdge)
+            {
+                left = Math.Min(left, protectedBounds.Left);
+            }
+
+            if (_resizeTopEdge)
+            {
+                top = Math.Min(top, protectedBounds.Top);
+            }
+
+            if (_resizeRightEdge)
+            {
+                right = Math.Max(right, protectedBounds.Right);
+            }
+
+            if (_resizeBottomEdge)
+            {
+                bottom = Math.Max(bottom, protectedBounds.Bottom);
+            }
+        }
+
+        return new System.Drawing.Rectangle(
+            Math.Min(left, right),
+            Math.Min(top, bottom),
+            Math.Abs(right - left),
+            Math.Abs(bottom - top));
+    }
+
+    private bool TryGetResizePreviewBounds(out Rect bounds)
+    {
+        bounds = default;
+        var physical = ResizePhysicalBoundsFromCursor(WinForms.Cursor.Position);
+        if (!TryGetCaptureSurfacePoint(
+                new DrawingPoint(physical.Left, physical.Top),
+                out var topLeft) ||
+            !TryGetCaptureSurfacePoint(
+                new DrawingPoint(physical.Right, physical.Bottom),
+                out var bottomRight))
+        {
+            return false;
+        }
+
+        bounds = ClampBoundsToSurface(new Rect(topLeft, bottomRight));
+        return true;
+    }
+
+    private bool HasSelectableTextSelection()
+    {
+        if (OcrTextOverlay.Visibility != Visibility.Visible)
+        {
+            return false;
+        }
+
+        return OcrTextOverlay.Children
+            .OfType<SelectableOcrTextOverlay>()
+            .Any(overlay => overlay.HasSelectedText);
+    }
+
+    private bool TryGetNativeFinalSelectionBounds(
+        out Rect bounds,
+        bool preserveMoveSize = false)
+    {
+        bounds = default;
+        if (!_nativeSelectionFrame.TryGetLastBounds(out var physical) ||
+            !TryGetCaptureSurfacePoint(
+                new DrawingPoint(physical.Left, physical.Top),
+                out var topLeft) ||
+            !TryGetCaptureSurfacePoint(
+                new DrawingPoint(physical.Right, physical.Bottom),
+                out var bottomRight))
+        {
+            return false;
+        }
+
+        var nativeBounds = new Rect(topLeft, bottomRight);
+        bounds = preserveMoveSize
+            ? ClampMovedBoundsToSurface(nativeBounds)
+            : ClampBoundsToSurface(nativeBounds);
+        return bounds.Width > 0 && bounds.Height > 0;
+    }
+
+    private void UpdateNativeSelectionVisuals(Rect bounds)
+    {
+        if (bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return;
+        }
+
+        SyncNativeSelectionFrameColor();
+        _nativeSelectionFrame.SetSizeEnabled(ShouldShowSelectionSize);
+        _nativeSelectionFrame.Update(ToDrawingRectangle(
+            GetPhysicalSelectionBoundsForBounds(bounds)));
+        _nativeSelectionFrame.RefreshMask();
+        _nativeSelectionFrame.EnsureVisible();
+    }
+
+    private bool TryGetMovePreviewBounds(out Rect bounds)
+    {
+        bounds = default;
+        if (!TryGetCaptureSurfacePoint(WinForms.Cursor.Position, out var currentPoint))
+        {
+            return false;
+        }
+
+        var delta = currentPoint - _dragStartPoint;
+        bounds = ClampMovedBoundsToSurface(new Rect(
+            _dragStartBounds.X + delta.X,
+            _dragStartBounds.Y + delta.Y,
+            _dragStartBounds.Width,
+            _dragStartBounds.Height));
+        return true;
+    }
+
+    private bool ShouldShowSelectionSize =>
+        _options is not null &&
+        !_isScrollCaptureSelection;
 
     private async Task RecognizeLocalInlineContentAsync(
         int expectedGeneration,
@@ -3504,8 +4477,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         if (InlineEditorCanvas.HasImage)
         {
-        InlineEditorCanvas.SelectTool(tool);
+            InlineEditorCanvas.SelectTool(tool);
+            ApplyInlineToolStyleState();
             InlineEditorCanvas.Focus();
+        }
+        else
+        {
+            ApplyInlineToolStyleState();
         }
         if (tool is EditorTool.Arrow or EditorTool.CurvedArrow)
         {
@@ -3584,6 +4562,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         if (InlineEditorCanvas.HasImage)
         {
             InlineEditorCanvas.SelectTool(tool);
+            ApplyInlineToolStyleState();
+        }
+        else
+        {
+            ApplyInlineToolStyleState();
         }
         InlineEditorCanvas.Focus();
     }
@@ -3637,7 +4620,12 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         if (InlineEditorCanvas.HasImage)
         {
             InlineEditorCanvas.SelectTool(tool);
+            ApplyInlineToolStyleState();
             InlineEditorCanvas.Focus();
+        }
+        else
+        {
+            ApplyInlineToolStyleState();
         }
         _options?.ShapeToolModeChanged?.Invoke(tool == EditorTool.Ellipse
             ? ShapeToolMode.Ellipse
@@ -3763,7 +4751,14 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         var isEmoji = _selectedInlineTool == EditorTool.Emoji;
         InlineEmojiPalette.Visibility = isEmoji ? Visibility.Visible : Visibility.Collapsed;
-        InlineStrokeOptions.Visibility = isEmoji ? Visibility.Collapsed : Visibility.Visible;
+        // Emoji uses the same per-tool size value as the other annotations;
+        // keep the px slider visible instead of hiding it with the palette.
+        InlineStrokeOptions.Visibility = Visibility.Visible;
+        var colorVisibility = isEmoji ? Visibility.Collapsed : Visibility.Visible;
+        InlineRedColorButton.Visibility = colorVisibility;
+        InlineCyanColorButton.Visibility = colorVisibility;
+        InlineDarkColorButton.Visibility = colorVisibility;
+        InlineCustomColorButton.Visibility = colorVisibility;
     }
 
     private void OnInlineAnnotationSelectionChanged(object? sender, EventArgs e)
@@ -3772,6 +4767,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             ? "已选中标注：可拖动或缩放，按 Delete 删除。"
             : "可继续编辑当前截图。";
         CaptureStatusText.Visibility = Visibility.Visible;
+        if (InlineEditorCanvas.HasSelectedAnnotation)
+        {
+            ApplyInlineToolStyleState();
+        }
     }
 
     private void OnInlineEmojiClick(object sender, RoutedEventArgs e)
@@ -3823,7 +4822,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         if (sender is System.Windows.Controls.Button { Tag: string colorValue } &&
             WpfColorConverter.ConvertFromString(colorValue) is WpfColor color)
         {
-            ApplyInlineCustomColor(color);
+            // Preset swatches belong to the active tool.  Do not route them
+            // through the custom-color slot: doing so made every preset click
+            // highlight the custom button and leaked one tool's color into
+            // another tool's palette state.
+            InlineEditorCanvas.SelectColor(color);
+            UpdateInlineSelectedColorButton((System.Windows.Controls.Button)sender);
+            InlineEditorCanvas.Focus();
         }
     }
 
@@ -4242,7 +5247,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             await Dispatcher.InvokeAsync(
                 static () => { },
                 DispatcherPriority.Render);
-            await Task.Delay(80);
+            // The overlay is already hidden and the render turn above lets
+            // DWM retire it. A long fixed delay here exposes the live desktop
+            // and is visible as a flash on the cold/fallback capture path.
+            await Task.Delay(16);
             return ScreenCaptureService.Capture(selection);
         }
         finally
@@ -4252,6 +5260,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 Show();
                 Activate();
                 CaptureSurface.Focus();
+                // Hiding the WPF owner also hides every owned native HWND.
+                // Re-issue the full native update here so the frame, mask and
+                // size badge are all shown again together on the next frame.
+                if (HasValidSelection())
+                {
+                    UpdateNativeSelectionVisuals(GetSelectionBounds());
+                }
             }
         }
     }
@@ -4271,11 +5286,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void QueueSelectionBoundsUpdate(Rect requestedBounds)
     {
-        _pendingSelectionBounds = requestedBounds;
         if (_isDisposed ||
             _windowHandle == IntPtr.Zero ||
             !IsVisible)
         {
+            _pendingSelectionBounds = requestedBounds;
             FlushSelectionBoundsUpdate();
             return;
         }
@@ -4286,27 +5301,227 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return;
         }
 
+        // During an active native drag the border, outside mask, and optional
+        // size badge are updated by NativeSelectionFrameWindow. Scheduling a
+        // WPF render pass here would rebuild hidden layout and can stall the
+        // video/translation selection path behind the compositor.
+        if ((_isSelecting || _isMovingSelection || _isResizeDragging) &&
+            _nativeSelectionFrame.IsHandleCreated)
+        {
+            _pendingSelectionBounds = null;
+            return;
+        }
+
+        _pendingSelectionBounds = requestedBounds;
+
         // Do not queue this at Render priority. That priority runs before the
         // next input event, so a high-polling-rate mouse would still force a
         // complete layout pass for every raw sample. CompositionTarget renders
         // once per display frame and therefore presents only the latest point.
         if (_selectionBoundsUpdateScheduled)
         {
+            _selectionIdleTimer.Stop();
+            _selectionIdleTimer.Start();
             return;
         }
 
         _selectionBoundsUpdateScheduled = true;
+        _selectionIdleTimer.Stop();
+        _selectionIdleTimer.Start();
         System.Windows.Media.CompositionTarget.Rendering +=
             OnSelectionPreviewRendering;
     }
 
     private void OnSelectionPreviewRendering(object? sender, EventArgs e)
     {
-        StopSelectionPreviewRendering();
-        if (_pendingSelectionBounds is { } bounds)
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (now - _lastSelectionPreviewTimestamp <
+            System.Diagnostics.Stopwatch.Frequency / _selectionPreviewHz)
         {
-            _pendingSelectionBounds = null;
-            ApplySelectionPreviewBounds(bounds);
+            return;
+        }
+
+        _lastSelectionPreviewTimestamp = now;
+        Rect? bounds = null;
+
+        // WPF mouse events can queue behind layout work on high-polling-rate
+        // devices. Read the native cursor at render time so the preview uses
+        // the latest physical position instead of the last queued event.
+        if (_isSelecting && !_isWindowSnapClickPending)
+        {
+            var cursor = WinForms.Cursor.Position;
+            if (TryGetCaptureSurfacePoint(cursor, out var currentPoint))
+            {
+                bounds = new Rect(_selectionStartPoint, currentPoint);
+            }
+        }
+        else if (_isMovingSelection)
+        {
+            var cursor = WinForms.Cursor.Position;
+            if (TryGetCaptureSurfacePoint(cursor, out var currentPoint))
+            {
+                var delta = currentPoint - _dragStartPoint;
+                bounds = ClampMovedBoundsToSurface(new Rect(
+                    _dragStartBounds.X + delta.X,
+                    _dragStartBounds.Y + delta.Y,
+                    _dragStartBounds.Width,
+                    _dragStartBounds.Height));
+            }
+        }
+        else if (_isResizeDragging && TryGetResizePreviewBounds(out var resizeBounds))
+        {
+            bounds = resizeBounds;
+        }
+        else if (_pendingSelectionBounds is { } pending)
+        {
+            bounds = pending;
+        }
+
+        _pendingSelectionBounds = null;
+        if (bounds is { } nextBounds)
+        {
+            var applyStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+            ApplySelectionPreviewBounds(nextBounds);
+            AdjustSelectionPreviewRate(
+                System.Diagnostics.Stopwatch.GetTimestamp() - applyStarted);
+        }
+
+        if (!_isSelecting && !_isMovingSelection && !_isResizeDragging &&
+            _pendingSelectionBounds is null)
+        {
+            StopSelectionPreviewRendering();
+        }
+    }
+
+    private void OnInlineContextMenuClosed(
+        object? sender,
+        RoutedEventArgs e)
+    {
+        if (!_nativeSelectionFrame.IsMaskEnabled || !HasValidSelection() ||
+            Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        // ContextMenu is a separate popup HWND. Reassert the native mask after
+        // the popup leaves so a z-order change cannot make the dimming layer
+        // disappear until the next drag update.
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.ContextIdle,
+            new Action(() =>
+            {
+                if (!_isCompleted && _nativeSelectionFrame.IsMaskEnabled &&
+                    HasValidSelection())
+                {
+                    UpdateNativeSelectionVisuals(GetSelectionBounds());
+                }
+            }));
+    }
+
+    private void ApplyInlineToolStyleState()
+    {
+        var color = InlineEditorCanvas.HasImage
+            ? InlineEditorCanvas.CurrentSelectedColor
+            : AnnotationToolPreferences.GetColor(
+                _selectedInlineTool,
+                WpfColor.FromRgb(214, 69, 69));
+        var width = InlineEditorCanvas.HasImage
+            ? InlineEditorCanvas.SelectedAnnotationStrokeWidth ??
+              InlineEditorCanvas.CurrentStrokeWidth
+            : AnnotationToolPreferences.GetWidth(_selectedInlineTool, 3);
+        InlineStrokeWidthSlider.Value = width;
+        UpdateInlineStrokeWidthText(width);
+        var selected = color == WpfColor.FromRgb(214, 69, 69)
+            ? InlineRedColorButton
+            : color == WpfColor.FromRgb(0, 127, 115)
+                ? InlineCyanColorButton
+                : color == WpfColor.FromRgb(37, 49, 58)
+                    ? InlineDarkColorButton
+                    : InlineCustomColorButton;
+
+        // The custom swatch is also the visual fallback for per-tool colors
+        // that are not one of the three presets.  Keep its fill synchronized
+        // with the active tool so switching tools always shows the color that
+        // will be used next, rather than the last globally edited custom color.
+        if (ReferenceEquals(selected, InlineCustomColorButton))
+        {
+            var brush = new WpfSolidColorBrush(color);
+            brush.Freeze();
+            InlineCustomColorButton.Background = brush;
+            InlineCustomColorButton.ToolTip = $"自定义颜色 {FormatInlineColorText(color)}";
+            _inlineCustomColor = color;
+        }
+        UpdateInlineSelectedColorButton(selected);
+    }
+
+    private bool TryGetCaptureSurfacePoint(System.Drawing.Point screenPoint,
+        out WpfPoint point)
+    {
+        point = default;
+        if (_isDisposed || !CaptureSurface.IsVisible ||
+            PresentationSource.FromVisual(CaptureSurface) is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            point = CaptureSurface.PointFromScreen(
+                new WpfPoint(screenPoint.X, screenPoint.Y));
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private void ResetSelectionPreviewRate()
+    {
+        _selectionPreviewHz = 120;
+        _selectionPreviewStableSamples = 0;
+        _lastSelectionPreviewTimestamp = 0;
+        _lastSelectionBadgeTimestamp = 0;
+    }
+
+    private void OnSelectionIdleTimerTick(object? sender, EventArgs e)
+    {
+        _selectionIdleTimer.Stop();
+        if (_isDisposed || _isResizeDragging ||
+            (!_isSelecting && !_isMovingSelection) ||
+            _lastRenderedSelectionBounds is not { } bounds)
+        {
+            return;
+        }
+
+        // The drag path only updates the border, mask, and size badge. Apply
+        // the remaining control/editor layout once the pointer has been idle.
+        UpdateSelectionBounds(bounds);
+    }
+
+    private void AdjustSelectionPreviewRate(long applyTicks)
+    {
+        var frequency = (double)System.Diagnostics.Stopwatch.Frequency;
+        var intervalTicks = frequency / _selectionPreviewHz;
+        if (applyTicks > intervalTicks * 0.70)
+        {
+            _selectionPreviewHz = Math.Max(60, _selectionPreviewHz * 0.80);
+            _selectionPreviewStableSamples = 0;
+            return;
+        }
+
+        if (applyTicks < intervalTicks * 0.20)
+        {
+            _selectionPreviewStableSamples++;
+            if (_selectionPreviewStableSamples >= 8)
+            {
+                _selectionPreviewHz = Math.Min(120, _selectionPreviewHz * 1.20);
+                _selectionPreviewStableSamples = 0;
+            }
+        }
+        else
+        {
+            _selectionPreviewStableSamples = 0;
         }
     }
 
@@ -4350,6 +5565,14 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         _lastRenderedSelectionBounds = bounds;
+        // During an active drag the dedicated native tracker owns the border.
+        // Do not write it again from the WPF render callback: that callback can
+        // be one or more input samples behind and would overwrite a newer
+        // native position, which is visible as a trailing rectangle.
+        if (_isSelecting || _isMovingSelection || _isResizeDragging)
+        {
+            SetNativeSelectionVisualSuppressed(true);
+        }
         Canvas.SetLeft(SelectionRectangle, bounds.X);
         Canvas.SetTop(SelectionRectangle, bounds.Y);
         SelectionRectangle.Width = bounds.Width;
@@ -4358,33 +5581,39 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         // During the initial drag the handles and toolbar are hidden. Avoid
         // moving those invisible controls for every rendered frame; they are
         // positioned once when the completed selection exposes them.
-        if (TopLeftResizeThumb.Visibility == Visibility.Visible ||
+        if (!_isSelecting && !_isMovingSelection && !_isResizeDragging &&
+            (TopLeftResizeThumb.Visibility == Visibility.Visible ||
             CaptureToolbar.Visibility == Visibility.Visible)
+           )
         {
             UpdateSelectionControlPositions(bounds);
         }
 
-        // Keep the lightweight size badge and the dimming mask in sync with
-        // the live border. These are the only visuals required while drawing.
-        UpdateSelectionSizeBadge(bounds);
-        UpdateSelectionMask(bounds);
-
-        var hasArea = bounds.Width >= MinimumSelectionEdge &&
-                      bounds.Height >= MinimumSelectionEdge;
-        CaptureShade.Visibility = hasArea
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-        SetSelectionMaskVisibility(hasArea
-            ? Visibility.Visible
-            : Visibility.Collapsed);
-
+        // Keep the lightweight size badge in sync with the live border.
+        // Text measurement/layout is substantially more expensive than the
+        // border and mask updates. Refresh the badge on completed bounds;
+        // keeping it out of the hot drag path avoids UI-thread stalls.
+        var badgeInterval = System.Diagnostics.Stopwatch.Frequency / 30;
+        if ((!_isSelecting && !_isMovingSelection) ||
+            System.Diagnostics.Stopwatch.GetTimestamp() -
+                _lastSelectionBadgeTimestamp >= badgeInterval)
+        {
+            UpdateSelectionSizeBadge(bounds);
+            _lastSelectionBadgeTimestamp =
+                System.Diagnostics.Stopwatch.GetTimestamp();
+        }
         if (InlineEditorCanvas.HasImage)
         {
             Canvas.SetLeft(InlineEditorOutline, bounds.X);
             Canvas.SetTop(InlineEditorOutline, bounds.Y);
             InlineEditorOutline.Width = bounds.Width;
             InlineEditorOutline.Height = bounds.Height;
-            InlineEditorOutline.Visibility = Visibility.Visible;
+            if (!_isSelectionAdjustmentInProgress &&
+                !_isMovingSelection &&
+                !_isResizeDragging)
+            {
+                InlineEditorOutline.Visibility = Visibility.Visible;
+            }
             Canvas.SetLeft(OcrTextOverlay, bounds.X);
             Canvas.SetTop(OcrTextOverlay, bounds.Y);
             Canvas.SetLeft(ContentRecognitionOverlay, bounds.X);
@@ -4402,6 +5631,21 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     {
         var bounds = ClampBoundsToSurface(NormalizeBounds(requestedBounds));
         _lastRenderedSelectionBounds = bounds;
+        var hasArea = bounds.Width >= MinimumSelectionEdge &&
+                      bounds.Height >= MinimumSelectionEdge;
+        if (hasArea && SelectionRectangle.Visibility == Visibility.Visible)
+        {
+            // Convert the requested bounds directly. Reading the WPF
+            // rectangle here would return the previous frame because the
+            // Canvas coordinates are assigned below.
+            var physicalBounds = GetPhysicalSelectionBoundsForBounds(bounds);
+            _nativeSelectionFrame.Update(ToDrawingRectangle(physicalBounds));
+            SetNativeSelectionVisualSuppressed(true);
+        }
+        else if (!hasArea)
+        {
+            _nativeSelectionFrame.Hide();
+        }
         if (_isColorPickerActive &&
             bounds.Width >= MinimumSelectionEdge &&
             bounds.Height >= MinimumSelectionEdge)
@@ -4416,18 +5660,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         UpdateSelectionControlPositions(bounds);
         UpdateSelectionSizeBadge(bounds);
-        UpdateSelectionMask(bounds);
-
-        if (bounds.Width >= MinimumSelectionEdge &&
-            bounds.Height >= MinimumSelectionEdge)
+        if (_isScrollCaptureSelectionPublished)
         {
-            CaptureShade.Visibility = Visibility.Collapsed;
-            SetSelectionMaskVisibility(Visibility.Visible);
-        }
-        else
-        {
-            CaptureShade.Visibility = Visibility.Visible;
-            SetSelectionMaskVisibility(Visibility.Collapsed);
+            UpdateScrollCaptureOutline(bounds);
         }
 
         if (InlineEditorCanvas.HasImage)
@@ -4466,6 +5701,15 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
     }
 
+    private void UpdateScrollCaptureOutline(Rect bounds)
+    {
+        var outlineOffset = ScrollCaptureOutline.StrokeThickness + 2;
+        ScrollCaptureOutline.Width = bounds.Width + (outlineOffset * 2);
+        ScrollCaptureOutline.Height = bounds.Height + (outlineOffset * 2);
+        Canvas.SetLeft(ScrollCaptureOutline, bounds.Left - outlineOffset);
+        Canvas.SetTop(ScrollCaptureOutline, bounds.Top - outlineOffset);
+    }
+
     private void UpdateResizeThumbPositions(Rect bounds)
     {
         SetControlPosition(TopLeftResizeThumb, bounds.X, bounds.Y);
@@ -4476,6 +5720,29 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         SetControlPosition(LeftResizeThumb, bounds.X, bounds.Y + (bounds.Height / 2));
         SetControlPosition(RightResizeThumb, bounds.Right, bounds.Y + (bounds.Height / 2));
         SetControlPosition(BottomResizeThumb, bounds.X + (bounds.Width / 2), bounds.Bottom);
+    }
+
+    private void UpdateSelectionMoveZonePositions(Rect bounds)
+    {
+        var canExposeMoveZones = bounds.Width >= (MoveZoneInset * 2 + 18) &&
+            bounds.Height >= (MoveZoneInset * 2 + 18);
+        var zones = new[]
+        {
+            (SelectionMoveTopLeftZone, bounds.Left + MoveZoneInset, bounds.Top + MoveZoneInset),
+            (SelectionMoveTopRightZone, bounds.Right - MoveZoneInset, bounds.Top + MoveZoneInset),
+            (SelectionMoveBottomLeftZone, bounds.Left + MoveZoneInset, bounds.Bottom - MoveZoneInset),
+            (SelectionMoveBottomRightZone, bounds.Right - MoveZoneInset, bounds.Bottom - MoveZoneInset),
+        };
+
+        foreach (var (zone, centerX, centerY) in zones)
+        {
+            SetControlPosition(zone, centerX, centerY);
+            zone.Visibility = canExposeMoveZones &&
+                CanMoveSelection() &&
+                !_resizeControlsSuppressed
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
     }
 
     private void UpdateSelectionControlPositions(Rect bounds)
@@ -4600,10 +5867,19 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void SaveCaptureToolbarPosition()
     {
-        // Toolbar placement is deliberately not persisted. Keep the helper so
-        // the drag lifecycle remains symmetrical and future position changes
-        // stay local to the current capture window.
-        _ = _options;
+        var maximumX = GetToolbarMaximumX();
+        var maximumY = GetToolbarMaximumY();
+        var left = Canvas.GetLeft(CaptureToolbar);
+        var top = Canvas.GetTop(CaptureToolbar);
+        _toolbarPositionXRatio = maximumX > 0
+            ? Math.Clamp(left / maximumX, 0, 1)
+            : 0;
+        _toolbarPositionYRatio = maximumY > 0
+            ? Math.Clamp(top / maximumY, 0, 1)
+            : 0;
+        _options?.ToolbarPositionChanged?.Invoke(
+            _toolbarPositionXRatio,
+            _toolbarPositionYRatio);
     }
 
     private void ResetCaptureToolbarPosition()
@@ -4637,6 +5913,12 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void UpdateSelectionSizeBadge(Rect bounds)
     {
+        if (!ShouldShowSelectionSize || _nativeSelectionFrame.IsSizeEnabled)
+        {
+            SelectionSizeBadge.Visibility = Visibility.Collapsed;
+            return;
+        }
+
         if (bounds.Width <= 0 || bounds.Height <= 0)
         {
             SelectionSizeBadge.Visibility = Visibility.Collapsed;
@@ -4682,9 +5964,46 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void ShowSelectionControls()
     {
+        // A native move/resize owns the live pixels. Any delayed WPF layout or
+        // completion callback must not re-show stale handles or the toolbar
+        // until the native gesture has released.
+        if (_isSelecting || _isMovingSelection || _isResizeDragging ||
+            _resizeControlsSuppressed)
+        {
+            return;
+        }
+
         _windowSnapTimer.Stop();
         HideWindowSnap();
+        // Keep the native frame and mask as the single visual source for an
+        // active selection. The WPF rectangle remains hit-testable for moving
+        // the region, but is transparent so it cannot leave a second border
+        // or a stale mask behind.
+        if (_nativeSelectionFrame.IsMaskEnabled)
+        {
+            _nativeSelectionFrame.SetSizeEnabled(ShouldShowSelectionSize);
+            if (HasValidSelection())
+            {
+                UpdateNativeSelectionVisuals(GetSelectionBounds());
+            }
+            _nativeSelectionFrame.RefreshMask();
+            SetNativeSelectionVisualSuppressed(true);
+        }
+        else
+        {
+            _nativeSelectionFrame.HideBorderKeepMask();
+        }
         SelectionRectangle.Visibility = Visibility.Visible;
+        // Restore the transparent move surface after a completed selection.
+        // Edited content keeps it disabled so OCR/text controls continue to
+        // receive interior clicks; the preview handler still owns the border.
+        SelectionRectangle.IsHitTestVisible =
+            !InlineEditorCanvas.HasImage || !InlineEditorCanvas.CanUndo;
+        UpdateSelectionMoveZonePositions(GetSelectionBounds());
+        if (_nativeSelectionFrame.IsMaskEnabled)
+        {
+            SelectionRectangle.Fill = WpfBrushes.Transparent;
+        }
         TopLeftResizeThumb.Visibility = Visibility.Visible;
         TopRightResizeThumb.Visibility = Visibility.Visible;
         BottomLeftResizeThumb.Visibility = Visibility.Visible;
@@ -4696,6 +6015,18 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         CaptureToolbar.Visibility = Visibility.Visible;
         CaptureToolbar.UpdateLayout();
         UpdateSelectionControlPositions(GetSelectionBounds());
+        // Keep the native frame/size windows as the last visual update after
+        // WPF has laid out the controls. This prevents a WPF z-order/layout
+        // pass from leaving only the handles visible.
+        if (_nativeSelectionFrame.IsMaskEnabled && HasValidSelection())
+        {
+            UpdateNativeSelectionVisuals(GetSelectionBounds());
+        }
+
+        if (TryGetCaptureSurfacePoint(WinForms.Cursor.Position, out var cursorPoint))
+        {
+            UpdateSelectionInteractionCursor(cursorPoint);
+        }
     }
 
     private void LockSelectionForEditing()
@@ -4723,8 +6054,19 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         InlineEditorOptions.Visibility = _hasVisibleInlineEditorTools
             ? Visibility.Visible
             : Visibility.Collapsed;
+        if (_nativeSelectionFrame.IsMaskEnabled && HasValidSelection())
+        {
+            _nativeSelectionFrame.SetSizeEnabled(ShouldShowSelectionSize);
+            UpdateNativeSelectionVisuals(bounds);
+            _nativeSelectionFrame.RefreshMask();
+        }
         CaptureToolbar.UpdateLayout();
         UpdateSelectionControlPositions(GetSelectionBounds());
+        UpdateSelectionMoveZonePositions(bounds);
+        if (_nativeSelectionFrame.IsMaskEnabled && HasValidSelection())
+        {
+            UpdateNativeSelectionVisuals(GetSelectionBounds());
+        }
     }
 
     private void ClearSelection()
@@ -4745,6 +6087,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         ClearInlineOcrText();
         _isSelecting = false;
         _isMovingSelection = false;
+        _isResizeDragging = false;
+        _resizeControlsSuppressed = false;
+        _nativeSelectionFrame.StopTracking();
         _pendingSelectionBounds = null;
         _lastRenderedSelectionBounds = null;
 
@@ -4760,19 +6105,14 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         ReleaseOverlayMouseCapture();
 
         SelectionRectangle.IsHitTestVisible = true;
-        SelectionRectangle.SetResourceReference(
-            System.Windows.Shapes.Shape.FillProperty,
-            "AppAccentMutedBrush");
+        SelectionRectangle.Fill = WpfBrushes.Transparent;
+        SelectionRectangle.Stroke = WpfBrushes.Transparent;
+        SelectionRectangle.Opacity = 0;
         Canvas.SetLeft(SelectionRectangle, 0);
         Canvas.SetTop(SelectionRectangle, 0);
         SelectionRectangle.Width = 0;
         SelectionRectangle.Height = 0;
         HideSelectionControls();
-        if (!_isScrollCaptureSelectionLocked)
-        {
-            CaptureShade.Visibility = Visibility.Visible;
-            SetSelectionMaskVisibility(Visibility.Collapsed);
-        }
         if (IsVisible && !_isCompleted)
         {
             _windowSnapTimer.Start();
@@ -4798,8 +6138,16 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
     }
 
-    private void HideSelectionControls()
+    private void HideSelectionControls(bool keepNativeMask = false)
     {
+        if (keepNativeMask)
+        {
+            _nativeSelectionFrame.HideBorderKeepMask();
+        }
+        else
+        {
+            _nativeSelectionFrame.Hide();
+        }
         SelectionRectangle.Visibility = Visibility.Collapsed;
         InlineEditorOutline.Visibility = Visibility.Collapsed;
         TopLeftResizeThumb.Visibility = Visibility.Collapsed;
@@ -4810,6 +6158,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         LeftResizeThumb.Visibility = Visibility.Collapsed;
         RightResizeThumb.Visibility = Visibility.Collapsed;
         BottomResizeThumb.Visibility = Visibility.Collapsed;
+        SelectionMoveTopLeftZone.Visibility = Visibility.Collapsed;
+        SelectionMoveTopRightZone.Visibility = Visibility.Collapsed;
+        SelectionMoveBottomLeftZone.Visibility = Visibility.Collapsed;
+        SelectionMoveBottomRightZone.Visibility = Visibility.Collapsed;
         CaptureToolbar.Visibility = Visibility.Collapsed;
         InlineEditorOptions.Visibility = Visibility.Collapsed;
         SelectionSizeBadge.Visibility = Visibility.Collapsed;
@@ -4859,6 +6211,20 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                         _virtualScreenBounds.Width,
                         _virtualScreenBounds.Height,
                         DoNotActivate | DoNotChangeOwnerZOrder);
+                    if (HasValidSelection())
+                    {
+                        if (_isScrollCaptureSelectionLocked)
+                        {
+                            // The locked scroll selection keeps its native
+                            // border visible for the whole capture session.
+                            // The mask hole is restored independently below.
+                            _nativeSelectionFrame.EnsureVisible();
+                        }
+                        else
+                        {
+                            UpdateNativeSelectionVisuals(GetSelectionBounds());
+                        }
+                    }
                 }
 
             },
@@ -4895,11 +6261,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         // The first bounds update happens before the selection is published,
         // so the scroll masks and outline have not been laid out yet. Compute
         // them now before the coordinator can lock the selection for scrolling.
-        UpdateSelectionMask(GetSelectionBounds());
+        _nativeSelectionFrame.SetMaskEnabled(true);
+        _nativeSelectionFrame.RefreshMask();
+        UpdateScrollCaptureOutline(GetSelectionBounds());
         ShowSelectionControls();
         CaptureSurface.Background = WpfBrushes.Transparent;
-        CaptureShade.Visibility = Visibility.Collapsed;
-        SetSelectionMaskVisibility(Visibility.Visible);
         var selection = new ScrollCaptureSelection(
             this,
             GetPhysicalSelectionBounds());
@@ -4917,8 +6283,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             new WpfPoint(
                 selection.X + selection.Width,
                 selection.Y + selection.Height));
-        UpdateSelectionBounds(new Rect(topLeft, bottomRight));
+        SyncNativeSelectionFrameColor();
+        _nativeSelectionFrame.SetMaskEnabled(true);
+        // SelectionRectangle starts collapsed for a fresh scroll overlay. Set
+        // it visible before syncing bounds so UpdateSelectionBounds also
+        // commits the first native frame position instead of skipping it.
         SelectionRectangle.Visibility = Visibility.Visible;
+        UpdateSelectionBounds(new Rect(topLeft, bottomRight));
         PrepareScrollCaptureSelection();
     }
 
@@ -4935,6 +6306,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             new WpfPoint(
                 selection.X + selection.Width,
                 selection.Y + selection.Height));
+        SyncNativeSelectionFrameColor();
+        _nativeSelectionFrame.SetMaskEnabled(true);
+        _nativeSelectionFrame.SetSizeEnabled(ShouldShowSelectionSize);
         UpdateSelectionBounds(new Rect(topLeft, bottomRight));
         if (!HasValidSelection())
         {
@@ -4942,6 +6316,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return;
         }
 
+        SyncNativeSelectionFrameColor();
+        _nativeSelectionFrame.SetSizeEnabled(ShouldShowSelectionSize);
+        _nativeSelectionFrame.Update(ToDrawingRectangle(
+            GetPhysicalSelectionBounds()));
         SelectionRectangle.Visibility = Visibility.Visible;
         ShowSelectionControls();
         await EnterInlineEditorForCompletedSelectionAsync();
@@ -4950,8 +6328,6 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private void PrepareScrollCaptureSelection()
     {
         ShowSelectionControls();
-        CaptureShade.Visibility = Visibility.Collapsed;
-        SetSelectionMaskVisibility(Visibility.Visible);
         SaveButton.Visibility = Visibility.Collapsed;
         RecordButton.Visibility = Visibility.Collapsed;
         ScrollCaptureButton.Visibility = Visibility.Collapsed;
@@ -4971,21 +6347,47 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         var selection = GetPhysicalSelectionBounds();
 
-        if (_screenSnapshot is not null)
+        if (!Dispatcher.CheckAccess())
         {
-            var sourceRectangle = new System.Drawing.Rectangle(
-                selection.X - _virtualScreenBounds.X,
-                selection.Y - _virtualScreenBounds.Y,
-                selection.Width,
-                selection.Height);
-            return new CapturedImage(
-                _screenSnapshot.Bitmap.Clone(
-                    sourceRectangle,
-                    System.Drawing.Imaging.PixelFormat.Format32bppPArgb),
-                selection);
+            return Dispatcher.Invoke(CaptureScrollSelectionSnapshot);
         }
 
-        return ScreenCaptureService.Capture(selection);
+        var hideNativeFrameForCapture = !_isScrollCaptureSelectionLocked &&
+            _screenSnapshot is null &&
+            _nativeSelectionFrame.IsMaskEnabled &&
+            HasValidSelection();
+        var outlineVisibility = ScrollCaptureOutline.Visibility;
+        if (hideNativeFrameForCapture)
+        {
+            _nativeSelectionFrame.HideBorderKeepMask();
+        }
+        ScrollCaptureOutline.Visibility = Visibility.Collapsed;
+        try
+        {
+            if (_screenSnapshot is not null)
+            {
+                var sourceRectangle = new System.Drawing.Rectangle(
+                    selection.X - _virtualScreenBounds.X,
+                    selection.Y - _virtualScreenBounds.Y,
+                    selection.Width,
+                    selection.Height);
+                return new CapturedImage(
+                    _screenSnapshot.Bitmap.Clone(
+                        sourceRectangle,
+                        System.Drawing.Imaging.PixelFormat.Format32bppPArgb),
+                    selection);
+            }
+
+            return ScreenCaptureService.Capture(selection);
+        }
+        finally
+        {
+            ScrollCaptureOutline.Visibility = outlineVisibility;
+            if (hideNativeFrameForCapture && !_isCompleted)
+            {
+                _nativeSelectionFrame.EnsureVisible();
+            }
+        }
     }
 
     internal Task LockScrollCaptureSelectionAsync(
@@ -5016,65 +6418,30 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         _isScrollCaptureSelectionLocked = true;
-        HideSelectionControls();
+        HideSelectionControls(keepNativeMask: true);
         SelectionRectangle.Fill = WpfBrushes.Transparent;
         SelectionRectangle.IsHitTestVisible = false;
         SelectionRectangle.Visibility = Visibility.Collapsed;
         FrozenScreenImage.Source = null;
         FrozenScreenImage.Visibility = Visibility.Collapsed;
-        CaptureShade.Visibility = Visibility.Collapsed;
-        SetSelectionMaskVisibility(Visibility.Visible);
+        // Keep the themed border visible while the user pauses or changes
+        // direction. It is positioned just outside the capture hole below,
+        // so frame sampling never needs to hide/show it.
         ScrollCaptureOutline.Visibility = Visibility.Visible;
+        var selectionBounds = ToDrawingRectangle(GetPhysicalSelectionBounds());
+        var borderBounds = selectionBounds;
+        borderBounds.Inflate(4, 4);
+        _nativeSelectionFrame.Update(borderBounds);
+        _nativeSelectionMask.Update(
+            ToDrawingRectangle(_virtualScreenBounds),
+            selectionBounds);
+        _nativeSelectionFrame.EnsureVisible();
         EnableScrollCaptureClickThrough();
 
-        // Keep the frozen bitmap removed so both the selection and its shaded
-        // surroundings show the same live window while it scrolls. The four
-        // masks dim only the area outside the selected viewport.
+        // Keep the frozen bitmap removed so the selection and its surroundings
+        // remain live while it scrolls. The native mask owns the dimming.
         _screenSnapshot?.Dispose();
         _screenSnapshot = null;
-    }
-
-    private void UpdateSelectionMask(Rect bounds)
-    {
-        TopMask.Width = CaptureSurface.ActualWidth;
-        TopMask.Height = Math.Max(0, bounds.Top);
-        Canvas.SetLeft(TopMask, 0);
-        Canvas.SetTop(TopMask, 0);
-
-        BottomMask.Width = CaptureSurface.ActualWidth;
-        BottomMask.Height = Math.Max(0, CaptureSurface.ActualHeight - bounds.Bottom);
-        Canvas.SetLeft(BottomMask, 0);
-        Canvas.SetTop(BottomMask, bounds.Bottom);
-
-        LeftMask.Width = Math.Max(0, bounds.Left);
-        LeftMask.Height = bounds.Height;
-        Canvas.SetLeft(LeftMask, 0);
-        Canvas.SetTop(LeftMask, bounds.Top);
-
-        RightMask.Width = Math.Max(0, CaptureSurface.ActualWidth - bounds.Right);
-        RightMask.Height = bounds.Height;
-        Canvas.SetLeft(RightMask, bounds.Right);
-        Canvas.SetTop(RightMask, bounds.Top);
-
-        // Rectangle strokes occupy the inside of their layout bounds. Keep the
-        // complete stroke plus an anti-aliasing gap outside the capture hole;
-        // otherwise its cyan inner edge becomes a row in every sampled frame.
-        if (_isScrollCaptureSelectionPublished)
-        {
-            var outlineOffset = ScrollCaptureOutline.StrokeThickness + 2;
-            ScrollCaptureOutline.Width = bounds.Width + (outlineOffset * 2);
-            ScrollCaptureOutline.Height = bounds.Height + (outlineOffset * 2);
-            Canvas.SetLeft(ScrollCaptureOutline, bounds.Left - outlineOffset);
-            Canvas.SetTop(ScrollCaptureOutline, bounds.Top - outlineOffset);
-        }
-    }
-
-    private void SetSelectionMaskVisibility(Visibility visibility)
-    {
-        TopMask.Visibility = visibility;
-        LeftMask.Visibility = visibility;
-        RightMask.Visibility = visibility;
-        BottomMask.Visibility = visibility;
     }
 
     private void EnableScrollCaptureClickThrough()
@@ -5206,7 +6573,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private ScreenRegion GetPhysicalSelectionBounds()
     {
-        var bounds = GetSelectionBounds();
+        return GetPhysicalSelectionBoundsForBounds(GetSelectionBounds());
+    }
+
+    private ScreenRegion GetPhysicalSelectionBoundsForBounds(Rect bounds)
+    {
         var start = CaptureSurface.PointToScreen(bounds.TopLeft);
         var end = CaptureSurface.PointToScreen(bounds.BottomRight);
 
@@ -5215,6 +6586,17 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             (int)Math.Round(start.Y),
             (int)Math.Round(end.X),
             (int)Math.Round(end.Y));
+    }
+
+    private static System.Drawing.Rectangle ToDrawingRectangle(ScreenRegion region) =>
+        new(region.X, region.Y, region.Width, region.Height);
+
+    private DrawingPoint ToPhysicalScreenPoint(WpfPoint point)
+    {
+        var screenPoint = CaptureSurface.PointToScreen(point);
+        return new DrawingPoint(
+            (int)Math.Round(screenPoint.X),
+            (int)Math.Round(screenPoint.Y));
     }
 
     private Rect ClampBoundsToSurface(Rect bounds)
@@ -5227,6 +6609,22 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         return new Rect(
             new WpfPoint(Math.Min(left, right), Math.Min(top, bottom)),
             new WpfPoint(Math.Max(left, right), Math.Max(top, bottom)));
+    }
+
+    private Rect ClampMovedBoundsToSurface(Rect requestedBounds)
+    {
+        var surfaceWidth = Math.Max(0, CaptureSurface.ActualWidth);
+        var surfaceHeight = Math.Max(0, CaptureSurface.ActualHeight);
+        var width = Math.Min(Math.Max(0, requestedBounds.Width), surfaceWidth);
+        var height = Math.Min(Math.Max(0, requestedBounds.Height), surfaceHeight);
+        var maxX = Math.Max(0, surfaceWidth - width);
+        var maxY = Math.Max(0, surfaceHeight - height);
+
+        return new Rect(
+            Math.Clamp(requestedBounds.X, 0, maxX),
+            Math.Clamp(requestedBounds.Y, 0, maxY),
+            width,
+            height);
     }
 
     private static Rect NormalizeBounds(Rect bounds)
@@ -5244,6 +6642,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         double rightChange,
         double bottomChange)
     {
+        // NativeSelectionFrameWindow owns the high-frequency resize geometry.
+        // Ignore WPF DragDelta samples so they cannot enqueue stale bounds.
+        if (_isResizeDragging)
+        {
+            return;
+        }
+
         ResizeSelectionCore(
             leftChange,
             topChange,

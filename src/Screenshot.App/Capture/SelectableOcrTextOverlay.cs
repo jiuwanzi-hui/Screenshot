@@ -86,6 +86,8 @@ internal sealed class SelectableOcrTextOverlay : FrameworkElement
         }
     }
 
+    internal bool HasSelectedText => !string.IsNullOrEmpty(SelectedText);
+
     internal IReadOnlyList<Rect> SegmentBounds =>
         _segments.Select(segment => segment.Bounds).ToArray();
 

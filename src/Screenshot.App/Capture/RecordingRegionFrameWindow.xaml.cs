@@ -1,11 +1,20 @@
 using System.Runtime.InteropServices;
+using System.Diagnostics.CodeAnalysis;
 using System.Windows;
 using System.Windows.Interop;
 using Screenshot.App.Infrastructure;
 using DrawingRectangle = System.Drawing.Rectangle;
+using DrawingColor = System.Drawing.Color;
+using WpfColor = System.Windows.Media.Color;
+using WpfBrush = System.Windows.Media.Brush;
+using WpfSolidColorBrush = System.Windows.Media.SolidColorBrush;
 
 namespace Screenshot.App.Capture;
 
+[SuppressMessage(
+    "Design",
+    "CA1001:Types that own disposable fields should be disposable",
+    Justification = "The WPF window disposes its native frame in OnClosed.")]
 public partial class RecordingRegionFrameWindow : Window
 {
     private const int ExtendedWindowStyleIndex = -20;
@@ -22,6 +31,7 @@ public partial class RecordingRegionFrameWindow : Window
     // second recording frame.
     private const int FrameMargin = 3;
     private readonly ScreenRegion _windowRegion;
+    private readonly NativeSelectionFrameWindow _nativeFrame;
     private HwndSource? _windowSource;
 
     public RecordingRegionFrameWindow(ScreenRegion recordingRegion)
@@ -41,6 +51,15 @@ public partial class RecordingRegionFrameWindow : Window
         Left = _windowRegion.X / dpi.X;
         Top = _windowRegion.Y / dpi.Y;
         InitializeComponent();
+        _nativeFrame = new NativeSelectionFrameWindow();
+        if (TryGetAccentColors(out var accentStart, out var accentEnd))
+        {
+            _nativeFrame.SetBorderColors(
+                DrawingColor.FromArgb(accentStart.R, accentStart.G, accentStart.B),
+                DrawingColor.FromArgb(accentEnd.R, accentEnd.G, accentEnd.B));
+        }
+        FrameBorder.Opacity = 0;
+        Opacity = 0;
         SourceInitialized += OnSourceInitialized;
     }
 
@@ -68,6 +87,11 @@ public partial class RecordingRegionFrameWindow : Window
             _windowRegion.Width,
             _windowRegion.Height,
             DoNotActivate | DoNotChangeOwnerZOrder);
+        _nativeFrame.Update(new DrawingRectangle(
+            _windowRegion.X,
+            _windowRegion.Y,
+            _windowRegion.Width,
+            _windowRegion.Height));
     }
 
     protected override void OnClosed(EventArgs e)
@@ -75,6 +99,7 @@ public partial class RecordingRegionFrameWindow : Window
         SourceInitialized -= OnSourceInitialized;
         _windowSource?.RemoveHook(OnWindowMessage);
         _windowSource = null;
+        _nativeFrame.Dispose();
         base.OnClosed(e);
     }
 
@@ -110,6 +135,38 @@ public partial class RecordingRegionFrameWindow : Window
             _windowRegion.Width,
             _windowRegion.Height,
             DoNotActivate | DoNotChangeOwnerZOrder);
+        _nativeFrame.Update(new DrawingRectangle(
+            _windowRegion.X,
+            _windowRegion.Y,
+            _windowRegion.Width,
+            _windowRegion.Height));
+    }
+
+    private bool TryGetAccentColors(out WpfColor start, out WpfColor end)
+    {
+        start = WpfColor.FromRgb(91, 141, 239);
+        end = start;
+        if (TryFindResource("AppAccentBrush") is not WpfBrush brush)
+        {
+            return false;
+        }
+
+        if (brush is WpfSolidColorBrush solid)
+        {
+            start = solid.Color;
+            end = solid.Color;
+            return true;
+        }
+
+        if (brush is System.Windows.Media.GradientBrush gradient &&
+            gradient.GradientStops.Count > 0)
+        {
+            start = gradient.GradientStops[0].Color;
+            end = gradient.GradientStops[^1].Color;
+            return true;
+        }
+
+        return false;
     }
 
     private static class NativeMethods

@@ -192,15 +192,33 @@ public static class TranslationProviderFactory
                 return [bergamot];
             }
 
-            var providerId = ResolveProviderId(settings.TranslationProvider);
-            return
-            [
-                new OpenAiCompatibleTranslationProvider(
-                    settings.TranslationEndpoint,
-                    settings.TranslationModel,
-                    credentialStore.GetApiKey(providerId),
-                    httpClient),
-            ];
+            var profiles = (settings.TranslationProfiles ?? [])
+                .Where(profile => profile.IsEnabled)
+                .ToArray();
+            if (profiles.Length == 0)
+            {
+                var providerId = ResolveProviderId(settings.TranslationProvider);
+                return
+                [
+                    new OpenAiCompatibleTranslationProvider(
+                        settings.TranslationEndpoint,
+                        settings.TranslationModel,
+                        credentialStore.GetApiKey(providerId),
+                        httpClient),
+                ];
+            }
+
+            return profiles
+                .Select(profile =>
+                {
+                    var providerId = ResolveProviderId(profile.Provider);
+                    return (ITranslationProvider)new OpenAiCompatibleTranslationProvider(
+                        profile.Endpoint,
+                        profile.Model,
+                        credentialStore.GetApiKey(profile.Id, providerId),
+                        httpClient);
+                })
+                .ToArray();
         }
 
         return new OrderedTranslationProvider(

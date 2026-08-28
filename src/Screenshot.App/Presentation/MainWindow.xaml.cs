@@ -75,6 +75,11 @@ public partial class MainWindow : Window, IDisposable
     private HotKeyCaptureBox? _activeHotKeyCaptureBox;
     private int _automaticUpdateCheckInProgress;
     private int _onlineAvailabilityCheckInProgress;
+    private int _translationProfilesAvailabilityRevision;
+    private int _translationProfilesAvailabilityCheckInProgress;
+    private System.Windows.Point? _translationProfileDragStart;
+    private AiTranslationProfileItem? _translationProfileDragItem;
+    private Border? _translationProfileDropTarget;
     private int _offlineModelPlanGeneration;
     private bool _isFolderDialogOpen;
     private bool? _pendingShowInTaskbar;
@@ -167,6 +172,10 @@ public partial class MainWindow : Window, IDisposable
             TranslationProviderFactory.ResolveProviderId(
                 initialSettings.TranslationProvider));
         RefreshOnlineTranslationAvailability();
+        // Restore cached profile results synchronously through the view model,
+        // then validate them in the background without making the settings
+        // page wait for network access.
+        _ = VerifyTranslationProfilesAvailabilityAsync();
         ShowSettingsSection(sectionIndex: 0);
         ShowOcrLanguageAvailability();
         CurrentVersionText.Text =
@@ -284,6 +293,14 @@ public partial class MainWindow : Window, IDisposable
         ApplySettingsImmediately();
     }
 
+    internal void SaveAnnotationToolSettings(AnnotationToolSetting[] settings)
+    {
+        _settingsViewModel.AnnotationToolSettings = settings?.ToArray() ?? [];
+        // Color/size changes can arrive for every slider tick. Reuse the
+        // existing coalescing timer so persistence never blocks the editor.
+        ScheduleSettingsApply();
+    }
+
     internal void SaveTranslationTargetLanguage(string languageTag)
     {
         if (string.IsNullOrWhiteSpace(languageTag))
@@ -371,7 +388,10 @@ public partial class MainWindow : Window, IDisposable
         RefreshCachedOfflineTranslationInstallationState();
         RefreshHighQualityOcrModelStatus();
         RefreshLocalLargeModelStatus();
-        _ = VerifyOnlineTranslationAvailabilityAsync();
+        if (TranslationSettingsPanel?.Visibility == Visibility.Visible)
+        {
+            _ = VerifyTranslationProfilesAvailabilityAsync();
+        }
     }
 
     public void ShowStatus(string message)
@@ -406,6 +426,11 @@ public partial class MainWindow : Window, IDisposable
     protected override void OnClosed(EventArgs e)
     {
         EndHotKeyCapture(restoreRegistrations: true);
+        if (_settingsApplyTimer.IsEnabled)
+        {
+            // Flush coalesced per-tool color/size changes before shutdown.
+            ApplySettingsImmediately();
+        }
         _settingsApplyTimer.Stop();
         _settingsApplyTimer.Tick -= OnSettingsApplyTimerTick;
         _idleMemoryTrimTimer.Stop();
@@ -1056,6 +1081,10 @@ public partial class MainWindow : Window, IDisposable
 
             TranslationProviderOfficialSiteText.Text = provider.OfficialSite;
             LoadTranslationApiKey(provider.Id);
+            _settingsViewModel.UpdateSelectedTranslationProfileConnection(
+                provider.Id,
+                _settingsViewModel.TranslationEndpoint,
+                _settingsViewModel.TranslationModel);
         }
         finally
         {
@@ -1175,6 +1204,266 @@ public partial class MainWindow : Window, IDisposable
             button.Content = "获取模型";
             button.IsEnabled = true;
         }
+    }
+
+    private void OnAddTranslationProfileClick(object sender, RoutedEventArgs e)
+    {
+        var item = _settingsViewModel.AddTranslationProfile();
+        OpenTranslationProfileEditor(item);
+    }
+
+    private void OnEditTranslationProfileClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { Tag: AiTranslationProfileItem item })
+            OpenTranslationProfileEditor(item);
+    }
+
+    private void OpenTranslationProfileEditor(AiTranslationProfileItem item)
+    {
+        var profileBeforeEditing = item.ToProfile();
+        var apiKeyBeforeEditing = _translationCredentialStore.GetApiKey(
+            item.Id,
+            item.Provider) ?? string.Empty;
+        var editor = new TranslationProfileEditorWindow(item, _translationCredentialStore)
+        {
+            Owner = this,
+        };
+        if (editor.ShowDialog() == true)
+        {
+            var profileAfterEditing = item.ToProfile();
+            var apiKeyAfterEditing = _translationCredentialStore.GetApiKey(
+                item.Id,
+                item.Provider) ?? string.Empty;
+            var profileChanged = !Equals(profileBeforeEditing, profileAfterEditing) ||
+                !string.Equals(apiKeyBeforeEditing, apiKeyAfterEditing, StringComparison.Ordinal);
+            if (!profileChanged)
+            {
+                return;
+            }
+
+            var connectionChanged =
+                !string.Equals(
+                    profileBeforeEditing.Provider,
+                    profileAfterEditing.Provider,
+                    StringComparison.Ordinal) ||
+                !string.Equals(
+                    profileBeforeEditing.Endpoint,
+                    profileAfterEditing.Endpoint,
+                    StringComparison.Ordinal) ||
+                !string.Equals(
+                    profileBeforeEditing.Model,
+                    profileAfterEditing.Model,
+                    StringComparison.Ordinal) ||
+                !string.Equals(apiKeyBeforeEditing, apiKeyAfterEditing, StringComparison.Ordinal);
+
+            _settingsViewModel.SelectedTranslationProfileId = item.Id;
+            _settingsViewModel.TranslationProvider = item.Provider;
+            _settingsViewModel.TranslationEndpoint = item.Endpoint;
+            _settingsViewModel.TranslationModel = item.Model;
+            _settingsViewModel.TranslationApiKey =
+                _translationCredentialStore.GetApiKey(item.Id, item.Provider) ?? string.Empty;
+            ApplySettingsImmediately();
+            if (connectionChanged)
+            {
+                _ = VerifyTranslationProfilesAvailabilityAsync();
+            }
+        }
+    }
+
+    private void OnRemoveTranslationProfileClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { Tag: AiTranslationProfileItem item } &&
+            _settingsViewModel.RemoveTranslationProfile(item))
+        {
+            ApplySettingsImmediately();
+            RefreshTranslationProfilesProviderAvailability();
+        }
+    }
+
+    private void OnTranslationProfileChanged(object sender, RoutedEventArgs e)
+    {
+        ApplySettingsImmediately();
+        _ = VerifyTranslationProfilesAvailabilityAsync();
+    }
+
+    private void OnTranslationProfileRowPreviewMouseLeftButtonDown(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (sender is not Border { DataContext: AiTranslationProfileItem item } ||
+            IsProfileRowInteractiveControl(e.OriginalSource as DependencyObject))
+        {
+            _translationProfileDragItem = null;
+            _translationProfileDragStart = null;
+            return;
+        }
+
+        _translationProfileDragItem = item;
+        _translationProfileDragStart = e.GetPosition(this);
+    }
+
+    private void OnTranslationProfileRowPreviewMouseMove(
+        object sender,
+        System.Windows.Input.MouseEventArgs e)
+    {
+        if (sender is not Border ||
+            _translationProfileDragItem is null ||
+            _translationProfileDragStart is not { } dragStart ||
+            e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        var current = e.GetPosition(this);
+        if (Math.Abs(current.X - dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(current.Y - dragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        var item = _translationProfileDragItem;
+        _translationProfileDragItem = null;
+        _translationProfileDragStart = null;
+        try
+        {
+            DragDrop.DoDragDrop(
+                (Border)sender,
+                item,
+                System.Windows.DragDropEffects.Move);
+        }
+        finally
+        {
+            ClearTranslationProfileDropTarget();
+        }
+    }
+
+    private static bool IsProfileRowInteractiveControl(DependencyObject? source)
+    {
+        while (source is not null)
+        {
+            if (source is System.Windows.Controls.Primitives.ButtonBase ||
+                source is System.Windows.Controls.Primitives.ToggleButton ||
+                source is System.Windows.Controls.TextBox ||
+                source is System.Windows.Controls.ComboBox)
+            {
+                return true;
+            }
+
+            source = source switch
+            {
+                Visual => VisualTreeHelper.GetParent(source),
+                FrameworkContentElement contentElement => contentElement.Parent,
+                _ => LogicalTreeHelper.GetParent(source),
+            };
+        }
+
+        return false;
+    }
+
+    private void OnTranslationProfileRowDragOver(
+        object sender,
+        System.Windows.DragEventArgs e)
+    {
+        if (sender is not Border row ||
+            !e.Data.GetDataPresent(typeof(AiTranslationProfileItem)))
+        {
+            e.Effects = System.Windows.DragDropEffects.None;
+            return;
+        }
+
+        e.Effects = System.Windows.DragDropEffects.Move;
+        ShowTranslationProfileDropTarget(
+            row,
+            e.GetPosition(row).Y >= row.ActualHeight / 2d);
+        e.Handled = true;
+    }
+
+    private void OnTranslationProfileRowDragLeave(
+        object sender,
+        System.Windows.DragEventArgs e)
+    {
+        if (sender is Border row &&
+            ReferenceEquals(e.OriginalSource, sender) &&
+            ReferenceEquals(row, _translationProfileDropTarget))
+        {
+            ClearTranslationProfileDropTarget();
+        }
+    }
+
+    private void OnTranslationProfileRowDrop(
+        object sender,
+        System.Windows.DragEventArgs e)
+    {
+        if (sender is not Border { DataContext: AiTranslationProfileItem target } ||
+            !e.Data.GetDataPresent(typeof(AiTranslationProfileItem)) ||
+            e.Data.GetData(typeof(AiTranslationProfileItem)) is not AiTranslationProfileItem item)
+        {
+            return;
+        }
+
+        var targetIndex = _settingsViewModel.TranslationProfiles.IndexOf(target);
+        if (targetIndex < 0)
+        {
+            return;
+        }
+
+        var position = e.GetPosition((IInputElement)sender);
+        var insertionIndex = targetIndex +
+            (position.Y >= ((FrameworkElement)sender).ActualHeight / 2d ? 1 : 0);
+        if (_settingsViewModel.MoveTranslationProfileToInsertionIndex(item, insertionIndex))
+        {
+            ApplySettingsImmediately();
+        }
+
+        ClearTranslationProfileDropTarget();
+        e.Handled = true;
+    }
+
+    private void ShowTranslationProfileDropTarget(Border row, bool insertAfter)
+    {
+        if (!ReferenceEquals(row, _translationProfileDropTarget))
+        {
+            ClearTranslationProfileDropTarget();
+            _translationProfileDropTarget = row;
+        }
+
+        if (FindTranslationProfileDropMarker(row) is { } marker)
+        {
+            marker.VerticalAlignment = insertAfter
+                ? VerticalAlignment.Bottom
+                : VerticalAlignment.Top;
+            marker.Visibility = Visibility.Visible;
+        }
+    }
+
+    private void ClearTranslationProfileDropTarget()
+    {
+        if (_translationProfileDropTarget is not null &&
+            FindTranslationProfileDropMarker(_translationProfileDropTarget) is { } marker)
+        {
+            marker.Visibility = Visibility.Collapsed;
+        }
+
+        _translationProfileDropTarget = null;
+    }
+
+    private static Border? FindTranslationProfileDropMarker(DependencyObject root)
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+        {
+            var child = VisualTreeHelper.GetChild(root, index);
+            if (child is Border { Name: "TranslationProfileDropMarker" } marker)
+            {
+                return marker;
+            }
+
+            if (FindTranslationProfileDropMarker(child) is { } nestedMarker)
+            {
+                return nestedMarker;
+            }
+        }
+
+        return null;
     }
 
     private static IReadOnlyList<string> GetSuggestedTranslationModels(string endpoint)
@@ -1785,6 +2074,10 @@ public partial class MainWindow : Window, IDisposable
         {
             if (ReferenceEquals(sender, TranslationEndpointTextBox))
             {
+                _settingsViewModel.UpdateSelectedTranslationProfileConnection(
+                    _settingsViewModel.TranslationProvider,
+                    _settingsViewModel.TranslationEndpoint,
+                    _settingsViewModel.TranslationModel);
                 RefreshOnlineTranslationAvailability();
             }
 
@@ -1836,6 +2129,10 @@ public partial class MainWindow : Window, IDisposable
         }
         if (ReferenceEquals(sender, TranslationModelComboBox))
         {
+            _settingsViewModel.UpdateSelectedTranslationProfileConnection(
+                _settingsViewModel.TranslationProvider,
+                _settingsViewModel.TranslationEndpoint,
+                _settingsViewModel.TranslationModel);
             RefreshOnlineTranslationAvailability();
         }
         if (ReferenceEquals(sender, TranslationTargetLanguageComboBox))
@@ -2097,6 +2394,160 @@ public partial class MainWindow : Window, IDisposable
     {
         ApplySettingsImmediately();
         RefreshOnlineTranslationAvailability();
+    }
+
+    private async Task VerifyTranslationProfilesAvailabilityAsync()
+    {
+        var revision = Interlocked.Increment(
+            ref _translationProfilesAvailabilityRevision);
+        if (Interlocked.Exchange(
+                ref _translationProfilesAvailabilityCheckInProgress,
+                1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var enabledProfiles = _settingsViewModel.TranslationProfiles
+                .Where(profile => profile.IsEnabled)
+                .ToArray();
+            if (enabledProfiles.Length == 0)
+            {
+                RefreshTranslationProfilesProviderAvailability();
+                return;
+            }
+
+            foreach (var profile in enabledProfiles)
+            {
+                profile.SetAvailabilityChecking();
+            }
+
+            // Check in sequence so opening the settings page never creates a
+            // burst of simultaneous requests against the user's model service.
+            foreach (var profile in enabledProfiles)
+            {
+                if (_disposed || revision != Volatile.Read(
+                        ref _translationProfilesAvailabilityRevision))
+                {
+                    return;
+                }
+
+                var endpoint = profile.Endpoint.Trim();
+                var model = profile.Model.Trim();
+                var providerId = TranslationProviderFactory.ResolveProviderId(
+                    profile.Provider);
+                var apiKey = _translationCredentialStore.GetApiKey(
+                    profile.Id,
+                    providerId);
+
+                if (string.IsNullOrWhiteSpace(endpoint))
+                {
+                    profile.SetAvailability(false, "请填写 API 接口地址");
+                    ScheduleSettingsApply();
+                    continue;
+                }
+
+                if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri) ||
+                    !endpointUri.Scheme.Equals(
+                        Uri.UriSchemeHttps,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    profile.SetAvailability(false, "API 接口必须使用有效的 HTTPS 地址");
+                    ScheduleSettingsApply();
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(apiKey))
+                {
+                    profile.SetAvailability(false, "请填写 API Key");
+                    ScheduleSettingsApply();
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(model))
+                {
+                    profile.SetAvailability(false, "请选择或填写翻译模型");
+                    ScheduleSettingsApply();
+                    continue;
+                }
+
+                var result = await TranslationModelCatalogService.TestAsync(
+                    endpoint,
+                    model,
+                    apiKey,
+                    _modelCatalogHttpClient,
+                    _updateCancellationSource.Token);
+                if (_disposed || revision != Volatile.Read(
+                        ref _translationProfilesAvailabilityRevision))
+                {
+                    return;
+                }
+
+                profile.SetAvailability(result.IsSuccess, result.Message);
+                ScheduleSettingsApply();
+            }
+
+            if (revision == Volatile.Read(
+                    ref _translationProfilesAvailabilityRevision))
+            {
+                RefreshTranslationProfilesProviderAvailability();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            Interlocked.Exchange(
+                ref _translationProfilesAvailabilityCheckInProgress,
+                0);
+
+            // A configuration may have been edited while its previous
+            // request was still in flight. Run one fresh pass for that state.
+            if (!_disposed && revision != Volatile.Read(
+                    ref _translationProfilesAvailabilityRevision))
+            {
+                _ = VerifyTranslationProfilesAvailabilityAsync();
+            }
+
+            ScheduleIdleMemoryTrim();
+        }
+    }
+
+    private void RefreshTranslationProfilesProviderAvailability()
+    {
+        var enabledProfiles = _settingsViewModel.TranslationProfiles
+            .Where(profile => profile.IsEnabled)
+            .ToArray();
+        if (enabledProfiles.Length == 0)
+        {
+            _settingsViewModel.UpdateTranslationProviderAvailability(
+                TranslationProviderKind.Online,
+                isAvailable: false,
+                "没有启用的在线模型配置");
+            return;
+        }
+
+        var availableProfile = enabledProfiles.FirstOrDefault(
+            profile => profile.IsAvailable);
+        if (availableProfile is not null)
+        {
+            _settingsViewModel.UpdateTranslationProviderAvailability(
+                TranslationProviderKind.Online,
+                isAvailable: true,
+                $"可用配置：{availableProfile.Name}");
+            return;
+        }
+
+        var firstFailure = enabledProfiles[0];
+        _settingsViewModel.UpdateTranslationProviderAvailability(
+            TranslationProviderKind.Online,
+            isAvailable: false,
+            $"所有启用的在线配置均不可用。{firstFailure.Name}：{firstFailure.AvailabilityReason}");
     }
 
     private void RefreshOnlineTranslationAvailability()
@@ -2560,6 +3011,15 @@ public partial class MainWindow : Window, IDisposable
 
                 _settingsStore.Save(settings);
 
+                if (!settings.RequestAdministratorPrivileges &&
+                    _savedSettings.RequestAdministratorPrivileges)
+                {
+                    // An explicit opt-out also removes the persistent task;
+                    // otherwise a previously granted task would keep
+                    // launching elevated after the user disabled the option.
+                    ElevationLaunchService.TryRemovePersistentElevationTask();
+                }
+
                 if (_translationApiKeyChanged)
                 {
                     _translationCredentialStore.SetApiKey(
@@ -2705,6 +3165,11 @@ public partial class MainWindow : Window, IDisposable
         ContactSettingsPanel.Visibility = sectionIndex == 6
             ? Visibility.Visible
             : Visibility.Collapsed;
+
+        if (sectionIndex == 3)
+        {
+            _ = VerifyTranslationProfilesAvailabilityAsync();
+        }
 
         if (sectionIndex == 6 &&
             Interlocked.Exchange(ref _communityQrLoadStarted, 1) == 0)

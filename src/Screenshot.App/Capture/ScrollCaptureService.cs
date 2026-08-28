@@ -175,8 +175,11 @@ public static class ScrollCaptureService
             var lastDiagnosticWheelTimestamp = 0L;
             var completionRequestedTimestamp = 0L;
             var previewTimestampSlot = new long[1];
+            var directManualWheel = !throttleWheelInput;
             var activeScrollWindow = TimeSpan.FromMilliseconds(Math.Max(
-                MinimumActiveScrollWindowMilliseconds,
+                directManualWheel
+                    ? MinimumActiveScrollWindowMilliseconds + 240
+                    : MinimumActiveScrollWindowMilliseconds,
                 options.FrameDelayMilliseconds * 4));
             var nextWheelEvent = wheelEvents.ReadAsync(
                 cancellationToken).AsTask();
@@ -515,7 +518,8 @@ public static class ScrollCaptureService
                     : Stopwatch.GetElapsedTime(lastWheelEventTimestamp);
                 var sampleDelayMilliseconds = GetActiveSampleDelayMilliseconds(
                     options.FrameDelayMilliseconds,
-                    elapsedSinceWheel);
+                    elapsedSinceWheel,
+                    directManualWheel);
                 nextSample = Task.Delay(
                     sampleDelayMilliseconds,
                     cancellationToken);
@@ -857,6 +861,7 @@ public static class ScrollCaptureService
         Action<ControlledScrollCaptureState>? stateChanged = null,
         Action<ScrollCapturePreviewState>? previewChanged = null,
         Bitmap? initialFrame = null,
+        Func<bool, CancellationToken, Task>? setProgressVisibilityAsync = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(target);
@@ -1077,6 +1082,7 @@ public static class ScrollCaptureService
                         using var returnAnchor = await CaptureControlledFrameAsync(
                             target,
                             scrollDriver,
+                            setProgressVisibilityAsync,
                             cancellationToken);
                         previousFingerprint = AutomaticViewportFingerprint.Create(
                             returnAnchor);
@@ -1112,6 +1118,7 @@ public static class ScrollCaptureService
                         using var resumeFrame = await CaptureControlledFrameAsync(
                             target,
                             scrollDriver,
+                            setProgressVisibilityAsync,
                             cancellationToken);
                         var resumeFingerprint = AutomaticViewportFingerprint.Create(
                             resumeFrame);
@@ -1229,6 +1236,7 @@ public static class ScrollCaptureService
                     using var settleFrame = await CaptureControlledFrameAsync(
                         target,
                         scrollDriver,
+                        setProgressVisibilityAsync,
                         cancellationToken);
                     var settleDirection = GetControlledSettleDirection(state);
                     var settleFingerprint = AutomaticViewportFingerprint.Create(
@@ -1528,6 +1536,7 @@ public static class ScrollCaptureService
                 using var frame = await CaptureControlledFrameAsync(
                     target,
                     scrollDriver,
+                    setProgressVisibilityAsync,
                     cancellationToken);
                 var sampledInputMagnitude = scrollDriver.TotalInputMagnitude;
                 if (isReturning)
@@ -1826,6 +1835,7 @@ public static class ScrollCaptureService
                         using var retryFrame = await CaptureControlledFrameAsync(
                             target,
                             scrollDriver,
+                            setProgressVisibilityAsync,
                             cancellationToken);
                         var retryFingerprint = AutomaticViewportFingerprint.Create(
                             retryFrame);
@@ -2087,6 +2097,7 @@ public static class ScrollCaptureService
                     using var completionFrame = await CaptureControlledFrameAsync(
                         target,
                         scrollDriver,
+                        setProgressVisibilityAsync,
                         cancellationToken);
                     var completionFingerprint = AutomaticViewportFingerprint.Create(
                         completionFrame);
@@ -2939,15 +2950,41 @@ public static class ScrollCaptureService
     private static Task<System.Drawing.Bitmap> CaptureControlledFrameAsync(
         ScrollCaptureTarget target,
         ControlledScrollDriver scrollDriver,
+        Func<bool, CancellationToken, Task>? setProgressVisibilityAsync,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(scrollDriver);
         cancellationToken.ThrowIfCancellationRequested();
 
-        // DwmFlush in CaptureFrame waits for one complete presentation pass so
-        // a sample does not combine two smooth-wheel animation positions.
-        return Task.FromResult(scrollDriver.CaptureFrame());
+        return CaptureControlledFrameCoreAsync(
+            scrollDriver,
+            setProgressVisibilityAsync,
+            cancellationToken);
+    }
+
+    private static async Task<System.Drawing.Bitmap> CaptureControlledFrameCoreAsync(
+        ControlledScrollDriver scrollDriver,
+        Func<bool, CancellationToken, Task>? setProgressVisibilityAsync,
+        CancellationToken cancellationToken)
+    {
+        if (setProgressVisibilityAsync is not null)
+        {
+            await setProgressVisibilityAsync(false, cancellationToken);
+        }
+
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return scrollDriver.CaptureFrame();
+        }
+        finally
+        {
+            if (setProgressVisibilityAsync is not null)
+            {
+                await setProgressVisibilityAsync(true, CancellationToken.None);
+            }
+        }
     }
 
     private static async Task TryAddCurrentFrameAsync(
@@ -2982,10 +3019,16 @@ public static class ScrollCaptureService
 
     internal static int GetActiveSampleDelayMilliseconds(
         int configuredDelayMilliseconds,
-        TimeSpan elapsedSinceWheel)
+        TimeSpan elapsedSinceWheel,
+        bool directManualWheel = false)
     {
+        // Direct manual wheel mode must keep up with the viewport while a
+        // high-resolution wheel is moving.  Controlled automatic scrolling
+        // and the throttled manual driver retain the established 32 ms floor.
         var cadenceFloor = elapsedSinceWheel < TimeSpan.FromMilliseconds(80)
-            ? ActiveScrollSampleDelayMilliseconds
+            ? directManualWheel
+                ? SettlingSampleDelayMilliseconds
+                : ActiveScrollSampleDelayMilliseconds
             : SettlingSampleDelayMilliseconds;
         return Math.Max(configuredDelayMilliseconds, cadenceFloor);
     }

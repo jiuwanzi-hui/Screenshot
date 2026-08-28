@@ -44,6 +44,23 @@ public sealed class DpapiTranslationCredentialStore : ITranslationCredentialStor
         SaveCredentials(credentials);
     }
 
+    public string? GetApiKey(string profileId, string providerId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(profileId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerId);
+        var credentials = LoadCredentials();
+        return credentials.TryGetValue($"profile:{profileId}:{providerId}", out var value)
+            ? value
+            : GetApiKey(providerId);
+    }
+
+    public void SetApiKey(string profileId, string providerId, string? apiKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(profileId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerId);
+        SetApiKey($"profile:{profileId}:{providerId}", apiKey);
+    }
+
     private Dictionary<string, string> LoadCredentials()
     {
         if (!File.Exists(_credentialsPath))

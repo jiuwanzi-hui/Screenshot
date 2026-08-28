@@ -4,6 +4,7 @@
         xmlns:editor="clr-namespace:Screenshot.App.Editor"
         AllowsTransparency="True"
         Background="Transparent"
+        Cursor="Arrow"
         Focusable="True"
         ResizeMode="NoResize"
         ShowActivated="False"

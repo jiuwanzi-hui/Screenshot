@@ -5,6 +5,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Globalization;
+using WinForms = System.Windows.Forms;
 using Screenshot.App.Capture;
 using Screenshot.App.Core;
 using WpfBrushes = System.Windows.Media.Brushes;
@@ -19,9 +20,14 @@ using WpfRectangle = System.Windows.Shapes.Rectangle;
 using WpfEllipse = System.Windows.Shapes.Ellipse;
 using WpfSize = System.Windows.Size;
 using WpfTextBox = System.Windows.Controls.TextBox;
+using DrawingPoint = System.Drawing.Point;
 
 namespace Screenshot.App.Editor;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design",
+    "CA1001",
+    Justification = "The native preview lifetime follows the WPF canvas lifetime.")]
 public sealed class ImageEditorCanvas : Canvas
 {
     private CapturedImage? _capturedImage;
@@ -38,10 +44,13 @@ public sealed class ImageEditorCanvas : Canvas
     private UIElement? _drawingPreview;
     private WpfTextBox? _activeTextInput;
     private WpfPoint _activeTextPosition;
+    private int _editingTextAnnotationIndex = -1;
+    private TextAnnotation? _editingTextOriginal;
     private bool _isDrawing;
     private int _selectedAnnotationIndex = -1;
     private int _activeAnnotationHandle = -1;
     private bool _isEditingAnnotation;
+    private bool _annotationEditMoved;
     private WpfPoint _annotationEditStartPoint;
     private EditorAnnotation? _annotationEditOriginal;
     private WpfPoint _latestPointerPoint;
@@ -51,6 +60,8 @@ public sealed class ImageEditorCanvas : Canvas
     private double _baseDisplayHeight;
     private double _zoom = 1;
     private bool _isTranslationOverlayVisible = true;
+    private NativeDrawingPreviewWindow? _nativeDrawingPreview;
+    private bool _nativeDrawingPreviewReady;
 
     public ImageEditorCanvas()
     {
@@ -74,6 +85,8 @@ public sealed class ImageEditorCanvas : Canvas
         _selectedAnnotationIndex >= 0 &&
         _selectedAnnotationIndex < _document.Annotations.Count;
 
+    public bool IsTextInputActive => _activeTextInput is not null;
+
     public bool HasTranslationOverlay =>
         _document.Annotations.Any(annotation =>
             annotation is TranslationOverlayAnnotation);
@@ -86,6 +99,317 @@ public sealed class ImageEditorCanvas : Canvas
     public double DisplayWidth => _baseDisplayWidth * _zoom;
 
     public double DisplayHeight => _baseDisplayHeight * _zoom;
+
+    public WpfColor CurrentSelectedColor => _selectedColor;
+
+    public double CurrentStrokeWidth => _strokeWidth;
+
+    /// <summary>
+    /// Returns the size value represented by the currently selected
+    /// annotation. Text, emoji, number and mosaic annotations expose their
+    /// equivalent toolbar value instead of their internal pixel scale.
+    /// </summary>
+    public double? SelectedAnnotationStrokeWidth
+    {
+        get
+        {
+            if (!HasSelectedAnnotation)
+            {
+                return null;
+            }
+
+            return GetToolbarWidth(_document.Annotations[_selectedAnnotationIndex]);
+        }
+    }
+
+    /// <summary>
+    /// Scales the selected annotation around its visual center. This is used
+    /// by the mouse wheel so resizing does not move the annotation's center or
+    /// change the size of the whole editor canvas.
+    /// </summary>
+    public bool AdjustSelectedAnnotationScale(double factor)
+    {
+        if (!HasSelectedAnnotation ||
+            !double.IsFinite(factor) ||
+            factor <= 0)
+        {
+            return false;
+        }
+
+        CommitPendingText();
+        if (!HasSelectedAnnotation)
+        {
+            return false;
+        }
+
+        var current = _document.Annotations[_selectedAnnotationIndex];
+        var currentBounds = GetAnnotationBounds(current);
+        var canvasWidth = ResolveCanvasDimension(Width, ActualWidth);
+        var canvasHeight = ResolveCanvasDimension(Height, ActualHeight);
+        var effectiveFactor = factor;
+
+        // Keep the complete visual (including stroke and arrow head) inside the
+        // editor canvas. This also repairs annotations that were already clipped.
+        if (!currentBounds.IsEmpty &&
+            canvasWidth > 0 &&
+            canvasHeight > 0 &&
+            currentBounds.Width > 0 &&
+            currentBounds.Height > 0)
+        {
+            var maxFactor = Math.Min(
+                canvasWidth / currentBounds.Width,
+                canvasHeight / currentBounds.Height);
+            if (double.IsFinite(maxFactor) && maxFactor < effectiveFactor)
+            {
+                effectiveFactor = Math.Max(0.001, maxFactor);
+            }
+        }
+
+        var replacement = ScaleAnnotation(current, effectiveFactor);
+        if (replacement is null)
+        {
+            return false;
+        }
+
+        if (canvasWidth > 0 && canvasHeight > 0)
+        {
+            replacement = ConstrainAnnotationToCanvas(
+                replacement,
+                canvasWidth,
+                canvasHeight);
+        }
+
+        if (Equals(current, replacement))
+        {
+            return false;
+        }
+
+        ReplaceSelectedAnnotation(current, replacement);
+        var annotationTool = GetAnnotationTool(current);
+        var toolbarWidth = GetToolbarWidth(replacement);
+        AnnotationToolPreferences.SetWidth(annotationTool, toolbarWidth);
+        if (_selectedTool == annotationTool)
+        {
+            _strokeWidth = toolbarWidth;
+        }
+        AnnotationSelectionChanged?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
+
+    protected override void OnMouseWheel(MouseWheelEventArgs e)
+    {
+        if (HasSelectedAnnotation &&
+            !_isDrawing &&
+            !_isEditingAnnotation &&
+            _activeTextInput is null)
+        {
+            var factor = e.Delta > 0 ? 1.1 : 1 / 1.1;
+            if (AdjustSelectedAnnotationScale(factor))
+            {
+                e.Handled = true;
+                return;
+            }
+        }
+
+        base.OnMouseWheel(e);
+    }
+
+    private static EditorAnnotation? ScaleAnnotation(
+        EditorAnnotation annotation,
+        double factor)
+    {
+        var visualBounds = GetAnnotationBounds(annotation);
+        if (visualBounds.IsEmpty || visualBounds.Width <= 0 || visualBounds.Height <= 0)
+        {
+            return null;
+        }
+
+        var center = new WpfPoint(
+            visualBounds.Left + (visualBounds.Width / 2),
+            visualBounds.Top + (visualBounds.Height / 2));
+        var scalePoint = (WpfPoint point) =>
+            center + ((point - center) * factor);
+        var scalePoints = (IReadOnlyList<WpfPoint> points) =>
+            points.Select(scalePoint).ToArray();
+        var scaleStroke = (double width) => Math.Clamp(width * factor, 1, 24);
+
+        return annotation switch
+        {
+            RectangleAnnotation rectangle => rectangle with
+            {
+                Bounds = ScaleRect(rectangle.Bounds, factor),
+                StrokeWidth = scaleStroke(rectangle.StrokeWidth),
+            },
+            EllipseAnnotation ellipse => ellipse with
+            {
+                Bounds = ScaleRect(ellipse.Bounds, factor),
+                StrokeWidth = scaleStroke(ellipse.StrokeWidth),
+            },
+            ArrowAnnotation arrow => arrow with
+            {
+                Start = scalePoint(arrow.Start),
+                End = scalePoint(arrow.End),
+                StrokeWidth = scaleStroke(arrow.StrokeWidth),
+            },
+            CurvedArrowAnnotation curvedArrow => curvedArrow with
+            {
+                Points = scalePoints(curvedArrow.Points),
+                StrokeWidth = scaleStroke(curvedArrow.StrokeWidth),
+            },
+            BrushAnnotation brush => brush with
+            {
+                Points = scalePoints(brush.Points),
+                StrokeWidth = scaleStroke(brush.StrokeWidth),
+            },
+            MosaicAnnotation mosaic => mosaic with
+            {
+                Points = scalePoints(mosaic.Points),
+                StrokeWidth = Math.Clamp(mosaic.StrokeWidth * factor, 8, 96),
+                BlockSize = Math.Clamp(
+                    (int)Math.Round(mosaic.BlockSize * factor),
+                    4,
+                    18),
+            },
+            TextAnnotation text => ScaleTextAnnotation(text, factor),
+            EmojiAnnotation emoji => emoji with
+            {
+                FontSize = Math.Clamp(emoji.FontSize * factor, 12, 512),
+            },
+            NumberAnnotation number => ScaleNumberAnnotation(number, factor),
+            _ => null,
+        };
+    }
+
+    private static TextAnnotation ScaleTextAnnotation(
+        TextAnnotation annotation,
+        double factor)
+    {
+        var oldBounds = GetTextBounds(annotation);
+        var fontSize = Math.Clamp(annotation.FontSize * factor, 8, 256);
+        var scaled = annotation with { FontSize = fontSize };
+        var newBounds = GetTextBounds(scaled);
+        return scaled with
+        {
+            Position = new WpfPoint(
+                oldBounds.Left + ((oldBounds.Width - newBounds.Width) / 2),
+                oldBounds.Top + ((oldBounds.Height - newBounds.Height) / 2)),
+        };
+    }
+
+    private static NumberAnnotation ScaleNumberAnnotation(
+        NumberAnnotation annotation,
+        double factor)
+    {
+        var center = new WpfPoint(
+            annotation.Position.X + (annotation.Size / 2),
+            annotation.Position.Y + (annotation.Size / 2));
+        var size = Math.Clamp(annotation.Size * factor, 12, 512);
+        return annotation with
+        {
+            Position = new WpfPoint(
+                center.X - (size / 2),
+                center.Y - (size / 2)),
+            Size = size,
+        };
+    }
+
+    private static Rect ScaleRect(Rect rectangle, double factor)
+    {
+        var center = new WpfPoint(
+            rectangle.Left + (rectangle.Width / 2),
+            rectangle.Top + (rectangle.Height / 2));
+        var width = Math.Max(2, rectangle.Width * factor);
+        var height = Math.Max(2, rectangle.Height * factor);
+        return new Rect(
+            center.X - (width / 2),
+            center.Y - (height / 2),
+            width,
+            height);
+    }
+
+    private static double ResolveCanvasDimension(double preferred, double fallback)
+    {
+        if (double.IsFinite(preferred) && preferred > 0)
+        {
+            return preferred;
+        }
+
+        return double.IsFinite(fallback) && fallback > 0 ? fallback : 0;
+    }
+
+    private static EditorAnnotation ConstrainAnnotationToCanvas(
+        EditorAnnotation annotation,
+        double canvasWidth,
+        double canvasHeight)
+    {
+        var bounds = GetAnnotationBounds(annotation);
+        if (bounds.IsEmpty)
+        {
+            return annotation;
+        }
+
+        var offsetX = 0d;
+        if (bounds.Width >= canvasWidth)
+        {
+            offsetX = ((canvasWidth - bounds.Width) / 2) - bounds.Left;
+        }
+        else if (bounds.Left < 0)
+        {
+            offsetX = -bounds.Left;
+        }
+        else if (bounds.Right > canvasWidth)
+        {
+            offsetX = canvasWidth - bounds.Right;
+        }
+
+        var offsetY = 0d;
+        if (bounds.Height >= canvasHeight)
+        {
+            offsetY = ((canvasHeight - bounds.Height) / 2) - bounds.Top;
+        }
+        else if (bounds.Top < 0)
+        {
+            offsetY = -bounds.Top;
+        }
+        else if (bounds.Bottom > canvasHeight)
+        {
+            offsetY = canvasHeight - bounds.Bottom;
+        }
+
+        return offsetX == 0 && offsetY == 0
+            ? annotation
+            : TranslateAnnotation(annotation, new Vector(offsetX, offsetY));
+    }
+
+    private static EditorTool GetAnnotationTool(EditorAnnotation annotation) =>
+        annotation switch
+        {
+            RectangleAnnotation => EditorTool.Rectangle,
+            EllipseAnnotation => EditorTool.Ellipse,
+            ArrowAnnotation => EditorTool.Arrow,
+            CurvedArrowAnnotation => EditorTool.CurvedArrow,
+            BrushAnnotation => EditorTool.Brush,
+            MosaicAnnotation => EditorTool.Mosaic,
+            TextAnnotation => EditorTool.Text,
+            EmojiAnnotation => EditorTool.Emoji,
+            NumberAnnotation => EditorTool.Number,
+            _ => EditorTool.Rectangle,
+        };
+
+    private static double GetToolbarWidth(EditorAnnotation annotation) =>
+        annotation switch
+        {
+            MosaicAnnotation mosaic => Math.Clamp(mosaic.StrokeWidth / 4, 1, 24),
+            TextAnnotation text => Math.Clamp(text.FontSize / 5, 1, 24),
+            EmojiAnnotation emoji => Math.Clamp(emoji.FontSize / 9, 1, 24),
+            NumberAnnotation number => Math.Clamp(number.Size / 9, 1, 24),
+            RectangleAnnotation rectangle => Math.Clamp(rectangle.StrokeWidth, 1, 24),
+            EllipseAnnotation ellipse => Math.Clamp(ellipse.StrokeWidth, 1, 24),
+            ArrowAnnotation arrow => Math.Clamp(arrow.StrokeWidth, 1, 24),
+            CurvedArrowAnnotation arrow => Math.Clamp(arrow.StrokeWidth, 1, 24),
+            BrushAnnotation brush => Math.Clamp(brush.StrokeWidth, 1, 24),
+            _ => 3,
+        };
 
     public void Initialize(
         CapturedImage capturedImage,
@@ -210,7 +534,14 @@ public sealed class ImageEditorCanvas : Canvas
             CommitAnnotationEdit();
         }
 
+        if (_selectedTool != tool)
+        {
+            AnnotationToolPreferences.SetColor(_selectedTool, _selectedColor);
+            AnnotationToolPreferences.SetWidth(_selectedTool, _strokeWidth);
+        }
         _selectedTool = tool;
+        _selectedColor = AnnotationToolPreferences.GetColor(tool, _selectedColor);
+        _strokeWidth = AnnotationToolPreferences.GetWidth(tool, _strokeWidth);
         var hadSelection = HasSelectedAnnotation;
         _selectedAnnotationIndex = -1;
         _activeAnnotationHandle = -1;
@@ -234,6 +565,7 @@ public sealed class ImageEditorCanvas : Canvas
     public void SelectColor(WpfColor color, bool updateSelectedAnnotation = true)
     {
         _selectedColor = color;
+        AnnotationToolPreferences.SetColor(_selectedTool, color);
         if (!updateSelectedAnnotation || !HasSelectedAnnotation)
         {
             return;
@@ -265,6 +597,7 @@ public sealed class ImageEditorCanvas : Canvas
         bool updateSelectedAnnotation = true)
     {
         _strokeWidth = Math.Clamp(strokeWidth, 1, 24);
+        AnnotationToolPreferences.SetWidth(_selectedTool, _strokeWidth);
         if (!updateSelectedAnnotation || !HasSelectedAnnotation)
         {
             return;
@@ -278,6 +611,18 @@ public sealed class ImageEditorCanvas : Canvas
             ArrowAnnotation annotation => annotation with { StrokeWidth = _strokeWidth },
             CurvedArrowAnnotation annotation => annotation with { StrokeWidth = _strokeWidth },
             BrushAnnotation annotation => annotation with { StrokeWidth = _strokeWidth },
+            TextAnnotation annotation => annotation with
+            {
+                FontSize = Math.Clamp(_strokeWidth * 5, 8, 256),
+            },
+            EmojiAnnotation annotation => annotation with
+            {
+                FontSize = Math.Clamp(_strokeWidth * 9, 12, 512),
+            },
+            NumberAnnotation annotation => annotation with
+            {
+                Size = Math.Clamp(_strokeWidth * 9, 12, 512),
+            },
             MosaicAnnotation annotation => annotation with
             {
                 StrokeWidth = Math.Max(8, _strokeWidth * 4),
@@ -745,6 +1090,12 @@ public sealed class ImageEditorCanvas : Canvas
         CommitPendingText();
         var point = ClampPoint(e.GetPosition(this));
 
+        if (e.ClickCount >= 2 && TryStartTextAnnotationEdit(point))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (BeginAnnotationEdit(point))
         {
             e.Handled = true;
@@ -796,6 +1147,7 @@ public sealed class ImageEditorCanvas : Canvas
         _drawingStartPoint = point;
         CaptureMouse();
         CreateDrawingPreview(point);
+        StartNativeDrawingPreview(point);
         e.Handled = true;
     }
 
@@ -825,6 +1177,23 @@ public sealed class ImageEditorCanvas : Canvas
         if (!_isDrawing || _drawingPreview is null)
         {
             UpdateInteractionCursor(point);
+            return;
+        }
+
+        if (_nativeDrawingPreview is not null && _nativeDrawingPreviewReady)
+        {
+            // NativeDrawingPreviewWindow samples the physical cursor and owns
+            // the drag pixels. Keeping the WPF preview out of this hot path is
+            // important when the editor is hosted over a busy capture overlay.
+            // Keep a UI-thread path as a fallback for an extremely short or
+            // very fast drag where the native sampler only observed the
+            // endpoints.
+            if (_selectedTool is EditorTool.Brush or
+                EditorTool.CurvedArrow or
+                EditorTool.Mosaic)
+            {
+                AppendDrawingPathPoint(point);
+            }
             return;
         }
 
@@ -929,8 +1298,23 @@ public sealed class ImageEditorCanvas : Canvas
         if (_isEditingAnnotation)
         {
             var point = ClampPoint(e.GetPosition(this));
+            var shouldOpenTextEditor =
+                _selectedTool == EditorTool.Text &&
+                _activeAnnotationHandle < 0 &&
+                !_annotationEditMoved &&
+                _annotationEditOriginal is TextAnnotation;
+            var textIndex = _selectedAnnotationIndex;
             FlushPointerUpdate(point);
             CommitAnnotationEdit();
+            if (shouldOpenTextEditor &&
+                textIndex >= 0 &&
+                textIndex < _document.Annotations.Count &&
+                _document.Annotations[textIndex] is TextAnnotation text)
+            {
+                // A click without movement means "edit" for the Text tool;
+                // an actual drag has already been committed as a move above.
+                StartExistingTextInput(text, textIndex);
+            }
             UpdateInteractionCursor(point);
             e.Handled = true;
             return;
@@ -942,9 +1326,22 @@ public sealed class ImageEditorCanvas : Canvas
         }
 
         var endPoint = ClampPoint(e.GetPosition(this));
-        FlushPointerUpdate(endPoint);
+        if (_nativeDrawingPreview is not null)
+        {
+            if (TryGetCanvasPointFromScreen(WinForms.Cursor.Position,
+                    out var nativeEndPoint))
+            {
+                endPoint = nativeEndPoint;
+            }
+            SyncNativeDrawingPoints(endPoint);
+        }
+        else
+        {
+            FlushPointerUpdate(endPoint);
+        }
         _isDrawing = false;
         ReleaseMouseCapture();
+        _nativeDrawingPreview?.Stop();
 
         if (_drawingPreview is not null)
         {
@@ -954,6 +1351,123 @@ public sealed class ImageEditorCanvas : Canvas
 
         AddDrawingAnnotation(endPoint);
         e.Handled = true;
+    }
+
+    private void StartNativeDrawingPreview(WpfPoint point)
+    {
+        if (_selectedTool is not (EditorTool.Rectangle or
+            EditorTool.Ellipse or
+            EditorTool.Arrow or
+            EditorTool.CurvedArrow or
+            EditorTool.Brush or
+            EditorTool.Mosaic))
+        {
+            return;
+        }
+
+        var screenPoint = PointToScreen(point);
+        if (_nativeDrawingPreview is null)
+        {
+            _nativeDrawingPreview = new NativeDrawingPreviewWindow();
+            _nativeDrawingPreview.Painted += OnNativeDrawingPreviewPainted;
+        }
+        _nativeDrawingPreviewReady = false;
+        _nativeDrawingPreview.Start(
+            _selectedTool,
+            new DrawingPoint((int)Math.Round(screenPoint.X),
+                (int)Math.Round(screenPoint.Y)),
+            System.Drawing.Color.FromArgb(
+                _selectedColor.R,
+                _selectedColor.G,
+                _selectedColor.B),
+            (float)(_selectedTool == EditorTool.Mosaic
+                ? GetMosaicStrokeWidth()
+                : _strokeWidth),
+            _arrowStyle);
+
+    }
+
+    private void SyncNativeDrawingPoints(WpfPoint endPoint)
+    {
+        if (_nativeDrawingPreview is null ||
+            _selectedTool is not (EditorTool.Brush or
+                EditorTool.Mosaic or EditorTool.CurvedArrow))
+        {
+            return;
+        }
+
+        var points = _nativeDrawingPreview.GetPoints();
+        var nativePoints = points
+            .Select(screenPoint => TryGetCanvasPointFromScreen(
+                screenPoint,
+                out var canvasPoint)
+                ? canvasPoint
+                : (WpfPoint?)null)
+            .Where(canvasPoint => canvasPoint.HasValue)
+            .Select(canvasPoint => canvasPoint!.Value)
+            .ToList();
+        if (nativePoints.Count >= 3 || _brushPoints is null ||
+            _brushPoints.Count < 3)
+        {
+            _brushPoints = nativePoints;
+        }
+        if (_brushPoints.Count == 0)
+        {
+            _brushPoints.Add(_drawingStartPoint);
+        }
+
+        if ((_brushPoints[^1] - endPoint).Length >= 1.5)
+        {
+            _brushPoints.Add(endPoint);
+        }
+    }
+
+    private void AppendDrawingPathPoint(WpfPoint point)
+    {
+        if (_brushPoints is null)
+        {
+            _brushPoints = [_drawingStartPoint];
+        }
+
+        if ((_brushPoints[^1] - point).Length >= 1.5)
+        {
+            _brushPoints.Add(point);
+        }
+    }
+
+    private bool TryGetCanvasPointFromScreen(
+        DrawingPoint screenPoint,
+        out WpfPoint canvasPoint)
+    {
+        canvasPoint = default;
+        try
+        {
+            canvasPoint = PointFromScreen(new WpfPoint(
+                screenPoint.X,
+                screenPoint.Y));
+            canvasPoint = ClampPoint(canvasPoint);
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private void OnNativeDrawingPreviewPainted(object? sender, EventArgs e)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(
+                new Action(() => OnNativeDrawingPreviewPainted(sender, e)));
+            return;
+        }
+
+        _nativeDrawingPreviewReady = true;
+        if (_isDrawing && _drawingPreview is not null)
+        {
+            _drawingPreview.Visibility = Visibility.Hidden;
+        }
     }
 
     private bool BeginAnnotationEdit(WpfPoint point)
@@ -1010,6 +1524,7 @@ public sealed class ImageEditorCanvas : Canvas
         _annotationEditStartPoint = point;
         _annotationEditOriginal = annotation;
         _isEditingAnnotation = true;
+        _annotationEditMoved = false;
         CaptureMouse();
         RebuildCanvas();
         UpdateInteractionCursor(point);
@@ -1025,6 +1540,10 @@ public sealed class ImageEditorCanvas : Canvas
         }
 
         var delta = point - _annotationEditStartPoint;
+        if (delta.Length >= 2)
+        {
+            _annotationEditMoved = true;
+        }
         var updated = original switch
         {
             RectangleAnnotation rectangle => rectangle with
@@ -1051,8 +1570,10 @@ public sealed class ImageEditorCanvas : Canvas
             },
             ArrowAnnotation arrow => _activeAnnotationHandle switch
             {
-                0 => arrow with { Start = point },
-                1 => arrow with { End = point },
+                0 or 1 => ResizeArrowAnnotation(
+                    arrow,
+                    _activeAnnotationHandle,
+                    point),
                 _ => arrow with
                 {
                     Start = arrow.Start + delta,
@@ -1061,14 +1582,10 @@ public sealed class ImageEditorCanvas : Canvas
             },
             CurvedArrowAnnotation arrow => _activeAnnotationHandle switch
             {
-                0 => arrow with
-                {
-                    Points = ReplaceEndpoint(arrow.Points, point, replaceStart: true),
-                },
-                1 => arrow with
-                {
-                    Points = ReplaceEndpoint(arrow.Points, point, replaceStart: false),
-                },
+                0 or 1 => ResizeCurvedArrowAnnotation(
+                    arrow,
+                    _activeAnnotationHandle,
+                    point),
                 _ => arrow with
                 {
                     Points = arrow.Points
@@ -1134,6 +1651,7 @@ public sealed class ImageEditorCanvas : Canvas
             ? _document.Annotations[index]
             : null;
         _isEditingAnnotation = false;
+        _annotationEditMoved = false;
         _activeAnnotationHandle = -1;
         _annotationEditOriginal = null;
         StopPointerRendering();
@@ -1169,6 +1687,7 @@ public sealed class ImageEditorCanvas : Canvas
         }
 
         _isEditingAnnotation = false;
+        _annotationEditMoved = false;
         _activeAnnotationHandle = -1;
         _annotationEditOriginal = null;
         StopPointerRendering();
@@ -1553,6 +2072,53 @@ public sealed class ImageEditorCanvas : Canvas
         return replacement;
     }
 
+    private static ArrowAnnotation ResizeArrowAnnotation(
+        ArrowAnnotation arrow,
+        int handle,
+        WpfPoint point)
+    {
+        var fixedPoint = handle == 0 ? arrow.End : arrow.Start;
+        var movingPoint = handle == 0 ? arrow.Start : arrow.End;
+        var originalLength = Math.Max(1, (movingPoint - fixedPoint).Length);
+        var newLength = Math.Max(1, (point - fixedPoint).Length);
+        var scale = Math.Clamp(newLength / originalLength, 0.1, 20);
+        var strokeWidth = Math.Clamp(arrow.StrokeWidth * scale, 1, 24);
+        return handle == 0
+            ? arrow with { Start = point, StrokeWidth = strokeWidth }
+            : arrow with { End = point, StrokeWidth = strokeWidth };
+    }
+
+    private static CurvedArrowAnnotation ResizeCurvedArrowAnnotation(
+        CurvedArrowAnnotation arrow,
+        int handle,
+        WpfPoint point)
+    {
+        if (arrow.Points.Count < 2)
+        {
+            return arrow;
+        }
+
+        var replaceStart = handle == 0;
+        var fixedPoint = replaceStart
+            ? arrow.Points[^1]
+            : arrow.Points[0];
+        var movingPoint = replaceStart
+            ? arrow.Points[0]
+            : arrow.Points[^1];
+        var originalLength = Math.Max(1, (movingPoint - fixedPoint).Length);
+        var newLength = Math.Max(1, (point - fixedPoint).Length);
+        var scale = Math.Clamp(newLength / originalLength, 0.1, 20);
+        var scaledPoints = arrow.Points
+            .Select(pathPoint => fixedPoint + ((pathPoint - fixedPoint) * scale))
+            .ToArray();
+        scaledPoints[replaceStart ? 0 : scaledPoints.Length - 1] = point;
+        return arrow with
+        {
+            Points = scaledPoints,
+            StrokeWidth = Math.Clamp(arrow.StrokeWidth * scale, 1, 24),
+        };
+    }
+
     private static WpfPoint[] ScalePathPoints(
         IReadOnlyList<WpfPoint> points,
         WpfPoint targetBottomRight)
@@ -1809,7 +2375,11 @@ public sealed class ImageEditorCanvas : Canvas
     {
         var input = new WpfTextBox
         {
-            Width = Math.Max(60, Math.Min(220, Width - point.X)),
+            Width = Math.Max(
+                60,
+                Math.Min(
+                    420,
+                    Width - point.X)),
             MinHeight = 34,
             Padding = new Thickness(6, 4, 6, 4),
             Background = WpfBrushes.Transparent,
@@ -1817,16 +2387,73 @@ public sealed class ImageEditorCanvas : Canvas
             BorderThickness = new Thickness(1),
             FontSize = Math.Max(14, _strokeWidth * 5),
             Foreground = new SolidColorBrush(_selectedColor),
+            Text = string.Empty,
         };
 
         input.KeyDown += OnTextInputKeyDown;
         input.LostKeyboardFocus += OnTextInputLostKeyboardFocus;
         _activeTextInput = input;
         _activeTextPosition = point;
+        _editingTextAnnotationIndex = -1;
+        _editingTextOriginal = null;
         SetLeft(input, point.X);
         SetTop(input, point.Y);
         Children.Add(input);
         input.Focus();
+    }
+
+    private void StartExistingTextInput(
+        TextAnnotation existing,
+        int annotationIndex)
+    {
+        var point = existing.Position;
+        var input = new WpfTextBox
+        {
+            Width = Math.Max(60, Math.Min(420, GetTextBounds(existing).Width + 24)),
+            MinHeight = 34,
+            Padding = new Thickness(6, 4, 6, 4),
+            Background = WpfBrushes.Transparent,
+            BorderBrush = new SolidColorBrush(existing.Color),
+            BorderThickness = new Thickness(1),
+            FontSize = existing.FontSize,
+            Foreground = new SolidColorBrush(existing.Color),
+            Text = existing.Text,
+        };
+
+        input.KeyDown += OnTextInputKeyDown;
+        input.LostKeyboardFocus += OnTextInputLostKeyboardFocus;
+        _activeTextInput = input;
+        _activeTextPosition = point;
+        _editingTextAnnotationIndex = annotationIndex;
+        _editingTextOriginal = existing;
+        SetLeft(input, point.X);
+        SetTop(input, point.Y);
+        // Remove the rendered copy before placing the editable TextBox so the
+        // old glyphs cannot show through while the user edits the text.
+        RebuildCanvasCore(includeSelection: false);
+        Children.Add(input);
+        input.Focus();
+        input.SelectAll();
+    }
+
+    private bool TryStartTextAnnotationEdit(WpfPoint point)
+    {
+        var index = HitTestAnnotation(point);
+        if (index < 0 || index >= _document.Annotations.Count ||
+            _document.Annotations[index] is not TextAnnotation text)
+        {
+            return false;
+        }
+
+        if (_isEditingAnnotation)
+        {
+            CancelAnnotationEdit();
+        }
+
+        _selectedAnnotationIndex = index;
+        StartExistingTextInput(text, index);
+        AnnotationSelectionChanged?.Invoke(this, EventArgs.Empty);
+        return true;
     }
 
     private void OnTextInputKeyDown(object sender, WpfKeyEventArgs e)
@@ -1863,16 +2490,35 @@ public sealed class ImageEditorCanvas : Canvas
         input.LostKeyboardFocus -= OnTextInputLostKeyboardFocus;
         Children.Remove(input);
 
+        var editingIndex = _editingTextAnnotationIndex;
+        var editingOriginal = _editingTextOriginal;
+        _editingTextAnnotationIndex = -1;
+        _editingTextOriginal = null;
+
         if (!keepText || string.IsNullOrWhiteSpace(input.Text))
         {
+            if (editingIndex >= 0)
+            {
+                RebuildCanvas();
+            }
             return;
         }
 
-        _document.Add(new TextAnnotation(
+        var updated = new TextAnnotation(
             _activeTextPosition,
             input.Text.Trim(),
-            _selectedColor,
-            input.FontSize));
+            editingOriginal?.Color ?? _selectedColor,
+            input.FontSize);
+        if (editingIndex >= 0 && editingIndex < _document.Annotations.Count &&
+            editingOriginal is not null)
+        {
+            _document.ReplaceAt(editingIndex, editingOriginal, updated);
+            _selectedAnnotationIndex = editingIndex;
+        }
+        else
+        {
+            _document.Add(updated);
+        }
         RebuildCanvas();
         RaiseHistoryChanged();
     }
@@ -1903,8 +2549,15 @@ public sealed class ImageEditorCanvas : Canvas
             });
         }
 
-        foreach (var annotation in _document.Annotations)
+        for (var index = 0; index < _document.Annotations.Count; index++)
         {
+            if (_activeTextInput is not null &&
+                index == _editingTextAnnotationIndex)
+            {
+                continue;
+            }
+
+            var annotation = _document.Annotations[index];
             if (annotation is TranslationOverlayAnnotation &&
                 !_isTranslationOverlayVisible)
             {
@@ -2198,7 +2851,7 @@ public sealed class ImageEditorCanvas : Canvas
 
         var headLength = Math.Min(
             Math.Max((totalLength * 0.11) + (strokeWidth * 1.6), 9),
-            Math.Min(44, totalLength * 0.45));
+            totalLength * 0.45);
         var headStartDistance = Math.Max(0, totalLength - headLength);
         var shaft = SlicePathAtDistance(
             points,
@@ -2416,7 +3069,7 @@ public sealed class ImageEditorCanvas : Canvas
         // first mouse move of an arrow drag.
         var headLength = Math.Min(
             Math.Max((length * 0.11) + (strokeWidth * 1.6), 9),
-            Math.Min(44, length * 0.45));
+            length * 0.45);
         var headHalfWidth = headLength * 0.36;
         var baseHalfWidth = Math.Max(
             1.4,

@@ -40,7 +40,7 @@
         <Geometry x:Key="RecordIconGeometry">M 2,4 H 12 V 14 H 2 Z M 12,7 L 16,4 V 14 L 12,11 Z</Geometry>
         <Geometry x:Key="ScrollIconGeometry">M 9,2 V 16 M 6,5 L 9,2 L 12,5 M 6,13 L 9,16 L 12,13</Geometry>
         <Geometry x:Key="OcrIconGeometry">M 2,5 V 2 H 5 M 13,2 H 16 V 5 M 16,13 V 16 H 13 M 5,16 H 2 V 13 M 5,12 L 8,5 L 11,12 M 6,10 H 10</Geometry>
-        <Geometry x:Key="PinIconGeometry">M 6,2 H 12 L 11,6 L 14,9 L 10,10 L 9,16 L 7,10 L 3,9 L 6,6 Z</Geometry>
+        <Geometry x:Key="PinIconGeometry">M 6,2 H 12 L 11.5,6 L 14,8.5 L 10,9.5 L 9,16 L 8,9.5 L 4,8.5 L 6.5,6 Z</Geometry>
         <Geometry x:Key="CancelIconGeometry">M 4,4 L 14,14 M 14,4 L 4,14</Geometry>
         <Geometry x:Key="ConfirmIconGeometry">M 3,9 L 7,13 L 15,4</Geometry>
         <LinearGradientBrush x:Key="InlineHueGradientBrush" StartPoint="0,0.5" EndPoint="1,0.5">
@@ -396,7 +396,7 @@
         </Style>
         </ResourceDictionary>
     </Window.Resources>
-    <Grid x:Name="CaptureSurface"
+            <Grid x:Name="CaptureSurface"
           Background="Transparent"
           Cursor="Cross"
           Focusable="True"
@@ -404,42 +404,24 @@
            Loaded="OnCaptureSurfaceLoaded"
            PreviewMouseRightButtonDown="OnCaptureSurfacePreviewMouseRightButtonDown"
            PreviewMouseRightButtonUp="OnCaptureSurfacePreviewMouseRightButtonUp"
+           PreviewMouseLeftButtonDown="OnCaptureSurfacePreviewMouseLeftButtonDown"
            MouseLeftButtonDown="OnCaptureSurfaceMouseLeftButtonDown"
            MouseLeftButtonUp="OnCaptureSurfaceMouseLeftButtonUp"
-          MouseMove="OnCaptureSurfaceMouseMove">
+           PreviewMouseLeftButtonUp="OnCaptureSurfacePreviewMouseLeftButtonUp"
+           PreviewMouseMove="OnCaptureSurfacePreviewMouseMove"
+           MouseMove="OnCaptureSurfaceMouseMove">
         <Image x:Name="FrozenScreenImage"
                IsHitTestVisible="False"
+               CacheMode="BitmapCache"
+               RenderOptions.BitmapScalingMode="LowQuality"
                SnapsToDevicePixels="True"
                Stretch="Fill" />
-        <Border x:Name="CaptureShade"
-                Background="#48000000"
-                IsHitTestVisible="False" />
         <Canvas>
-            <Rectangle x:Name="TopMask"
-                       Fill="#48000000"
-                       IsHitTestVisible="False"
-                       Panel.ZIndex="60"
-                       Visibility="Collapsed" />
-            <Rectangle x:Name="LeftMask"
-                       Fill="#48000000"
-                       IsHitTestVisible="False"
-                       Panel.ZIndex="60"
-                       Visibility="Collapsed" />
-            <Rectangle x:Name="RightMask"
-                       Fill="#48000000"
-                       IsHitTestVisible="False"
-                       Panel.ZIndex="60"
-                       Visibility="Collapsed" />
-            <Rectangle x:Name="BottomMask"
-                       Fill="#48000000"
-                       IsHitTestVisible="False"
-                       Panel.ZIndex="60"
-                       Visibility="Collapsed" />
             <Rectangle x:Name="ScrollCaptureOutline"
                        Fill="Transparent"
                        IsHitTestVisible="False"
                        Panel.ZIndex="80"
-                       Stroke="{DynamicResource AppAccentBrush}"
+                       Stroke="Transparent"
                        StrokeThickness="4"
                        Visibility="Collapsed" />
             <Rectangle x:Name="WindowSnapRectangle"
@@ -459,16 +441,51 @@
             </Rectangle>
             <Rectangle x:Name="SelectionRectangle"
                        Cursor="SizeAll"
-                       Fill="#16000000"
+                       Fill="Transparent"
                        ForceCursor="True"
                        SnapsToDevicePixels="True"
                        Panel.ZIndex="70"
-                       Stroke="{DynamicResource AppAccentBrush}"
+                       Stroke="Transparent"
                        StrokeThickness="2"
                        Visibility="Collapsed"
                        MouseLeftButtonDown="OnSelectionRectangleMouseLeftButtonDown"
                        MouseMove="OnSelectionRectangleMouseMove"
                        MouseLeftButtonUp="OnSelectionRectangleMouseLeftButtonUp" />
+
+            <!-- Small move affordances inset from the resize corners. They
+                 are input-only and never overlap the eight resize handles. -->
+            <Border x:Name="SelectionMoveTopLeftZone"
+                    Width="14"
+                    Height="14"
+                    Background="Transparent"
+                    Cursor="SizeAll"
+                    Panel.ZIndex="85"
+                    Visibility="Collapsed"
+                    MouseLeftButtonDown="OnSelectionMoveZoneMouseLeftButtonDown" />
+            <Border x:Name="SelectionMoveTopRightZone"
+                    Width="14"
+                    Height="14"
+                    Background="Transparent"
+                    Cursor="SizeAll"
+                    Panel.ZIndex="85"
+                    Visibility="Collapsed"
+                    MouseLeftButtonDown="OnSelectionMoveZoneMouseLeftButtonDown" />
+            <Border x:Name="SelectionMoveBottomLeftZone"
+                    Width="14"
+                    Height="14"
+                    Background="Transparent"
+                    Cursor="SizeAll"
+                    Panel.ZIndex="85"
+                    Visibility="Collapsed"
+                    MouseLeftButtonDown="OnSelectionMoveZoneMouseLeftButtonDown" />
+            <Border x:Name="SelectionMoveBottomRightZone"
+                    Width="14"
+                    Height="14"
+                    Background="Transparent"
+                    Cursor="SizeAll"
+                    Panel.ZIndex="85"
+                    Visibility="Collapsed"
+                    MouseLeftButtonDown="OnSelectionMoveZoneMouseLeftButtonDown" />
 
             <Border x:Name="SelectionSizeBadge"
                     Width="112"
@@ -497,11 +514,13 @@
 
             <Canvas x:Name="OcrTextOverlay"
                     ClipToBounds="True"
+                    IsHitTestVisible="True"
                     Panel.ZIndex="95"
                     Visibility="Collapsed" />
 
             <Canvas x:Name="ContentRecognitionOverlay"
                     ClipToBounds="True"
+                    IsHitTestVisible="False"
                     Panel.ZIndex="97"
                     Visibility="Collapsed" />
 
@@ -705,10 +724,10 @@
 
             <Rectangle x:Name="InlineEditorOutline"
                        Cursor="SizeAll"
-                       Fill="{x:Null}"
-                       IsHitTestVisible="True"
+                       Fill="Transparent"
+                       IsHitTestVisible="False"
                        Panel.ZIndex="80"
-                       Stroke="{DynamicResource AppAccentBrush}"
+                       Stroke="Transparent"
                        StrokeThickness="3"
                        Visibility="Collapsed"
                        MouseLeftButtonDown="OnInlineEditorOutlineMouseLeftButtonDown"

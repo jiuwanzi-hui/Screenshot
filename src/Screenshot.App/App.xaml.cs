@@ -4,6 +4,7 @@ using System.Text;
 using System.Windows;
 using Screenshot.App.Capture;
 using Screenshot.App.Core;
+using Screenshot.App.Editor;
 using Screenshot.App.Infrastructure;
 using Screenshot.App.Pin;
 using Screenshot.App.Presentation;
@@ -68,17 +69,48 @@ public partial class App : System.Windows.Application, IDisposable
         var elevationResult = new ElevationLaunchResult(
             RelaunchStarted: false,
             Warning: null);
+        var hasElevatedRelaunchMarker = e.Args.Any(argument =>
+            string.Equals(
+                argument,
+                ElevationLaunchService.ElevatedRelaunchArgument,
+                StringComparison.OrdinalIgnoreCase));
+
+        // The elevated child is the only process that can create the
+        // highest-run-level task. This is done after the first UAC consent;
+        // failures are intentionally non-fatal and retain the runas fallback.
+        if (hasElevatedRelaunchMarker &&
+            ElevationLaunchService.IsCurrentProcessElevated() &&
+            Environment.ProcessPath is { } elevatedProcessPath)
+        {
+            ElevationLaunchService.TryEnsurePersistentElevationTask(
+                elevatedProcessPath);
+        }
+
         if (elevationLaunchService.ShouldRequestElevation(elevationSettings, e.Args))
         {
-            // Release the per-session instance event before the elevated child
-            // starts, otherwise it would be treated as a second app instance.
+            // Release the per-session instance event before either the
+            // persistent task or the UAC child starts. Otherwise the new
+            // elevated process can be mistaken for a duplicate and exit.
             _singleInstanceCoordinator.Dispose();
             _singleInstanceCoordinator = null;
+
+            if (Environment.ProcessPath is { } processPath &&
+                ElevationLaunchService.TryRunPersistentElevationTask(
+                    processPath,
+                    e.Args))
+            {
+                Shutdown();
+                return;
+            }
+
             elevationResult = elevationLaunchService.TryRelaunchElevated(
                 elevationSettings,
                 e.Args);
             if (elevationResult.RelaunchStarted)
             {
+                // Keep the user's preference unchanged. The elevated child
+                // carries the relaunch marker, while the persisted setting
+                // remains checked for the next normal/startup launch.
                 Shutdown();
                 return;
             }
@@ -147,6 +179,9 @@ public partial class App : System.Windows.Application, IDisposable
             _hotKeyManager,
             credentialStore,
             _translationHttpClient);
+        AnnotationToolPreferences.Configure(
+            _currentSettings.AnnotationToolSettings,
+            settings => _mainWindow?.SaveAnnotationToolSettings(settings));
         _mainWindow.ApplySettingsPalette(_themeManager.ResolvedTheme);
         MainWindow = _mainWindow;
         _mainWindow.SettingsSaved += OnSettingsSaved;
@@ -229,14 +264,14 @@ public partial class App : System.Windows.Application, IDisposable
         _trayIconService.SetVisible(_currentSettings.ShowNotificationIcon);
         UpdateFloatingCaptureWindow();
 
-        if (startInBackground || !_currentSettings.OpenSettingsOnStartup)
+        if (startInBackground)
         {
             _ = StartupFeedbackWindow.ShowAsync("已最小化启动");
         }
 
         if ((!startInBackground && _currentSettings.OpenSettingsOnStartup) ||
-            hotKeyWarning is not null ||
-            elevationWarning is not null)
+            (!startInBackground && hotKeyWarning is not null) ||
+            (!startInBackground && elevationWarning is not null))
         {
             ShowMainWindow();
         }
@@ -253,7 +288,10 @@ public partial class App : System.Windows.Application, IDisposable
     {
         // Let startup paint and settle before loading capture drivers. This is
         // deliberately best-effort and never changes the visible startup flow.
-        await Task.Delay(TimeSpan.FromSeconds(1));
+        // Start the capture warm-up shortly after the dispatcher is ready so
+        // the first pin/capture action does not pay the graphics initialization
+        // cost. Keep a small delay to let the startup window paint first.
+        await Task.Delay(TimeSpan.FromMilliseconds(250));
         var recorderWarmUp = RegionVideoRecorder.WarmUpAsync(
             _currentSettings.VideoRecordingCodec,
             _currentSettings.VideoRecordingFrameRate,
@@ -432,7 +470,8 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void OnScrollCaptureRequested(object? sender, EventArgs e)
     {
-        _ = Dispatcher.BeginInvoke(RequestScrollCapture);
+        _ = Dispatcher.BeginInvoke(
+            (Action)(() => RequestScrollCapture(pointerContinuation: null)));
     }
 
     private void OnVideoRecordingRequested(object? sender, EventArgs e)
@@ -1139,9 +1178,16 @@ public partial class App : System.Windows.Application, IDisposable
         DpapiTranslationCredentialStore credentialStore)
     {
         var configuredProvider = settings.TranslationProvider?.Trim() ?? string.Empty;
+        // Preserve a recognized provider from the settings file. Older
+        // versions sometimes stored an API key in TranslationProvider; only
+        // that legacy shape should be converted to the custom entry.
+        var resolvedProvider = TranslationProviderFactory.ResolveProviderId(
+            configuredProvider);
         var migrated = settings with
         {
-            TranslationProvider = TranslationProviderFactory.OpenAiCompatibleProviderId,
+            TranslationProvider = configuredProvider.StartsWith("sk-", StringComparison.OrdinalIgnoreCase)
+                ? TranslationProviderFactory.OpenAiCompatibleProviderId
+                : resolvedProvider,
         };
 
         if (configuredProvider.StartsWith("sk-", StringComparison.OrdinalIgnoreCase) &&
@@ -1154,8 +1200,8 @@ public partial class App : System.Windows.Application, IDisposable
         }
 
         if (!string.Equals(
+                migrated.TranslationProvider,
                 configuredProvider,
-                TranslationProviderFactory.OpenAiCompatibleProviderId,
                 StringComparison.Ordinal))
         {
             settingsStore.Save(migrated);

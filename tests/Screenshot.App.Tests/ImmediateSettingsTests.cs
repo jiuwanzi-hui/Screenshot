@@ -507,6 +507,92 @@ public sealed class ImmediateSettingsTests : IDisposable
     }
 
     [Fact]
+    public void TranslationProfileAvailabilitySurvivesProfileReorderingAndSave()
+    {
+        var settings = CreateSettings() with
+        {
+            TranslationProfiles =
+            [
+                new AiTranslationProfile
+                {
+                    Id = "primary",
+                    Name = "主模型",
+                    IsEnabled = true,
+                    Provider = TranslationProviderFactory.OpenAiCompatibleProviderId,
+                    Endpoint = "https://api.example.com/v1",
+                    Model = "model-primary",
+                },
+                new AiTranslationProfile
+                {
+                    Id = "backup",
+                    Name = "备用模型",
+                    IsEnabled = true,
+                    Provider = TranslationProviderFactory.OpenAiCompatibleProviderId,
+                    Endpoint = "https://backup.example.com/v1",
+                    Model = "model-backup",
+                },
+            ],
+        };
+        var viewModel = new SettingsViewModel(settings);
+        var primary = Assert.Single(
+            viewModel.TranslationProfiles,
+            profile => profile.Id == "primary");
+        primary.SetAvailability(true, "模型已验证");
+
+        Assert.True(viewModel.MoveTranslationProfileToInsertionIndex(
+            primary,
+            insertionIndex: 2));
+
+        viewModel.Apply(viewModel.CreateSettings());
+
+        var savedPrimary = Assert.Single(
+            viewModel.TranslationProfiles,
+            profile => profile.Id == "primary");
+        Assert.Same(primary, savedPrimary);
+        Assert.True(savedPrimary.IsAvailable);
+        Assert.False(savedPrimary.IsAvailabilityChecking);
+        Assert.Equal("模型已验证", savedPrimary.AvailabilityReason);
+
+        var reloaded = new SettingsViewModel(viewModel.CreateSettings());
+        var reloadedPrimary = Assert.Single(
+            reloaded.TranslationProfiles,
+            profile => profile.Id == "primary");
+        Assert.True(reloadedPrimary.IsAvailable);
+        Assert.Equal("可用", reloadedPrimary.AvailabilityLabel);
+        Assert.Equal("模型已验证", reloadedPrimary.AvailabilityReason);
+    }
+
+    [Fact]
+    public void TranslationProfileAvailabilityKeepsLastResultWhileChecking()
+    {
+        var profile = new AiTranslationProfileItem(new AiTranslationProfile
+        {
+            Name = "在线模型",
+            IsEnabled = true,
+        });
+        profile.SetAvailability(true, "模型已验证");
+        var availabilityLabelNotifications = 0;
+        profile.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(AiTranslationProfileItem.AvailabilityLabel))
+            {
+                availabilityLabelNotifications++;
+            }
+        };
+
+        profile.SetAvailabilityChecking();
+
+        Assert.True(profile.IsAvailabilityChecking);
+        Assert.True(profile.IsAvailable);
+        Assert.Equal("可用", profile.AvailabilityLabel);
+        Assert.Equal("模型已验证", profile.AvailabilityReason);
+
+        profile.SetAvailability(true, "模型已验证");
+        Assert.False(profile.IsAvailabilityChecking);
+        Assert.Equal(0, availabilityLabelNotifications);
+    }
+
+    [Fact]
     public void CaptureToolbarChoicesRoundTripThroughSettingsViewModel()
     {
         var viewModel = new SettingsViewModel(CreateSettings() with
@@ -754,14 +840,15 @@ public sealed class ImmediateSettingsTests : IDisposable
                 window.FindName("TranslationPriorityPanel"));
             var targetLanguage = Assert.IsType<ComboBox>(
                 window.FindName("TranslationTargetLanguageComboBox"));
+            var viewModel = Assert.IsType<SettingsViewModel>(window.DataContext);
             Assert.Null(window.FindName("TranslationModeComboBox"));
-            Assert.Equal(Visibility.Visible, onlinePanel.Visibility);
+            Assert.Equal(Visibility.Collapsed, onlinePanel.Visibility);
             Assert.Equal(Visibility.Visible, offlinePanel.Visibility);
             Assert.Equal(Visibility.Visible, priorityPanel.Visibility);
+            Assert.NotEmpty(viewModel.TranslationProfiles);
             Assert.Equal(
                 TranslationLanguageCatalog.Languages.Count,
                 targetLanguage.Items.Count);
-            var viewModel = Assert.IsType<SettingsViewModel>(window.DataContext);
             Assert.Equal(
                 TranslationMode.Automatic,
                 viewModel.CreateSettings().TranslationMode);
@@ -805,9 +892,12 @@ public sealed class ImmediateSettingsTests : IDisposable
             var targetLanguage = Assert.IsType<ComboBox>(
                 window.FindName("TranslationTargetLanguageComboBox"));
 
-            Assert.Equal(Visibility.Visible, onlinePanel.Visibility);
+            Assert.Equal(Visibility.Collapsed, onlinePanel.Visibility);
             Assert.Equal(Visibility.Visible, offlinePanel.Visibility);
             Assert.Equal(Visibility.Visible, priorityPanel.Visibility);
+            Assert.NotEmpty(window.DataContext is SettingsViewModel model
+                ? model.TranslationProfiles
+                : []);
             Assert.Equal(
                 TranslationLanguageCatalog.Languages.Count,
                 targetLanguage.Items.Count);
