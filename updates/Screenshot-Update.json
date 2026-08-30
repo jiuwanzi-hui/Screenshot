@@ -5,14 +5,14 @@
                       "fileName":  "SnapCut-Setup-3.7.8-win-x64.exe",
                       "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.7.8-win-x64.exe",
                       "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.8/SnapCut-Setup-3.7.8-win-x64.exe",
-                      "size":  65756004,
-                      "sha256":  "0768F8A0035E7158214EB803782D0CF83B1EB5C31AC1F42C4EC353A22CB28B0B"
+                      "size":  65761955,
+                      "sha256":  "99ECD7FBBFDABCA9C259F284812B5C95842845842964632CA0949D13F5F99F60"
                   },
     "portable":  {
                      "fileName":  "SnapCut-Portable-3.7.8-win-x64.zip",
                      "githubUrl":  "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.7.8-win-x64.zip",
                      "giteeUrl":  "https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.8/SnapCut-Portable-3.7.8-win-x64.zip",
-                     "size":  92472853,
-                     "sha256":  "91C36990AC50554F10DA809EA025E3A5492FDB1D2CD907D10DFDA25E67FC6F34"
+                     "size":  92473046,
+                     "sha256":  "D2325CC03D3CFA33316D79891EA7DF2FC2DA8B92E4616F8F7D1C787F5FB02A70"
                  }
 }
