@@ -13,12 +13,15 @@ internal sealed class NativeSelectionMaskWindow : Form
     private const int TopmostWindow = -1;
     private const uint DoNotActivate = 0x0010;
     private const uint DoNotChangeOwnerZOrder = 0x0200;
+    private const uint NoRedraw = 0x0008;
     private const int ShowNormal = 5;
     private const int HideCommand = 0;
     private bool _disposed;
+    private readonly object _updateLock = new();
     // Keep the dimming layer neutral. The selection border follows the theme,
     // but the mask must not inherit the accent color.
     private static readonly Color NeutralMaskColor = Color.Black;
+    private Rectangle? _excludedRegion;
 
     public NativeSelectionMaskWindow()
     {
@@ -40,42 +43,114 @@ internal sealed class NativeSelectionMaskWindow : Form
 
     public void Update(Rectangle surface, Rectangle selection)
     {
+        UpdateCore(surface, selection, show: true, belowWindow: IntPtr.Zero);
+    }
+
+    // The native drag loop calls this method directly. It deliberately avoids
+    // WinForms control state and only uses USER32/GDI handles, so the mask is
+    // committed on the same sample as the border without a dispatcher delay.
+    public void UpdateNative(
+        Rectangle surface,
+        Rectangle selection,
+        Rectangle? excluded,
+        IntPtr belowWindow)
+    {
+        lock (_updateLock)
+        {
+            _excludedRegion = excluded is { Width: > 0, Height: > 0 }
+                ? excluded
+                : null;
+            UpdateCore(surface, selection, show: true, belowWindow);
+        }
+    }
+
+    private void UpdateCore(
+        Rectangle surface,
+        Rectangle selection,
+        bool show,
+        IntPtr belowWindow)
+    {
         if (_disposed || !IsHandleCreated || surface.Width <= 0 || surface.Height <= 0)
         {
             return;
         }
 
-        var hole = Rectangle.Intersect(
-            new Rectangle(selection.X - surface.X, selection.Y - surface.Y,
-                selection.Width, selection.Height),
-            new Rectangle(0, 0, surface.Width, surface.Height));
-        var region = CreateRectRgn(0, 0, 0, 0);
-        try
+        lock (_updateLock)
         {
-            AddRegion(region, new Rectangle(0, 0, surface.Width, Math.Max(0, hole.Top)));
-            AddRegion(region, new Rectangle(0, hole.Bottom, surface.Width,
-                Math.Max(0, surface.Height - hole.Bottom)));
-            AddRegion(region, new Rectangle(0, hole.Top, Math.Max(0, hole.Left),
-                Math.Max(0, hole.Height)));
-            AddRegion(region, new Rectangle(hole.Right, hole.Top,
-                Math.Max(0, surface.Width - hole.Right), Math.Max(0, hole.Height)));
-            _ = SetWindowPos(Handle, new IntPtr(TopmostWindow), surface.X, surface.Y,
-                surface.Width, surface.Height,
-                DoNotActivate | DoNotChangeOwnerZOrder);
-            // USER32 owns the region after this call. Repaint only the changed
-            // window after it is visible so the mask cannot disappear between
-            // the native border update and the WPF controls becoming visible.
-            _ = SetWindowRgn(Handle, region, false);
-            region = IntPtr.Zero;
-            _ = ShowWindow(Handle, ShowNormal);
-            _ = InvalidateRect(Handle, IntPtr.Zero, false);
-        }
-        finally
-        {
-            if (region != IntPtr.Zero)
+            var hole = Rectangle.Intersect(
+                new Rectangle(selection.X - surface.X, selection.Y - surface.Y,
+                    selection.Width, selection.Height),
+                new Rectangle(0, 0, surface.Width, surface.Height));
+            // Leave a tiny safety gap around the selection so a compositor
+            // frame can never cover the border while the two HWNDs change
+            // z-order at high pointer rates.
+            hole.Inflate(2, 2);
+            hole = Rectangle.Intersect(
+                hole,
+                new Rectangle(0, 0, surface.Width, surface.Height));
+            var region = CreateRectRgn(0, 0, 0, 0);
+            try
             {
-                _ = DeleteObject(region);
+                AddRegion(region, new Rectangle(0, 0, surface.Width, Math.Max(0, hole.Top)));
+                AddRegion(region, new Rectangle(0, hole.Bottom, surface.Width,
+                    Math.Max(0, surface.Height - hole.Bottom)));
+                AddRegion(region, new Rectangle(0, hole.Top, Math.Max(0, hole.Left),
+                    Math.Max(0, hole.Height)));
+                AddRegion(region, new Rectangle(hole.Right, hole.Top,
+                    Math.Max(0, surface.Width - hole.Right), Math.Max(0, hole.Height)));
+                if (_excludedRegion is { } excluded)
+                {
+                    var exclusion = Rectangle.Intersect(
+                        new Rectangle(excluded.X - surface.X, excluded.Y - surface.Y,
+                            excluded.Width, excluded.Height),
+                        new Rectangle(0, 0, surface.Width, surface.Height));
+                    if (!exclusion.IsEmpty)
+                    {
+                        var exclusionRegion = CreateRectRgn(
+                            exclusion.Left, exclusion.Top,
+                            exclusion.Right, exclusion.Bottom);
+                        try
+                        {
+                            _ = CombineRgn(region, region, exclusionRegion, 4);
+                        }
+                        finally
+                        {
+                            _ = DeleteObject(exclusionRegion);
+                        }
+                    }
+                }
+                var insertAfter = belowWindow == IntPtr.Zero
+                    ? new IntPtr(TopmostWindow)
+                    : belowWindow;
+                var flags = belowWindow == IntPtr.Zero
+                    ? DoNotActivate | DoNotChangeOwnerZOrder | NoRedraw
+                    : DoNotActivate | NoRedraw;
+                _ = SetWindowPos(Handle, insertAfter, surface.X, surface.Y,
+                    surface.Width, surface.Height, flags);
+                _ = SetWindowRgn(Handle, region, true);
+                region = IntPtr.Zero;
+                if (show)
+                {
+                    _ = ShowWindow(Handle, ShowNormal);
+                }
             }
+            finally
+            {
+                if (region != IntPtr.Zero)
+                {
+                    _ = DeleteObject(region);
+                }
+            }
+        }
+    }
+
+    public void SetExcludedRegion(Rectangle? region)
+    {
+        lock (_updateLock)
+        {
+            _excludedRegion = region is { Width: > 0, Height: > 0 }
+                ? region
+                : null;
         }
     }
 
@@ -90,6 +165,23 @@ internal sealed class NativeSelectionMaskWindow : Form
         // ContextMenu popups can otherwise reorder topmost windows and leave
         // the mask behind the overlay until the next selection update.
         _ = SetWindowLongPtr(Handle, OwnerIndex, owner);
+    }
+
+    public void PlaceBelow(IntPtr sibling)
+    {
+        if (_disposed || !IsHandleCreated || sibling == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _ = SetWindowPos(
+            Handle,
+            sibling,
+            Left,
+            Top,
+            Width,
+            Height,
+            DoNotActivate);
     }
 
     public void HideMask()

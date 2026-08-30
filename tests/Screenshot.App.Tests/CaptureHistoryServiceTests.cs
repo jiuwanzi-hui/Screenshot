@@ -189,6 +189,24 @@ public sealed class CaptureHistoryServiceTests
     }
 
     [Fact]
+    public void VideoHistoryItemReportsMetadataReadFailureInsteadOfLoadingForever()
+    {
+        var item = new VideoHistoryItem(
+            Path.Combine(Path.GetTempPath(), "broken.mp4"),
+            "broken.mp4",
+            DateTimeOffset.UtcNow,
+            1);
+
+        Assert.Equal("时长读取中…", item.DurationText);
+        Assert.Equal("分辨率读取中…", item.ResolutionText);
+
+        item.MarkMediaMetadataReadFailed();
+
+        Assert.Equal("时长读取失败", item.DurationText);
+        Assert.Equal("分辨率读取失败", item.ResolutionText);
+    }
+
+    [Fact]
     public void HistoryWindowRendersReadOnlyImageDimensionsWithoutCrashing()
     {
         WpfTestHost.Invoke(() =>

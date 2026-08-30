@@ -85,6 +85,7 @@ public partial class MainWindow : Window, IDisposable
     private bool? _pendingShowInTaskbar;
     private HistoryRetentionDialog? _activeHistoryRetentionDialog;
     private bool _disposed;
+    private bool _updateRetryRequested;
     private int _communityQrLoadStarted;
 
     public MainWindow(
@@ -334,6 +335,11 @@ public partial class MainWindow : Window, IDisposable
 
         _ = WindowPlacementService.EnsureVisible(this);
         Activate();
+        if (_updateRetryRequested)
+        {
+            _updateRetryRequested = false;
+            _ = CheckForUpdatesAsync(showBusyState: true);
+        }
         ScheduleIdleMemoryTrim();
     }
 
@@ -397,6 +403,18 @@ public partial class MainWindow : Window, IDisposable
     public void ShowStatus(string message)
     {
         _settingsViewModel.SetStatus(message);
+    }
+
+    public void ShowUpdateFailureRetry(string message, bool showWindow = true)
+    {
+        _updateRetryRequested = true;
+        _settingsViewModel.SetStatus(message);
+        SettingsNavigation.SelectedIndex = 4;
+        ShowSettingsSection(4);
+        if (showWindow)
+        {
+            ShowFromTray();
+        }
     }
 
     public void SetFloatingCaptureButtonEnabled(bool enabled)

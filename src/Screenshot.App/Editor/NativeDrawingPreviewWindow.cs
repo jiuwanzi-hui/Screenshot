@@ -29,7 +29,11 @@ internal sealed class NativeDrawingPreviewWindow : Form
     private EditorTool _tool;
     private DrawingPoint _start;
     private DrawingPoint _current;
-    private DrawingPoint[] _points = [];
+    private readonly List<DrawingPoint> _points = [];
+    private int _pathLeft;
+    private int _pathTop;
+    private int _pathRight;
+    private int _pathBottom;
     private Color _color = Color.Red;
     private float _strokeWidth = 3;
     private ArrowStyle _arrowStyle = ArrowStyle.Filled;
@@ -84,7 +88,10 @@ internal sealed class NativeDrawingPreviewWindow : Form
             _tool = tool;
             _start = start;
             _current = start;
-            _points = [start];
+            _points.Clear();
+            _points.Add(start);
+            _pathLeft = _pathRight = start.X;
+            _pathTop = _pathBottom = start.Y;
             _color = Color.FromArgb(color.R, color.G, color.B);
             _strokeWidth = Math.Max(1, strokeWidth);
             _arrowStyle = arrowStyle;
@@ -223,13 +230,14 @@ internal sealed class NativeDrawingPreviewWindow : Form
             _current = cursor;
             if (_tool is EditorTool.Brush or EditorTool.CurvedArrow or EditorTool.Mosaic)
             {
-                if (_points.Length == 0 ||
-                    DistanceSquared(_points[^1], cursor) >= 4)
+                if (_points.Count == 0 ||
+                    DistanceSquared(_points[^1], cursor) >= 1)
                 {
-                    var next = new DrawingPoint[_points.Length + 1];
-                    _points.CopyTo(next, 0);
-                    next[^1] = cursor;
-                    _points = next;
+                    _points.Add(cursor);
+                    _pathLeft = Math.Min(_pathLeft, cursor.X);
+                    _pathTop = Math.Min(_pathTop, cursor.Y);
+                    _pathRight = Math.Max(_pathRight, cursor.X);
+                    _pathBottom = Math.Max(_pathBottom, cursor.Y);
                 }
             }
         }
@@ -265,13 +273,10 @@ internal sealed class NativeDrawingPreviewWindow : Form
             var top = Math.Min(_start.Y, _current.Y);
             var right = Math.Max(_start.X, _current.X);
             var bottom = Math.Max(_start.Y, _current.Y);
-            foreach (var point in _points)
-            {
-                left = Math.Min(left, point.X);
-                top = Math.Min(top, point.Y);
-                right = Math.Max(right, point.X);
-                bottom = Math.Max(bottom, point.Y);
-            }
+            left = Math.Min(left, _pathLeft);
+            top = Math.Min(top, _pathTop);
+            right = Math.Max(right, _pathRight);
+            bottom = Math.Max(bottom, _pathBottom);
 
             return new Rectangle(
                 left - FramePadding,
@@ -308,7 +313,16 @@ internal sealed class NativeDrawingPreviewWindow : Form
             return;
         }
 
+        DrawArrowTail(
+            graphics,
+            pen,
+            Offset(points[0], origin),
+            Offset(points[1], origin),
+            style);
+        var startCap = pen.StartCap;
+        pen.StartCap = LineCap.Flat;
         DrawPolyline(graphics, pen, points, origin);
+        pen.StartCap = startCap;
         var end = Offset(points[^1], origin);
         var previous = Offset(points[^2], origin);
         DrawArrowHead(graphics, pen, previous, end, style);
@@ -321,8 +335,102 @@ internal sealed class NativeDrawingPreviewWindow : Form
         DrawingPoint end,
         ArrowStyle style)
     {
-        graphics.DrawLine(pen, start, end);
-        DrawArrowHead(graphics, pen, start, end, style);
+        var dx = end.X - start.X;
+        var dy = end.Y - start.Y;
+        var length = Math.Sqrt((dx * dx) + (dy * dy));
+        if (length < 2)
+        {
+            return;
+        }
+
+        var metrics = ArrowGeometryMetrics.For(length, pen.Width);
+        var ux = dx / length;
+        var uy = dy / length;
+        var perpendicularX = -uy;
+        var perpendicularY = ux;
+        var tailBaseX = start.X + (ux * Math.Min(
+            Math.Max(pen.Width * 1.5, metrics.HeadLength * 0.16),
+            length * 0.12));
+        var tailBaseY = start.Y + (uy * Math.Min(
+            Math.Max(pen.Width * 1.5, metrics.HeadLength * 0.16),
+            length * 0.12));
+        var baseX = end.X - (ux * metrics.HeadLength);
+        var baseY = end.Y - (uy * metrics.HeadLength);
+        var polygon = new[]
+        {
+            new PointF((float)start.X, (float)start.Y),
+            new PointF(
+                (float)(tailBaseX + (perpendicularX * metrics.TailHalfWidth)),
+                (float)(tailBaseY + (perpendicularY * metrics.TailHalfWidth))),
+            new PointF(
+                (float)(baseX + (perpendicularX * metrics.BaseHalfWidth)),
+                (float)(baseY + (perpendicularY * metrics.BaseHalfWidth))),
+            new PointF(
+                (float)(baseX + (perpendicularX * metrics.HeadHalfWidth)),
+                (float)(baseY + (perpendicularY * metrics.HeadHalfWidth))),
+            new PointF((float)end.X, (float)end.Y),
+            new PointF(
+                (float)(baseX - (perpendicularX * metrics.HeadHalfWidth)),
+                (float)(baseY - (perpendicularY * metrics.HeadHalfWidth))),
+            new PointF(
+                (float)(baseX - (perpendicularX * metrics.BaseHalfWidth)),
+                (float)(baseY - (perpendicularY * metrics.BaseHalfWidth))),
+            new PointF(
+                (float)(tailBaseX - (perpendicularX * metrics.TailHalfWidth)),
+                (float)(tailBaseY - (perpendicularY * metrics.TailHalfWidth))),
+        };
+
+        if (style == ArrowStyle.Hollow)
+        {
+            graphics.DrawPolygon(pen, polygon);
+        }
+        else
+        {
+            using var brush = new SolidBrush(pen.Color);
+            graphics.FillPolygon(brush, polygon);
+        }
+    }
+
+    private static void DrawArrowTail(
+        Graphics graphics,
+        Pen pen,
+        DrawingPoint start,
+        DrawingPoint next,
+        ArrowStyle style)
+    {
+        var dx = next.X - start.X;
+        var dy = next.Y - start.Y;
+        var length = Math.Sqrt((dx * dx) + (dy * dy));
+        if (length < 2)
+        {
+            return;
+        }
+
+        var metrics = ArrowGeometryMetrics.For(length, pen.Width);
+        var transition = Math.Min(
+            Math.Max(pen.Width * 1.5, metrics.HeadLength * 0.16),
+            length * 0.12);
+        var ux = dx / length;
+        var uy = dy / length;
+        var baseX = start.X + (ux * transition);
+        var baseY = start.Y + (uy * transition);
+        var halfWidth = metrics.TailHalfWidth;
+        var polygon = new[]
+        {
+            new PointF(start.X, start.Y),
+            new PointF((float)(baseX - (uy * halfWidth)), (float)(baseY + (ux * halfWidth))),
+            new PointF((float)(baseX + (uy * halfWidth)), (float)(baseY - (ux * halfWidth))),
+        };
+
+        if (style == ArrowStyle.Hollow)
+        {
+            graphics.DrawPolygon(pen, polygon);
+        }
+        else
+        {
+            using var brush = new SolidBrush(pen.Color);
+            graphics.FillPolygon(brush, polygon);
+        }
     }
 
     private static void DrawArrowHead(
@@ -342,10 +450,9 @@ internal sealed class NativeDrawingPreviewWindow : Form
 
         var ux = dx / length;
         var uy = dy / length;
-        // Keep the head proportional as the live arrow grows; a fixed cap
-        // makes the shaft stretch while the head appears unchanged.
-        var headLength = Math.Max(10, length * 0.2);
-        var halfWidth = headLength * 0.38;
+        var metrics = ArrowGeometryMetrics.For(length, pen.Width);
+        var headLength = metrics.HeadLength;
+        var halfWidth = metrics.HeadHalfWidth;
         var baseX = end.X - (ux * headLength);
         var baseY = end.Y - (uy * headLength);
         var left = new PointF(

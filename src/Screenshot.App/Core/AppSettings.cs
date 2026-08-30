@@ -39,6 +39,12 @@ public enum ScrollCaptureMode
     ManualWheel,
 }
 
+public enum PngSaveLocationMode
+{
+    DefaultDirectory,
+    AskEveryTime,
+}
+
 public enum ArrowStyle
 {
     Filled,
@@ -161,6 +167,12 @@ public enum OcrEngineMode
     PaddleOcrV6,
 }
 
+public enum RecognitionResultPresentationMode
+{
+    Overlay,
+    Popup,
+}
+
 public enum OfflineTranslationEngine
 {
     Mozilla,
@@ -205,6 +217,15 @@ public sealed record AppSettings
     public string SaveDirectory { get; init; } = GetDefaultSaveDirectory();
 
     public string VideoSaveDirectory { get; init; } = GetDefaultVideoSaveDirectory();
+
+    public PngSaveLocationMode PngSaveLocationMode { get; init; } =
+        PngSaveLocationMode.DefaultDirectory;
+
+    /// <summary>
+    /// Output scale for saved/copied screenshots. 100% keeps the physical
+    /// screen pixels; lower values reduce output dimensions and file size.
+    /// </summary>
+    public int ScreenshotScalePercent { get; init; } = 100;
 
     public bool RecordSystemAudio { get; init; } = true;
 
@@ -345,6 +366,9 @@ public sealed record AppSettings
     public string OcrLanguageTag { get; init; } = "zh-Hans";
 
     public OcrEngineMode OcrEngine { get; init; } = OcrEngineMode.Windows;
+
+    public RecognitionResultPresentationMode RecognitionResultPresentation { get; init; } =
+        RecognitionResultPresentationMode.Overlay;
 
     public string TranslationProvider { get; init; } = "OpenAICompatible";
 
@@ -595,6 +619,13 @@ public sealed record AppSettings
             VideoSaveDirectory = string.IsNullOrWhiteSpace(VideoSaveDirectory)
                 ? defaults.VideoSaveDirectory
                 : VideoSaveDirectory.Trim(),
+            PngSaveLocationMode = Enum.IsDefined(PngSaveLocationMode)
+                ? PngSaveLocationMode
+                : defaults.PngSaveLocationMode,
+            ScreenshotScalePercent = Math.Clamp(
+                ScreenshotScalePercent,
+                25,
+                200),
             RegionCaptureHotKey = RegionCaptureHotKey?.Trim() ?? string.Empty,
             CompleteCaptureHotKey = string.IsNullOrWhiteSpace(CompleteCaptureHotKey)
                 ? defaults.CompleteCaptureHotKey
@@ -650,6 +681,9 @@ public sealed record AppSettings
             OcrEngine = Enum.IsDefined(OcrEngine)
                 ? OcrEngine
                 : defaults.OcrEngine,
+            RecognitionResultPresentation = Enum.IsDefined(RecognitionResultPresentation)
+                ? RecognitionResultPresentation
+                : defaults.RecognitionResultPresentation,
             TranslationProvider = TranslationProvider?.Trim() ?? string.Empty,
             TranslationEndpoint = TranslationEndpoint?.Trim() ?? string.Empty,
             TranslationTargetLanguage = string.IsNullOrWhiteSpace(TranslationTargetLanguage)

@@ -558,28 +558,49 @@
                     <TextBlock Style="{StaticResource GeneralGroupDescription}"
                                Text="截图、视频文件与界面显示" />
 
-                    <TextBlock Margin="0,17,0,0"
-                               Style="{StaticResource GeneralFieldLabel}"
-                               Text="截图保存位置" />
-                    <Grid Margin="0,9,0,0">
+                    <Grid Margin="0,17,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBox Height="34"
-                                 Padding="10,3"
-                                 VerticalContentAlignment="Center"
-                                 BorderBrush="{DynamicResource AppBorderBrush}"
-                                 LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
-                                 TextChanged="OnTextSettingChanged"
-                                 Text="{Binding SaveDirectory, UpdateSourceTrigger=PropertyChanged}" />
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource GeneralFieldLabel}"
+                                       Text="截图保存位置" />
+                            <TextBox Height="34"
+                                     Margin="0,9,0,0"
+                                     Padding="10,3"
+                                     VerticalContentAlignment="Center"
+                                     BorderBrush="{DynamicResource AppBorderBrush}"
+                                     LostKeyboardFocus="OnSettingEditorLostKeyboardFocus"
+                                     TextChanged="OnTextSettingChanged"
+                                     Text="{Binding SaveDirectory, UpdateSourceTrigger=PropertyChanged}" />
+                        </StackPanel>
                         <Button x:Name="BrowseSaveDirectoryButton"
                                 Grid.Column="1"
                                 Margin="10,0,0,0"
+                                Height="34"
+                                VerticalAlignment="Bottom"
                                 Click="OnBrowseSaveDirectoryClick"
                                 Content="浏览"
                                 Style="{StaticResource SecondaryButton}"
                                 ToolTip="选择截图保存目录" />
+                        <StackPanel Grid.Column="2"
+                                    Margin="16,0,0,0">
+                            <TextBlock Style="{StaticResource GeneralFieldLabel}"
+                                       Text="PNG保存位置" />
+                            <ComboBox Width="250"
+                                      Height="34"
+                                      Margin="0,9,0,0"
+                                      Padding="9,2"
+                                      FontSize="13"
+                                      ItemsSource="{Binding PngSaveLocationModeOptions}"
+                                      DisplayMemberPath="Label"
+                                      SelectedValuePath="Value"
+                                      SelectedValue="{Binding PngSaveLocationMode, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      SelectionChanged="OnImmediateSettingChanged"
+                                      ToolTip="选择使用默认截图目录，或每次保存时选择目录" />
+                        </StackPanel>
                     </Grid>
 
                     <TextBlock Margin="0,15,0,0"
@@ -605,6 +626,39 @@
                                 Style="{StaticResource SecondaryButton}"
                                 ToolTip="选择视频保存目录" />
                     </Grid>
+
+                    <TextBlock Margin="0,15,0,0"
+                               Style="{StaticResource GeneralFieldLabel}"
+                               Text="截图输出画质" />
+                    <ComboBox x:Name="ScreenshotScalePercentComboBox"
+                              Width="270"
+                              Height="34"
+                              Margin="0,9,0,0"
+                              HorizontalAlignment="Left"
+                              Padding="9,2"
+                              FontSize="13"
+                              SelectedValuePath="Tag"
+                              SelectedValue="{Binding ScreenshotScalePercent, Mode=TwoWay}"
+                              SelectionChanged="OnImmediateSettingChanged"
+                              ToolTip="调整普通截图和钉图的输出尺寸；100% 保留屏幕原始像素">
+                        <ComboBoxItem Content="50% · 更小文件"
+                                      Tag="50" />
+                        <ComboBoxItem Content="75% · 平衡"
+                                      Tag="75" />
+                        <ComboBoxItem Content="100% · 原始像素"
+                                      Tag="100" />
+                        <ComboBoxItem Content="125% · 放大"
+                                      Tag="125" />
+                        <ComboBoxItem Content="150% · 高清放大"
+                                      Tag="150" />
+                        <ComboBoxItem Content="200% · 超清放大"
+                                      Tag="200" />
+                    </ComboBox>
+                    <TextBlock Margin="0,7,0,0"
+                               FontSize="12"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               TextWrapping="Wrap"
+                               Text="仅应用于普通截图和钉图的保存、复制输出；长截图保持原始拼接像素。PNG 仍为无损格式。" />
 
                     <StackPanel Margin="0,18,0,0">
                         <TextBlock Style="{StaticResource GeneralFieldLabel}"
@@ -1620,6 +1674,24 @@
                               SelectedValue="{Binding OcrEngine, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                               SelectedValuePath="Value"
                               SelectionChanged="OnImmediateSettingChanged" />
+
+                    <TextBlock Margin="0,18,0,0"
+                               FontSize="14"
+                               FontWeight="SemiBold"
+                               Foreground="{DynamicResource AppTextPrimaryBrush}"
+                               Text="识别/翻译结果显示" />
+                    <ComboBox x:Name="RecognitionResultPresentationComboBox"
+                              Margin="0,9,0,0"
+                              DisplayMemberPath="Label"
+                              ItemsSource="{Binding RecognitionResultPresentationOptions}"
+                              SelectedValue="{Binding RecognitionResultPresentation, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              SelectedValuePath="Value"
+                              SelectionChanged="OnImmediateSettingChanged" />
+                    <TextBlock Margin="0,6,0,0"
+                               FontSize="12"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               Text="独立弹窗会在屏幕右下角显示结果；覆盖原图保持现有编辑流程。"
+                               TextWrapping="Wrap" />
 
                     <TextBlock Margin="0,18,0,0"
                                FontSize="14"

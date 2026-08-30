@@ -9,6 +9,7 @@ namespace Screenshot.App.Update;
 public static class PortableUpdateRunner
 {
     public const string UpdateArgument = "--apply-portable-update";
+    public const string UpdateFailedArgument = "--update-failed";
     private const string CleanupArgument = "--cleanup-update-runner";
     private const string RunnerProcessArgument = "--update-runner-pid";
     private const string CleanupPackageArgument = "--cleanup-update-package";
@@ -29,16 +30,39 @@ public static class PortableUpdateRunner
             return 2;
         }
 
+        string? restartPath = null;
+        string? targetDirectory = null;
+        string? version = null;
         try
         {
             var packagePath = Path.GetFullPath(arguments[1]);
-            var targetDirectory = EnsureTrailingSeparator(
+            targetDirectory = EnsureTrailingSeparator(
                 Path.GetFullPath(arguments[2]));
-            var restartPath = Path.GetFullPath(arguments[4]);
-            var version = arguments[5];
+            restartPath = Path.GetFullPath(arguments[4]);
+            version = arguments[5];
             ValidateUpdatePaths(packagePath, targetDirectory, restartPath);
             WaitForProcessExit(processId);
-            ApplyPackage(packagePath, targetDirectory);
+            Exception? applyFailure = null;
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                try
+                {
+                    ApplyPackage(packagePath, targetDirectory);
+                    applyFailure = null;
+                    break;
+                }
+                catch (Exception exception) when (attempt == 0)
+                {
+                    applyFailure = exception;
+                    Thread.Sleep(350);
+                }
+            }
+
+            if (applyFailure is not null)
+            {
+                throw new IOException("更新文件写入失败。", applyFailure);
+            }
+
             File.Delete(packagePath);
 
             var startInfo = new ProcessStartInfo
@@ -56,9 +80,55 @@ public static class PortableUpdateRunner
             _ = Process.Start(startInfo);
             return 0;
         }
+        catch (Exception exception)
+        {
+            TryRecordFailureAndRestart(
+                targetDirectory,
+                restartPath,
+                version,
+                exception);
+            return 1;
+        }
+    }
+
+    private static void TryRecordFailureAndRestart(
+        string? targetDirectory,
+        string? restartPath,
+        string? version,
+        Exception exception)
+    {
+        if (string.IsNullOrWhiteSpace(targetDirectory) ||
+            string.IsNullOrWhiteSpace(restartPath))
+        {
+            return;
+        }
+
+        try
+        {
+            var updatesDirectory = Path.Combine(
+                targetDirectory,
+                AppMetadata.DataDirectoryName,
+                AppMetadata.UpdatesDirectoryName);
+            Directory.CreateDirectory(updatesDirectory);
+            var failurePath = Path.Combine(updatesDirectory, "last-update-failure.txt");
+            File.WriteAllText(
+                failurePath,
+                $"{DateTimeOffset.Now:O}\n版本: {version ?? "未知"}\n{exception}",
+                new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = restartPath,
+                UseShellExecute = true,
+            };
+            startInfo.ArgumentList.Add(UpdateFailedArgument);
+            startInfo.ArgumentList.Add(version ?? string.Empty);
+            _ = Process.Start(startInfo);
+        }
         catch
         {
-            return 1;
+            // The updater must not mask its original failure with a second
+            // process or filesystem error.
         }
     }
 

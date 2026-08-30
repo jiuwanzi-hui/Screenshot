@@ -387,7 +387,7 @@ public sealed class PinnedImageManager : IDisposable
 
         if (_groupWindow is null)
         {
-            _groupWindow = new PinnedImageGroupWindow(members);
+            _groupWindow = new PinnedImageGroupWindow(members, _settingsProvider);
             _groupWindow.UngroupRequested += OnUngroupRequested;
             _groupWindow.CloseGroupRequested += OnCloseGroupRequested;
             _groupWindow.SettingsRequested += OnPinnedImageSettingsRequested;

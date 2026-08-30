@@ -1,0 +1,28 @@
+<Window x:Class="Screenshot.App.Capture.PresetCaptureExecuteWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        AllowsTransparency="True" Background="Transparent" Cursor="Hand"
+        Focusable="True" ResizeMode="NoResize" ShowActivated="False"
+        ShowInTaskbar="False" Topmost="True" WindowStyle="None"
+        PreviewMouseDown="OnWindowPreviewMouseDown">
+    <Grid x:Name="Root" Background="#01000000">
+        <Canvas x:Name="RegionCanvas" Background="Transparent" IsHitTestVisible="False" />
+        <Border x:Name="PresetPanel" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                Margin="0,0,28,28" Padding="8"
+                Background="{DynamicResource AppPanelBackgroundBrush}"
+                BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                CornerRadius="7">
+            <StackPanel>
+        <TextBlock x:Name="InstructionText" Foreground="{DynamicResource AppTextPrimaryBrush}"
+                           FontSize="12" Margin="3,0,3,6"
+                           Text="左键点击编号截图；右键点击编号编辑区域；点击面板外关闭" />
+                <TextBlock x:Name="RangeText" Foreground="{DynamicResource AppTextSecondaryBrush}"
+                           FontSize="11" Margin="3,0,3,5" Visibility="Collapsed" />
+                <UniformGrid x:Name="PresetButtons" Columns="5" />
+                <Button x:Name="ClearAllButton" Content="清空全部预设"
+                        HorizontalAlignment="Right" Margin="3,7,3,0"
+                        Padding="10,4" Click="OnClearAllClick" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

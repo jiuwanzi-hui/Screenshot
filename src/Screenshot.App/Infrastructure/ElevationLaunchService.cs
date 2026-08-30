@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO;
 using System.Security.Principal;
 using Screenshot.App.Core;
 
@@ -70,7 +71,17 @@ public sealed class ElevationLaunchService
             var process = _startProcess(CreateElevatedStartInfo(processPath, argumentList));
             if (process is not null)
             {
-                return new ElevationLaunchResult(RelaunchStarted: true, Warning: null);
+                // Process.Start only confirms that Windows accepted the
+                // request. The child can still fail during its own startup
+                // (for example because the elevation task is stale). Keep
+                // this instance alive unless the replacement is observable.
+                if (process.Id == Environment.ProcessId ||
+                    WaitForReplacementProcess(processPath))
+                {
+                    return new ElevationLaunchResult(
+                        RelaunchStarted: true,
+                        Warning: null);
+                }
             }
         }
         catch (Win32Exception exception) when (exception.NativeErrorCode == 1223)
@@ -164,7 +175,16 @@ public sealed class ElevationLaunchService
             var runInfo = CreateSchtasksStartInfo("/Run");
             runInfo.ArgumentList.Add("/TN");
             runInfo.ArgumentList.Add(PersistentElevationTaskName);
-            return RunSchtasks(runInfo);
+            if (!RunSchtasks(runInfo))
+            {
+                return false;
+            }
+
+            // `schtasks /Run` only queues the task and can return success even
+            // when the task action fails immediately. Do not let the caller
+            // terminate the usable instance until the replacement process is
+            // actually observable.
+            return WaitForReplacementProcess(processPath);
         }
         catch
         {
@@ -264,5 +284,51 @@ public sealed class ElevationLaunchService
         }
 
         return process.ExitCode == 0;
+    }
+
+    private static bool WaitForReplacementProcess(string processPath)
+    {
+        var expectedPath = Path.GetFullPath(processPath);
+        var expectedName = Path.GetFileNameWithoutExtension(expectedPath);
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
+        while (DateTime.UtcNow < deadline)
+        {
+            foreach (var process in Process.GetProcessesByName(expectedName))
+            {
+                try
+                {
+                    if (process.Id == Environment.ProcessId)
+                    {
+                        continue;
+                    }
+
+                    var actualPath = process.MainModule?.FileName;
+                    if (!string.IsNullOrWhiteSpace(actualPath) &&
+                        string.Equals(
+                            Path.GetFullPath(actualPath),
+                            expectedPath,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                }
+                catch (System.ComponentModel.Win32Exception)
+                {
+                    // An elevated process can temporarily deny module access;
+                    // keep polling until the startup window expires.
+                }
+                finally
+                {
+                    process.Dispose();
+                }
+            }
+
+            Thread.Sleep(100);
+        }
+
+        return false;
     }
 }

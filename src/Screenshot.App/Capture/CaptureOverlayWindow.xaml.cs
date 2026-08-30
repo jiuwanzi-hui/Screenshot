@@ -73,6 +73,11 @@ public sealed class CaptureOverlayOptions
 
     public required bool KeepHistory { get; init; }
 
+    public int ScreenshotScalePercent { get; init; } = 100;
+
+    public PngSaveLocationMode PngSaveLocationMode { get; init; } =
+        PngSaveLocationMode.DefaultDirectory;
+
     public required int HistoryLimit { get; init; }
 
     public required CaptureHistoryService HistoryService { get; init; }
@@ -81,12 +86,17 @@ public sealed class CaptureOverlayOptions
 
     public string TranslationTargetLanguage { get; init; } = "zh-Hans";
 
+    public RecognitionResultPresentationMode RecognitionResultPresentation { get; init; } =
+        RecognitionResultPresentationMode.Overlay;
+
     public required Func<CapturedImage, Task> StartOcrAsync { get; init; }
 
     public Func<CapturedImage, Task<OcrRecognitionResult>>? RecognizeTextAsync { get; init; }
 
     public Func<OcrRecognitionResult, Task<TranslationSegmentsResult>>?
         TranslateTextAsync { get; init; }
+
+    public Func<string, string, string?, Task>? ShowRecognitionPopupAsync { get; init; }
 
     public Func<CapturedImage, CancellationToken, Task<ContentRecognitionResult>>?
         RecognizeFormulaAsync { get; init; }
@@ -153,11 +163,20 @@ public sealed class CaptureOverlayOptions
         CaptureToolbarRowCount.One;
 
     public double ToolbarScalePercent { get; init; } = 100;
+
+    // Keyboard shortcuts can defer the initial activation by one dispatcher
+    // turn so the shortcut's input frame is not forced through WPF activation.
+    // Mouse-triggered sessions keep the original synchronous hand-off.
+    public bool DeferInitialColorPickerActivation { get; init; }
+
+    public bool DeferInitialScreenCapture { get; init; }
 }
 
 public partial class CaptureOverlayWindow : Window, IDisposable
 {
     private static CaptureOverlayWindow? _activeInteractiveOverlay;
+    private static readonly object NativeWindowPoolLock = new();
+    private static NativeWindowPool? _nativeWindowPool;
     private const int TopmostWindow = -1;
     private const int ExtendedWindowStyleIndex = -20;
     private const int NonClientHitTestMessage = 0x0084;
@@ -178,6 +197,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private readonly ScreenRegion _virtualScreenBounds;
     private readonly CaptureOverlayOptions? _options;
+    private readonly bool _deferInitialColorPickerActivation;
+    private readonly bool _deferInitialScreenCapture;
     private readonly HotKeyGesture? _completionHotKeyGesture;
     private readonly bool _isScrollCaptureSelection;
     private readonly CapturePointerContinuation? _initialPointerContinuation;
@@ -271,13 +292,22 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         _publishedScrollCaptureSelection;
     private HwndSource? _windowSource;
 
-    private CaptureOverlayWindow(
+    internal CaptureOverlayWindow(
         CaptureOverlayOptions? options,
         bool isScrollCaptureSelection = false,
         CapturedImage? initialScreenSnapshot = null,
-        CapturePointerContinuation? initialPointerContinuation = null)
+        CapturePointerContinuation? initialPointerContinuation = null,
+        bool isStartupPrewarm = false,
+        bool deferInitialColorPickerActivation = false)
     {
+        using var timing = CaptureTimingDiagnostics.Begin(
+            "overlay-constructor",
+            $"startup={isStartupPrewarm} hasSnapshot={initialScreenSnapshot is not null}");
         _options = options;
+        _deferInitialColorPickerActivation =
+            deferInitialColorPickerActivation ||
+            options?.DeferInitialColorPickerActivation == true;
+        _deferInitialScreenCapture = options?.DeferInitialScreenCapture == true;
         _toolbarScale = Math.Clamp(
             double.IsFinite(options?.ToolbarScalePercent ?? 100)
                 ? (options?.ToolbarScalePercent ?? 100) / 100d
@@ -302,6 +332,15 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             options?.ArrowToolMode ?? ArrowToolMode.Straight,
             options?.ShapeToolMode ?? ShapeToolMode.Rectangle);
         _isScrollCaptureSelection = isScrollCaptureSelection;
+        if (isStartupPrewarm)
+        {
+            // Keep the one-time visual-tree warm-up completely invisible and
+            // non-activating. OnClosed still performs the normal native-handle
+            // cleanup, so this cannot leak a hidden overlay instance.
+            Opacity = 0;
+            ShowActivated = false;
+            ShowInTaskbar = false;
+        }
         _initialPointerContinuation =
             initialPointerContinuation ?? options?.InitialPointerContinuation;
         _scrollCaptureSelectionCompletionSource = isScrollCaptureSelection
@@ -311,10 +350,22 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         // The capture toolbar starts from the automatic placement on every
         // capture. Its drag position is intentionally session-local.
         _hasCustomToolbarPosition = false;
-        InitializeComponent();
-        _nativeSelectionFrame = new NativeSelectionFrameWindow();
-        _nativeSelectionMask = new NativeSelectionMaskWindow();
-        _nativeSelectionSize = new NativeSelectionSizeWindow();
+        using (CaptureTimingDiagnostics.Begin("overlay-initialize-component"))
+        {
+            InitializeComponent();
+        }
+        using (CaptureTimingDiagnostics.Begin("overlay-native-windows"))
+        {
+            var nativeWindows = isStartupPrewarm
+                ? new NativeWindowPool(
+                    new NativeSelectionFrameWindow(),
+                    new NativeSelectionMaskWindow(),
+                    new NativeSelectionSizeWindow())
+                : TakeNativeWindowPool();
+            _nativeSelectionFrame = nativeWindows.Frame;
+            _nativeSelectionMask = nativeWindows.Mask;
+            _nativeSelectionSize = nativeWindows.Size;
+        }
         _nativeSelectionFrame.AttachSizeWindow(_nativeSelectionSize);
         foreach (var resizeThumb in new[]
         {
@@ -339,9 +390,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 DrawingColor.FromArgb(accentStart.R, accentStart.G, accentStart.B),
                 DrawingColor.FromArgb(accentEnd.R, accentEnd.G, accentEnd.B));
         }
-        CaptureToolbar.LayoutTransform = new System.Windows.Media.ScaleTransform(
-            _toolbarScale,
-            _toolbarScale);
+        using (CaptureTimingDiagnostics.Begin("overlay-toolbar-setup"))
+        {
+            CaptureToolbar.LayoutTransform = new System.Windows.Media.ScaleTransform(
+                _toolbarScale,
+                _toolbarScale);
         _toolbarDragHint = new ToolbarDragHintBehavior(
             CaptureToolbar,
             CaptureToolbar);
@@ -412,24 +465,29 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         InlineEditorCanvas.HistoryChanged += OnInlineEditorHistoryChanged;
         InlineEditorCanvas.AnnotationSelectionChanged +=
             OnInlineAnnotationSelectionChanged;
-        InlineEditorCanvas.PreviewMouseLeftButtonDown +=
-            OnInlineEditorCanvasPreviewMouseLeftButtonDown;
+            InlineEditorCanvas.PreviewMouseLeftButtonDown +=
+                OnInlineEditorCanvasPreviewMouseLeftButtonDown;
+        }
 
         _virtualScreenBounds = VirtualScreen.GetBounds();
         _nativeSelectionFrame.AttachMaskWindow(
             _nativeSelectionMask,
             ToDrawingRectangle(_virtualScreenBounds));
-        try
+        if ((!isStartupPrewarm || initialScreenSnapshot is not null) &&
+            !_deferInitialScreenCapture)
         {
-            _screenSnapshot = initialScreenSnapshot ??
-                ScreenCaptureService.Capture(_virtualScreenBounds);
-            FrozenScreenImage.Source = _screenSnapshot.Preview;
-        }
-        catch
-        {
-            _screenSnapshot?.Dispose();
-            _screenSnapshot = null;
-            FrozenScreenImage.Source = null;
+            try
+            {
+                _screenSnapshot = initialScreenSnapshot ??
+                    ScreenCaptureService.Capture(_virtualScreenBounds);
+                FrozenScreenImage.Source = _screenSnapshot.Preview;
+            }
+            catch
+            {
+                _screenSnapshot?.Dispose();
+                _screenSnapshot = null;
+                FrozenScreenImage.Source = null;
+            }
         }
         Left = _virtualScreenBounds.X;
         Top = _virtualScreenBounds.Y;
@@ -440,12 +498,15 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     public static Task<ScreenRegion?> SelectAsync(
         CapturePointerContinuation? initialPointerContinuation = null,
-        CapturedImage? initialScreenSnapshot = null)
+        CapturedImage? initialScreenSnapshot = null,
+        bool deferInitialColorPickerActivation = false)
     {
         var overlay = new CaptureOverlayWindow(
             options: null,
             initialScreenSnapshot: initialScreenSnapshot,
-            initialPointerContinuation: initialPointerContinuation);
+            initialPointerContinuation: initialPointerContinuation,
+            deferInitialColorPickerActivation:
+                deferInitialColorPickerActivation);
         overlay.Show();
         return overlay._selectionCompletionSource.Task;
     }
@@ -505,11 +566,35 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         CapturedImage? initialScreenSnapshot = null)
     {
         ArgumentNullException.ThrowIfNull(options);
+        CaptureTimingDiagnostics.Mark(
+            "show-interactive",
+            $"hasSnapshot={initialScreenSnapshot is not null}");
         var overlay = new CaptureOverlayWindow(
             options,
             initialScreenSnapshot: initialScreenSnapshot);
+        // Keyboard shortcuts must not synchronously activate a full-screen
+        // transparent WPF window while the key message is being dispatched.
+        // Loaded will activate it after the surface and native selection
+        // windows have been presented. Mouse-triggered sessions retain the
+        // original activation timing.
+        if (options.DeferInitialColorPickerActivation)
+        {
+            overlay.ShowActivated = false;
+            // Keep the compositor from presenting an empty full-screen frame
+            // while the first desktop image is captured in the background.
+            overlay.Opacity = 0;
+        }
         _activeInteractiveOverlay = overlay;
+        CaptureTimingDiagnostics.Mark("before-overlay-show");
+        if (options.DeferInitialScreenCapture)
+        {
+            // Start GDI capture before WPF enters its first Show/layout pass.
+            // The worker and window initialization can then overlap instead
+            // of serializing both costs on the shortcut's first frame.
+            _ = overlay.CaptureInitialScreenAsync();
+        }
         overlay.Show();
+        CaptureTimingDiagnostics.Mark("after-overlay-show");
         if (options.InitialSelection is { } initialSelection)
         {
             overlay.UpdateLayout();
@@ -517,6 +602,152 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         return overlay;
+    }
+
+    internal void SetInitialScreenSnapshot(CapturedImage snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (Dispatcher.CheckAccess())
+        {
+            SetInitialScreenSnapshotCore(snapshot);
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Input,
+            new Action(() => SetInitialScreenSnapshotCore(snapshot)));
+    }
+
+    private void SetInitialScreenSnapshotCore(CapturedImage snapshot)
+    {
+        if (_isDisposed || _isCompleted)
+        {
+            snapshot.Dispose();
+            return;
+        }
+
+        _screenSnapshot?.Dispose();
+        _screenSnapshot = snapshot;
+        FrozenScreenImage.Source = snapshot.Preview;
+        if (_deferInitialScreenCapture)
+        {
+            // Publish the first complete frame atomically. Showing the window
+            // before this point would expose a stale/empty compositor frame.
+            Opacity = 1;
+        }
+        if (_options is not null &&
+            !_isSelecting &&
+            !HasValidSelection() &&
+            !_isColorPickerActive)
+        {
+            EnterColorPicker(activateWindow: true);
+        }
+        else if (_deferInitialScreenCapture &&
+                 !_isCompleted &&
+                 _isColorPickerActive)
+        {
+            ActivateDeferredColorPicker();
+        }
+    }
+
+    private async Task CaptureInitialScreenAsync()
+    {
+        try
+        {
+            var snapshot = await Task.Factory.StartNew(() =>
+            {
+                using var timing = CaptureTimingDiagnostics.Begin(
+                    "keyboard-gdi-capture-worker");
+                var captured = ScreenCaptureService.Capture(
+                    VirtualScreen.GetBounds());
+                _ = captured.WarmPreview();
+                return captured;
+            }, CancellationToken.None, TaskCreationOptions.LongRunning,
+                TaskScheduler.Default);
+            SetInitialScreenSnapshot(snapshot);
+        }
+        catch
+        {
+            CompleteSelection(result: null);
+        }
+    }
+
+    internal static void PrewarmForStartup(
+        CapturedImage? initialScreenSnapshot = null)
+    {
+        var overlay = new CaptureOverlayWindow(
+            options: null,
+            initialScreenSnapshot: initialScreenSnapshot,
+            isStartupPrewarm: true);
+        overlay.Show();
+        CaptureTimingDiagnostics.Mark("show-interactive-return");
+        // Force the Loaded/layout/source-initialized path while startup is
+        // still in progress. Show() alone may defer layout until the next
+        // dispatcher turn, allowing the first hotkey to pay that cost.
+        overlay.UpdateLayout();
+        overlay.Close();
+    }
+
+    internal static void PrewarmNativeWindows()
+    {
+        lock (NativeWindowPoolLock)
+        {
+            if (_nativeWindowPool is not null)
+            {
+                return;
+            }
+
+            try
+            {
+                _nativeWindowPool = new NativeWindowPool(
+                    new NativeSelectionFrameWindow(),
+                    new NativeSelectionMaskWindow(),
+                    new NativeSelectionSizeWindow());
+                CaptureTimingDiagnostics.Mark("native-window-pool-ready");
+            }
+            catch
+            {
+                _nativeWindowPool = null;
+            }
+        }
+    }
+
+    private static NativeWindowPool TakeNativeWindowPool()
+    {
+        lock (NativeWindowPoolLock)
+        {
+            var pool = _nativeWindowPool;
+            _nativeWindowPool = null;
+            if (pool is not null)
+            {
+                CaptureTimingDiagnostics.Mark("native-window-pool-used");
+                return pool;
+            }
+        }
+
+        return new NativeWindowPool(
+            new NativeSelectionFrameWindow(),
+            new NativeSelectionMaskWindow(),
+            new NativeSelectionSizeWindow());
+    }
+
+    private sealed class NativeWindowPool
+    {
+        public NativeWindowPool(
+            NativeSelectionFrameWindow frame,
+            NativeSelectionMaskWindow mask,
+            NativeSelectionSizeWindow size)
+        {
+            Frame = frame;
+            Mask = mask;
+            Size = size;
+        }
+
+        public NativeSelectionFrameWindow Frame { get; }
+
+        public NativeSelectionMaskWindow Mask { get; }
+
+        public NativeSelectionSizeWindow Size { get; }
     }
 
     internal static bool TryCompleteActiveInteractiveSelection()
@@ -612,6 +843,18 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         base.OnClosed(e);
         Dispose();
+
+        // Rebuild the reusable native HWND set only after the interaction has
+        // fully closed. This keeps the next keyboard shortcut off the HWND
+        // creation path without adding work to the current close operation.
+        if (_options is not null &&
+            !Dispatcher.HasShutdownStarted &&
+            !Dispatcher.HasShutdownFinished)
+        {
+            _ = Dispatcher.BeginInvoke(
+                DispatcherPriority.ApplicationIdle,
+                new Action(PrewarmNativeWindows));
+        }
     }
 
     public void Dispose()
@@ -690,6 +933,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void OnCaptureSurfaceLoaded(object sender, RoutedEventArgs e)
     {
+        using var timing = CaptureTimingDiagnostics.Begin(
+            "overlay-loaded",
+            $"deferActivation={_deferInitialColorPickerActivation}");
         if (_initialPointerContinuation is not null)
         {
             CaptureInputDiagnostics.Write(
@@ -698,16 +944,40 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             ActivateContinuedSelectionWindow("loaded");
         }
 
-        CaptureSurface.Focus();
-        Keyboard.Focus(CaptureSurface);
+        if (!_deferInitialScreenCapture)
+        {
+            CaptureSurface.Focus();
+            Keyboard.Focus(CaptureSurface);
+        }
         _windowSnapTimer.Start();
         BeginContinuedSelectionIfNeeded();
         if (_options is not null &&
             !_isSelecting &&
             !HasValidSelection())
         {
-            EnterColorPicker();
+            // Preserve the original keyboard/mouse hand-off: entering the
+            // picker synchronously here keeps the cursor mode and first
+            // sample timing unchanged for mouse gestures.
+            EnterColorPicker(
+                activateWindow: !_deferInitialColorPickerActivation);
         }
+    }
+
+    private void ActivateDeferredColorPicker()
+    {
+        if (!_isColorPickerActive || _isDisposed || _isCompleted)
+        {
+            return;
+        }
+
+        CaptureSurface.CaptureMouse();
+        Activate();
+        CaptureSurface.Focus();
+        Keyboard.Focus(CaptureSurface);
+        UpdateColorPicker(CaptureSurface.PointFromScreen(
+            new WpfPoint(
+                WinForms.Cursor.Position.X,
+                WinForms.Cursor.Position.Y)));
     }
 
     private void OnCaptureSurfaceKeyDown(object sender, WpfKeyEventArgs e)
@@ -1408,7 +1678,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private void OnCaptureSurfacePreviewMouseMove(object sender, WpfMouseEventArgs e)
     {
         if (_isColorPickerActive || _isSelecting || _isMovingSelection ||
-            _isResizeDragging || _isActionInProgress || !HasValidSelection())
+            _isResizeDragging || _isActionInProgress ||
+            _isScrollCaptureSelectionLocked || !HasValidSelection())
         {
             return;
         }
@@ -1457,6 +1728,14 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             }
 
             QueueSelectionBoundsUpdate(new Rect(_selectionStartPoint, currentPoint));
+            return;
+        }
+
+        // Manual long-screenshot capture uses a native input hole and a
+        // low-level wheel hook. Do not feed every high-report-rate mouse move
+        // through WPF just to recompute a cursor that cannot affect capture.
+        if (_isScrollCaptureSelectionLocked)
+        {
             return;
         }
 
@@ -1765,8 +2044,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         ConfirmCurrentSelection();
     }
 
-    private void EnterColorPicker()
+    private void EnterColorPicker(bool activateWindow = true)
     {
+        using var timing = CaptureTimingDiagnostics.Begin(
+            "enter-color-picker",
+            $"activate={activateWindow}");
         if (_screenSnapshot is null || _isCompleted || _isActionInProgress)
         {
             return;
@@ -1777,9 +2059,12 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         CaptureSurface.Cursor = System.Windows.Input.Cursors.Cross;
         ColorPickerPanel.Visibility = Visibility.Visible;
         ColorPickerPanel.UpdateLayout();
-        CaptureSurface.CaptureMouse();
-        Activate();
-        CaptureSurface.Focus();
+        if (activateWindow)
+        {
+            CaptureSurface.CaptureMouse();
+            Activate();
+            CaptureSurface.Focus();
+        }
         UpdateColorPicker(CaptureSurface.PointFromScreen(
             new WpfPoint(WinForms.Cursor.Position.X, WinForms.Cursor.Position.Y)));
         UpdateWindowSnap(
@@ -1854,6 +2139,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void UpdateColorPicker(WpfPoint point)
     {
+        using var timing = CaptureTimingDiagnostics.Begin("update-color-picker");
         if (!_isColorPickerActive || _screenSnapshot is null)
         {
             return;
@@ -2220,13 +2506,31 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return;
         }
 
+        var completed = false;
         try
         {
             var completedRegion = GetPhysicalSelectionBounds();
-            using var image = await CaptureCurrentResultAsync(restoreOverlay: false);
+            using var capturedImage = await CaptureCurrentResultAsync(restoreOverlay: false);
+            using var image = capturedImage.CreateScaled(
+                _options.ScreenshotScalePercent);
+            // The folder picker is a separate native window.  Close the
+            // full-screen capture overlay before opening it; otherwise the
+            // overlay's owned/topmost windows can cover the picker.
+            if (_options.PngSaveLocationMode == PngSaveLocationMode.AskEveryTime)
+            {
+                CompleteSelection(result: null);
+            }
+            var saveDirectory = await PngSaveLocationService.ResolveAsync(
+                _options.PngSaveLocationMode,
+                _options.SaveDirectory);
+            if (saveDirectory is null)
+            {
+                return;
+            }
+
             var savedPath = CaptureFileService.SaveAsPng(
                 image,
-                _options.SaveDirectory);
+                saveDirectory);
             CaptureHistoryItem? historyItem = null;
             if (_options.KeepHistory)
             {
@@ -2248,13 +2552,22 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             }
 
             _options.CaptureCompleted?.Invoke(completedRegion);
+            completed = true;
         }
         catch
         {
         }
         finally
         {
-            CompleteSelection(result: null);
+            if (completed)
+            {
+                CompleteSelection(result: null);
+            }
+            else
+            {
+                _isActionInProgress = false;
+                CaptureToolbar.IsEnabled = true;
+            }
         }
     }
 
@@ -2737,6 +3050,14 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         CaptureToolbar.Visibility = suppressed || _toolbarHiddenForMove
             ? Visibility.Collapsed
             : Visibility.Visible;
+        // The native mask leaves a hole for the visible toolbar.  Clear that
+        // hole as soon as the toolbar is suppressed; otherwise its old
+        // position remains undimmed and appears as an empty panel while the
+        // selection is moved or resized.
+        if (suppressed && _nativeSelectionFrame.IsMaskEnabled)
+        {
+            _nativeSelectionFrame.SetMaskExcludedRegion(null);
+        }
         InlineEditorOptions.Opacity = opacity;
         InlineEditorOptions.Visibility = suppressed || !_hasVisibleInlineEditorTools
             ? Visibility.Collapsed
@@ -2759,6 +3080,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         _toolbarHiddenForMove = true;
         CaptureToolbar.Visibility = Visibility.Collapsed;
+        if (_nativeSelectionFrame.IsMaskEnabled)
+        {
+            _nativeSelectionFrame.SetMaskExcludedRegion(null);
+        }
     }
 
     private void RestoreToolbarAfterNativeMove(Rect? finalBounds = null)
@@ -2773,11 +3098,19 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         InlineEditorOptions.Visibility = _hasVisibleInlineEditorTools
             ? Visibility.Visible
             : Visibility.Collapsed;
+        // Complete the WPF layout before publishing the native mask again.
+        // Otherwise the old toolbar exclusion remains active for one frame and
+        // appears as a blank strip below the selection before the toolbar paints.
+        CaptureToolbar.UpdateLayout();
         if (finalBounds is { } bounds)
         {
             UpdateResizeThumbPositions(bounds);
             UpdateSelectionControlPositions(bounds);
             UpdateSelectionMoveZonePositions(bounds);
+        }
+        if (_nativeSelectionFrame.IsMaskEnabled && HasValidSelection())
+        {
+            UpdateNativeSelectionVisuals(finalBounds ?? GetSelectionBounds());
         }
     }
 
@@ -2913,11 +3246,32 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         SyncNativeSelectionFrameColor();
+        _nativeSelectionFrame.SetMaskExcludedRegion(
+            GetVisibleToolbarScreenBounds());
         _nativeSelectionFrame.SetSizeEnabled(ShouldShowSelectionSize);
         _nativeSelectionFrame.Update(ToDrawingRectangle(
             GetPhysicalSelectionBoundsForBounds(bounds)));
         _nativeSelectionFrame.RefreshMask();
         _nativeSelectionFrame.EnsureVisible();
+    }
+
+    private System.Drawing.Rectangle? GetVisibleToolbarScreenBounds()
+    {
+        if (CaptureToolbar.Visibility != Visibility.Visible ||
+            CaptureToolbar.ActualWidth <= 0 ||
+            CaptureToolbar.ActualHeight <= 0)
+        {
+            return null;
+        }
+
+        var topLeft = CaptureToolbar.PointToScreen(new WpfPoint(0, 0));
+        var bottomRight = CaptureToolbar.PointToScreen(
+            new WpfPoint(CaptureToolbar.ActualWidth, CaptureToolbar.ActualHeight));
+        return new System.Drawing.Rectangle(
+            (int)Math.Round(topLeft.X),
+            (int)Math.Round(topLeft.Y),
+            Math.Max(1, (int)Math.Round(bottomRight.X - topLeft.X)),
+            Math.Max(1, (int)Math.Round(bottomRight.Y - topLeft.Y)));
     }
 
     private bool TryGetMovePreviewBounds(out Rect bounds)
@@ -3020,6 +3374,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         _isUnifiedRecognitionVisible = false;
         OcrTextOverlay.Visibility = Visibility.Collapsed;
         ContentRecognitionOverlay.Visibility = Visibility.Collapsed;
+        ContentRecognitionOverlay.IsHitTestVisible = false;
     }
 
     private int ShowSelectionMessage(string message)
@@ -3122,7 +3477,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 return;
             }
 
-            ShowInlineOcrText(result);
+            await ShowRecognizedTextAsync(result);
         }
         catch
         {
@@ -3143,7 +3498,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     {
         if (_inlineOcrResult is { IsSuccess: true, Regions.Count: > 0 } cached)
         {
-            ShowInlineOcrText(cached);
+            await ShowRecognizedTextAsync(cached);
             return;
         }
 
@@ -3252,6 +3607,16 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                         .ThenBy(region => region.X)
                         .Select(region => region.Text))
                 : recognition.Text;
+            if (_options.RecognitionResultPresentation ==
+                    RecognitionResultPresentationMode.Popup &&
+                _options.ShowRecognitionPopupAsync is { } showPopup)
+            {
+                await ShowSelectionMessageForAsync("已识别", 650);
+                CompleteSelection(result: null);
+                await showPopup("已识别", text.Trim(), null);
+                return;
+            }
+
             await ClipboardTextService.SetTextAsync(text.Trim());
             await ShowSelectionMessageForAsync(
                 "已识别并复制全部文字",
@@ -3635,6 +4000,22 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                         translationRegions[index].Text,
                         text))
                 .ToArray();
+            if (_options.RecognitionResultPresentation ==
+                    RecognitionResultPresentationMode.Popup &&
+                _options.ShowRecognitionPopupAsync is { } showPopup)
+            {
+                var translatedText = string.Join(
+                    Environment.NewLine,
+                    normalizedTranslations);
+                await ShowSelectionMessageForAsync("已翻译", 650);
+                CompleteSelection(result: null);
+                await showPopup(
+                    "已翻译",
+                    translationInput.Text,
+                    translatedText);
+                return;
+            }
+
             var translatedLines = translationRegions
                 .Select((region, index) => new
                 {
@@ -3855,6 +4236,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         OcrTextOverlay.Visibility = Visibility.Collapsed;
         ContentRecognitionOverlay.Children.Clear();
         ContentRecognitionOverlay.Visibility = Visibility.Collapsed;
+        ContentRecognitionOverlay.IsHitTestVisible = false;
         SelectionMessageToast.Visibility = Visibility.Collapsed;
     }
 
@@ -3864,6 +4246,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         if (!_isUnifiedRecognitionVisible || _inlineEditorImage is null)
         {
             ContentRecognitionOverlay.Visibility = Visibility.Collapsed;
+            ContentRecognitionOverlay.IsHitTestVisible = false;
             return;
         }
 
@@ -3944,6 +4327,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             ContentRecognitionOverlay.Children.Count > 0
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+        ContentRecognitionOverlay.IsHitTestVisible =
+            _inlineQrResult?.IsSuccess == true ||
+            _inlineFormulaResult?.IsSuccess == true;
     }
 
     private System.Windows.Controls.Button CreateRecognitionResultButton(
@@ -4087,7 +4473,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         CapturedImage? image = null;
         try
         {
-            image = await CaptureCurrentResultAsync(restoreOverlay: false);
+            using var capturedImage = await CaptureCurrentResultAsync(
+                restoreOverlay: false);
+            image = capturedImage.CreateScaled(_options.ScreenshotScalePercent);
             var imageToPin = image;
             image = null;
             _options.PinnedImageManager.Pin(imageToPin);
@@ -4114,7 +4502,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             if (_options is not null)
             {
                 var completedRegion = GetPhysicalSelectionBounds();
-                using var image = await CaptureCurrentResultAsync(restoreOverlay: false);
+                using var capturedImage = await CaptureCurrentResultAsync(restoreOverlay: false);
+                using var image = capturedImage.CreateScaled(
+                    _options.ScreenshotScalePercent);
                 await ClipboardImageService.SetImageAsync(image.Preview);
 
                 if (_options.KeepHistory)
@@ -4830,6 +5220,33 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             UpdateInlineSelectedColorButton((System.Windows.Controls.Button)sender);
             InlineEditorCanvas.Focus();
         }
+    }
+
+    private async Task ShowRecognizedTextAsync(OcrRecognitionResult result)
+    {
+        if (_options?.RecognitionResultPresentation ==
+                RecognitionResultPresentationMode.Popup &&
+            _options.ShowRecognitionPopupAsync is { } showPopup)
+        {
+            var text = string.IsNullOrWhiteSpace(result.Text)
+                ? string.Join(
+                    Environment.NewLine,
+                    result.Regions
+                        .OrderBy(region => region.Y)
+                        .ThenBy(region => region.X)
+                        .Select(region => region.Text))
+                : result.Text;
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                await ShowSelectionMessageForAsync("已识别", 650);
+                CompleteSelection(result: null);
+                await showPopup("已识别", text.Trim(), null);
+            }
+
+            return;
+        }
+
+        ShowInlineOcrText(result);
     }
 
     private void OnInlineCustomColorClick(object sender, RoutedEventArgs e)
@@ -5909,6 +6326,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     {
         Canvas.SetLeft(CaptureToolbar, Math.Clamp(x, 0, GetToolbarMaximumX()));
         Canvas.SetTop(CaptureToolbar, Math.Clamp(y, 0, GetToolbarMaximumY()));
+        if (_nativeSelectionFrame.IsMaskEnabled &&
+            CaptureToolbar.Visibility == Visibility.Visible)
+        {
+            CaptureToolbar.UpdateLayout();
+            _nativeSelectionFrame.SetMaskExcludedRegion(
+                GetVisibleToolbarScreenBounds());
+        }
     }
 
     private void UpdateSelectionSizeBadge(Rect bounds)
@@ -6163,6 +6587,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         SelectionMoveBottomLeftZone.Visibility = Visibility.Collapsed;
         SelectionMoveBottomRightZone.Visibility = Visibility.Collapsed;
         CaptureToolbar.Visibility = Visibility.Collapsed;
+        if (_nativeSelectionFrame.IsMaskEnabled)
+        {
+            _nativeSelectionFrame.SetMaskExcludedRegion(null);
+        }
         InlineEditorOptions.Visibility = Visibility.Collapsed;
         SelectionSizeBadge.Visibility = Visibility.Collapsed;
     }
@@ -6352,8 +6780,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return Dispatcher.Invoke(CaptureScrollSelectionSnapshot);
         }
 
-        var hideNativeFrameForCapture = !_isScrollCaptureSelectionLocked &&
-            _screenSnapshot is null &&
+        var hideNativeFrameForCapture = _screenSnapshot is null &&
             _nativeSelectionFrame.IsMaskEnabled &&
             HasValidSelection();
         var outlineVisibility = ScrollCaptureOutline.Visibility;
@@ -6422,6 +6849,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         SelectionRectangle.Fill = WpfBrushes.Transparent;
         SelectionRectangle.IsHitTestVisible = false;
         SelectionRectangle.Visibility = Visibility.Collapsed;
+        // Once the region is locked, all pointer semantics are owned by the
+        // native frame/mask and ScrollCaptureWheelMonitor. Keeping the
+        // full-screen WPF surface hit-testable would still enqueue a WPF
+        // MouseMove for every high-report-rate packet outside the hole.
+        CaptureSurface.IsHitTestVisible = false;
         FrozenScreenImage.Source = null;
         FrozenScreenImage.Visibility = Visibility.Collapsed;
         // Keep the themed border visible while the user pauses or changes
@@ -6432,9 +6864,6 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         var borderBounds = selectionBounds;
         borderBounds.Inflate(4, 4);
         _nativeSelectionFrame.Update(borderBounds);
-        _nativeSelectionMask.Update(
-            ToDrawingRectangle(_virtualScreenBounds),
-            selectionBounds);
         _nativeSelectionFrame.EnsureVisible();
         EnableScrollCaptureClickThrough();
 

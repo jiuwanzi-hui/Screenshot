@@ -382,7 +382,7 @@ public static class ScrollCaptureService
                     var observedWheelDelta = wheelDelta;
                     ScrollCaptureDirection? throttledRequestedDirection = null;
 
-                    if (wheelDelta != 0)
+                    if (wheelDelta != 0 && throttleWheelInput)
                     {
                         // Keep manual-wheel input attached to the window that
                         // was selected for capture.  The progress preview is

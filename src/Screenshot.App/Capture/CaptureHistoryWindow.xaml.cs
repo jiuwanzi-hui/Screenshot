@@ -8,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Documents;
 using System.Windows.Media.Imaging;
 using System.Drawing.Imaging;
+using Screenshot.App.Core;
 using Screenshot.App.Infrastructure;
 using Screenshot.App.Presentation;
 using WpfButton = System.Windows.Controls.Button;
@@ -31,6 +32,7 @@ public partial class CaptureHistoryWindow : Window, IDisposable
         _historyDragHints = [];
     private string _saveDirectory;
     private string _videoDirectory;
+    private PngSaveLocationMode _pngSaveLocationMode;
     private VideoHistorySortMode _videoSortMode = VideoHistorySortMode.NewestFirst;
     private bool _isCommittingVideoName;
     private CancellationTokenSource _videoThumbnailCancellation = new();
@@ -46,7 +48,8 @@ public partial class CaptureHistoryWindow : Window, IDisposable
         int screenshotRetentionDays = 7,
         int screenshotLimit = 50,
         int videoRetentionDays = 7,
-        int videoLimit = 50)
+        int videoLimit = 50,
+        PngSaveLocationMode pngSaveLocationMode = PngSaveLocationMode.DefaultDirectory)
     {
         ArgumentNullException.ThrowIfNull(historyService);
 
@@ -57,6 +60,7 @@ public partial class CaptureHistoryWindow : Window, IDisposable
         _videoDirectory = ResolveDirectory(
             videoDirectory,
             Core.AppMetadata.DefaultVideoDirectory);
+        _pngSaveLocationMode = pngSaveLocationMode;
 
         InitializeComponent();
         WindowPlacementService.Track(this, WindowPlacementKeys.CaptureHistory);
@@ -218,7 +222,8 @@ public partial class CaptureHistoryWindow : Window, IDisposable
             var preview = new CapturePreviewWindow(
                 item.CreateCapturedImage(),
                 _saveDirectory,
-                item);
+                item,
+                _pngSaveLocationMode);
             preview.ConfigureForHistoryView();
             preview.Show();
             HistoryStatusText.Text = "已打开完整截图。";
@@ -330,40 +335,83 @@ public partial class CaptureHistoryWindow : Window, IDisposable
         }
     }
 
-    private static async Task LoadVideoThumbnailsAsync(
+    private async Task LoadVideoThumbnailsAsync(
         IReadOnlyList<VideoHistoryItem> items,
         CancellationToken cancellationToken)
     {
-        foreach (var item in items)
+        // A damaged or partially-written MP4 can block WinRT decoding for
+        // several seconds. Keep two decoders in flight so one bad file does
+        // not make every later history item appear permanently "loading".
+        using var concurrencyGate = new SemaphoreSlim(2, 2);
+        var tasks = items.Select(item => LoadVideoThumbnailAsync(
+            item,
+            concurrencyGate,
+            cancellationToken));
+        try
         {
-            try
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!File.Exists(item.FilePath))
-                {
-                    continue;
-                }
+            await Task.WhenAll(tasks);
+        }
+        catch (OperationCanceledException) when (
+            cancellationToken.IsCancellationRequested)
+        {
+            // Refresh/close cancels the remaining decoders.
+        }
+    }
 
-                var session = await VideoPreviewSession.CreateAsync(item.FilePath);
-                item.SetMediaMetadata(session.Duration, 0, 0);
-                var bytes = await session.GetFrameAsync(TimeSpan.Zero, 320);
-                cancellationToken.ThrowIfCancellationRequested();
-                var thumbnail = CreateThumbnailBitmap(bytes);
-                item.SetMediaMetadata(
-                    session.Duration,
-                    thumbnail.PixelWidth,
-                    thumbnail.PixelHeight);
-                item.Thumbnail = thumbnail;
-            }
-            catch (OperationCanceledException) when (
-                cancellationToken.IsCancellationRequested)
+    private async Task LoadVideoThumbnailAsync(
+        VideoHistoryItem item,
+        SemaphoreSlim concurrencyGate,
+        CancellationToken cancellationToken)
+    {
+        await concurrencyGate.WaitAsync(cancellationToken);
+        var metadataPublished = false;
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!File.Exists(item.FilePath))
             {
                 return;
             }
-            catch
+
+            var session = await VideoPreviewSession.CreateAsync(item.FilePath)
+                .WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
+            await Dispatcher.InvokeAsync(
+                () => item.SetMediaMetadata(
+                    session.Duration,
+                    session.PixelWidth,
+                    session.PixelHeight));
+            metadataPublished = true;
+
+            var bytes = await session.GetFrameAsync(TimeSpan.Zero, 320)
+                .WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            var thumbnail = CreateThumbnailBitmap(bytes);
+            await Dispatcher.InvokeAsync(() => item.Thumbnail = thumbnail);
+        }
+        catch (OperationCanceledException) when (
+            cancellationToken.IsCancellationRequested)
+        {
+            // Refresh/close is expected to cancel in-flight decoders.
+        }
+        catch
+        {
+            // Keep the video icon, but do not leave an invalid file in a
+            // permanent loading state.
+            if (!metadataPublished && !Dispatcher.HasShutdownStarted)
             {
-                // Keep the video icon when a codec cannot expose a first frame.
+                try
+                {
+                    await Dispatcher.InvokeAsync(item.MarkMediaMetadataReadFailed);
+                }
+                catch (InvalidOperationException)
+                {
+                    // The window may close while a decoder is unwinding.
+                }
             }
+        }
+        finally
+        {
+            concurrencyGate.Release();
         }
     }
 

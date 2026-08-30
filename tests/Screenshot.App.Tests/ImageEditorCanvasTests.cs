@@ -726,6 +726,37 @@ public sealed class ImageEditorCanvasTests
     }
 
     [Fact]
+    public void TaperedArrowHeadScalesWithStrokeWidth()
+    {
+        var method = typeof(ImageEditorCanvas).GetMethod(
+            "CreateTaperedArrowPoints",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var narrow = Assert.IsType<System.Windows.Media.PointCollection>(
+            method.Invoke(
+                null,
+                [new WpfPoint(0, 0), new WpfPoint(120, 0), 3d]));
+        var wide = Assert.IsType<System.Windows.Media.PointCollection>(
+            method.Invoke(
+                null,
+                [new WpfPoint(0, 0), new WpfPoint(120, 0), 12d]));
+
+        static double HeadBaseX(
+            System.Windows.Media.PointCollection points) =>
+            points.Count > 3 ? points[2].X : 0;
+
+        static double HeadHalfWidth(
+            System.Windows.Media.PointCollection points) =>
+            points.Count > 3
+                ? Math.Max(Math.Abs(points[2].Y), Math.Abs(points[4].Y))
+                : 0;
+
+        Assert.True(HeadBaseX(wide) < HeadBaseX(narrow));
+        Assert.True(HeadHalfWidth(wide) > HeadHalfWidth(narrow));
+    }
+
+    [Fact]
     public void ArrowDefaultsToFilledAndHollowStyleUsesAnOutlinedPolygon()
     {
         var annotation = new ArrowAnnotation(

@@ -30,13 +30,21 @@ internal sealed class VideoPreviewSession
 
     private VideoPreviewSession(
         MediaComposition composition,
-        TimeSpan duration)
+        TimeSpan duration,
+        int pixelWidth,
+        int pixelHeight)
     {
         _composition = composition;
         Duration = duration;
+        PixelWidth = pixelWidth;
+        PixelHeight = pixelHeight;
     }
 
     public TimeSpan Duration { get; }
+
+    public int PixelWidth { get; }
+
+    public int PixelHeight { get; }
 
     public static async Task<VideoPreviewSession> CreateAsync(string inputPath)
     {
@@ -46,7 +54,18 @@ internal sealed class VideoPreviewSession
         var clip = await MediaClip.CreateFromFileAsync(file);
         var composition = new MediaComposition();
         composition.Clips.Add(clip);
-        return new VideoPreviewSession(composition, clip.OriginalDuration);
+        var properties = clip.GetVideoEncodingProperties();
+        var pixelWidth = properties?.Width is { } width
+            ? (int)Math.Min(width, int.MaxValue)
+            : 0;
+        var pixelHeight = properties?.Height is { } height
+            ? (int)Math.Min(height, int.MaxValue)
+            : 0;
+        return new VideoPreviewSession(
+            composition,
+            clip.OriginalDuration,
+            pixelWidth,
+            pixelHeight);
     }
 
     public async Task<byte[]> GetFrameAsync(

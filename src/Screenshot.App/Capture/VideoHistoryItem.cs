@@ -12,6 +12,7 @@ public sealed class VideoHistoryItem : INotifyPropertyChanged
     private TimeSpan? _duration;
     private int _pixelWidth;
     private int _pixelHeight;
+    private bool _metadataReadFailed;
 
     public VideoHistoryItem(
         string filePath,
@@ -100,11 +101,11 @@ public sealed class VideoHistoryItem : INotifyPropertyChanged
 
     public string DurationText => Duration is { } duration && duration >= TimeSpan.Zero
         ? FormatDuration(duration)
-        : "时长读取中…";
+        : _metadataReadFailed ? "时长读取失败" : "时长读取中…";
 
     public string ResolutionText => PixelWidth > 0 && PixelHeight > 0
         ? $"{PixelWidth} × {PixelHeight}"
-        : "分辨率读取中…";
+        : _metadataReadFailed ? "分辨率读取失败" : "分辨率读取中…";
 
     public string FormatText =>
         Path.GetExtension(FilePath).TrimStart('.').ToUpperInvariant() switch
@@ -115,9 +116,22 @@ public sealed class VideoHistoryItem : INotifyPropertyChanged
 
     public void SetMediaMetadata(TimeSpan? duration, int pixelWidth, int pixelHeight)
     {
+        _metadataReadFailed = false;
         Duration = duration;
         PixelWidth = Math.Max(0, pixelWidth);
         PixelHeight = Math.Max(0, pixelHeight);
+    }
+
+    public void MarkMediaMetadataReadFailed()
+    {
+        if (_metadataReadFailed)
+        {
+            return;
+        }
+
+        _metadataReadFailed = true;
+        OnPropertyChanged(nameof(DurationText));
+        OnPropertyChanged(nameof(ResolutionText));
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

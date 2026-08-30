@@ -37,10 +37,27 @@ public partial class ScrollCaptureProgressWindow : Window
     private double _maximumHeightDip;
     private double _workAreaTopDip;
     private double _workAreaBottomDip;
+    private bool _captureExcluded;
 
     public ScrollCaptureProgressWindow()
     {
         InitializeComponent();
+    }
+
+    public void ExcludeFromScreenCapture()
+    {
+        if (_captureExcluded)
+        {
+            return;
+        }
+
+        var handle = new WindowInteropHelper(this).EnsureHandle();
+        if (handle != IntPtr.Zero)
+        {
+            _captureExcluded = NativeMethods.SetWindowDisplayAffinity(
+                handle,
+                WindowDisplayAffinityExcludeFromCapture);
+        }
     }
 
     public event EventHandler? CompleteRequested;
@@ -529,6 +546,8 @@ public partial class ScrollCaptureProgressWindow : Window
             DoNotResize | DoNotChangeZOrder | DoNotActivate);
     }
 
+    private const uint WindowDisplayAffinityExcludeFromCapture = 0x00000011;
+
     private static class NativeMethods
     {
         [DllImport("user32.dll", SetLastError = true)]
@@ -558,6 +577,12 @@ public partial class ScrollCaptureProgressWindow : Window
         public static extern bool GetMonitorInfo(
             IntPtr monitorHandle,
             ref NativeMonitorInfo monitorInfo);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool SetWindowDisplayAffinity(
+            IntPtr windowHandle,
+            uint affinity);
     }
 
     [StructLayout(LayoutKind.Sequential)]

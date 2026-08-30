@@ -35,6 +35,7 @@ public partial class App : System.Windows.Application, IDisposable
     private AppSettings _currentSettings = AppSettings.CreateDefault();
     private bool _isShuttingDown;
     private bool _isCaptureInProgress;
+    private bool _startupCompleted;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -53,9 +54,12 @@ public partial class App : System.Windows.Application, IDisposable
 
         var startInBackground = e.Args.Any(argument =>
             string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
+        CaptureTimingDiagnostics.Mark(
+            "app-startup",
+            $"pid={Environment.ProcessId} base={AppContext.BaseDirectory} background={startInBackground}");
         _singleInstanceCoordinator = SingleInstanceCoordinator.TryAcquire(
             "Screenshot.App",
-            () => _ = Dispatcher.BeginInvoke(ShowMainWindow),
+            RequestPrimaryWindowActivation,
             signalExistingInstance: !startInBackground);
         if (_singleInstanceCoordinator is null)
         {
@@ -117,7 +121,7 @@ public partial class App : System.Windows.Application, IDisposable
 
             _singleInstanceCoordinator = SingleInstanceCoordinator.TryAcquire(
                 "Screenshot.App",
-                () => _ = Dispatcher.BeginInvoke(ShowMainWindow),
+                RequestPrimaryWindowActivation,
                 signalExistingInstance: !startInBackground);
             if (_singleInstanceCoordinator is null)
             {
@@ -162,11 +166,23 @@ public partial class App : System.Windows.Application, IDisposable
                 startupRegistrationService,
                 _currentSettings.LaunchAtStartup)
             : null);
+        // Build the complete capture overlay before registering global
+        // hotkeys. The first shortcut must not pay the one-time WPF/XAML,
+        // layout, and native-window initialization cost.
+        PrewarmScreenCaptureBackend();
+        PrewarmCaptureWindows();
+        // Complete this before installing the hotkey hook. An idle callback
+        // can still race with the first shortcut after a fast launch, which
+        // puts the one-time WPF/native window cost back on the input edge.
+        PrewarmInteractiveCaptureWindow();
         _hotKeyManager = new GlobalHotKeyManager();
         _hotKeyManager.HotKeyPressed += OnHotKeyPressed;
         var hotKeyWarning = TryApplyInitialHotKeys(
             _hotKeyManager,
             _currentSettings);
+        CaptureTimingDiagnostics.Mark(
+            "hotkey-registration-complete",
+            $"warning={(hotKeyWarning is null ? "none" : hotKeyWarning)}");
         _translationHttpClient = new HttpClient
         {
             Timeout = TimeSpan.FromSeconds(30),
@@ -230,7 +246,19 @@ public partial class App : System.Windows.Application, IDisposable
             () => _floatingCaptureWindow?.ShowRecordingAlreadyActiveFeedback());
         _regionCaptureCoordinator.CaptureStateChanged += OnCaptureStateChanged;
 
-        if (dataMigrationResult.Warning is not null)
+        var updateFailureRequested = e.Args.Any(argument =>
+            string.Equals(
+                argument,
+                PortableUpdateRunner.UpdateFailedArgument,
+                StringComparison.OrdinalIgnoreCase));
+
+        if (updateFailureRequested)
+        {
+            _mainWindow.ShowUpdateFailureRetry(
+                ReadUpdateFailureStatus(),
+                showWindow: !startInBackground);
+        }
+        else if (dataMigrationResult.Warning is not null)
         {
             _mainWindow.ShowStatus(dataMigrationResult.Warning);
         }
@@ -269,9 +297,11 @@ public partial class App : System.Windows.Application, IDisposable
             _ = StartupFeedbackWindow.ShowAsync("已最小化启动");
         }
 
-        if ((!startInBackground && _currentSettings.OpenSettingsOnStartup) ||
-            (!startInBackground && hotKeyWarning is not null) ||
-            (!startInBackground && elevationWarning is not null))
+        // Showing the settings window at startup is controlled exclusively by
+        // the user's checkbox. Startup warnings and update failures are
+        // reported through the status area above and must not unexpectedly
+        // turn a tray/background launch into a settings window.
+        if (!startInBackground && _currentSettings.OpenSettingsOnStartup)
         {
             ShowMainWindow();
         }
@@ -282,6 +312,61 @@ public partial class App : System.Windows.Application, IDisposable
         _ = Dispatcher.BeginInvoke(
             System.Windows.Threading.DispatcherPriority.ApplicationIdle,
             new Action(PrewarmVideoRecordingAsync));
+
+        _startupCompleted = true;
+    }
+
+    private static void PrewarmCaptureWindows()
+    {
+        // Keep one initialized native HWND set available for the next
+        // interactive session. Creating and disposing it here only warms JIT;
+        // retaining it removes the WinForms handle cost from the hotkey edge.
+        CaptureOverlayWindow.PrewarmNativeWindows();
+    }
+
+    private static void PrewarmInteractiveCaptureWindow()
+    {
+        // Construct the WPF capture surface during startup idle time. The
+        // window is never shown and therefore cannot affect the desktop; the
+        // first hotkey only creates the real session after this one-time XAML
+        // and visual-tree cost has already been paid.
+        try
+        {
+            // Include one real desktop frame so WPF also initializes the
+            // Image/BitmapSource rendering path before a keyboard shortcut.
+            // Otherwise the first live overlay still performs this work at
+            // the exact moment the mouse is expected to remain fluid.
+            using var snapshot = ScreenCaptureService.Capture(
+                VirtualScreen.GetBounds());
+            _ = snapshot.WarmPreview();
+            CaptureOverlayWindow.PrewarmForStartup(snapshot);
+        }
+        catch
+        {
+            // The interactive path keeps its normal fallback if a desktop
+            // environment rejects construction during startup.
+        }
+    }
+
+    private static void PrewarmScreenCaptureBackend()
+    {
+        // Touch both GDI capture modes before the global hook is installed.
+        // Running this synchronously avoids a first-hotkey race with a
+        // background warm-up task and keeps the input path free of cold-start
+        // graphics initialization.
+        var bounds = VirtualScreen.GetBounds();
+        try
+        {
+            using var snapshot = ScreenCaptureService.Capture(bounds);
+            _ = snapshot.WarmPreview();
+            using var layeredSnapshot =
+                ScreenCaptureService.CaptureIncludingLayeredWindows(bounds);
+            _ = layeredSnapshot.WarmPreview();
+        }
+        catch
+        {
+            // The normal capture path retains its existing fallback handling.
+        }
     }
 
     private async void PrewarmVideoRecordingAsync()
@@ -291,30 +376,22 @@ public partial class App : System.Windows.Application, IDisposable
         // Start the capture warm-up shortly after the dispatcher is ready so
         // the first pin/capture action does not pay the graphics initialization
         // cost. Keep a small delay to let the startup window paint first.
-        await Task.Delay(TimeSpan.FromMilliseconds(250));
+        // Codec/device initialization can contend with the first screenshot
+        // gesture. Let the first interactive capture settle before doing this
+        // optional warm-up; video recording has its own async fallback.
+        await Task.Delay(TimeSpan.FromSeconds(5));
+        if (_isShuttingDown || _isCaptureInProgress)
+        {
+            return;
+        }
+
         var recorderWarmUp = RegionVideoRecorder.WarmUpAsync(
             _currentSettings.VideoRecordingCodec,
             _currentSettings.VideoRecordingFrameRate,
             _currentSettings.RecordSystemAudio,
             _currentSettings.RecordMicrophone,
             _currentSettings.MicrophoneDeviceId);
-        var snapshotWarmUp = Task.Run(() =>
-        {
-            try
-            {
-                // The recording region picker displays a frozen desktop
-                // snapshot. Touch the GDI capture path here and release it
-                // immediately so the first video hotkey does not have to
-                // initialize it while the user is waiting for the overlay.
-                using var snapshot = ScreenCaptureService.Capture(
-                    VirtualScreen.GetBounds());
-            }
-            catch
-            {
-                // The real picker retains its normal capture fallback.
-            }
-        });
-        await Task.WhenAll(recorderWarmUp, snapshotWarmUp);
+        await recorderWarmUp;
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -595,6 +672,7 @@ public partial class App : System.Windows.Application, IDisposable
         window.VideoRecordingRequested += OnFloatingVideoRecordingRequested;
         window.PinCaptureRequested += OnFloatingPinCaptureRequested;
         window.AllScreensCaptureRequested += OnFloatingAllScreensCaptureRequested;
+        window.PresetCaptureRequested += OnFloatingPresetCaptureRequested;
         window.HistoryRequested += OnFloatingHistoryRequested;
         window.SettingsRequested += OnFloatingSettingsRequested;
         window.TextTranslationRequested += OnFloatingTextTranslationRequested;
@@ -623,6 +701,7 @@ public partial class App : System.Windows.Application, IDisposable
         window.VideoRecordingRequested -= OnFloatingVideoRecordingRequested;
         window.PinCaptureRequested -= OnFloatingPinCaptureRequested;
         window.AllScreensCaptureRequested -= OnFloatingAllScreensCaptureRequested;
+        window.PresetCaptureRequested -= OnFloatingPresetCaptureRequested;
         window.HistoryRequested -= OnFloatingHistoryRequested;
         window.SettingsRequested -= OnFloatingSettingsRequested;
         window.TextTranslationRequested -= OnFloatingTextTranslationRequested;
@@ -651,6 +730,9 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void OnCaptureStateChanged(bool isInProgress)
     {
+        using var timing = CaptureTimingDiagnostics.Begin(
+            "app-capture-state",
+            $"inProgress={isInProgress}");
         if (!Dispatcher.CheckAccess())
         {
             _ = Dispatcher.BeginInvoke(
@@ -692,6 +774,93 @@ public partial class App : System.Windows.Application, IDisposable
     private void OnFloatingAllScreensCaptureRequested(object? sender, EventArgs e)
     {
         _ = RequestAllScreensCaptureAsync();
+    }
+
+    private void OnFloatingPresetCaptureRequested(object? sender, EventArgs e)
+    {
+        _ = RequestPresetCaptureAsync();
+    }
+
+    private async Task RequestPresetCaptureAsync()
+    {
+        try
+        {
+            var store = new PresetCaptureRegionStore();
+            var current = store.Load();
+            if (current.Count == 0)
+            {
+                var configured = await PresetCaptureWindow.ShowAsync(current);
+                if (configured is null)
+                {
+                    return;
+                }
+
+                store.Save(configured);
+                current = configured;
+                _mainWindow?.ShowStatus(
+                    configured.Count == 0
+                        ? "预设截图已清空。"
+                        : $"已保存 {configured.Count} 个预设截图区域。鼠标移入编号后点击即可截图。");
+            }
+
+            if (current.Count == 0)
+            {
+                return;
+            }
+
+            while (current.Count > 0)
+            {
+                var result = await PresetCaptureExecuteWindow.ShowAsync(current);
+                if (result?.ClearAll == true)
+                {
+                    store.Save([]);
+                    _mainWindow?.ShowStatus("已清空全部预设截图区域。");
+                    return;
+                }
+
+                if (result?.EditIndex is int editIndex)
+                {
+                    _mainWindow?.ShowStatus(
+                        editIndex >= 0
+                            ? $"正在编辑第 {editIndex + 1} 个预设截图区域。可拖动移动，拖右下角调整大小，右键返回。"
+                            : "正在添加预设截图区域。最多可设置 5 个区域，右键返回。" );
+                    var edited = await PresetCaptureWindow.ShowAsync(current, editIndex);
+                    if (edited is not null)
+                    {
+                        store.Save(edited);
+                        current = edited;
+                    }
+
+                    continue;
+                }
+
+                if (result?.Region is { } region)
+                {
+                    await CapturePresetRegionAsync(region);
+                }
+
+                break;
+            }
+        }
+        catch (Exception exception)
+        {
+            _mainWindow?.ShowStatus($"预设截图失败：{exception.Message}");
+        }
+    }
+
+    private async Task CapturePresetRegionAsync(ScreenRegion region)
+    {
+        if (region.IsEmpty || _captureHistoryService is null)
+        {
+            return;
+        }
+
+        var settings = _currentSettings;
+        using var image = await Task.Run(() => ScreenCaptureService.Capture(region));
+        await ClipboardImageService.SetImageAsync(image.Preview);
+        _ = _captureHistoryService.Add(image, Math.Max(1, settings.HistoryLimit));
+        await CaptureFeedbackWindow.ShowAsync(region);
+        _mainWindow?.ShowStatus("预设截图已完成，已复制到剪贴板并保存到截图历史。");
     }
 
     private void OnFloatingHistoryRequested(object? sender, EventArgs e)
@@ -754,6 +923,7 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void OnHotKeyPressed(object? sender, HotKeyPressedEventArgs e)
     {
+        CaptureTimingDiagnostics.Mark("hotkey-handler", $"action={e.Action}");
         if (_mainWindow?.IsCapturingHotKey == true)
         {
             return;
@@ -761,9 +931,11 @@ public partial class App : System.Windows.Application, IDisposable
 
         if (e.Action == HotKeyAction.RegionCapture)
         {
-            RequestRegionCapture(
-                DetachUsablePreCapturedScreen(e),
-                e.CapturePointerContinuation);
+            QueueHotKeyCapture(e, static (app, snapshot, continuation) =>
+                app.RequestRegionCapture(
+                    snapshot,
+                    continuation,
+                    deferInitialColorPickerActivation: true));
         }
         else if (e.Action == HotKeyAction.CompleteCapture)
         {
@@ -771,15 +943,19 @@ public partial class App : System.Windows.Application, IDisposable
         }
         else if (e.Action == HotKeyAction.RecognizeText)
         {
-            RequestTranslationCapture(
-                DetachUsablePreCapturedScreen(e),
-                e.CapturePointerContinuation);
+            QueueHotKeyCapture(e, static (app, snapshot, continuation) =>
+                app.RequestTranslationCapture(
+                    snapshot,
+                    continuation,
+                    deferInitialColorPickerActivation: true));
         }
         else if (e.Action == HotKeyAction.PinImage)
         {
-            RequestPinCapture(
-                DetachUsablePreCapturedScreen(e),
-                e.CapturePointerContinuation);
+            QueueHotKeyCapture(e, static (app, snapshot, continuation) =>
+                app.RequestPinCapture(
+                    snapshot,
+                    continuation,
+                    deferInitialColorPickerActivation: true));
         }
         else if (e.Action == HotKeyAction.ScrollCapture)
         {
@@ -818,7 +994,36 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void ShowMainWindow()
     {
-        _mainWindow?.ShowFromTray();
+        if (_mainWindow is null)
+        {
+            _ = Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                new Action(ShowMainWindow));
+            return;
+        }
+
+        _mainWindow.ShowFromTray();
+    }
+
+    private void RequestPrimaryWindowActivation()
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        if (!_startupCompleted)
+        {
+            // Ignore activation events received while this process is still
+            // constructing its windows and hotkeys. Those events can be stale
+            // signals left by a previous launch and must not replay a settings
+            // window after startup, especially when the option is disabled.
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.Send,
+            new Action(ShowMainWindow));
     }
 
     private async Task TranslateSelectedTextAsync()
@@ -903,7 +1108,8 @@ public partial class App : System.Windows.Application, IDisposable
                     _currentSettings.ScreenshotHistoryRetentionDays,
                     _currentSettings.HistoryLimit,
                     _currentSettings.VideoHistoryRetentionDays,
-                    _currentSettings.VideoHistoryLimit);
+                    _currentSettings.VideoHistoryLimit,
+                    _currentSettings.PngSaveLocationMode);
                 _captureHistoryWindow.Closed += OnCaptureHistoryWindowClosed;
                 if (showVideo)
                 {
@@ -953,27 +1159,35 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void RequestRegionCapture(
         CapturedImage? initialScreenSnapshot,
-        CapturePointerContinuation? pointerContinuation)
+        CapturePointerContinuation? pointerContinuation,
+        bool deferInitialColorPickerActivation = false)
     {
         _ = RequestRegionCaptureAsync(
             initialScreenSnapshot,
-            pointerContinuation);
+            pointerContinuation,
+            deferInitialColorPickerActivation);
     }
 
     private void RequestTranslationCapture(
         CapturedImage? initialScreenSnapshot,
-        CapturePointerContinuation? pointerContinuation)
+        CapturePointerContinuation? pointerContinuation,
+        bool deferInitialColorPickerActivation = false)
     {
         _ = RequestTranslationCaptureAsync(
             initialScreenSnapshot,
-            pointerContinuation);
+            pointerContinuation,
+            deferInitialColorPickerActivation);
     }
 
     private void RequestPinCapture(
         CapturedImage? initialScreenSnapshot = null,
-        CapturePointerContinuation? pointerContinuation = null)
+        CapturePointerContinuation? pointerContinuation = null,
+        bool deferInitialColorPickerActivation = false)
     {
-        _ = RequestPinCaptureAsync(initialScreenSnapshot, pointerContinuation);
+        _ = RequestPinCaptureAsync(
+            initialScreenSnapshot,
+            pointerContinuation,
+            deferInitialColorPickerActivation);
     }
 
     private void RequestScrollCapture(
@@ -984,7 +1198,8 @@ public partial class App : System.Windows.Application, IDisposable
 
     private async Task RequestRegionCaptureAsync(
         CapturedImage? initialScreenSnapshot,
-        CapturePointerContinuation? pointerContinuation)
+        CapturePointerContinuation? pointerContinuation,
+        bool deferInitialColorPickerActivation = false)
     {
         try
         {
@@ -992,7 +1207,8 @@ public partial class App : System.Windows.Application, IDisposable
             {
                 await _regionCaptureCoordinator.RequestCaptureAsync(
                     initialScreenSnapshot,
-                    pointerContinuation);
+                    pointerContinuation,
+                    deferInitialColorPickerActivation);
             }
             else
             {
@@ -1007,7 +1223,8 @@ public partial class App : System.Windows.Application, IDisposable
 
     private async Task RequestTranslationCaptureAsync(
         CapturedImage? initialScreenSnapshot,
-        CapturePointerContinuation? pointerContinuation)
+        CapturePointerContinuation? pointerContinuation,
+        bool deferInitialColorPickerActivation = false)
     {
         try
         {
@@ -1015,7 +1232,8 @@ public partial class App : System.Windows.Application, IDisposable
             {
                 await _regionCaptureCoordinator.RequestTranslationCaptureAsync(
                     initialScreenSnapshot,
-                    pointerContinuation);
+                    pointerContinuation,
+                    deferInitialColorPickerActivation);
             }
             else
             {
@@ -1030,7 +1248,8 @@ public partial class App : System.Windows.Application, IDisposable
 
     private async Task RequestPinCaptureAsync(
         CapturedImage? initialScreenSnapshot,
-        CapturePointerContinuation? pointerContinuation)
+        CapturePointerContinuation? pointerContinuation,
+        bool deferInitialColorPickerActivation = false)
     {
         try
         {
@@ -1038,7 +1257,8 @@ public partial class App : System.Windows.Application, IDisposable
             {
                 await _regionCaptureCoordinator.RequestPinCaptureAsync(
                     initialScreenSnapshot,
-                    pointerContinuation);
+                    pointerContinuation,
+                    deferInitialColorPickerActivation);
                 initialScreenSnapshot = null;
             }
             else
@@ -1288,5 +1508,64 @@ public partial class App : System.Windows.Application, IDisposable
         }
 
         return null;
+    }
+
+    private static string ReadUpdateFailureStatus()
+    {
+        var failurePath = Path.Combine(
+            AppMetadata.UpdatesDirectoryPath,
+            "last-update-failure.txt");
+        try
+        {
+            if (!File.Exists(failurePath))
+            {
+                return "软件更新未完成，已恢复运行旧版本。请稍后重试。";
+            }
+
+            var details = File.ReadAllText(failurePath).Trim();
+            File.Delete(failurePath);
+            var detailLine = details
+                .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .LastOrDefault(line =>
+                    !line.StartsWith("版本:", StringComparison.OrdinalIgnoreCase) &&
+                    !DateTimeOffset.TryParse(line, out _));
+            return string.IsNullOrWhiteSpace(detailLine)
+                ? "软件更新未完成，已恢复运行旧版本。请稍后重试。"
+                : $"软件更新未完成，已恢复运行旧版本：{detailLine.Trim()}";
+        }
+        catch
+        {
+            return "软件更新未完成，已恢复运行旧版本。请稍后重试。";
+        }
+    }
+
+    private void QueueHotKeyCapture(
+        HotKeyPressedEventArgs eventArgs,
+        Action<App, CapturedImage?, CapturePointerContinuation?> request)
+    {
+        var snapshot = DetachUsablePreCapturedScreen(eventArgs);
+        var continuation = eventArgs.CapturePointerContinuation;
+        CaptureTimingDiagnostics.Mark(
+            "hotkey-queue-detached",
+            $"action={eventArgs.Action} hasSnapshot={snapshot is not null}");
+        // Even when a frame is already prepared, constructing the WPF
+        // capture surface synchronously from the hotkey callback causes one
+        // compositor frame of input hitch. Queue the hand-off after the
+        // keyboard message returns; the prepared frame is still reused, so
+        // this does not add another desktop capture.
+        _ = Dispatcher.BeginInvoke(
+            // The overlay remains invisible until its first frame is ready, so
+            // the hand-off can yield behind the current input/render pass.
+            // Running at Input priority made WPF perform the first full-screen
+            // window layout while the cursor was still completing the shortcut,
+            // which is the remaining one-frame hitch users could see.
+            System.Windows.Threading.DispatcherPriority.Background,
+            new Action(() =>
+            {
+                CaptureTimingDiagnostics.Mark(
+                    "hotkey-dispatcher-callback",
+                    $"action={eventArgs.Action}");
+                request(this, snapshot, continuation);
+            }));
     }
 }

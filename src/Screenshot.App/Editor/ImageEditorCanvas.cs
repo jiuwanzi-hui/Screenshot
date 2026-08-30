@@ -62,6 +62,9 @@ public sealed class ImageEditorCanvas : Canvas
     private bool _isTranslationOverlayVisible = true;
     private NativeDrawingPreviewWindow? _nativeDrawingPreview;
     private bool _nativeDrawingPreviewReady;
+    private readonly Dictionary<int, List<UIElement>> _annotationVisuals = [];
+    private readonly List<UIElement> _selectionVisuals = [];
+    private int _selectionVisualCount;
 
     public ImageEditorCanvas()
     {
@@ -165,6 +168,8 @@ public sealed class ImageEditorCanvas : Canvas
             }
         }
 
+        var minFactor = GetMinimumScaleFactor(current);
+        effectiveFactor = Math.Max(minFactor, effectiveFactor);
         var replacement = ScaleAnnotation(current, effectiveFactor);
         if (replacement is null)
         {
@@ -303,7 +308,7 @@ public sealed class ImageEditorCanvas : Canvas
         var center = new WpfPoint(
             annotation.Position.X + (annotation.Size / 2),
             annotation.Position.Y + (annotation.Size / 2));
-        var size = Math.Clamp(annotation.Size * factor, 12, 512);
+        var size = Math.Clamp(annotation.Size * factor, 18, 512);
         return annotation with
         {
             Position = new WpfPoint(
@@ -325,6 +330,20 @@ public sealed class ImageEditorCanvas : Canvas
             center.Y - (height / 2),
             width,
             height);
+    }
+
+    private static double GetMinimumScaleFactor(EditorAnnotation annotation)
+    {
+        var bounds = GetAnnotationBounds(annotation);
+        if (bounds.IsEmpty || bounds.Width <= 0 || bounds.Height <= 0)
+        {
+            return 1;
+        }
+
+        const double minimumVisibleExtent = 2;
+        return Math.Max(
+            minimumVisibleExtent / bounds.Width,
+            minimumVisibleExtent / bounds.Height);
     }
 
     private static double ResolveCanvasDimension(double preferred, double fallback)
@@ -621,7 +640,7 @@ public sealed class ImageEditorCanvas : Canvas
             },
             NumberAnnotation annotation => annotation with
             {
-                Size = Math.Clamp(_strokeWidth * 9, 12, 512),
+                Size = Math.Clamp(_strokeWidth * 9, 18, 512),
             },
             MosaicAnnotation annotation => annotation with
             {
@@ -642,8 +661,25 @@ public sealed class ImageEditorCanvas : Canvas
             return;
         }
 
-        _document.ReplaceAt(_selectedAnnotationIndex, current, replacement);
-        RebuildCanvas();
+        var selectedIndex = _selectedAnnotationIndex;
+        var hadSelection = HasSelectedAnnotation;
+
+        // Keep the other annotation visuals alive while a selected item is
+        // resized or restyled. Rebuilding the whole canvas for every wheel
+        // tick briefly clears hundreds of elements, which is visible as a
+        // blank editor during large edits. The per-annotation visual map lets
+        // us replace only the changed item and then restore its handles.
+        RemoveSelectionVisuals();
+        _document.ReplaceAt(selectedIndex, current, replacement);
+        if (!ReplaceAnnotationVisual(selectedIndex, replacement))
+        {
+            RebuildCanvasCore(includeSelection: false);
+        }
+
+        if (hadSelection)
+        {
+            AddSelectionVisual();
+        }
         RaiseHistoryChanged();
     }
 
@@ -1527,6 +1563,7 @@ public sealed class ImageEditorCanvas : Canvas
         _annotationEditMoved = false;
         CaptureMouse();
         RebuildCanvas();
+        RemoveSelectionVisuals();
         UpdateInteractionCursor(point);
     }
 
@@ -1616,7 +1653,7 @@ public sealed class ImageEditorCanvas : Canvas
                 {
                     Size = Math.Clamp(
                         number.Size + ((delta.X + delta.Y) * 0.5),
-                        12,
+                        18,
                         512),
                 }
                 : number with { Position = number.Position + delta },
@@ -1630,7 +1667,11 @@ public sealed class ImageEditorCanvas : Canvas
         };
 
         _document.SetAt(_selectedAnnotationIndex, updated);
-        RebuildCanvas();
+        RemoveSelectionVisuals();
+        if (!ReplaceAnnotationVisual(_selectedAnnotationIndex, updated))
+        {
+            RebuildCanvasCore(includeSelection: false);
+        }
     }
 
     private void CommitAnnotationEdit()
@@ -2007,6 +2048,8 @@ public sealed class ImageEditorCanvas : Canvas
 
         var annotation = _document.Annotations[_selectedAnnotationIndex];
         var handles = GetAnnotationHandlePoints(annotation);
+        _selectionVisuals.Clear();
+        _selectionVisualCount = handles.Count;
         for (var index = 0; index < handles.Count; index++)
         {
             var handle = new Ellipse
@@ -2021,7 +2064,64 @@ public sealed class ImageEditorCanvas : Canvas
             SetLeft(handle, handles[index].X - 4);
             SetTop(handle, handles[index].Y - 4);
             Children.Add(handle);
+            _selectionVisuals.Add(handle);
         }
+    }
+
+    private void RemoveSelectionVisuals()
+    {
+        foreach (var visual in _selectionVisuals)
+        {
+            Children.Remove(visual);
+        }
+
+        _selectionVisuals.Clear();
+        _selectionVisualCount = 0;
+    }
+
+    private bool ReplaceAnnotationVisual(
+        int annotationIndex,
+        EditorAnnotation annotation)
+    {
+        if (!_annotationVisuals.TryGetValue(annotationIndex, out var current) ||
+            current.Count == 0)
+        {
+            return false;
+        }
+
+        var insertIndex = Children.IndexOf(current[0]);
+        if (insertIndex < 0)
+        {
+            return false;
+        }
+
+        foreach (var visual in current)
+        {
+            Children.Remove(visual);
+        }
+
+        var oldCount = Children.Count;
+        AddAnnotationVisual(annotation);
+        if (Children.Count == oldCount)
+        {
+            return false;
+        }
+
+        var replacement = Children.Cast<UIElement>()
+            .Skip(oldCount)
+            .ToArray();
+        foreach (var visual in replacement)
+        {
+            Children.Remove(visual);
+        }
+
+        for (var index = 0; index < replacement.Length; index++)
+        {
+            Children.Insert(insertIndex + index, replacement[index]);
+        }
+
+        _annotationVisuals[annotationIndex] = replacement.ToList();
+        return true;
     }
 
     private static double DistanceToSegment(
@@ -2531,6 +2631,8 @@ public sealed class ImageEditorCanvas : Canvas
     private void RebuildCanvasCore(bool includeSelection)
     {
         Children.Clear();
+        _annotationVisuals.Clear();
+        _selectionVisualCount = 0;
 
         if (!_isInitialized)
         {
@@ -2564,7 +2666,15 @@ public sealed class ImageEditorCanvas : Canvas
                 continue;
             }
 
+            var firstChild = Children.Count;
             AddAnnotationVisual(annotation);
+            if (Children.Count > firstChild)
+            {
+                _annotationVisuals[index] = Children
+                    .Cast<UIElement>()
+                    .Skip(firstChild)
+                    .ToList();
+            }
         }
 
         if (includeSelection && _selectedAnnotationIndex >= 0)
@@ -2849,9 +2959,8 @@ public sealed class ImageEditorCanvas : Canvas
             return [points[0], points[^1]];
         }
 
-        var headLength = Math.Min(
-            Math.Max((totalLength * 0.11) + (strokeWidth * 1.6), 9),
-            totalLength * 0.45);
+        var metrics = ArrowGeometryMetrics.For(totalLength, strokeWidth);
+        var headLength = metrics.HeadLength;
         var headStartDistance = Math.Max(0, totalLength - headLength);
         var shaft = SlicePathAtDistance(
             points,
@@ -2882,15 +2991,13 @@ public sealed class ImageEditorCanvas : Canvas
 
         direction.Normalize();
         var headNormal = new Vector(-direction.Y, direction.X);
-        var headHalfWidth = headLength * 0.36;
-        var baseHalfWidth = Math.Max(
-            1.4,
-            Math.Max(strokeWidth * 1.12, headHalfWidth * 0.24));
-        var tailHalfWidth = Math.Max(1.2, strokeWidth * 0.55);
-        var shaftLength = Math.Max(1, GetPathLength(shaft));
-        var shaftCumulative = BuildCumulativeLengths(shaft);
+        var headHalfWidth = metrics.HeadHalfWidth;
+        var baseHalfWidth = metrics.BaseHalfWidth;
+        var tailHalfWidth = metrics.TailHalfWidth;
         var left = new List<WpfPoint>(shaft.Count);
         var right = new List<WpfPoint>(shaft.Count);
+        var shaftLength = Math.Max(1, GetPathLength(shaft));
+        var shaftCumulative = BuildCumulativeLengths(shaft);
 
         for (var index = 0; index < shaft.Count; index++)
         {
@@ -2903,15 +3010,18 @@ public sealed class ImageEditorCanvas : Canvas
             right.Add(shaft[index] - (normal * halfWidth));
         }
 
-        var polygon = new PointCollection(left.Count + right.Count + 3);
-        foreach (var point in left)
+        var polygon = new PointCollection(left.Count + right.Count + 3)
         {
-            polygon.Add(point);
+            shaft[0],
+        };
+        for (var index = 1; index < left.Count; index++)
+        {
+            polygon.Add(left[index]);
         }
         polygon.Add(basePoint + (headNormal * headHalfWidth));
         polygon.Add(tip);
         polygon.Add(basePoint - (headNormal * headHalfWidth));
-        for (var index = right.Count - 1; index >= 0; index--)
+        for (var index = right.Count - 1; index >= 1; index--)
         {
             polygon.Add(right[index]);
         }
@@ -3060,32 +3170,30 @@ public sealed class ImageEditorCanvas : Canvas
 
         direction.Normalize();
         var perpendicular = new Vector(-direction.Y, direction.X);
-        // The head grows with the arrow itself, the way chat-app arrows do: a
-        // long arrow gets a long, wide head, while the stroke width mostly
-        // controls how much the shaft swells. Composed from Min/Max instead of
-        // Math.Clamp: while the user is still dragging a tiny arrow the
-        // length-derived maximum drops below the preferred minimum, and Clamp
-        // throws on an inverted range — which crashed the whole app on the
-        // first mouse move of an arrow drag.
-        var headLength = Math.Min(
-            Math.Max((length * 0.11) + (strokeWidth * 1.6), 9),
-            length * 0.45);
-        var headHalfWidth = headLength * 0.36;
-        var baseHalfWidth = Math.Max(
-            1.4,
-            Math.Max(strokeWidth * 1.12, headHalfWidth * 0.24));
-        var tailHalfWidth = Math.Max(1.2, strokeWidth * 0.55);
+        // Keep the head and shaft proportional for both long drags and thick
+        // strokes. The shared metrics also handle tiny drags without an
+        // inverted clamp range during the first mouse move.
+        var metrics = ArrowGeometryMetrics.For(length, strokeWidth);
+        var headLength = metrics.HeadLength;
+        var headHalfWidth = metrics.HeadHalfWidth;
+        var baseHalfWidth = metrics.BaseHalfWidth;
+        var tailHalfWidth = metrics.TailHalfWidth;
+        var tailTransition = Math.Min(
+            Math.Max(strokeWidth * 1.5, headLength * 0.16),
+            length * 0.12);
+        var tailBase = start + (direction * tailTransition);
         var basePoint = end - (direction * headLength);
 
         return
         [
-            start + (perpendicular * tailHalfWidth),
+            start,
+            tailBase + (perpendicular * tailHalfWidth),
             basePoint + (perpendicular * baseHalfWidth),
             basePoint + (perpendicular * headHalfWidth),
             end,
             basePoint - (perpendicular * headHalfWidth),
             basePoint - (perpendicular * baseHalfWidth),
-            start - (perpendicular * tailHalfWidth),
+            tailBase - (perpendicular * tailHalfWidth),
         ];
     }
 
@@ -3140,10 +3248,12 @@ public sealed class ImageEditorCanvas : Canvas
     private void AddNumberVisual(NumberAnnotation annotation, string label)
     {
         var digitCount = Math.Max(1, label.Length);
+        var preferredFontSize = annotation.Size *
+            (digitCount >= 4 ? 0.28 : digitCount >= 3 ? 0.36 : 0.48);
         var labelFontSize = Math.Clamp(
-            annotation.Size * (digitCount >= 4 ? 0.28 : digitCount >= 3 ? 0.36 : 0.48),
+            preferredFontSize,
             8,
-            annotation.Size * 0.48);
+            Math.Max(8, annotation.Size * 0.48));
         var border = new Border
         {
             Width = annotation.Size,

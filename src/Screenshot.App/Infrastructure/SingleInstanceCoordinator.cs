@@ -43,6 +43,9 @@ public sealed class SingleInstanceCoordinator : IDisposable
         {
             if (signalExistingInstance)
             {
+                // Signal the already-running tray instance. The primary
+                // process owns the UI dispatcher and will bring its window
+                // forward without starting a second process.
                 _ = activationEvent.Set();
             }
         }

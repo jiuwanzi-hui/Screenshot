@@ -230,6 +230,14 @@
                             Margin="9,1"
                             Background="{DynamicResource AppSeparatorBrush}"
                             Opacity="0.72" />
+                    <Button x:Name="PresetCaptureMenuButton"
+                            Click="OnPresetCaptureClick"
+                            Content="预设截图"
+                            Style="{StaticResource FloatingMenuButton}" />
+                    <Border Height="1"
+                            Margin="9,1"
+                            Background="{DynamicResource AppSeparatorBrush}"
+                            Opacity="0.72" />
                     <Button x:Name="HistoryMenuButton"
                             Click="OnHistoryClick"
                             Content="历史查看"

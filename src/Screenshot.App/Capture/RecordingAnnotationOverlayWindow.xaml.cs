@@ -305,8 +305,9 @@ public partial class RecordingAnnotationOverlayWindow : Window
 
         direction.Normalize();
         var perpendicular = new Vector(-direction.Y, direction.X);
-        var headLength = Math.Clamp((end - start).Length * 0.22, 10, 20);
-        var headWidth = headLength * 0.52;
+        var metrics = ArrowGeometryMetrics.For((end - start).Length, 3);
+        var headLength = metrics.HeadLength;
+        var headWidth = metrics.HeadHalfWidth;
         var headBase = end - (direction * headLength);
         var first = headBase + (perpendicular * headWidth);
         var second = headBase - (perpendicular * headWidth);

@@ -86,7 +86,8 @@ public sealed class RegionCaptureCoordinator
 
     public Task RequestCaptureAsync(
         CapturedImage? initialScreenSnapshot = null,
-        CapturePointerContinuation? pointerContinuation = null)
+        CapturePointerContinuation? pointerContinuation = null,
+        bool deferInitialColorPickerActivation = false)
     {
         return RequestInteractiveCaptureAsync(
             recognizeTextAfterSelection: false,
@@ -94,12 +95,14 @@ public sealed class RegionCaptureCoordinator
             trackOrdinaryCaptureRegion: true,
             initialScreenSnapshot,
             pointerContinuation,
-            initialSelection: null);
+            initialSelection: null,
+            deferInitialColorPickerActivation);
     }
 
     public Task RequestOcrCaptureAsync(
         CapturedImage? initialScreenSnapshot = null,
-        CapturePointerContinuation? pointerContinuation = null)
+        CapturePointerContinuation? pointerContinuation = null,
+        bool deferInitialColorPickerActivation = false)
     {
         return RequestInteractiveCaptureAsync(
             recognizeTextAfterSelection: true,
@@ -107,12 +110,14 @@ public sealed class RegionCaptureCoordinator
             trackOrdinaryCaptureRegion: false,
             initialScreenSnapshot,
             pointerContinuation,
-            initialSelection: null);
+            initialSelection: null,
+            deferInitialColorPickerActivation);
     }
 
     public Task RequestTranslationCaptureAsync(
         CapturedImage? initialScreenSnapshot = null,
-        CapturePointerContinuation? pointerContinuation = null)
+        CapturePointerContinuation? pointerContinuation = null,
+        bool deferInitialColorPickerActivation = false)
     {
         return RequestInteractiveCaptureAsync(
             recognizeTextAfterSelection: false,
@@ -120,7 +125,8 @@ public sealed class RegionCaptureCoordinator
             trackOrdinaryCaptureRegion: false,
             initialScreenSnapshot,
             pointerContinuation,
-            initialSelection: null);
+            initialSelection: null,
+            deferInitialColorPickerActivation);
     }
 
     public event Action<bool>? CaptureStateChanged;
@@ -155,7 +161,12 @@ public sealed class RegionCaptureCoordinator
             try
             {
                 overlaySnapshot = await Task.Run(() =>
-                    ScreenCaptureService.Capture(VirtualScreen.GetBounds()));
+                {
+                    var snapshot = ScreenCaptureService.Capture(
+                        VirtualScreen.GetBounds());
+                    _ = snapshot.WarmPreview();
+                    return snapshot;
+                });
             }
             catch
             {
@@ -322,31 +333,75 @@ public sealed class RegionCaptureCoordinator
         bool trackOrdinaryCaptureRegion,
         CapturedImage? initialScreenSnapshot,
         CapturePointerContinuation? pointerContinuation,
-        ScreenRegion? initialSelection)
+        ScreenRegion? initialSelection,
+        bool deferInitialColorPickerActivation = false)
     {
+        using var timing = CaptureTimingDiagnostics.Begin(
+            "coordinator-interactive",
+            $"snapshot={(initialScreenSnapshot is not null)}");
         if (_isCaptureInProgress)
         {
             initialScreenSnapshot?.Dispose();
             return;
         }
 
-        SetCaptureInProgress(true);
+        using (CaptureTimingDiagnostics.Begin("set-capture-in-progress"))
+        {
+            SetCaptureInProgress(true);
+        }
         try
         {
-            if (initialScreenSnapshot is null)
+            var deferInitialScreenCapture =
+                deferInitialColorPickerActivation && initialScreenSnapshot is null;
+            if (initialScreenSnapshot is null &&
+                !deferInitialColorPickerActivation)
             {
+                CaptureTimingDiagnostics.Mark("before-capture-chrome-yield");
                 await WaitForCaptureChromeToHideAsync();
+                CaptureTimingDiagnostics.Mark("after-capture-chrome-yield");
             }
             var settings = _settingsProvider();
             // A hotkey can arrive before the low-level pre-capture worker has
             // finished. Capture the fallback snapshot off the dispatcher so a
             // cold/idle first wake-up never blocks the UI thread in GDI.
-            if (initialScreenSnapshot is null)
+            if (initialScreenSnapshot is null && !deferInitialScreenCapture)
             {
                 try
                 {
-                    initialScreenSnapshot = await Task.Run(() =>
-                        ScreenCaptureService.Capture(VirtualScreen.GetBounds()));
+                    CaptureTimingDiagnostics.Mark("before-gdi-capture");
+                    initialScreenSnapshot = await Task.Factory.StartNew(() =>
+                    {
+                        var previousPriority = Thread.CurrentThread.Priority;
+                        try
+                        {
+                            Thread.CurrentThread.Priority =
+                                ThreadPriority.BelowNormal;
+                        }
+                        catch
+                        {
+                        }
+
+                        try
+                        {
+                            using var captureTiming =
+                                CaptureTimingDiagnostics.Begin("gdi-capture-worker");
+                            var snapshot = ScreenCaptureService.Capture(
+                                VirtualScreen.GetBounds());
+                            _ = snapshot.WarmPreview();
+                            return snapshot;
+                        }
+                        finally
+                        {
+                            try
+                            {
+                                Thread.CurrentThread.Priority = previousPriority;
+                            }
+                            catch
+                            {
+                            }
+                        }
+                    }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                    CaptureTimingDiagnostics.Mark("after-gdi-capture");
                 }
                 catch
                 {
@@ -354,19 +409,24 @@ public sealed class RegionCaptureCoordinator
                     // the best-effort snapshot cannot be obtained.
                 }
             }
+            CaptureTimingDiagnostics.Mark("before-show-interactive");
             CaptureOverlayWindow.ShowInteractive(
                 new CaptureOverlayOptions
                 {
                     SaveDirectory = settings.SaveDirectory,
+                    PngSaveLocationMode = settings.PngSaveLocationMode,
+                    ScreenshotScalePercent = settings.ScreenshotScalePercent,
                     CompletionHotKey = settings.CompleteCaptureHotKey,
                     KeepHistory = true,
                     HistoryLimit = settings.HistoryLimit,
                     HistoryService = _historyService,
                     PinnedImageManager = _pinnedImageManager,
                     TranslationTargetLanguage = settings.TranslationTargetLanguage,
+                    RecognitionResultPresentation = settings.RecognitionResultPresentation,
                     StartOcrAsync = ShowOcrResultAndCompleteCaptureAsync,
                     RecognizeTextAsync = RecognizeTextAsync,
                     TranslateTextAsync = TranslateTextAsync,
+                    ShowRecognitionPopupAsync = ShowRecognitionPopupAsync,
                     RecognizeFormulaAsync = RecognizeFormulaAsync,
                     RecognizeTextAfterSelection = recognizeTextAfterSelection,
                     TranslateTextAfterSelection = translateTextAfterSelection,
@@ -390,6 +450,9 @@ public sealed class RegionCaptureCoordinator
                         settings.CaptureToolbarFeatureOrder.ToArray(),
                     ToolbarRows = settings.CaptureToolbarRows,
                     ToolbarScalePercent = settings.ToolbarScalePercent,
+                    DeferInitialColorPickerActivation =
+                        deferInitialColorPickerActivation,
+                    DeferInitialScreenCapture = deferInitialScreenCapture,
                     ArrowStyleChanged = _arrowStyleChanged,
                     ArrowToolModeChanged = _arrowToolModeChanged,
                     ShapeToolModeChanged = _shapeToolModeChanged,
@@ -417,7 +480,8 @@ public sealed class RegionCaptureCoordinator
 
     public async Task RequestPinCaptureAsync(
         CapturedImage? initialScreenSnapshot = null,
-        CapturePointerContinuation? pointerContinuation = null)
+        CapturePointerContinuation? pointerContinuation = null,
+        bool deferInitialColorPickerActivation = false)
     {
         if (_isCaptureInProgress)
         {
@@ -436,7 +500,8 @@ public sealed class RegionCaptureCoordinator
             {
                 selection = await CaptureOverlayWindow.SelectAsync(
                     pointerContinuation,
-                    overlaySnapshot);
+                    overlaySnapshot,
+                    deferInitialColorPickerActivation);
                 overlaySnapshot = null;
             }
             finally
@@ -659,6 +724,7 @@ public sealed class RegionCaptureCoordinator
                 progressWindow.ConfigureForCaptureRegion(initialRegion);
                 new System.Windows.Interop.WindowInteropHelper(progressWindow)
                     .EnsureHandle();
+                progressWindow.ExcludeFromScreenCapture();
                 progressWindow.TryPositionOutside(initialRegion);
                 // Position and size the preview before showing it. Showing the
                 // window first lets WPF place it at the default origin for one
@@ -683,6 +749,18 @@ public sealed class RegionCaptureCoordinator
                     // surface: click pauses/resumes and double-click reverses.
                     await scrollSelection.LockForScrollingAsync(
                         cancellationSource.Token);
+                    progressWindow.ConfigureForCaptureRegion(
+                        scrollSelection.CaptureRegion);
+                    progressWindow.TryPositionOutside(
+                        scrollSelection.CaptureRegion);
+                    // Capture the settled selection once after the drag has
+                    // completed. A full-screen GDI snapshot for every pointer
+                    // move made manual mode compete with high-report-rate
+                    // cursors and was unrelated to stitching.
+                    var settledSelectionImage = scrollSelection.CaptureSnapshot();
+                    var previousInitialImage = initialImage;
+                    initialImage = settledSelectionImage;
+                    previousInitialImage.Dispose();
                     using var wheelMonitor = new ScrollCaptureWheelMonitor(
                         initialRegion,
                         wheelDetected: null,
@@ -696,57 +774,30 @@ public sealed class RegionCaptureCoordinator
                         // automatic mode enters its state machine.
                         wheelMonitor.EnableControlledCaptureInput();
                     }
-                    var latestSelectionRegion = initialRegion;
-                    var selectionPreviewRefreshPending = false;
                     scrollSelection.CaptureRegionChanged += region =>
                     {
                         wheelMonitor.UpdateCaptureRegion(region);
-                        latestSelectionRegion = region;
-
-                        // Mouse move events can arrive much faster than WPF can
-                        // render. Coalesce the expensive snapshot and layout work
-                        // to one update per render pass while keeping the wheel hit
-                        // region current synchronously.
-                        if (selectionPreviewRefreshPending)
-                        {
-                            return;
-                        }
-
-                        selectionPreviewRefreshPending = true;
-                        _ = progressWindow.Dispatcher.BeginInvoke(
-                            DispatcherPriority.Render,
-                            () =>
-                            {
-                                selectionPreviewRefreshPending = false;
-
-                                if (!progressWindow.IsVisible ||
-                                    cancellationSource.IsCancellationRequested)
-                                {
-                                    return;
-                                }
-
-                                var currentRegion = latestSelectionRegion;
-                                progressWindow.ConfigureForCaptureRegion(currentRegion);
-                                progressWindow.TryPositionOutside(currentRegion);
-                                progressWindow.BringToFront();
-                                var previewImage = scrollSelection.CaptureSnapshot();
-                                var priorInitialImage = initialImage;
-                                initialImage = previewImage;
-                                priorInitialImage.Dispose();
-                                UpdateProgress(
-                                    progressWindow,
-                                    new ScrollCapturePreviewState(
-                                        previewImage.Preview,
-                                        1,
-                                        0,
-                                        0,
-                                        previewImage.Bitmap.Width,
-                                        previewImage.Bitmap.Height));
-                            });
                     };
 
                     ScrollCaptureTarget? target = null;
                     progressWindow.Owner = null;
+                    async Task SetProgressVisibilityAsync(
+                        bool isVisible,
+                        CancellationToken token)
+                    {
+                        if (cancellationSource.IsCancellationRequested)
+                        {
+                            return;
+                        }
+
+                        // The preview is marked WDA_EXCLUDEFROMCAPTURE, so it can
+                        // remain visible over wide selections without introducing
+                        // a hide/show flash or contaminating the captured image.
+                        await progressWindow.Dispatcher.InvokeAsync(
+                            progressWindow.BringToFront,
+                            DispatcherPriority.Send,
+                            token);
+                    }
                     await scrollSelection.SetVisibleAsync(
                         isVisible: false,
                         cancellationSource.Token);
@@ -816,8 +867,22 @@ public sealed class RegionCaptureCoordinator
                             wheelMonitor.WheelEvents,
                             previewChanged: previewState =>
                                 UpdateProgress(progressWindow, previewState),
+                            // The progress window is excluded from screen
+                            // capture. Passing a visibility callback here
+                            // would marshal every sampled frame through the
+                            // WPF dispatcher just to bring an already
+                            // visible window to the front. Manual mode
+                            // must leave the target's input/UI thread
+                            // untouched between wheel events.
+                            setPreviewVisibilityAsync: null,
                             throttleWheelInput: false,
-                            enableViewportMotionFallback: true,
+                            // Manual mode is driven exclusively by the
+                            // low-level wheel channel. Do not probe the
+                            // viewport while the pointer is idle: each
+                            // probe captures and clones the whole region,
+                            // which makes high-report-rate mouse movement
+                            // contend with GDI/bitmap memory bandwidth.
+                            enableViewportMotionFallback: false,
                             initialFrame: firstFrame,
                             cancellationToken: cancellationSource.Token);
                     }
@@ -849,6 +914,7 @@ public sealed class RegionCaptureCoordinator
                             },
                             previewChanged: previewState =>
                                 UpdateProgress(progressWindow, previewState),
+                            setProgressVisibilityAsync: SetProgressVisibilityAsync,
                             initialFrame: firstFrame,
                             cancellationToken: cancellationSource.Token);
                     }
@@ -888,7 +954,8 @@ public sealed class RegionCaptureCoordinator
                                 shapeToolModeChanged: _shapeToolModeChanged,
                                 lastAnnotationTool: settings.LastAnnotationTool,
                                 lastAnnotationToolChanged: _lastAnnotationToolChanged,
-                                recognizeTextAsync: RecognizeTextAsync);
+                                recognizeTextAsync: RecognizeTextAsync,
+                                pngSaveLocationMode: settings.PngSaveLocationMode);
                             editor.Show();
                             completedImage = null;
 
@@ -1002,7 +1069,8 @@ public sealed class RegionCaptureCoordinator
                 shapeToolModeChanged: _shapeToolModeChanged,
                 lastAnnotationTool: _settingsProvider().LastAnnotationTool,
                 lastAnnotationToolChanged: _lastAnnotationToolChanged,
-                recognizeTextAsync: RecognizeTextAsync);
+                recognizeTextAsync: RecognizeTextAsync,
+                pngSaveLocationMode: _settingsProvider().PngSaveLocationMode);
             editor.Show();
             preview.Close();
         };
@@ -1044,12 +1112,37 @@ public sealed class RegionCaptureCoordinator
         var result = await OcrProviderFactory.RecognizeAsync(
             capturedImage,
             settings);
+        if (settings.RecognitionResultPresentation ==
+            RecognitionResultPresentationMode.Popup)
+        {
+            await ShowRecognitionPopupAsync(
+                "已识别",
+                result.Text,
+                null);
+            return;
+        }
+
         var window = new OcrResultWindow(
             result,
             _settingsProvider,
             _translationCredentialStore,
             _httpClient);
         window.Show();
+    }
+
+    private Task ShowRecognitionPopupAsync(
+        string title,
+        string sourceText,
+        string? translatedText)
+    {
+        var window = new RecognitionResultPopupWindow(
+            title,
+            sourceText,
+            translatedText,
+            closeAfterCopy: true);
+        window.Show();
+        window.Activate();
+        return Task.CompletedTask;
     }
 
     private async Task RequestVideoRecordingFromSelectionAsync(
@@ -1221,10 +1314,6 @@ public sealed class RegionCaptureCoordinator
     private static async Task WaitForCaptureChromeToHideAsync()
     {
         await Dispatcher.Yield(DispatcherPriority.Render);
-        // The popup is closed synchronously before capture starts. One short
-        // compositor interval is enough for DWM to retire the hidden chrome;
-        // a long delay makes the desktop visibly blink between windows.
-        await Task.Delay(16);
     }
 
     private static void UpdateProgress(

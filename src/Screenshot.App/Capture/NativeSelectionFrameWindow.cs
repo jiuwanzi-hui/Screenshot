@@ -7,9 +7,9 @@ using DrawingPoint = System.Drawing.Point;
 namespace Screenshot.App.Capture;
 
 /// <summary>
-/// A small WinForms HWND used for the live selection border. The form is
-/// color-key transparent and paints only four border bands with GDI. This
-/// keeps the high-frequency drag path out of the full-screen WPF surface.
+/// A native layered HWND used for the live selection border. During a drag it
+/// is paired with the native region mask window; both are updated directly from
+/// the same polling sample without a dispatcher hop.
 /// </summary>
 internal sealed class NativeSelectionFrameWindow : Form
 {
@@ -18,32 +18,40 @@ internal sealed class NativeSelectionFrameWindow : Form
     private const long ExtendedStyleTransparent = 0x00000020L;
     private const long ExtendedStyleToolWindow = 0x00000080L;
     private const long ExtendedStyleNoActivate = 0x08000000L;
+    private const long ExtendedStyleLayered = 0x00080000L;
     private const int TopmostWindow = -1;
     private const uint DoNotActivate = 0x0010;
     private const uint DoNotChangeOwnerZOrder = 0x0200;
-    private const uint InvalidateErase = 0x0001;
+    private const uint NoMove = 0x0002;
+    private const uint NoSize = 0x0001;
     private const int ShowNormal = 5;
     private const int HideCommand = 0;
     private Color _borderStartColor = Color.FromArgb(91, 141, 239);
     private Color _borderEndColor = Color.FromArgb(91, 141, 239);
-    // Retained for compatibility with the previous layered implementation;
-    // the active path below uses the lighter color-key paint window.
     private readonly object _renderLock = new();
     private Bitmap? _layerBitmap;
     private Rectangle _layerBitmapBounds;
     private bool _maskEnabled;
     private NativeSelectionMaskWindow? _maskWindow;
     private Rectangle _maskSurface;
+    private Rectangle? _maskExcludedRegion;
+    private bool _borderVisible = true;
     private NativeSelectionSizeWindow? _sizeWindow;
     private bool _sizeEnabled;
     private readonly object _boundsLock = new();
     private Rectangle _lastBounds;
+    private long _boundsVersion;
+    private readonly object _auxiliaryUpdateLock = new();
+    private Rectangle _pendingAuxiliaryBounds;
+    private long _pendingAuxiliaryVersion;
+    private bool _auxiliaryUpdateScheduled;
 
     private bool _disposed;
     private CancellationTokenSource? _trackingCancellation;
     private Thread? _trackingThread;
     private Action? _trackingReleaseCallback;
     private bool _nativeMouseCaptured;
+    private readonly object _nativeUpdateLock = new();
 
     public NativeSelectionFrameWindow()
     {
@@ -53,8 +61,10 @@ internal sealed class NativeSelectionFrameWindow : Form
         ShowIcon = false;
         TopMost = true;
         ControlBox = false;
-        BackColor = Color.Magenta;
-        TransparencyKey = Color.Magenta;
+        // WinForms does not accept Color.Transparent as a control background.
+        // The layered bitmap supplies the actual alpha surface, so this value
+        // is only a fallback for the native window before its first update.
+        BackColor = Color.Black;
         _maskEnabled = false;
         Width = 1;
         Height = 1;
@@ -72,7 +82,8 @@ internal sealed class NativeSelectionFrameWindow : Form
             new IntPtr(style |
                        ExtendedStyleTransparent |
                        ExtendedStyleToolWindow |
-                       ExtendedStyleNoActivate));
+                       ExtendedStyleNoActivate |
+                       ExtendedStyleLayered));
     }
 
     public void SetBorderColor(Color color)
@@ -88,15 +99,26 @@ internal sealed class NativeSelectionFrameWindow : Form
         _maskSurface = surface;
     }
 
+    public void SetMaskExcludedRegion(Rectangle? region)
+    {
+        lock (_nativeUpdateLock)
+        {
+            _maskExcludedRegion = region;
+        }
+        RefreshMask();
+    }
+
     public void SetMaskEnabled(bool enabled)
     {
-        _maskEnabled = enabled;
-        if (!enabled)
+        lock (_nativeUpdateLock)
         {
-            _maskWindow?.HideMask();
-            return;
+            _maskEnabled = enabled;
+            if (!enabled)
+            {
+                _maskWindow?.HideMask();
+            }
+            _borderVisible = true;
         }
-
         RefreshMask();
     }
 
@@ -116,15 +138,87 @@ internal sealed class NativeSelectionFrameWindow : Form
         return bounds.Width > 0 && bounds.Height > 0;
     }
 
+    private long PublishBounds(Rectangle bounds)
+    {
+        lock (_boundsLock)
+        {
+            _lastBounds = bounds;
+            return ++_boundsVersion;
+        }
+    }
+
+    private bool IsCurrentBoundsVersion(long version)
+    {
+        lock (_boundsLock)
+        {
+            return _boundsVersion == version;
+        }
+    }
+
+    private static Rectangle GetRenderWindowBounds(Rectangle selectionBounds)
+    {
+        // Keep one extra device pixel on the right/bottom edges. GDI region
+        // rectangles are right/bottom exclusive, and a layered HWND whose
+        // size exactly matches the selection can otherwise lose the final
+        // border pixel during a resize commit.
+        return new Rectangle(
+            selectionBounds.X,
+            selectionBounds.Y,
+            Math.Max(1, selectionBounds.Width),
+            Math.Max(1, selectionBounds.Height));
+    }
+
+    private bool TryGetLastBoundsVersion(out Rectangle bounds, out long version)
+    {
+        lock (_boundsLock)
+        {
+            bounds = _lastBounds;
+            version = _boundsVersion;
+        }
+
+        return bounds.Width > 0 && bounds.Height > 0;
+    }
+
+    private void PositionLayeredWindow(Rectangle windowBounds)
+    {
+        windowBounds = new Rectangle(
+            windowBounds.X,
+            windowBounds.Y,
+            Math.Max(1, windowBounds.Width),
+            Math.Max(1, windowBounds.Height));
+        _ = SetWindowPos(
+            Handle,
+            new IntPtr(TopmostWindow),
+            0,
+            0,
+            0,
+            0,
+            // UpdateLayeredWindow commits the actual position and size along
+            // with the pixels. SetWindowPos only restores the native z-order,
+            // avoiding a visible resize/clear intermediate state.
+            DoNotActivate | DoNotChangeOwnerZOrder | NoMove | NoSize);
+    }
+
     public void RefreshMask()
     {
-        if (!_maskEnabled || _maskWindow is null ||
-            !TryGetLastBounds(out var bounds))
+        if (!TryGetLastBounds(out var bounds))
         {
             return;
         }
 
-        _maskWindow.Update(_maskSurface, bounds);
+        var windowBounds = GetRenderWindowBounds(bounds);
+        lock (_nativeUpdateLock)
+        {
+            if (IsHandleCreated)
+            {
+                PositionLayeredWindow(windowBounds);
+                RenderLayered(windowBounds, bounds);
+                if (_maskEnabled)
+                {
+                    _maskWindow?.UpdateNative(_maskSurface, bounds, _maskExcludedRegion, Handle);
+                }
+            }
+        }
     }
 
     public void AttachSizeWindow(NativeSelectionSizeWindow sizeWindow)
@@ -160,11 +254,14 @@ internal sealed class NativeSelectionFrameWindow : Form
             return;
         }
 
-        _borderStartColor = Color.FromArgb(startColor.R, startColor.G, startColor.B);
-        _borderEndColor = Color.FromArgb(endColor.R, endColor.G, endColor.B);
-        if (IsHandleCreated)
+        lock (_renderLock)
         {
-            _ = InvalidateRect(Handle, IntPtr.Zero, false);
+            _borderStartColor = Color.FromArgb(startColor.R, startColor.G, startColor.B);
+            _borderEndColor = Color.FromArgb(endColor.R, endColor.G, endColor.B);
+            if (IsHandleCreated && TryGetLastBounds(out var bounds))
+            {
+                RenderLayered(GetRenderWindowBounds(bounds), bounds);
+            }
         }
     }
 
@@ -175,40 +272,165 @@ internal sealed class NativeSelectionFrameWindow : Form
             return false;
         }
 
-        try
+        lock (_nativeUpdateLock)
         {
-            _ = SetWindowPos(
-                Handle,
-                new IntPtr(TopmostWindow),
-                bounds.X,
-                bounds.Y,
-                Math.Max(1, bounds.Width),
-                Math.Max(1, bounds.Height),
-                 DoNotActivate | DoNotChangeOwnerZOrder);
-            // Restrict the HWND to the painted border bands. The selection
-            // interior must remain owned by the WPF input surface so a click
-            // inside the region can start the move gesture.
-            UpdateInputRegion(Math.Max(1, bounds.Width), Math.Max(1, bounds.Height));
-            lock (_boundsLock)
+            try
             {
-                _lastBounds = bounds;
+                _borderVisible = true;
+                var windowBounds = GetRenderWindowBounds(bounds);
+                PositionLayeredWindow(windowBounds);
+                _ = PublishBounds(bounds);
+                RenderLayered(windowBounds, bounds);
+                if (_maskEnabled)
+                {
+                    _maskWindow?.UpdateNative(_maskSurface, bounds, _maskExcludedRegion, Handle);
+                }
+                if (_sizeEnabled)
+                {
+                    _sizeWindow?.SetDimensions(bounds.Width, bounds.Height);
+                    _sizeWindow?.Update(bounds);
+                }
+                PositionLayeredWindow(windowBounds);
+                _ = ShowWindow(Handle, ShowNormal);
+                return true;
             }
-            if (_maskEnabled)
+            catch
             {
-                _maskWindow?.Update(_maskSurface, bounds);
+                return false;
             }
-            if (_sizeEnabled)
-            {
-                _sizeWindow?.SetDimensions(bounds.Width, bounds.Height);
-                _sizeWindow?.Update(bounds);
-            }
-            _ = InvalidateRect(Handle, IntPtr.Zero, false);
-            _ = ShowWindow(Handle, ShowNormal);
-            return true;
         }
-        catch
+    }
+
+    // The high-frequency tracker runs on a dedicated thread. Keep that path
+    // limited to USER32/GDI operations on this HWND; the mask and size windows
+    // are owned by the UI thread and must not be touched from the polling loop.
+    private bool UpdateBorderOnly(Rectangle bounds)
+    {
+        if (_disposed || !IsHandleCreated)
         {
             return false;
+        }
+
+        lock (_nativeUpdateLock)
+        {
+            try
+            {
+                _borderVisible = true;
+                var windowBounds = GetRenderWindowBounds(bounds);
+                PositionLayeredWindow(windowBounds);
+                var version = PublishBounds(bounds);
+                RenderLayered(windowBounds, bounds);
+                if (_maskEnabled)
+                {
+                    _maskWindow?.UpdateNative(_maskSurface, bounds, _maskExcludedRegion, Handle);
+                }
+                QueueAuxiliaryWindowUpdate(bounds, version);
+                _ = ShowWindow(Handle, ShowNormal);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    private void QueueAuxiliaryWindowUpdate(Rectangle bounds, long version)
+    {
+        if (_disposed || !IsHandleCreated ||
+            (!_maskEnabled && !_sizeEnabled))
+        {
+            return;
+        }
+
+        lock (_auxiliaryUpdateLock)
+        {
+            _pendingAuxiliaryBounds = bounds;
+            _pendingAuxiliaryVersion = version;
+            if (_auxiliaryUpdateScheduled)
+            {
+                return;
+            }
+
+            _auxiliaryUpdateScheduled = true;
+        }
+
+        try
+        {
+            BeginInvoke(new Action(ApplyQueuedAuxiliaryWindowUpdate));
+        }
+        catch (InvalidOperationException)
+        {
+            lock (_auxiliaryUpdateLock)
+            {
+                _auxiliaryUpdateScheduled = false;
+            }
+        }
+    }
+
+    private void ApplyQueuedAuxiliaryWindowUpdate()
+    {
+        Rectangle bounds;
+        long version;
+        lock (_auxiliaryUpdateLock)
+        {
+            bounds = _pendingAuxiliaryBounds;
+            version = _pendingAuxiliaryVersion;
+            _auxiliaryUpdateScheduled = false;
+        }
+
+        if (_disposed || !IsHandleCreated || bounds.Width <= 0 ||
+            bounds.Height <= 0)
+        {
+            return;
+        }
+
+        // A release/final-commit can publish a newer rectangle while this
+        // callback is waiting in the dispatcher queue. Never let that old
+        // callback move the border back to the previous position.
+        if (!IsCurrentBoundsVersion(version))
+        {
+            if (TryGetLastBoundsVersion(out var currentBounds, out var currentVersion))
+            {
+                QueueAuxiliaryWindowUpdate(currentBounds, currentVersion);
+            }
+
+            return;
+        }
+
+        if (_sizeEnabled)
+        {
+            _sizeWindow?.SetDimensions(bounds.Width, bounds.Height);
+            _sizeWindow?.Update(bounds);
+        }
+
+        if (!IsCurrentBoundsVersion(version))
+        {
+            if (TryGetLastBoundsVersion(out var currentBounds, out var currentVersion))
+            {
+                QueueAuxiliaryWindowUpdate(currentBounds, currentVersion);
+            }
+
+            return;
+        }
+
+        Rectangle latestBounds = default;
+        long latestVersion = 0;
+        var hasNewerPendingUpdate = false;
+        lock (_auxiliaryUpdateLock)
+        {
+            if (_pendingAuxiliaryVersion != version)
+            {
+                latestBounds = _pendingAuxiliaryBounds;
+                latestVersion = _pendingAuxiliaryVersion;
+                _auxiliaryUpdateScheduled = false;
+                hasNewerPendingUpdate = true;
+            }
+        }
+
+        if (hasNewerPendingUpdate)
+        {
+            QueueAuxiliaryWindowUpdate(latestBounds, latestVersion);
         }
     }
 
@@ -225,16 +447,14 @@ internal sealed class NativeSelectionFrameWindow : Form
             return;
         }
 
-        _ = SetWindowPos(
-            Handle,
-            new IntPtr(TopmostWindow),
-            bounds.X,
-            bounds.Y,
-            Math.Max(1, bounds.Width),
-            Math.Max(1, bounds.Height),
-            DoNotActivate | DoNotChangeOwnerZOrder);
-        _ = ShowWindow(Handle, ShowNormal);
-        _ = UpdateWindow(Handle);
+        lock (_nativeUpdateLock)
+        {
+            var windowBounds = GetRenderWindowBounds(bounds);
+            PositionLayeredWindow(windowBounds);
+            _borderVisible = true;
+            RenderLayered(windowBounds, bounds);
+            _ = ShowWindow(Handle, ShowNormal);
+        }
         if (_sizeEnabled)
         {
             _sizeWindow?.EnsureVisible(bounds);
@@ -307,9 +527,12 @@ internal sealed class NativeSelectionFrameWindow : Form
         cancellation?.Dispose();
         if (hide && !_disposed && IsHandleCreated)
         {
-            _ = ShowWindow(Handle, HideCommand);
-            _maskWindow?.HideMask();
-            _sizeWindow?.HideSize();
+            lock (_nativeUpdateLock)
+            {
+                _ = ShowWindow(Handle, HideCommand);
+                _maskWindow?.HideMask();
+                _sizeWindow?.HideSize();
+            }
         }
     }
 
@@ -317,9 +540,12 @@ internal sealed class NativeSelectionFrameWindow : Form
     {
         if (!_disposed && IsHandleCreated)
         {
-            _ = ShowWindow(Handle, HideCommand);
-            _maskWindow?.HideMask();
-            _sizeWindow?.HideSize();
+            lock (_nativeUpdateLock)
+            {
+                _ = ShowWindow(Handle, HideCommand);
+                _maskWindow?.HideMask();
+                _sizeWindow?.HideSize();
+            }
         }
     }
 
@@ -327,25 +553,32 @@ internal sealed class NativeSelectionFrameWindow : Form
     {
         if (!_disposed && IsHandleCreated)
         {
-            _ = ShowWindow(Handle, HideCommand);
-            if (_maskEnabled && _maskWindow is not null &&
-                TryGetLastBounds(out var bounds))
+            lock (_nativeUpdateLock)
             {
-                _maskWindow.Update(_maskSurface, bounds);
+                // The border HWND must remain a selection-sized surface. Do
+                // not reuse it for the full-screen mask while the toolbar is
+                // being restored; changing its size/contents mid-gesture is
+                // what caused the border to disappear at the largest bounds.
+                _borderVisible = false;
+                _ = ShowWindow(Handle, HideCommand);
+                _sizeWindow?.HideSize();
             }
-            _sizeWindow?.HideSize();
         }
     }
 
     protected override void OnPaintBackground(PaintEventArgs e)
     {
-        e.Graphics.Clear(Color.Magenta);
+        // This HWND is exclusively painted by UpdateLayeredWindow. A normal
+        // WinForms paint can race the layered commit and briefly erase edges.
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        var width = ClientSize.Width;
-        var height = ClientSize.Height;
+        // Intentionally empty; see OnPaintBackground.
+    }
+
+    private void PaintFrame(Graphics graphics, int width, int height)
+    {
         if (width <= 0 || height <= 0)
         {
             return;
@@ -356,10 +589,10 @@ internal sealed class NativeSelectionFrameWindow : Form
             _borderStartColor,
             _borderEndColor,
             LinearGradientMode.Horizontal);
-        e.Graphics.FillRectangle(brush, 0, 0, width, Math.Min(FrameWidth, height));
-        e.Graphics.FillRectangle(brush, 0, Math.Max(0, height - FrameWidth), width, Math.Min(FrameWidth, height));
-        e.Graphics.FillRectangle(brush, 0, 0, Math.Min(FrameWidth, width), height);
-        e.Graphics.FillRectangle(brush, Math.Max(0, width - FrameWidth), 0, Math.Min(FrameWidth, width), height);
+        graphics.FillRectangle(brush, 0, 0, width, Math.Min(FrameWidth, height));
+        graphics.FillRectangle(brush, 0, Math.Max(0, height - FrameWidth), width, Math.Min(FrameWidth, height));
+        graphics.FillRectangle(brush, 0, 0, Math.Min(FrameWidth, width), height);
+        graphics.FillRectangle(brush, Math.Max(0, width - FrameWidth), 0, Math.Min(FrameWidth, width), height);
     }
 
     protected override void WndProc(ref Message message)
@@ -407,47 +640,60 @@ internal sealed class NativeSelectionFrameWindow : Form
             if (_maskEnabled)
             {
                 using var maskBrush = new SolidBrush(Color.FromArgb(72, 0, 0, 0));
-                graphics.FillRectangle(
-                    maskBrush,
-                    0,
-                    0,
-                    windowBounds.Width,
-                    Math.Max(0, selection.Top));
-                graphics.FillRectangle(
-                    maskBrush,
-                    0,
-                    Math.Min(windowBounds.Height, selection.Bottom),
-                    windowBounds.Width,
-                    Math.Max(0, windowBounds.Height - selection.Bottom));
-                graphics.FillRectangle(
-                    maskBrush,
-                    0,
-                    Math.Max(0, selection.Top),
-                    Math.Max(0, selection.Left),
-                    Math.Max(0, selection.Height));
-                graphics.FillRectangle(
-                    maskBrush,
-                    Math.Min(windowBounds.Width, selection.Right),
-                    Math.Max(0, selection.Top),
-                    Math.Max(0, windowBounds.Width - selection.Right),
-                    Math.Max(0, selection.Height));
+                using var maskRegion = new Region(new Rectangle(
+                    0, 0, windowBounds.Width, windowBounds.Height));
+                var clippedSelection = Rectangle.Intersect(
+                    new Rectangle(0, 0, windowBounds.Width, windowBounds.Height),
+                    selection);
+                if (!clippedSelection.IsEmpty)
+                {
+                    maskRegion.Exclude(clippedSelection);
+                }
+
+                if (_maskExcludedRegion is { } excluded)
+                {
+                    var excludedLocal = new Rectangle(
+                        excluded.Left - windowBounds.Left,
+                        excluded.Top - windowBounds.Top,
+                        excluded.Width,
+                        excluded.Height);
+                    var clippedExcluded = Rectangle.Intersect(
+                        new Rectangle(0, 0, windowBounds.Width, windowBounds.Height),
+                        excludedLocal);
+                    if (!clippedExcluded.IsEmpty)
+                    {
+                        maskRegion.Exclude(clippedExcluded);
+                    }
+                }
+
+                graphics.FillRegion(maskBrush, maskRegion);
             }
 
-            if (selection.Width > 0 && selection.Height > 0)
+            if (_borderVisible && selection.Width > 0 && selection.Height > 0)
             {
                 using var borderBrush = new LinearGradientBrush(
                     new Rectangle(0, 0, Math.Max(1, selection.Width), Math.Max(1, selection.Height)),
                     _borderStartColor,
                     _borderEndColor,
                     LinearGradientMode.Horizontal);
-                var left = selection.Left;
-                var top = selection.Top;
-                var right = Math.Min(windowBounds.Width, selection.Right);
-                var bottom = Math.Min(windowBounds.Height, selection.Bottom);
-                graphics.FillRectangle(borderBrush, left, top, Math.Min(FrameWidth, right - left), Math.Max(0, bottom - top));
-                graphics.FillRectangle(borderBrush, Math.Max(left, right - FrameWidth), top, Math.Min(FrameWidth, right - left), Math.Max(0, bottom - top));
-                graphics.FillRectangle(borderBrush, left, top, Math.Max(0, right - left), Math.Min(FrameWidth, bottom - top));
-                graphics.FillRectangle(borderBrush, left, Math.Max(top, bottom - FrameWidth), Math.Max(0, right - left), Math.Min(FrameWidth, bottom - top));
+                var outer = Rectangle.Intersect(
+                    new Rectangle(0, 0, windowBounds.Width, windowBounds.Height),
+                    selection);
+                if (!outer.IsEmpty)
+                {
+                    using var borderRegion = new Region(outer);
+                    var inner = outer;
+                    inner.Inflate(-FrameWidth, -FrameWidth);
+                    if (!inner.IsEmpty)
+                    {
+                        borderRegion.Exclude(inner);
+                    }
+
+                    // Fill one continuous ring instead of four independently
+                    // painted bands. The gradient then has one coordinate
+                    // system and cannot hard-cut at an edge or corner.
+                    graphics.FillRegion(borderBrush, borderRegion);
+                }
             }
 
             var screenPoint = new NativePoint { X = windowBounds.X, Y = windowBounds.Y };
@@ -462,6 +708,20 @@ internal sealed class NativeSelectionFrameWindow : Form
             };
             var screenDc = GetDC(IntPtr.Zero);
             var memoryDc = CreateCompatibleDC(screenDc);
+            if (screenDc == IntPtr.Zero || memoryDc == IntPtr.Zero)
+            {
+                if (memoryDc != IntPtr.Zero)
+                {
+                    _ = DeleteDC(memoryDc);
+                }
+
+                if (screenDc != IntPtr.Zero)
+                {
+                    _ = ReleaseDC(IntPtr.Zero, screenDc);
+                }
+
+                return;
+            }
             var bitmapHandle = _layerBitmap!.GetHbitmap(Color.FromArgb(0, 0, 0, 0));
             var previous = SelectObject(memoryDc, bitmapHandle);
             try
@@ -545,17 +805,27 @@ internal sealed class NativeSelectionFrameWindow : Form
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
                 var lastBounds = Rectangle.Empty;
                 var buttonWasDown = false;
+                var consecutiveButtonUpSamples = 0;
                 while (!cancellation.IsCancellationRequested && !_disposed)
                 {
                     var buttonIsDown = (GetAsyncKeyState(LeftButton) & unchecked((short)0x8000)) != 0;
                     if (buttonIsDown)
                     {
                         buttonWasDown = true;
+                        consecutiveButtonUpSamples = 0;
                     }
                     else if (buttonWasDown)
                     {
-                        _trackingReleaseCallback?.Invoke();
-                        break;
+                        // GetAsyncKeyState can briefly report an up state while
+                        // a high-report-rate device is paused or crosses the
+                        // native frame region. Do not finish the drag on one
+                        // sample; require a stable release window instead.
+                        consecutiveButtonUpSamples++;
+                        if (consecutiveButtonUpSamples >= 8)
+                        {
+                            _trackingReleaseCallback?.Invoke();
+                            break;
+                        }
                     }
 
                     if (stopwatch.ElapsedMilliseconds >= 1 &&
@@ -565,7 +835,7 @@ internal sealed class NativeSelectionFrameWindow : Form
                         var bounds = projection(new DrawingPoint(cursor.X, cursor.Y));
                         if (bounds != lastBounds)
                         {
-                            _ = Update(bounds);
+                            _ = UpdateBorderOnly(bounds);
                             lastBounds = bounds;
                         }
                     }
@@ -583,66 +853,6 @@ internal sealed class NativeSelectionFrameWindow : Form
             Name = "SnapCut native selection frame",
         };
         _trackingThread.Start();
-    }
-
-    private void UpdateInputRegion(int width, int height)
-    {
-        if (!IsHandleCreated || width <= 0 || height <= 0)
-        {
-            return;
-        }
-
-        var region = CreateRectRgn(0, 0, 0, 0);
-        try
-        {
-            AddRegion(region, new Rectangle(0, 0, width, Math.Min(FrameWidth, height)));
-            AddRegion(region, new Rectangle(
-                0,
-                Math.Max(0, height - FrameWidth),
-                width,
-                Math.Min(FrameWidth, height)));
-            AddRegion(region, new Rectangle(
-                0,
-                0,
-                Math.Min(FrameWidth, width),
-                height));
-            AddRegion(region, new Rectangle(
-                Math.Max(0, width - FrameWidth),
-                0,
-                Math.Min(FrameWidth, width),
-                height));
-            _ = SetWindowRgn(Handle, region, false);
-            region = IntPtr.Zero;
-        }
-        finally
-        {
-            if (region != IntPtr.Zero)
-            {
-                _ = DeleteObject(region);
-            }
-        }
-    }
-
-    private static void AddRegion(IntPtr destination, Rectangle rectangle)
-    {
-        if (rectangle.Width <= 0 || rectangle.Height <= 0)
-        {
-            return;
-        }
-
-        var source = CreateRectRgn(
-            rectangle.Left,
-            rectangle.Top,
-            rectangle.Right,
-            rectangle.Bottom);
-        try
-        {
-            _ = CombineRgn(destination, destination, source, 2);
-        }
-        finally
-        {
-            _ = DeleteObject(source);
-        }
     }
 
     private void BeginNativeMouseCapture()
@@ -695,35 +905,6 @@ internal sealed class NativeSelectionFrameWindow : Form
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr window, int command);
-
-    [DllImport("user32.dll")]
-    private static extern bool InvalidateRect(
-        IntPtr window,
-        IntPtr updateRectangle,
-        bool erase);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern int SetWindowRgn(
-        IntPtr window,
-        IntPtr region,
-        bool redraw);
-
-    [DllImport("gdi32.dll", SetLastError = true)]
-    private static extern IntPtr CreateRectRgn(
-        int left,
-        int top,
-        int right,
-        int bottom);
-
-    [DllImport("gdi32.dll", SetLastError = true)]
-    private static extern int CombineRgn(
-        IntPtr destination,
-        IntPtr source1,
-        IntPtr source2,
-        int mode);
-
-    [DllImport("user32.dll")]
-    private static extern bool UpdateWindow(IntPtr window);
 
     [DllImport("user32.dll")]
     private static extern IntPtr SetCapture(IntPtr window);

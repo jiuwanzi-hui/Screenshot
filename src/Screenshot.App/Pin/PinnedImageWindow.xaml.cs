@@ -300,21 +300,45 @@ public partial class PinnedImageWindow : Window
         }
     }
 
-    private void SaveCurrentImage()
+    private async void SaveCurrentImage()
     {
+        var settings = _settingsProvider?.Invoke();
+        var restoreAfterPicker = settings?.PngSaveLocationMode ==
+            PngSaveLocationMode.AskEveryTime &&
+            IsVisible;
         try
         {
             var image = _isEditorMode
                 ? InlineEditorCanvas.RenderEditedImage()
                 : _capturedImage.Preview;
+            if (restoreAfterPicker)
+            {
+                Hide();
+            }
+            var saveDirectory = await PngSaveLocationService.ResolveAsync(
+                settings?.PngSaveLocationMode ?? PngSaveLocationMode.DefaultDirectory,
+                settings?.SaveDirectory ?? AppMetadata.DefaultCaptureDirectory);
+            if (saveDirectory is null)
+            {
+                return;
+            }
+
             var path = CaptureFileService.SaveAsPng(
                 image,
-                AppMetadata.DefaultCaptureDirectory);
+                saveDirectory);
             HeaderStatusText.Text = $"钉图 · 已保存 {System.IO.Path.GetFileName(path)}";
         }
         catch
         {
             HeaderStatusText.Text = "钉图 · 保存失败";
+        }
+        finally
+        {
+            if (restoreAfterPicker && !_isClosed)
+            {
+                Show();
+                Activate();
+            }
         }
     }
 
@@ -347,6 +371,16 @@ public partial class PinnedImageWindow : Window
         if (!recognition.IsSuccess || recognition.Regions.Count == 0)
         {
             HeaderStatusText.Text = recognition.ErrorMessage ?? "未识别到文字";
+            return;
+        }
+
+        if (_settingsProvider?.Invoke().RecognitionResultPresentation ==
+            RecognitionResultPresentationMode.Popup)
+        {
+            ShowRecognitionPopup(
+                "钉图 · 已识别",
+                recognition.Text,
+                translatedText: null);
             return;
         }
 
@@ -1061,6 +1095,19 @@ public partial class PinnedImageWindow : Window
                     EstimatedFontSize = region.EstimatedFontSize,
                 })
                 .ToArray();
+
+            if (_settingsProvider?.Invoke().RecognitionResultPresentation ==
+                RecognitionResultPresentationMode.Popup)
+            {
+                ShowRecognitionPopup(
+                    "钉图 · 已翻译",
+                    recognition.Text,
+                    string.Join(
+                        Environment.NewLine,
+                        translation.Segments));
+                return;
+            }
+
             ShowTranslatedText();
         }
         catch
@@ -1099,6 +1146,24 @@ public partial class PinnedImageWindow : Window
         TranslateButton.Content = "原文";
         TranslateButton.ToolTip = "显示原始文字";
         TranslateButton.IsEnabled = true;
+    }
+
+    private void ShowRecognitionPopup(
+        string title,
+        string sourceText,
+        string? translatedText)
+    {
+        var popup = new RecognitionResultPopupWindow(
+            title,
+            sourceText,
+            translatedText,
+            closeAfterCopy: false)
+        {
+            Owner = this,
+            Topmost = true,
+        };
+        popup.Show();
+        popup.Activate();
     }
 
     private void OnImageViewportSizeChanged(

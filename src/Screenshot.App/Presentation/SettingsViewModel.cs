@@ -284,6 +284,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private AppSettings _baseSettings;
     private string _saveDirectory;
     private string _videoSaveDirectory;
+    private PngSaveLocationMode _pngSaveLocationMode;
+    private int _screenshotScalePercent;
     private bool _recordSystemAudio;
     private bool _recordMicrophone;
     private string? _microphoneDeviceId;
@@ -338,6 +340,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private bool _mouseSideButtonsUseLongPress;
     private string _ocrLanguageTag;
     private OcrEngineMode _ocrEngine;
+    private RecognitionResultPresentationMode _recognitionResultPresentation;
     private string _translationProvider;
     private string _translationEndpoint;
     private string _translationTargetLanguage;
@@ -353,6 +356,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _baseSettings = settings;
         _saveDirectory = settings.SaveDirectory;
         _videoSaveDirectory = settings.VideoSaveDirectory;
+        _pngSaveLocationMode = settings.PngSaveLocationMode;
+        _screenshotScalePercent = settings.ScreenshotScalePercent;
         _recordSystemAudio = settings.RecordSystemAudio;
         _recordMicrophone = settings.RecordMicrophone;
         _microphoneDeviceId = settings.MicrophoneDeviceId;
@@ -418,6 +423,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _mouseSideButtonsUseLongPress = settings.MouseSideButtonsUseLongPress;
         _ocrLanguageTag = settings.OcrLanguageTag;
         _ocrEngine = settings.OcrEngine;
+        _recognitionResultPresentation = settings.RecognitionResultPresentation;
         _translationProvider = TranslationProviderFactory.ResolveProviderId(
             settings.TranslationProvider);
         _translationEndpoint = settings.TranslationEndpoint;
@@ -455,6 +461,18 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     [
         new(nameof(OcrEngineMode.Windows), "Windows 系统识别（默认）"),
         new(nameof(OcrEngineMode.PaddleOcrV6), "PP-OCRv6 高质量识别"),
+    ];
+
+    public IReadOnlyList<SettingOption> RecognitionResultPresentationOptions { get; } =
+    [
+        new(nameof(RecognitionResultPresentationMode.Overlay), "覆盖原图（当前方式）"),
+        new(nameof(RecognitionResultPresentationMode.Popup), "独立弹窗（右下角）"),
+    ];
+
+    public IReadOnlyList<SettingOption> PngSaveLocationModeOptions { get; } =
+    [
+        new(nameof(PngSaveLocationMode.DefaultDirectory), "默认位置（截图保存目录）"),
+        new(nameof(PngSaveLocationMode.AskEveryTime), "每次保存时选择目录"),
     ];
 
     public IReadOnlyList<SettingOption> TranslationProviderOptions { get; } =
@@ -557,6 +575,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         get => _videoSaveDirectory;
         set => SetProperty(ref _videoSaveDirectory, value);
+    }
+
+    public PngSaveLocationMode PngSaveLocationMode
+    {
+        get => _pngSaveLocationMode;
+        set => SetProperty(ref _pngSaveLocationMode, value);
     }
 
     public bool RecordSystemAudio
@@ -827,6 +851,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _videoRecordingHotKey, value);
     }
 
+    public int ScreenshotScalePercent
+    {
+        get => _screenshotScalePercent;
+        set => SetProperty(ref _screenshotScalePercent, Math.Clamp(value, 25, 200));
+    }
+
     public AnnotationToolSetting[] AnnotationToolSettings
     {
         get => _annotationToolSettings;
@@ -905,6 +935,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _ocrEngine, value);
     }
 
+    public RecognitionResultPresentationMode RecognitionResultPresentation
+    {
+        get => _recognitionResultPresentation;
+        set => SetProperty(ref _recognitionResultPresentation, value);
+    }
+
     public string TranslationProvider
     {
         get => _translationProvider;
@@ -964,6 +1000,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         {
             SaveDirectory = SaveDirectory,
             VideoSaveDirectory = VideoSaveDirectory,
+            PngSaveLocationMode = PngSaveLocationMode,
+            ScreenshotScalePercent = ScreenshotScalePercent,
             RecordSystemAudio = RecordSystemAudio,
             RecordMicrophone = RecordMicrophone,
             MicrophoneDeviceId = MicrophoneDeviceId,
@@ -1033,6 +1071,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             MouseSideButtonsUseLongPress = MouseSideButtonsUseLongPress,
             OcrLanguageTag = OcrLanguageTag,
             OcrEngine = OcrEngine,
+            RecognitionResultPresentation = RecognitionResultPresentation,
             TranslationMode = TranslationMode.Automatic,
             SendTextToOnlineTranslation = true,
             TranslationProviderPriority = TranslationPriorityItems
@@ -1053,6 +1092,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _baseSettings = settings;
         SaveDirectory = settings.SaveDirectory;
         VideoSaveDirectory = settings.VideoSaveDirectory;
+        PngSaveLocationMode = settings.PngSaveLocationMode;
+        ScreenshotScalePercent = settings.ScreenshotScalePercent;
         RecordSystemAudio = settings.RecordSystemAudio;
         RecordMicrophone = settings.RecordMicrophone;
         MicrophoneDeviceId = settings.MicrophoneDeviceId;
@@ -1120,6 +1161,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         MouseSideButtonsUseLongPress = settings.MouseSideButtonsUseLongPress;
         OcrLanguageTag = settings.OcrLanguageTag;
         OcrEngine = settings.OcrEngine;
+        RecognitionResultPresentation = settings.RecognitionResultPresentation;
         SetTranslationProviderPriority(
             settings.ResolveTranslationProviderPriority());
         TranslationProvider = TranslationProviderFactory.ResolveProviderId(

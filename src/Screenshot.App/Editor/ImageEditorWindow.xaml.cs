@@ -20,6 +20,7 @@ public partial class ImageEditorWindow : Window
 {
     private CapturedImage _capturedImage;
     private readonly string _saveDirectory;
+    private readonly PngSaveLocationMode _pngSaveLocationMode;
     private readonly Action<ArrowStyle>? _arrowStyleChanged;
     private readonly Action<ArrowToolMode>? _arrowToolModeChanged;
     private readonly Action<ShapeToolMode>? _shapeToolModeChanged;
@@ -57,13 +58,15 @@ public partial class ImageEditorWindow : Window
         Action<ShapeToolMode>? shapeToolModeChanged = null,
         AnnotationToolMode lastAnnotationTool = AnnotationToolMode.Rectangle,
         Action<AnnotationToolMode>? lastAnnotationToolChanged = null,
-        Func<CapturedImage, Task<OcrRecognitionResult>>? recognizeTextAsync = null)
+        Func<CapturedImage, Task<OcrRecognitionResult>>? recognizeTextAsync = null,
+        PngSaveLocationMode pngSaveLocationMode = PngSaveLocationMode.DefaultDirectory)
     {
         ArgumentNullException.ThrowIfNull(capturedImage);
         ArgumentException.ThrowIfNullOrWhiteSpace(saveDirectory);
 
         _capturedImage = capturedImage;
         _saveDirectory = saveDirectory;
+        _pngSaveLocationMode = pngSaveLocationMode;
         _arrowStyle = Enum.IsDefined(arrowStyle)
             ? arrowStyle
             : ArrowStyle.Filled;
@@ -830,24 +833,47 @@ public partial class ImageEditorWindow : Window
         }
     }
 
-    private void OnSaveClick(object sender, RoutedEventArgs e)
+    private async void OnSaveClick(object sender, RoutedEventArgs e)
     {
         if (!_isInitialized)
         {
             StatusText.Text = "编辑画布仍在准备中。";
             return;
         }
+        var restoreAfterPicker = _pngSaveLocationMode ==
+            PngSaveLocationMode.AskEveryTime &&
+            IsVisible;
         try
         {
             var renderedImage = EditorCanvas.RenderEditedImage();
+            if (restoreAfterPicker)
+            {
+                Hide();
+            }
+            var saveDirectory = await PngSaveLocationService.ResolveAsync(
+                _pngSaveLocationMode,
+                _saveDirectory);
+            if (saveDirectory is null)
+            {
+                return;
+            }
+
             var savedPath = CaptureFileService.SaveAsPng(
                 renderedImage,
-                _saveDirectory);
+                saveDirectory);
             StatusText.Text = $"已保存到 {savedPath}";
         }
         catch
         {
             StatusText.Text = "保存失败，请检查保存位置和权限。";
+        }
+        finally
+        {
+            if (restoreAfterPicker && !_isClosed)
+            {
+                Show();
+                Activate();
+            }
         }
     }
 

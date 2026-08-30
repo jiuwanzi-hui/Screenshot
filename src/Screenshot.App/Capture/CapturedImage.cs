@@ -1,5 +1,6 @@
 ﻿using System.Drawing;
 using System.Drawing.Imaging;
+using System.Drawing.Drawing2D;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Media;
@@ -151,5 +152,38 @@ public sealed class CapturedImage : IDisposable
             _disposed = true;
             Bitmap.Dispose();
         }
+    }
+
+    public CapturedImage CreateScaled(int percent)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        percent = Math.Clamp(percent, 25, 200);
+        if (percent == 100)
+        {
+            return Clone();
+        }
+
+        var width = Math.Max(1, (int)Math.Round(Bitmap.Width * percent / 100d));
+        var height = Math.Max(1, (int)Math.Round(Bitmap.Height * percent / 100d));
+        var scaled = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
+        var dpiX = Bitmap.HorizontalResolution > 0 ? Bitmap.HorizontalResolution : 96;
+        var dpiY = Bitmap.VerticalResolution > 0 ? Bitmap.VerticalResolution : 96;
+        scaled.SetResolution(dpiX, dpiY);
+        using (var graphics = Graphics.FromImage(scaled))
+        {
+            graphics.CompositingMode = CompositingMode.SourceCopy;
+            graphics.Clear(System.Drawing.Color.Transparent);
+            graphics.CompositingMode = CompositingMode.SourceOver;
+            graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            graphics.SmoothingMode = SmoothingMode.HighQuality;
+            graphics.DrawImage(
+                Bitmap,
+                new Rectangle(0, 0, width, height),
+                new Rectangle(0, 0, Bitmap.Width, Bitmap.Height),
+                GraphicsUnit.Pixel);
+        }
+
+        return new CapturedImage(scaled, SourceRegion);
     }
 }

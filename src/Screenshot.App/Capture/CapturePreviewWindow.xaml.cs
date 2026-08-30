@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
+using Screenshot.App.Core;
 using Screenshot.App.Infrastructure;
 using DrawingRectangle = System.Drawing.Rectangle;
 
@@ -15,6 +16,7 @@ public partial class CapturePreviewWindow : Window
 
     private readonly CapturedImage _capturedImage;
     private readonly string _saveDirectory;
+    private readonly PngSaveLocationMode _pngSaveLocationMode;
     private readonly CaptureHistoryItem? _historyItem;
     private readonly bool _hasSavedPlacement;
     private bool _fitToWidth = true;
@@ -22,6 +24,7 @@ public partial class CapturePreviewWindow : Window
     private bool _fitUpdatePending;
     private bool _isApplyingFit;
     private bool _isPanning;
+    private bool _isClosed;
     private ScreenRegion? _pendingPositionRegion;
     private System.Windows.Point _panStartPoint;
     private double _panStartHorizontalOffset;
@@ -31,13 +34,15 @@ public partial class CapturePreviewWindow : Window
     public CapturePreviewWindow(
         CapturedImage capturedImage,
         string saveDirectory,
-        CaptureHistoryItem? historyItem)
+        CaptureHistoryItem? historyItem,
+        PngSaveLocationMode pngSaveLocationMode = PngSaveLocationMode.DefaultDirectory)
     {
         ArgumentNullException.ThrowIfNull(capturedImage);
         ArgumentException.ThrowIfNullOrWhiteSpace(saveDirectory);
 
         _capturedImage = capturedImage;
         _saveDirectory = saveDirectory;
+        _pngSaveLocationMode = pngSaveLocationMode;
         _historyItem = historyItem;
 
         InitializeComponent();
@@ -90,6 +95,7 @@ public partial class CapturePreviewWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _isClosed = true;
         EndPanning();
         SourceInitialized -= OnSourceInitialized;
         _capturedImage.Dispose();
@@ -457,19 +463,42 @@ public partial class CapturePreviewWindow : Window
         }
     }
 
-    private void OnSaveClick(object sender, RoutedEventArgs e)
+    private async void OnSaveClick(object sender, RoutedEventArgs e)
     {
+        var restoreAfterPicker = _pngSaveLocationMode ==
+            PngSaveLocationMode.AskEveryTime &&
+            IsVisible;
         try
         {
+            if (restoreAfterPicker)
+            {
+                Hide();
+            }
+            var saveDirectory = await PngSaveLocationService.ResolveAsync(
+                _pngSaveLocationMode,
+                _saveDirectory);
+            if (saveDirectory is null)
+            {
+                return;
+            }
+
             var savedPath = CaptureFileService.SaveAsPng(
                 _capturedImage,
-                _saveDirectory);
+                saveDirectory);
             _historyItem?.MarkSaved(savedPath);
             StatusText.Text = $"已保存到 {savedPath}";
         }
         catch (Exception)
         {
             StatusText.Text = "保存失败，请检查保存位置和权限。";
+        }
+        finally
+        {
+            if (restoreAfterPicker && !_isClosed)
+            {
+                Show();
+                Activate();
+            }
         }
     }
 

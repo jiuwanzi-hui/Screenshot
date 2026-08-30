@@ -242,6 +242,8 @@ public partial class FloatingCaptureWindow : Window
 
     public event EventHandler? AllScreensCaptureRequested;
 
+    public event EventHandler? PresetCaptureRequested;
+
     public event EventHandler? HistoryRequested;
 
     public event EventHandler? SettingsRequested;
@@ -713,6 +715,12 @@ public partial class FloatingCaptureWindow : Window
     {
         FeatureMenuPopup.IsOpen = false;
         AllScreensCaptureRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnPresetCaptureClick(object sender, RoutedEventArgs e)
+    {
+        FeatureMenuPopup.IsOpen = false;
+        PresetCaptureRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void OnHistoryClick(object sender, RoutedEventArgs e)

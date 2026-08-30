@@ -24,6 +24,8 @@ public partial class PinnedImageGroupWindow : Window
 {
     private static readonly DrawingBrush CompositeCheckerboardBrush =
         CreateCompositeCheckerboardBrush();
+    private readonly Func<AppSettings>? _settingsProvider;
+    private bool _isClosed;
 
     private sealed record CompositionResult(
         BitmapSource Image,
@@ -58,8 +60,11 @@ public partial class PinnedImageGroupWindow : Window
     private Thickness _restoreShellBorderThickness;
     private ContextMenu? _restoreContextMenu;
 
-    public PinnedImageGroupWindow(IReadOnlyList<PinnedImageWindow> members)
+    public PinnedImageGroupWindow(
+        IReadOnlyList<PinnedImageWindow> members,
+        Func<AppSettings>? settingsProvider = null)
     {
+        _settingsProvider = settingsProvider;
         InitializeComponent();
         SetMembers(members);
     }
@@ -176,6 +181,7 @@ public partial class PinnedImageGroupWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _isClosed = true;
         EndInlineEditorPanning();
         foreach (var member in _members)
         {
@@ -819,19 +825,43 @@ public partial class PinnedImageGroupWindow : Window
             ? InlineEditorCanvas.RenderEditedImage()
             : CompositePreview;
 
-    private void SaveCurrentImage()
+    private async void SaveCurrentImage()
     {
+        var settings = _settingsProvider?.Invoke();
+        var restoreAfterPicker = settings?.PngSaveLocationMode ==
+            PngSaveLocationMode.AskEveryTime &&
+            IsVisible;
         try
         {
+            if (restoreAfterPicker)
+            {
+                Hide();
+            }
+            var saveDirectory = await PngSaveLocationService.ResolveAsync(
+                settings?.PngSaveLocationMode ?? PngSaveLocationMode.DefaultDirectory,
+                settings?.SaveDirectory ?? AppMetadata.DefaultCaptureDirectory);
+            if (saveDirectory is null)
+            {
+                return;
+            }
+
             var path = CaptureFileService.SaveAsPng(
                 GetCurrentToolbarImage(),
-                AppMetadata.DefaultCaptureDirectory);
+                saveDirectory);
             HeaderStatusText.Text =
                 $"钉图编组 · 已保存 {System.IO.Path.GetFileName(path)}";
         }
         catch
         {
             HeaderStatusText.Text = "钉图编组 · 保存失败";
+        }
+        finally
+        {
+            if (restoreAfterPicker && !_isClosed)
+            {
+                Show();
+                Activate();
+            }
         }
     }
 
