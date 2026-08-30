@@ -1,0 +1,6 @@
+title: "SnapCut 社区讨论"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎讨论 SnapCut 的使用、功能建议和版本反馈。可复现的缺陷请使用 Issues 中的 Bug report 模板。

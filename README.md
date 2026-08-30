@@ -6,6 +6,7 @@
 [![GitHub downloads](https://img.shields.io/github/downloads/jiuwanzi-hui/Screenshot/total?style=flat-square&label=downloads)](https://github.com/jiuwanzi-hui/Screenshot/releases)
 [![GitHub issues](https://img.shields.io/github/issues/jiuwanzi-hui/Screenshot?style=flat-square)](https://github.com/jiuwanzi-hui/Screenshot/issues)
 [![GitHub stars](https://img.shields.io/github/stars/jiuwanzi-hui/Screenshot?style=flat-square)](https://github.com/jiuwanzi-hui/Screenshot/stargazers)
+[![GitHub Discussions](https://img.shields.io/github/discussions/jiuwanzi-hui/Screenshot?style=flat-square&label=discussions)](https://github.com/jiuwanzi-hui/Screenshot/discussions)
 [![Windows 10 | 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows11)](https://www.microsoft.com/windows)
 [![macOS preview](https://img.shields.io/badge/macOS-preview-7657FF?style=flat-square&logo=apple)](src/SnapCut.Mac/README.md)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4?style=flat-square&logo=dotnet)](https://dotnet.microsoft.com/)
@@ -13,6 +14,8 @@
 [![Gitee mirror](https://img.shields.io/badge/Gitee-国内镜像-C71D23?style=flat-square&logo=gitee)](https://gitee.com/wwangyunhui/screenshot)
 
 ![SnapCut icon](src/Screenshot.App/Assets/Screenshot.png)
+
+> Windows 截图、长截图、区域录屏、钉图、标注、OCR 和翻译，集中在一条快捷工作流中。欢迎通过 [Discussions](https://github.com/jiuwanzi-hui/Screenshot/discussions) 分享使用体验或建议；可复现缺陷请提交 [Issue](https://github.com/jiuwanzi-hui/Screenshot/issues)。
 
 ## 简体中文
 
