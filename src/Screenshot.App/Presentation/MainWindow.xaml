@@ -603,6 +603,16 @@
                         </StackPanel>
                     </Grid>
 
+                    <CheckBox MinHeight="30"
+                              Margin="0,12,0,0"
+                              FontSize="14"
+                              Foreground="{DynamicResource AppTextPrimaryBrush}"
+                              IsChecked="{Binding AutoSaveOnComplete}"
+                              Checked="OnImmediateSettingChanged"
+                              Unchecked="OnImmediateSettingChanged"
+                              Content="完成截图后自动保存 PNG"
+                              ToolTip="点击完成按钮或使用完成截图快捷键后，按 PNG 保存位置设置保存截图" />
+
                     <TextBlock Margin="0,15,0,0"
                                Style="{StaticResource GeneralFieldLabel}"
                                Text="视频保存位置" />

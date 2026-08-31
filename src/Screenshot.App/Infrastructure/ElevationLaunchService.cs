@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
 using System.Security.Principal;
+using System.Text;
 using Screenshot.App.Core;
 
 namespace Screenshot.App.Infrastructure;
@@ -17,7 +19,7 @@ public sealed record ElevationLaunchResult(
 public sealed class ElevationLaunchService
 {
     public const string ElevatedRelaunchArgument = "--elevated-relaunch";
-    public const string PersistentElevationTaskName = "SnapCut.Elevated";
+    public const string LegacyPersistentElevationTaskName = "SnapCut.Elevated";
 
     private readonly Func<bool> _isElevated;
     private readonly Func<string?> _processPathProvider;
@@ -119,8 +121,9 @@ public sealed class ElevationLaunchService
         try
         {
             var startInfo = CreateSchtasksStartInfo("/Create");
+            var taskName = GetPersistentElevationTaskName(processPath);
             startInfo.ArgumentList.Add("/TN");
-            startInfo.ArgumentList.Add(PersistentElevationTaskName);
+            startInfo.ArgumentList.Add(taskName);
             startInfo.ArgumentList.Add("/SC");
             startInfo.ArgumentList.Add("ONCE");
             startInfo.ArgumentList.Add("/ST");
@@ -139,7 +142,16 @@ public sealed class ElevationLaunchService
             // The task is intentionally enabled: Windows refuses to execute
             // a disabled task through `schtasks /Run`. Its future schedule
             // prevents an additional automatic launch at logon.
-            return RunSchtasks(startInfo);
+            var created = RunSchtasks(startInfo);
+            if (created)
+            {
+                // Older builds used a global task name whose action could
+                // point at a different checkout. Remove that stale alias
+                // after the path-specific task has been created.
+                TryRemoveTask(LegacyPersistentElevationTaskName);
+            }
+
+            return created;
         }
         catch
         {
@@ -165,16 +177,21 @@ public sealed class ElevationLaunchService
         try
         {
             var queryInfo = CreateSchtasksStartInfo("/Query");
+            var taskName = GetPersistentElevationTaskName(processPath);
             queryInfo.ArgumentList.Add("/TN");
-            queryInfo.ArgumentList.Add(PersistentElevationTaskName);
-            if (!RunSchtasks(queryInfo))
+            queryInfo.ArgumentList.Add(taskName);
+            var taskXml = ReadSchtasksOutput(queryInfo);
+            if (taskXml is null ||
+                !taskXml.Contains(
+                    Path.GetFullPath(processPath),
+                    StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
 
             var runInfo = CreateSchtasksStartInfo("/Run");
             runInfo.ArgumentList.Add("/TN");
-            runInfo.ArgumentList.Add(PersistentElevationTaskName);
+            runInfo.ArgumentList.Add(taskName);
             if (!RunSchtasks(runInfo))
             {
                 return false;
@@ -192,20 +209,36 @@ public sealed class ElevationLaunchService
         }
     }
 
-    public static bool TryRemovePersistentElevationTask()
+    public static bool TryRemovePersistentElevationTask(string? processPath = null)
     {
+        var removed = false;
         try
         {
-            var startInfo = CreateSchtasksStartInfo("/Delete");
-            startInfo.ArgumentList.Add("/TN");
-            startInfo.ArgumentList.Add(PersistentElevationTaskName);
-            startInfo.ArgumentList.Add("/F");
-            return RunSchtasks(startInfo);
+            if (!string.IsNullOrWhiteSpace(processPath))
+            {
+                removed = TryRemoveTask(GetPersistentElevationTaskName(processPath));
+            }
+
+            // Also remove the pre-3.7.9 global alias. It is unsafe because it
+            // has no relationship to the executable that is being launched.
+            removed = TryRemoveTask(LegacyPersistentElevationTaskName) || removed;
+            return removed;
         }
         catch
         {
             return false;
         }
+    }
+
+    public static string GetPersistentElevationTaskName(string processPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(processPath);
+
+        var fullPath = Path.GetFullPath(processPath);
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(
+            fullPath.ToUpperInvariant()));
+        var suffix = Convert.ToHexString(digest.AsSpan(0, 6));
+        return $"SnapCut.Elevated.{suffix}";
     }
 
     public static ProcessStartInfo CreateElevatedStartInfo(
@@ -284,6 +317,43 @@ public sealed class ElevationLaunchService
         }
 
         return process.ExitCode == 0;
+    }
+
+    private static string? ReadSchtasksOutput(ProcessStartInfo startInfo)
+    {
+        startInfo.RedirectStandardOutput = true;
+        startInfo.RedirectStandardError = true;
+
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            return null;
+        }
+
+        var output = process.StandardOutput.ReadToEnd();
+        _ = process.StandardError.ReadToEnd();
+        if (!process.WaitForExit(3000) || process.ExitCode != 0)
+        {
+            return null;
+        }
+
+        return output;
+    }
+
+    private static bool TryRemoveTask(string taskName)
+    {
+        try
+        {
+            var startInfo = CreateSchtasksStartInfo("/Delete");
+            startInfo.ArgumentList.Add("/TN");
+            startInfo.ArgumentList.Add(taskName);
+            startInfo.ArgumentList.Add("/F");
+            return RunSchtasks(startInfo);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool WaitForReplacementProcess(string processPath)

@@ -15,6 +15,7 @@ namespace Screenshot.App;
 
 public partial class App : System.Windows.Application, IDisposable
 {
+    private const string SingleInstanceName = "Screenshot.App";
     internal const long MaximumCrashLogSizeBytes = 10 * 1024 * 1024;
     private static readonly Encoding CrashLogEncoding = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false);
@@ -35,12 +36,21 @@ public partial class App : System.Windows.Application, IDisposable
     private AppSettings _currentSettings = AppSettings.CreateDefault();
     private bool _isShuttingDown;
     private bool _isCaptureInProgress;
+    private long _captureStateNotificationVersion;
+    private long _appliedCaptureStateNotificationVersion;
     private bool _startupCompleted;
+
+    internal bool IsCaptureInProgressForDiagnostics => _isCaptureInProgress;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         WpfRenderingCompatibility.ConfigureForCurrentSession();
         base.OnStartup(e);
+#if DEBUG
+        AppDomain.CurrentDomain.UnhandledException += OnDebugUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnDebugUnobservedTaskException;
+        AppDomain.CurrentDomain.ProcessExit += OnDebugProcessExit;
+#endif
         TrimCrashLogIfOversized();
         DispatcherUnhandledException += OnDispatcherUnhandledException;
 
@@ -58,7 +68,7 @@ public partial class App : System.Windows.Application, IDisposable
             "app-startup",
             $"pid={Environment.ProcessId} base={AppContext.BaseDirectory} background={startInBackground}");
         _singleInstanceCoordinator = SingleInstanceCoordinator.TryAcquire(
-            "Screenshot.App",
+            SingleInstanceName,
             RequestPrimaryWindowActivation,
             signalExistingInstance: !startInBackground);
         if (_singleInstanceCoordinator is null)
@@ -90,6 +100,7 @@ public partial class App : System.Windows.Application, IDisposable
                 elevatedProcessPath);
         }
 
+#if !DEBUG
         if (elevationLaunchService.ShouldRequestElevation(elevationSettings, e.Args))
         {
             // Release the per-session instance event before either the
@@ -120,7 +131,7 @@ public partial class App : System.Windows.Application, IDisposable
             }
 
             _singleInstanceCoordinator = SingleInstanceCoordinator.TryAcquire(
-                "Screenshot.App",
+                SingleInstanceName,
                 RequestPrimaryWindowActivation,
                 signalExistingInstance: !startInBackground);
             if (_singleInstanceCoordinator is null)
@@ -129,6 +140,7 @@ public partial class App : System.Windows.Application, IDisposable
                 return;
             }
         }
+#endif
         var elevationWarning = elevationResult.Warning;
 
         var dataMigrationResult = InstalledDataMigration.TryMigrateLegacyData();
@@ -396,9 +408,44 @@ public partial class App : System.Windows.Application, IDisposable
 
     protected override void OnExit(ExitEventArgs e)
     {
+#if DEBUG
+        CaptureTimingDiagnostics.Mark(
+            "app-exit",
+            $"code={e.ApplicationExitCode} shuttingDown={_isShuttingDown} " +
+            $"capture={_isCaptureInProgress}");
+#endif
         Dispose();
         base.OnExit(e);
     }
+
+#if DEBUG
+    private static void OnDebugUnhandledException(
+        object sender,
+        UnhandledExceptionEventArgs e)
+    {
+        var exception = e.ExceptionObject as Exception;
+        CaptureTimingDiagnostics.Mark(
+            "appdomain-unhandled",
+            $"terminating={e.IsTerminating} exception={exception}");
+    }
+
+    private static void OnDebugUnobservedTaskException(
+        object? sender,
+        UnobservedTaskExceptionEventArgs e)
+    {
+        CaptureTimingDiagnostics.Mark(
+            "task-unobserved",
+            $"exception={e.Exception}");
+        e.SetObserved();
+    }
+
+    private static void OnDebugProcessExit(
+        object? sender,
+        EventArgs e)
+    {
+        CaptureTimingDiagnostics.Mark("process-exit");
+    }
+#endif
 
     /// <summary>
     /// A background-resident tool must survive a failure in one interaction:
@@ -715,6 +762,19 @@ public partial class App : System.Windows.Application, IDisposable
         if (ReferenceEquals(sender, _floatingCaptureWindow))
         {
             _floatingCaptureWindow = null;
+
+            // A transient close must not permanently remove the background
+            // control. Explicit user closure updates settings separately;
+            // only recreate here when the configured feature is still on and
+            // no capture is active.
+            if (!_isShuttingDown &&
+                !_isCaptureInProgress &&
+                _currentSettings.ShowFloatingCaptureButton)
+            {
+                _ = Dispatcher.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                    new Action(UpdateFloatingCaptureWindow));
+            }
         }
     }
 
@@ -730,20 +790,86 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void OnCaptureStateChanged(bool isInProgress)
     {
+        var notificationVersion = Interlocked.Increment(
+            ref _captureStateNotificationVersion);
+        CaptureTimingDiagnostics.Mark(
+            "capture-state-notified",
+            $"inProgress={isInProgress} version={notificationVersion}");
         using var timing = CaptureTimingDiagnostics.Begin(
             "app-capture-state",
-            $"inProgress={isInProgress}");
+            $"inProgress={isInProgress} version={notificationVersion}");
         if (!Dispatcher.CheckAccess())
         {
             _ = Dispatcher.BeginInvoke(
-                () => OnCaptureStateChanged(isInProgress));
+                () => ApplyCaptureStateChanged(
+                    isInProgress,
+                    notificationVersion));
             return;
         }
 
+        ApplyCaptureStateChanged(isInProgress, notificationVersion);
+    }
+
+    private void ApplyCaptureStateChanged(
+        bool isInProgress,
+        long notificationVersion)
+    {
+        if (notificationVersion < _appliedCaptureStateNotificationVersion)
+        {
+            CaptureTimingDiagnostics.Mark(
+                "capture-state-stale",
+                $"inProgress={isInProgress} version={notificationVersion} " +
+                $"applied={_appliedCaptureStateNotificationVersion}");
+            return;
+        }
+
+        _appliedCaptureStateNotificationVersion = notificationVersion;
         _isCaptureInProgress = isInProgress;
-        _hotKeyManager?.SetCaptureOverlayActive(isInProgress);
-        VideoRecordingControlWindow.SetCaptureInteractionActive(isInProgress);
-        _floatingCaptureWindow?.SetCaptureInProgress(isInProgress);
+        CaptureTimingDiagnostics.Mark(
+            "capture-state-applied",
+            $"inProgress={isInProgress} version={notificationVersion} " +
+            $"floatingVisible={_floatingCaptureWindow?.IsVisible}");
+        // State cleanup must continue even if one optional subscriber has a
+        // stale native handle during overlay teardown.
+        try
+        {
+            _hotKeyManager?.SetCaptureOverlayActive(isInProgress);
+        }
+        catch (Exception)
+        {
+            // A stale native hook must not prevent the rest of the teardown.
+        }
+
+        try
+        {
+            VideoRecordingControlWindow.SetCaptureInteractionActive(isInProgress);
+        }
+        catch (Exception)
+        {
+            // A closing recording window must not strand capture state.
+        }
+
+        if (_floatingCaptureWindow is null &&
+            !isInProgress &&
+            !_isShuttingDown &&
+            _currentSettings.ShowFloatingCaptureButton)
+        {
+            UpdateFloatingCaptureWindow();
+            CaptureTimingDiagnostics.Mark("floating-recreated-after-capture");
+        }
+        else
+        {
+            try
+            {
+                _floatingCaptureWindow?.SetCaptureInProgress(isInProgress);
+            }
+            catch (Exception)
+            {
+                // The window may be in its Closed callback; recovery is
+                // retried by the normal floating-window lifecycle path.
+                CaptureTimingDiagnostics.Mark("floating-state-apply-failed");
+            }
+        }
     }
 
     private void OnFloatingRepeatCaptureRequested(object? sender, EventArgs e)
@@ -923,6 +1049,7 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void OnHotKeyPressed(object? sender, HotKeyPressedEventArgs e)
     {
+        CaptureTimingDiagnostics.BeginInputWindow($"hotkey action={e.Action}");
         CaptureTimingDiagnostics.Mark("hotkey-handler", $"action={e.Action}");
         if (_mainWindow?.IsCapturingHotKey == true)
         {
@@ -935,7 +1062,10 @@ public partial class App : System.Windows.Application, IDisposable
                 app.RequestRegionCapture(
                     snapshot,
                     continuation,
-                    deferInitialColorPickerActivation: true));
+                    // Keyboard shortcuts acquire the first frame in the
+                    // overlay worker so the input dispatcher never waits on GDI.
+                    deferInitialColorPickerActivation:
+                        continuation is null));
         }
         else if (e.Action == HotKeyAction.CompleteCapture)
         {
@@ -947,7 +1077,8 @@ public partial class App : System.Windows.Application, IDisposable
                 app.RequestTranslationCapture(
                     snapshot,
                     continuation,
-                    deferInitialColorPickerActivation: true));
+                    deferInitialColorPickerActivation:
+                        continuation is null));
         }
         else if (e.Action == HotKeyAction.PinImage)
         {
@@ -955,7 +1086,8 @@ public partial class App : System.Windows.Application, IDisposable
                 app.RequestPinCapture(
                     snapshot,
                     continuation,
-                    deferInitialColorPickerActivation: true));
+                    deferInitialColorPickerActivation:
+                        continuation is null));
         }
         else if (e.Action == HotKeyAction.ScrollCapture)
         {
@@ -1021,9 +1153,9 @@ public partial class App : System.Windows.Application, IDisposable
             return;
         }
 
-        _ = Dispatcher.BeginInvoke(
-            System.Windows.Threading.DispatcherPriority.Send,
-            new Action(ShowMainWindow));
+        // A second executable launch is only an instance-presence check. It
+        // must never turn a background/tray launch into a settings window;
+        // the user can open settings explicitly from the tray or hotkey.
     }
 
     private async Task TranslateSelectedTextAsync()

@@ -71,6 +71,7 @@ public partial class PinnedImageWindow : Window
     private CornerRadius _restoreShellCornerRadius;
     private System.Windows.Media.Effects.Effect? _restoreShellEffect;
     private ContextMenu? _restoreContextMenu;
+    private readonly NativeWindowDragTracker _windowDragTracker;
 
     public PinnedImageWindow(
         CapturedImage capturedImage,
@@ -98,6 +99,7 @@ public partial class PinnedImageWindow : Window
         _shapeToolModeChanged = shapeToolModeChanged;
         _lastAnnotationToolChanged = lastAnnotationToolChanged;
         InitializeComponent();
+        _windowDragTracker = new NativeWindowDragTracker(this, EndWindowDrag);
         DataContext = _capturedImage;
         TranslateButton.IsEnabled = false;
         ApplyInitialSize();
@@ -245,6 +247,7 @@ public partial class PinnedImageWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _isClosed = true;
+        _windowDragTracker.Stop();
         EndInlineEditorPanning();
         SourceInitialized -= OnSourceInitialized;
         Loaded -= OnLoaded;
@@ -939,6 +942,28 @@ public partial class PinnedImageWindow : Window
     private void OnImageLostMouseCapture(object sender, WpfMouseEventArgs e) =>
         EndThumbnailDrag();
 
+    private void OnWindowPreviewMouseMove(object sender, WpfMouseEventArgs e)
+    {
+        if (_windowDragTracker.IsActive)
+        {
+            e.Handled = true;
+        }
+    }
+
+    private void OnWindowPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (!_windowDragTracker.IsActive)
+        {
+            return;
+        }
+
+        EndWindowDrag();
+        e.Handled = true;
+    }
+
+    private void OnWindowLostMouseCapture(object sender, WpfMouseEventArgs e) =>
+        EndWindowDrag();
+
     private WpfPoint GetCurrentScreenCursorPosition()
     {
         var cursor = System.Windows.Forms.Cursor.Position;
@@ -1537,8 +1562,13 @@ public partial class PinnedImageWindow : Window
             return;
         }
 
-        DragMove();
+        _windowDragTracker.Start();
         e.Handled = true;
+    }
+
+    private void EndWindowDrag()
+    {
+        _windowDragTracker.Stop();
     }
 
     private void OnResizeEdgeDragDelta(object sender, DragDeltaEventArgs e)

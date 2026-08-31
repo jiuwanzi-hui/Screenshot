@@ -398,7 +398,7 @@
     </Window.Resources>
             <Grid x:Name="CaptureSurface"
           Background="Transparent"
-          Cursor="Cross"
+          Cursor="Arrow"
           Focusable="True"
            KeyDown="OnCaptureSurfaceKeyDown"
            Loaded="OnCaptureSurfaceLoaded"

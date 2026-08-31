@@ -415,6 +415,7 @@ public sealed class RegionCaptureCoordinator
                 {
                     SaveDirectory = settings.SaveDirectory,
                     PngSaveLocationMode = settings.PngSaveLocationMode,
+                    AutoSaveOnComplete = settings.AutoSaveOnComplete,
                     ScreenshotScalePercent = settings.ScreenshotScalePercent,
                     CompletionHotKey = settings.CompleteCaptureHotKey,
                     KeepHistory = true,
@@ -724,7 +725,6 @@ public sealed class RegionCaptureCoordinator
                 progressWindow.ConfigureForCaptureRegion(initialRegion);
                 new System.Windows.Interop.WindowInteropHelper(progressWindow)
                     .EnsureHandle();
-                progressWindow.ExcludeFromScreenCapture();
                 progressWindow.TryPositionOutside(initialRegion);
                 // Position and size the preview before showing it. Showing the
                 // window first lets WPF place it at the default origin for one
@@ -749,18 +749,10 @@ public sealed class RegionCaptureCoordinator
                     // surface: click pauses/resumes and double-click reverses.
                     await scrollSelection.LockForScrollingAsync(
                         cancellationSource.Token);
-                    progressWindow.ConfigureForCaptureRegion(
-                        scrollSelection.CaptureRegion);
-                    progressWindow.TryPositionOutside(
-                        scrollSelection.CaptureRegion);
-                    // Capture the settled selection once after the drag has
-                    // completed. A full-screen GDI snapshot for every pointer
-                    // move made manual mode compete with high-report-rate
-                    // cursors and was unrelated to stitching.
-                    var settledSelectionImage = scrollSelection.CaptureSnapshot();
-                    var previousInitialImage = initialImage;
-                    initialImage = settledSelectionImage;
-                    previousInitialImage.Dispose();
+                    // Locking the selection refreshes the native full-screen
+                    // mask and can move that HWND above the WPF preview. Put
+                    // the preview back on top after the final mask update.
+                    progressWindow.BringToFront();
                     using var wheelMonitor = new ScrollCaptureWheelMonitor(
                         initialRegion,
                         wheelDetected: null,
@@ -781,6 +773,10 @@ public sealed class RegionCaptureCoordinator
 
                     ScrollCaptureTarget? target = null;
                     progressWindow.Owner = null;
+                    // Changing Owner can reset WPF's native z-order. Reassert
+                    // topmost after detaching from the full-screen overlay so
+                    // the preview remains visible during target discovery.
+                    progressWindow.BringToFront();
                     async Task SetProgressVisibilityAsync(
                         bool isVisible,
                         CancellationToken token)
@@ -1307,8 +1303,31 @@ public sealed class RegionCaptureCoordinator
         }
 
         _isCaptureInProgress = isInProgress;
-        _mouseShortcutSuppressionChanged?.Invoke(isInProgress);
-        CaptureStateChanged?.Invoke(isInProgress);
+        CaptureTimingDiagnostics.Mark(
+            "coordinator-capture-state",
+            $"inProgress={isInProgress}");
+        // Teardown must not be aborted by an optional subscriber whose native
+        // state has already been disposed. Notify each listener independently
+        // so the floating button and hotkey manager both recover.
+        try
+        {
+            _mouseShortcutSuppressionChanged?.Invoke(isInProgress);
+        }
+        catch (Exception)
+        {
+            // Optional input suppression must never prevent the capture state
+            // notification that restores the tray/floating controls.
+        }
+
+        try
+        {
+            CaptureStateChanged?.Invoke(isInProgress);
+        }
+        catch (Exception)
+        {
+            // A closing window may already have released its native handle;
+            // the coordinator still has to finish its state transition.
+        }
     }
 
     private static async Task WaitForCaptureChromeToHideAsync()

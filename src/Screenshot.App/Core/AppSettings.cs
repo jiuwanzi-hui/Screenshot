@@ -222,6 +222,12 @@ public sealed record AppSettings
         PngSaveLocationMode.DefaultDirectory;
 
     /// <summary>
+    /// Saves a PNG automatically when a region capture is completed from the
+    /// confirmation button or completion shortcut.
+    /// </summary>
+    public bool AutoSaveOnComplete { get; init; }
+
+    /// <summary>
     /// Output scale for saved/copied screenshots. 100% keeps the physical
     /// screen pixels; lower values reduce output dimensions and file size.
     /// </summary>

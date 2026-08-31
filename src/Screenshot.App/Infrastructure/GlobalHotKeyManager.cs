@@ -635,6 +635,11 @@ public sealed class GlobalHotKeyManager : IDisposable
                     keyboardData.VirtualKey,
                     isKeyDown,
                     "WH_KEYBOARD_LL");
+                CaptureTimingDiagnostics.Input(
+                    $"keyboard source=WH_KEYBOARD_LL vk=0x{keyboardData.VirtualKey:X2} " +
+                    $"event={(isKeyDown ? "down" : "up")} flags=0x{keyboardData.Flags:X} " +
+                    $"extra=0x{keyboardData.ExtraInfo.ToInt64():X} " +
+                    $"modifiers={GetCurrentModifiersIncluding(keyboardData.VirtualKey)}");
                 WriteInputDiagnostic(
                     $"source=WH_KEYBOARD_LL key=0x{keyboardData.VirtualKey:X2} " +
                     $"event={(isKeyDown ? "down" : "up")} flags=0x{keyboardData.Flags:X} " +
@@ -684,6 +689,13 @@ public sealed class GlobalHotKeyManager : IDisposable
                 {
                     return new IntPtr(1);
                 }
+            }
+
+            if (isKeyUp)
+            {
+                CaptureTimingDiagnostics.Input(
+                    $"keyboard-up vk=0x{keyboardData.VirtualKey:X2} " +
+                    $"captureActive={_isKeyboardCaptureActive}");
             }
 
             if (!isKeyDown &&
@@ -758,6 +770,12 @@ public sealed class GlobalHotKeyManager : IDisposable
                 {
                     CancelMovedMouseHolds(mouseData.Point);
                 }
+                CaptureTimingDiagnostics.MouseMove(
+                    "WH_MOUSE_LL",
+                    mouseData.Point.X,
+                    mouseData.Point.Y,
+                    state: $"pending={_pendingMouseHolds.Count} probe={_modifierProbeHolds.Count} " +
+                           $"capture={_captureOverlayActive}");
             }
             else if (TryGetMouseButton(
                 message,
@@ -3884,6 +3902,14 @@ public sealed class GlobalHotKeyManager : IDisposable
             if (NativeMethods.GetCursorPos(out var point))
             {
                 CancelMovedMouseHolds(point);
+                CaptureTimingDiagnostics.MouseMove(
+                    "WM_INPUT-MOUSE",
+                    point.X,
+                    point.Y,
+                    mouse.LastX,
+                    mouse.LastY,
+                    $"pending={_pendingMouseHolds.Count} probe={_modifierProbeHolds.Count} " +
+                    $"capture={_captureOverlayActive}");
             }
         }
     }
@@ -4008,10 +4034,11 @@ public sealed class GlobalHotKeyManager : IDisposable
     }
 
     [Conditional("SNAPCUT_INPUT_DIAGNOSTICS")]
-    private static void WriteInputDiagnostic(string _)
+    private static void WriteInputDiagnostic(string message)
     {
-        // Intentionally disabled. Global input hooks must never perform
-        // diagnostic formatting or synchronous disk I/O.
+        // The diagnostic build queues this asynchronously; normal builds do
+        // not compile any of the high-frequency input trace call sites.
+        CaptureTimingDiagnostics.Input(message);
     }
 
     private static bool IsModifierKey(uint virtualKey)

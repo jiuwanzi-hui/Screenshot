@@ -8,6 +8,7 @@ using System.Windows.Media.Imaging;
 using Screenshot.App.Capture;
 using Screenshot.App.Core;
 using Screenshot.App.Editor;
+using Screenshot.App.Infrastructure;
 using Screenshot.App.Text;
 using WpfBrushes = System.Windows.Media.Brushes;
 using WpfButtonBase = System.Windows.Controls.Primitives.ButtonBase;
@@ -59,6 +60,7 @@ public partial class PinnedImageGroupWindow : Window
     private double _thumbnailStartTop;
     private Thickness _restoreShellBorderThickness;
     private ContextMenu? _restoreContextMenu;
+    private readonly NativeWindowDragTracker _windowDragTracker;
 
     public PinnedImageGroupWindow(
         IReadOnlyList<PinnedImageWindow> members,
@@ -66,6 +68,7 @@ public partial class PinnedImageGroupWindow : Window
     {
         _settingsProvider = settingsProvider;
         InitializeComponent();
+        _windowDragTracker = new NativeWindowDragTracker(this, EndWindowDrag);
         SetMembers(members);
     }
 
@@ -182,6 +185,7 @@ public partial class PinnedImageGroupWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _isClosed = true;
+        _windowDragTracker.Stop();
         EndInlineEditorPanning();
         foreach (var member in _members)
         {
@@ -364,9 +368,36 @@ public partial class PinnedImageGroupWindow : Window
         if (e.LeftButton == MouseButtonState.Pressed &&
             e.OriginalSource is not WpfButtonBase and not Slider)
         {
-            DragMove();
+            BeginWindowDrag(e);
             e.Handled = true;
         }
+    }
+
+    private void BeginWindowDrag(MouseButtonEventArgs e)
+    {
+        _windowDragTracker.Start();
+    }
+
+    private void OnWindowPreviewMouseMove(object sender, WpfMouseEventArgs e)
+    {
+        if (_windowDragTracker.IsActive)
+        {
+            e.Handled = true;
+        }
+    }
+
+    private void OnWindowPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        _windowDragTracker.Stop();
+        e.Handled = true;
+    }
+
+    private void OnWindowLostMouseCapture(object sender, WpfMouseEventArgs e) =>
+        EndWindowDrag();
+
+    private void EndWindowDrag()
+    {
+        _windowDragTracker.Stop();
     }
 
     private void OnGroupCanvasMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -1343,4 +1374,5 @@ public partial class PinnedImageGroupWindow : Window
         }
         InlineEditorViewport.Cursor = WpfCursors.Arrow;
     }
+
 }

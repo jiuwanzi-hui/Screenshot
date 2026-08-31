@@ -1316,6 +1316,19 @@ public sealed class ImageEditorCanvas : Canvas
         }
     }
 
+    protected override void OnPreviewKeyDown(WpfKeyEventArgs e)
+    {
+        if (e.Key == Key.Z &&
+            Keyboard.Modifiers.HasFlag(ModifierKeys.Control) &&
+            TryUndoPreviousOperation())
+        {
+            e.Handled = true;
+            return;
+        }
+
+        base.OnPreviewKeyDown(e);
+    }
+
     protected override void OnKeyDown(WpfKeyEventArgs e)
     {
         if (e.Key == Key.Delete && DeleteSelectedAnnotation())

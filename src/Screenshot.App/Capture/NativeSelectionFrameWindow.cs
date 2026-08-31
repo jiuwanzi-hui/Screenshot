@@ -30,12 +30,14 @@ internal sealed class NativeSelectionFrameWindow : Form
     private Color _borderEndColor = Color.FromArgb(91, 141, 239);
     private readonly object _renderLock = new();
     private Bitmap? _layerBitmap;
-    private Rectangle _layerBitmapBounds;
     private bool _maskEnabled;
     private NativeSelectionMaskWindow? _maskWindow;
     private Rectangle _maskSurface;
     private Rectangle? _maskExcludedRegion;
     private bool _borderVisible = true;
+    private int _renderedWidth;
+    private int _renderedHeight;
+    private bool _hasRenderedFrame;
     private NativeSelectionSizeWindow? _sizeWindow;
     private bool _sizeEnabled;
     private readonly object _boundsLock = new();
@@ -122,6 +124,22 @@ internal sealed class NativeSelectionFrameWindow : Form
         RefreshMask();
     }
 
+    public void ShowIdleMask(Rectangle surface)
+    {
+        if (_disposed || !IsHandleCreated || surface.Width <= 0 || surface.Height <= 0)
+        {
+            return;
+        }
+
+        lock (_nativeUpdateLock)
+        {
+            _maskSurface = surface;
+            _maskEnabled = true;
+            _maskExcludedRegion = null;
+            _maskWindow?.UpdateNative(surface, Rectangle.Empty, null, Handle);
+        }
+    }
+
     public bool IsMaskEnabled => _maskEnabled;
 
     public bool IsSizeEnabled => _sizeEnabled;
@@ -199,6 +217,28 @@ internal sealed class NativeSelectionFrameWindow : Form
             DoNotActivate | DoNotChangeOwnerZOrder | NoMove | NoSize);
     }
 
+    private void MoveLayeredWindow(Rectangle windowBounds)
+    {
+        _ = SetWindowPos(
+            Handle,
+            new IntPtr(TopmostWindow),
+            windowBounds.X,
+            windowBounds.Y,
+            0,
+            0,
+            DoNotActivate | DoNotChangeOwnerZOrder | NoSize);
+    }
+
+    private bool NeedsFrameRender(Rectangle windowBounds)
+    {
+        lock (_renderLock)
+        {
+            return !_hasRenderedFrame ||
+                _renderedWidth != windowBounds.Width ||
+                _renderedHeight != windowBounds.Height;
+        }
+    }
+
     public void RefreshMask()
     {
         if (!TryGetLastBounds(out var bounds))
@@ -211,7 +251,6 @@ internal sealed class NativeSelectionFrameWindow : Form
         {
             if (IsHandleCreated)
             {
-                PositionLayeredWindow(windowBounds);
                 RenderLayered(windowBounds, bounds);
                 if (_maskEnabled)
                 {
@@ -278,9 +317,16 @@ internal sealed class NativeSelectionFrameWindow : Form
             {
                 _borderVisible = true;
                 var windowBounds = GetRenderWindowBounds(bounds);
-                PositionLayeredWindow(windowBounds);
+                var needsRender = NeedsFrameRender(windowBounds);
                 _ = PublishBounds(bounds);
-                RenderLayered(windowBounds, bounds);
+                if (needsRender)
+                {
+                    RenderLayered(windowBounds, bounds);
+                }
+                else
+                {
+                    MoveLayeredWindow(windowBounds);
+                }
                 if (_maskEnabled)
                 {
                     _maskWindow?.UpdateNative(_maskSurface, bounds, _maskExcludedRegion, Handle);
@@ -317,9 +363,16 @@ internal sealed class NativeSelectionFrameWindow : Form
             {
                 _borderVisible = true;
                 var windowBounds = GetRenderWindowBounds(bounds);
-                PositionLayeredWindow(windowBounds);
+                var needsRender = NeedsFrameRender(windowBounds);
                 var version = PublishBounds(bounds);
-                RenderLayered(windowBounds, bounds);
+                if (needsRender)
+                {
+                    RenderLayered(windowBounds, bounds);
+                }
+                else
+                {
+                    MoveLayeredWindow(windowBounds);
+                }
                 if (_maskEnabled)
                 {
                     _maskWindow?.UpdateNative(_maskSurface, bounds, _maskExcludedRegion, Handle);
@@ -566,6 +619,19 @@ internal sealed class NativeSelectionFrameWindow : Form
         }
     }
 
+    public void HideBorderOnly()
+    {
+        if (!_disposed && IsHandleCreated)
+        {
+            lock (_nativeUpdateLock)
+            {
+                _borderVisible = false;
+                _ = ShowWindow(Handle, HideCommand);
+                _sizeWindow?.HideSize();
+            }
+        }
+    }
+
     protected override void OnPaintBackground(PaintEventArgs e)
     {
         // This HWND is exclusively painted by UpdateLayeredWindow. A normal
@@ -617,14 +683,19 @@ internal sealed class NativeSelectionFrameWindow : Form
 
         lock (_renderLock)
         {
-            if (_layerBitmap is null || _layerBitmapBounds != windowBounds)
+            // Moving a selection changes the HWND's screen position but not
+            // the bitmap dimensions. Reuse the backing surface for moves;
+            // allocating a new bitmap on every pointer sample makes high
+            // report-rate dragging visibly laggy.
+            if (_layerBitmap is null ||
+                _layerBitmap.Width != windowBounds.Width ||
+                _layerBitmap.Height != windowBounds.Height)
             {
                 _layerBitmap?.Dispose();
                 _layerBitmap = new Bitmap(
                     windowBounds.Width,
                     windowBounds.Height,
                     System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
-                _layerBitmapBounds = windowBounds;
             }
 
             using var graphics = Graphics.FromImage(_layerBitmap);
@@ -632,43 +703,15 @@ internal sealed class NativeSelectionFrameWindow : Form
             graphics.Clear(Color.Transparent);
             graphics.CompositingMode = CompositingMode.SourceOver;
 
+            _renderedWidth = windowBounds.Width;
+            _renderedHeight = windowBounds.Height;
+            _hasRenderedFrame = true;
+
             var selection = new Rectangle(
                 selectionBounds.Left - windowBounds.Left,
                 selectionBounds.Top - windowBounds.Top,
                 selectionBounds.Width,
                 selectionBounds.Height);
-            if (_maskEnabled)
-            {
-                using var maskBrush = new SolidBrush(Color.FromArgb(72, 0, 0, 0));
-                using var maskRegion = new Region(new Rectangle(
-                    0, 0, windowBounds.Width, windowBounds.Height));
-                var clippedSelection = Rectangle.Intersect(
-                    new Rectangle(0, 0, windowBounds.Width, windowBounds.Height),
-                    selection);
-                if (!clippedSelection.IsEmpty)
-                {
-                    maskRegion.Exclude(clippedSelection);
-                }
-
-                if (_maskExcludedRegion is { } excluded)
-                {
-                    var excludedLocal = new Rectangle(
-                        excluded.Left - windowBounds.Left,
-                        excluded.Top - windowBounds.Top,
-                        excluded.Width,
-                        excluded.Height);
-                    var clippedExcluded = Rectangle.Intersect(
-                        new Rectangle(0, 0, windowBounds.Width, windowBounds.Height),
-                        excludedLocal);
-                    if (!clippedExcluded.IsEmpty)
-                    {
-                        maskRegion.Exclude(clippedExcluded);
-                    }
-                }
-
-                graphics.FillRegion(maskBrush, maskRegion);
-            }
-
             if (_borderVisible && selection.Width > 0 && selection.Height > 0)
             {
                 using var borderBrush = new LinearGradientBrush(

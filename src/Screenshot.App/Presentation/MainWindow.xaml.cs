@@ -2570,6 +2570,16 @@ public partial class MainWindow : Window, IDisposable
 
     private void RefreshOnlineTranslationAvailability()
     {
+        // Online availability is represented by the enabled profile list.
+        // Restore that cached aggregate immediately on startup and after any
+        // profile edit; the background profile check will replace it only
+        // when a completed result differs.
+        if (_settingsViewModel.TranslationProfiles.Count > 0)
+        {
+            RefreshTranslationProfilesProviderAvailability();
+            return;
+        }
+
         if (TranslationApiKeyBox is null)
         {
             return;
@@ -3035,7 +3045,8 @@ public partial class MainWindow : Window, IDisposable
                     // An explicit opt-out also removes the persistent task;
                     // otherwise a previously granted task would keep
                     // launching elevated after the user disabled the option.
-                    ElevationLaunchService.TryRemovePersistentElevationTask();
+                    ElevationLaunchService.TryRemovePersistentElevationTask(
+                        Environment.ProcessPath);
                 }
 
                 if (_translationApiKeyChanged)

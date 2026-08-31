@@ -27,8 +27,10 @@ public partial class TranslationProfileEditorWindow : Window
         {
             if (ProviderBox.SelectedValue is not string id) return;
             var definition = TranslationProviderFactory.GetDefinition(id);
-            if (string.IsNullOrWhiteSpace(EndpointBox.Text) ||
-                EndpointBox.Text.Contains("api.", StringComparison.OrdinalIgnoreCase))
+            // Only fill an endpoint that has never been configured. Custom
+            // endpoints must remain attached to this profile when another
+            // provider is selected or the editor is reopened.
+            if (string.IsNullOrWhiteSpace(EndpointBox.Text))
             {
                 EndpointBox.Text = definition.OfficialEndpoint;
             }

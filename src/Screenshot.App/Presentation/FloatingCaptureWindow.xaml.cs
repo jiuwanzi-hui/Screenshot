@@ -7,6 +7,7 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using Screenshot.App.Capture;
 using Screenshot.App.Infrastructure;
 using DrawingPoint = System.Drawing.Point;
 using DrawingRectangle = System.Drawing.Rectangle;
@@ -254,17 +255,29 @@ public partial class FloatingCaptureWindow : Window
 
     public void SetCaptureInProgress(bool isInProgress)
     {
+        CaptureTimingDiagnostics.Mark(
+            "floating-capture-state",
+            $"inProgress={isInProgress} visible={IsVisible} hidden={_isCaptureHidden}");
         if (isInProgress)
         {
-            _isCaptureHidden = IsVisible;
+            // Capture state notifications can be repeated while the overlay
+            // is closing. Preserve the original visibility instead of
+            // overwriting it with false on a repeated notification.
+            _isCaptureHidden |= IsVisible;
             FeatureMenuPopup.IsOpen = false;
             FloatingButtonContextMenu.IsOpen = false;
-            Hide();
+            if (IsVisible)
+            {
+                Hide();
+            }
         }
-        else if (_isCaptureHidden)
+        else if (_isCaptureHidden || !IsVisible)
         {
             _isCaptureHidden = false;
-            Show();
+            if (!IsVisible && !Dispatcher.HasShutdownStarted)
+            {
+                Show();
+            }
             _ = Dispatcher.BeginInvoke(
                 DispatcherPriority.Loaded,
                 () => ReconcileWithDisplays(snapNearby: false));
@@ -316,6 +329,10 @@ public partial class FloatingCaptureWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        CaptureTimingDiagnostics.Mark(
+            "floating-closed",
+            $"captureHidden={_isCaptureHidden} captureInProgress={
+                (System.Windows.Application.Current as App)?.IsCaptureInProgressForDiagnostics}");
         Loaded -= OnLoaded;
         MouseLeave -= OnWindowMouseLeave;
         _menuCloseTimer.Stop();

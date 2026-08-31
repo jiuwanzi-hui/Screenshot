@@ -81,10 +81,6 @@ internal sealed class NativeSelectionMaskWindow : Form
                 new Rectangle(selection.X - surface.X, selection.Y - surface.Y,
                     selection.Width, selection.Height),
                 new Rectangle(0, 0, surface.Width, surface.Height));
-            // Leave a tiny safety gap around the selection so a compositor
-            // frame can never cover the border while the two HWNDs change
-            // z-order at high pointer rates.
-            hole.Inflate(2, 2);
             hole = Rectangle.Intersect(
                 hole,
                 new Rectangle(0, 0, surface.Width, surface.Height));

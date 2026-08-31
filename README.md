@@ -39,13 +39,14 @@ SnapCut（简截）是一款以 Windows 10/11 正式版为主的轻量截图工�
 
 下载最新的 x64 自包含版本。2.3.0 起发布附件统一使用 `SnapCut-Setup-*` 和 `SnapCut-Portable-*`；同时保留旧清单入口，2.1.0 及之后版本仍可在程序内在线更新：
 
-- [安装版 SnapCut Setup 3.7.8（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.7.8-win-x64.exe)
-- [免安装版 SnapCut Portable 3.7.8（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.7.8-win-x64.zip)
-- [安装版 SnapCut Setup 3.7.8（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.8/SnapCut-Setup-3.7.8-win-x64.exe)
-- [免安装版 SnapCut Portable 3.7.8（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.8/SnapCut-Portable-3.7.8-win-x64.zip)
+- [安装版 SnapCut Setup 3.7.9（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.7.9-win-x64.exe)
+- [免安装版 SnapCut Portable 3.7.9（GitHub）](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.7.9-win-x64.zip)
+- [安装版 SnapCut Setup 3.7.9（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.9/SnapCut-Setup-3.7.9-win-x64.exe)
+- [免安装版 SnapCut Portable 3.7.9（Gitee 国内镜像）](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.9/SnapCut-Portable-3.7.9-win-x64.zip)
 
 免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET 或 Visual C++ 运行库。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.8.3 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
 
+3.7.9 修复高回报率鼠标下快捷键进入截图时的首帧卡顿：截图窗口先以非激活方式显示，桌面帧在后台获取并在首帧完成后接管鼠标，避免光标切换和窗口合成阻塞输入；同时移除进入时默认十字光标和首帧大图同步绑定。正式 Release 不启用输入时序调试日志。
 3.7.8 在 3.7.5 的截图、钉图和录屏框选稳定性修复基础上，补充预设截图区域管理：支持最多五个区域、悬浮编号面板、区域高亮、直接截图、右键编辑、删除和一键清空，并改善透明预览、主题适配及面板外关闭行为。快捷键首次进入截图的预热流程、原生选区与遮罩同步更新、标注编辑和复制行为继续修正；正式 Release 不启用输入时序调试日志。
 
 3.7.5 集中修复高回报率鼠标下截图、钉图和录屏框选的跟手性、遮罩残留、双边框和切换闪烁；原生选区、尺寸标签、遮罩及标注预览的更新链路进一步统一。修复修饰键和鼠标左右键快捷键对普通应用、托盘菜单和文件右键菜单的误拦截，避免 Alt/Ctrl 被系统输入钩子吞掉；录屏键盘/鼠标提示、文字编辑与复制、标注工具独立颜色和线宽持久化也同步修正。翻译在线模型按配置顺序失败回退，设置页启动后先显示上次状态并在后台重新检测。
@@ -183,12 +184,14 @@ SnapCut is primarily a lightweight Windows 10/11 capture utility. It combines re
 
 Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-*` and `SnapCut-Portable-*` starting with 2.3.0. The legacy manifest endpoint remains available so versions 2.1.0 and later continue to update in-app:
 
-- [SnapCut Setup 3.7.8 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.7.8-win-x64.exe)
-- [SnapCut Portable 3.7.8 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.7.8-win-x64.zip)
-- [SnapCut Setup 3.7.8 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.8/SnapCut-Setup-3.7.8-win-x64.exe)
-- [SnapCut Portable 3.7.8 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.8/SnapCut-Portable-3.7.8-win-x64.zip)
+- [SnapCut Setup 3.7.9 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.7.9-win-x64.exe)
+- [SnapCut Portable 3.7.9 (GitHub)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.7.9-win-x64.zip)
+- [SnapCut Setup 3.7.9 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.9/SnapCut-Setup-3.7.9-win-x64.exe)
+- [SnapCut Portable 3.7.9 (Gitee China mirror)](https://gitee.com/wwangyunhui/screenshot/releases/download/v3.7.9/SnapCut-Portable-3.7.9-win-x64.zip)
 
 Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET or Visual C++ runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.8.3 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
+
+Version 3.7.9 fixes the first-frame hitch when a high-report-rate mouse is moving while a screenshot shortcut is pressed. The overlay appears non-activating first, desktop capture runs in the background, and mouse capture/cursor switching waits until the first complete frame is ready; Release builds keep timing traces disabled.
 
 Version 3.7.8 adds preset screenshot region management with up to five saved regions, a numbered floating panel, hover highlighting, direct capture, right-click editing, deletion, clear-all, transparent themed previews, and outside-click dismissal. It also carries forward the capture warm-up, native selection/mask synchronization, annotation editing, and copy fixes; timing traces remain disabled in Release builds.
 

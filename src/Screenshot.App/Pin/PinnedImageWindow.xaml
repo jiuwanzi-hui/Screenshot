@@ -15,7 +15,10 @@
         ShowInTaskbar="False"
         Topmost="True"
         WindowStartupLocation="CenterScreen"
-        WindowStyle="None">
+        WindowStyle="None"
+        PreviewMouseMove="OnWindowPreviewMouseMove"
+        PreviewMouseLeftButtonUp="OnWindowPreviewMouseLeftButtonUp"
+        LostMouseCapture="OnWindowLostMouseCapture">
     <Window.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>

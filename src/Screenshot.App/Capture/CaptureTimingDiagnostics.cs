@@ -13,20 +13,24 @@ namespace Screenshot.App.Capture;
 /// </summary>
 internal static class CaptureTimingDiagnostics
 {
-    // Timing traces are for local Debug investigations only. Release builds
-    // keep the call sites as no-ops so shipped packages cannot enable them.
-#if DEBUG
+    // The diagnostic symbol is used only for a temporary investigation build.
+    // Normal Release builds keep all input-trace call sites compiled out.
+#if DEBUG || SNAPCUT_CAPTURE_DIAGNOSTICS
     private static readonly bool IsEnabled = IsDiagnosticsEnabled();
 #else
     private static bool IsEnabled => false;
 #endif
     private static readonly Channel<string> Queue =
-        Channel.CreateUnbounded<string>(new UnboundedChannelOptions
+        Channel.CreateBounded<string>(new BoundedChannelOptions(20000)
         {
             SingleReader = true,
             SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropOldest,
         });
     private static int _started;
+    private static long _inputWindowUntil;
+    private static long _lastMouseMoveTimestamp;
+    private static int _mouseMoveSampleCount;
 
     private static bool IsDiagnosticsEnabled()
     {
@@ -69,6 +73,82 @@ internal static class CaptureTimingDiagnostics
 
         EnsureWriter();
         Write($"mark stage={stage}{FormatDetails(details)}");
+    }
+
+    [Conditional("SNAPCUT_CAPTURE_DIAGNOSTICS")]
+    public static void Input(string message)
+    {
+        if (!IsEnabled)
+        {
+            return;
+        }
+
+        EnsureWriter();
+        Write($"input {message}");
+    }
+
+    public static bool Enabled => IsEnabled;
+
+    [Conditional("SNAPCUT_CAPTURE_DIAGNOSTICS")]
+    public static void BeginInputWindow(string reason)
+    {
+        if (!IsEnabled)
+        {
+            return;
+        }
+
+        Interlocked.Exchange(
+            ref _inputWindowUntil,
+            Stopwatch.GetTimestamp() + Stopwatch.Frequency * 3);
+        Interlocked.Exchange(ref _lastMouseMoveTimestamp, 0);
+        Interlocked.Exchange(ref _mouseMoveSampleCount, 0);
+        Input($"input-window reason={reason}");
+    }
+
+    [Conditional("SNAPCUT_CAPTURE_DIAGNOSTICS")]
+    public static void MouseMove(
+        string source,
+        int x,
+        int y,
+        int deltaX = 0,
+        int deltaY = 0,
+        string? state = null)
+    {
+        if (!IsEnabled)
+        {
+            return;
+        }
+
+        var now = Stopwatch.GetTimestamp();
+        var until = Interlocked.Read(ref _inputWindowUntil);
+        if (now > until)
+        {
+            return;
+        }
+
+        var previous = Interlocked.Exchange(ref _lastMouseMoveTimestamp, now);
+        var gapMs = previous == 0
+            ? 0
+            : Stopwatch.GetElapsedTime(previous).TotalMilliseconds;
+        var sample = Interlocked.Increment(ref _mouseMoveSampleCount);
+        if (sample <= 40 || gapMs >= 8)
+        {
+            Input(
+                $"mouse-move source={source} x={x} y={y} dx={deltaX} dy={deltaY} " +
+                $"gapMs={gapMs:0.###} sample={sample} state={state ?? "none"}");
+        }
+    }
+
+    public static void Exception(string stage, Exception exception)
+    {
+        if (!IsEnabled)
+        {
+            return;
+        }
+
+        EnsureWriter();
+        Write($"exception stage={stage} type={exception.GetType().Name} " +
+            $"message={exception.Message.Replace(Environment.NewLine, " ")}");
     }
 
     private static string FormatDetails(string? details) =>

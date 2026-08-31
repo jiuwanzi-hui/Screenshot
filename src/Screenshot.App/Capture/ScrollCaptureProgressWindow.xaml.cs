@@ -248,6 +248,11 @@ public partial class ScrollCaptureProgressWindow : Window
         var latest = Interlocked.Exchange(ref _pendingPreviewState, null);
         if (latest is not null && IsVisible)
         {
+            // The selection mask is a separate topmost native HWND and may
+            // reorder this WPF window below it while a frame is being sampled.
+            // Restore z-order on the dispatcher immediately before painting
+            // the coalesced preview update.
+            BringToFront();
             UpdatePreview(latest);
         }
 

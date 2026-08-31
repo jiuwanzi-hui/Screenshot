@@ -22,6 +22,15 @@ public partial class RecognitionResultPopupWindow : Window
         ResultTextBox.Text = string.IsNullOrWhiteSpace(translatedText)
             ? sourceText
             : translatedText;
+        // WPF's default TextBox copy command calls Clipboard.SetText
+        // synchronously on the UI thread. On machines with a clipboard
+        // manager or Office integration that can block the whole popup for
+        // several seconds. Route both Ctrl+C and the context-menu Copy item
+        // through the existing asynchronous clipboard service instead.
+        ResultTextBox.CommandBindings.Add(new CommandBinding(
+            ApplicationCommands.Copy,
+            OnCopySelectionCommand,
+            OnCanCopySelectionCommand));
         SourceText.Text = string.IsNullOrWhiteSpace(translatedText)
             ? "识别内容"
             : "译文 · 已保留原文段落顺序";
@@ -68,6 +77,36 @@ public partial class RecognitionResultPopupWindow : Window
     }
 
     private void OnCloseClick(object sender, RoutedEventArgs e) => Close();
+
+    private void OnCanCopySelectionCommand(
+        object sender,
+        CanExecuteRoutedEventArgs e)
+    {
+        e.CanExecute = !string.IsNullOrEmpty(ResultTextBox.SelectedText);
+        e.Handled = true;
+    }
+
+    private async void OnCopySelectionCommand(
+        object sender,
+        ExecutedRoutedEventArgs e)
+    {
+        e.Handled = true;
+        var selectedText = ResultTextBox.SelectedText;
+        if (string.IsNullOrEmpty(selectedText))
+        {
+            return;
+        }
+
+        try
+        {
+            await ClipboardTextService.SetTextAsync(selectedText);
+            SourceText.Text = "已复制所选文字";
+        }
+        catch
+        {
+            SourceText.Text = "剪贴板正被其他程序使用，请重试";
+        }
+    }
 
     private void OnResizeThumbDragDelta(
         object sender,

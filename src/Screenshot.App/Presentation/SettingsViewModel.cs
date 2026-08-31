@@ -285,6 +285,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private string _saveDirectory;
     private string _videoSaveDirectory;
     private PngSaveLocationMode _pngSaveLocationMode;
+    private bool _autoSaveOnComplete;
     private int _screenshotScalePercent;
     private bool _recordSystemAudio;
     private bool _recordMicrophone;
@@ -357,6 +358,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _saveDirectory = settings.SaveDirectory;
         _videoSaveDirectory = settings.VideoSaveDirectory;
         _pngSaveLocationMode = settings.PngSaveLocationMode;
+        _autoSaveOnComplete = settings.AutoSaveOnComplete;
         _screenshotScalePercent = settings.ScreenshotScalePercent;
         _recordSystemAudio = settings.RecordSystemAudio;
         _recordMicrophone = settings.RecordMicrophone;
@@ -581,6 +583,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         get => _pngSaveLocationMode;
         set => SetProperty(ref _pngSaveLocationMode, value);
+    }
+
+    public bool AutoSaveOnComplete
+    {
+        get => _autoSaveOnComplete;
+        set => SetProperty(ref _autoSaveOnComplete, value);
     }
 
     public bool RecordSystemAudio
@@ -1001,6 +1009,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             SaveDirectory = SaveDirectory,
             VideoSaveDirectory = VideoSaveDirectory,
             PngSaveLocationMode = PngSaveLocationMode,
+            AutoSaveOnComplete = AutoSaveOnComplete,
             ScreenshotScalePercent = ScreenshotScalePercent,
             RecordSystemAudio = RecordSystemAudio,
             RecordMicrophone = RecordMicrophone,
@@ -1093,6 +1102,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         SaveDirectory = settings.SaveDirectory;
         VideoSaveDirectory = settings.VideoSaveDirectory;
         PngSaveLocationMode = settings.PngSaveLocationMode;
+        AutoSaveOnComplete = settings.AutoSaveOnComplete;
         ScreenshotScalePercent = settings.ScreenshotScalePercent;
         RecordSystemAudio = settings.RecordSystemAudio;
         RecordMicrophone = settings.RecordMicrophone;
