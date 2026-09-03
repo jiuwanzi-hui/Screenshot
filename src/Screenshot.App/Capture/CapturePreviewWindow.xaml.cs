@@ -19,6 +19,7 @@ public partial class CapturePreviewWindow : Window
     private readonly PngSaveLocationMode _pngSaveLocationMode;
     private readonly CaptureHistoryItem? _historyItem;
     private readonly bool _hasSavedPlacement;
+    private readonly TimeSpan _interactionFrameInterval;
     private bool _fitToWidth = true;
     private bool _resizeWindowToImage;
     private bool _fitUpdatePending;
@@ -30,6 +31,8 @@ public partial class CapturePreviewWindow : Window
     private double _panStartHorizontalOffset;
     private double _panStartVerticalOffset;
     private double _zoom = 1;
+    private long _lastPanUpdateTimestamp;
+    private long _lastZoomUpdateTimestamp;
 
     public CapturePreviewWindow(
         CapturedImage capturedImage,
@@ -44,6 +47,14 @@ public partial class CapturePreviewWindow : Window
         _saveDirectory = saveDirectory;
         _pngSaveLocationMode = pngSaveLocationMode;
         _historyItem = historyItem;
+        var virtualBounds = VirtualScreen.GetBounds();
+        _interactionFrameInterval =
+            DisplayRefreshRateService.GetInteractionFrameInterval(
+                new DrawingRectangle(
+                    virtualBounds.X,
+                    virtualBounds.Y,
+                    virtualBounds.Width,
+                    virtualBounds.Height));
 
         InitializeComponent();
         _hasSavedPlacement = WindowPlacementService.Track(
@@ -285,6 +296,11 @@ public partial class CapturePreviewWindow : Window
 
         _fitToWidth = false;
         _resizeWindowToImage = false;
+        e.Handled = true;
+        if (!IsInteractionFrameDue(ref _lastZoomUpdateTimestamp))
+        {
+            return;
+        }
         var pointer = e.GetPosition(PreviewScrollViewer);
         var contentX =
             (PreviewScrollViewer.HorizontalOffset + pointer.X) / _zoom;
@@ -305,6 +321,7 @@ public partial class CapturePreviewWindow : Window
         MouseButtonEventArgs e)
     {
         _isPanning = true;
+        _lastPanUpdateTimestamp = 0;
         _panStartPoint = e.GetPosition(PreviewScrollViewer);
         _panStartHorizontalOffset = PreviewScrollViewer.HorizontalOffset;
         _panStartVerticalOffset = PreviewScrollViewer.VerticalOffset;
@@ -328,12 +345,32 @@ public partial class CapturePreviewWindow : Window
             return;
         }
 
+        if (!IsInteractionFrameDue(ref _lastPanUpdateTimestamp))
+        {
+            return;
+        }
+
         var currentPoint = e.GetPosition(PreviewScrollViewer);
         PreviewScrollViewer.ScrollToHorizontalOffset(
             _panStartHorizontalOffset + _panStartPoint.X - currentPoint.X);
         PreviewScrollViewer.ScrollToVerticalOffset(
             _panStartVerticalOffset + _panStartPoint.Y - currentPoint.Y);
         e.Handled = true;
+    }
+
+    private bool IsInteractionFrameDue(ref long lastTimestamp)
+    {
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        var frameTicks = (long)Math.Ceiling(
+            _interactionFrameInterval.TotalSeconds *
+            System.Diagnostics.Stopwatch.Frequency);
+        if (lastTimestamp != 0 && now - lastTimestamp < frameTicks)
+        {
+            return false;
+        }
+
+        lastTimestamp = now;
+        return true;
     }
 
     private void OnPreviewMouseLeftButtonUp(

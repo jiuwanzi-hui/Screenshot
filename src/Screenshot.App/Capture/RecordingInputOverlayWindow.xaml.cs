@@ -60,14 +60,16 @@ public partial class RecordingInputOverlayWindow : Window
             Interval = TimeSpan.FromMilliseconds(850),
         };
         _clearTimer.Tick += OnClearTimerTick;
+        var interactionFrameInterval =
+            DisplayRefreshRateService.GetInteractionFrameInterval(recordingBounds);
         _trailTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromMilliseconds(33),
+            Interval = interactionFrameInterval,
         };
         _trailTimer.Tick += OnTrailTimerTick;
         _mousePositionTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromMilliseconds(33),
+            Interval = interactionFrameInterval,
         };
         _mousePositionTimer.Tick += OnMousePositionTimerTick;
         SourceInitialized += OnSourceInitialized;

@@ -153,30 +153,11 @@ public sealed class RegionCaptureCoordinator
         try
         {
             await WaitForCaptureChromeToHideAsync();
-            // Opening the region picker used to let its constructor take the
-            // first full-screen snapshot on the dispatcher. That is most
-            // noticeable on the first video hotkey after boot, when GDI/DWM
-            // has not been touched yet. Keep the picker responsive by using
-            // the same background snapshot handoff as ordinary screenshots.
-            try
-            {
-                overlaySnapshot = await Task.Run(() =>
-                {
-                    var snapshot = ScreenCaptureService.Capture(
-                        VirtualScreen.GetBounds());
-                    _ = snapshot.WarmPreview();
-                    return snapshot;
-                });
-            }
-            catch
-            {
-                // The overlay retains its own synchronous fallback for the
-                // rare case where a desktop snapshot is temporarily unavailable.
-            }
-
             selection = await CaptureOverlayWindow.SelectAsync(
                 pointerContinuation,
-                overlaySnapshot);
+                overlaySnapshot,
+                deferInitialColorPickerActivation: false,
+                deferInitialScreenCapture: pointerContinuation is null);
             overlaySnapshot = null;
         }
         catch (Exception exception)
@@ -351,16 +332,33 @@ public sealed class RegionCaptureCoordinator
         }
         try
         {
+            // Keyboard-triggered sessions must never wait for a full virtual
+            // desktop BitBlt before the capture surface is shown. On slower
+            // machines that copy can take 40-100 ms and competes with DWM's
+            // cursor/compositor work, which is perceived as a mouse hitch.
+            // Let the overlay publish its first frame from its background
+            // worker instead. Mouse continuations already own an input
+            // gesture and keep their existing hand-off semantics.
             var deferInitialScreenCapture =
-                deferInitialColorPickerActivation && initialScreenSnapshot is null;
+                pointerContinuation is null &&
+                initialSelection is null;
             if (initialScreenSnapshot is null &&
-                !deferInitialColorPickerActivation)
+                !deferInitialScreenCapture)
             {
                 CaptureTimingDiagnostics.Mark("before-capture-chrome-yield");
                 await WaitForCaptureChromeToHideAsync();
                 CaptureTimingDiagnostics.Mark("after-capture-chrome-yield");
             }
             var settings = _settingsProvider();
+            if ((recognizeTextAfterSelection || translateTextAfterSelection) &&
+                settings.OcrEngine == OcrEngineMode.PaddleOcrV6)
+            {
+                // Start model loading while the user is still selecting the
+                // region. The native work is serialized with recognition and
+                // runs on a background thread, so the first result does not
+                // pay the model-init cost after the selection is complete.
+                _ = HighQualityOcrService.PrewarmAsync();
+            }
             // A hotkey can arrive before the low-level pre-capture worker has
             // finished. Capture the fallback snapshot off the dispatcher so a
             // cold/idle first wake-up never blocks the UI thread in GDI.
@@ -410,7 +408,7 @@ public sealed class RegionCaptureCoordinator
                 }
             }
             CaptureTimingDiagnostics.Mark("before-show-interactive");
-            CaptureOverlayWindow.ShowInteractive(
+            await CaptureOverlayWindow.BeginInteractive(
                 new CaptureOverlayOptions
                 {
                     SaveDirectory = settings.SaveDirectory,
@@ -502,7 +500,8 @@ public sealed class RegionCaptureCoordinator
                 selection = await CaptureOverlayWindow.SelectAsync(
                     pointerContinuation,
                     overlaySnapshot,
-                    deferInitialColorPickerActivation);
+                    deferInitialColorPickerActivation,
+                    deferInitialScreenCapture: pointerContinuation is null);
                 overlaySnapshot = null;
             }
             finally
@@ -559,8 +558,9 @@ public sealed class RegionCaptureCoordinator
     {
         SetCaptureInProgress(false);
         // The overlay held a frozen full-desktop snapshot plus the capture
-        // bitmaps; return that memory now so the tray idle stays small.
-        Core.MemoryFootprint.TrimAfterHeavyOperation();
+        // bitmaps; return that memory after the close input burst so the
+        // cursor is not held up by synchronous working-set/GC trimming.
+        _ = Task.Run(Core.MemoryFootprint.TrimAfterHeavyOperation);
     }
 
     public Task RequestScrollCaptureAsync(
@@ -638,7 +638,11 @@ public sealed class RegionCaptureCoordinator
         CapturePointerContinuation? pointerContinuation,
         CapturedImage? initialScreenSnapshot = null)
     {
-        if (_isCaptureInProgress)
+        // A completed selection from the interactive overlay transitions
+        // directly into scrolling before its close callback clears the
+        // shared flag. Keep the guard for fresh shortcut requests while
+        // allowing that explicit selection hand-off.
+        if (_isCaptureInProgress && initialSelection is null)
         {
             return;
         }
@@ -863,13 +867,6 @@ public sealed class RegionCaptureCoordinator
                             wheelMonitor.WheelEvents,
                             previewChanged: previewState =>
                                 UpdateProgress(progressWindow, previewState),
-                            // The progress window is excluded from screen
-                            // capture. Passing a visibility callback here
-                            // would marshal every sampled frame through the
-                            // WPF dispatcher just to bring an already
-                            // visible window to the front. Manual mode
-                            // must leave the target's input/UI thread
-                            // untouched between wheel events.
                             setPreviewVisibilityAsync: null,
                             throttleWheelInput: false,
                             // Manual mode is driven exclusively by the

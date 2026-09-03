@@ -1,6 +1,7 @@
 param(
-    [string]$Version = "3.7.9",
-    [switch]$SkipTrackedManifestUpdate
+    [string]$Version = "3.8.0",
+    [switch]$SkipTrackedManifestUpdate,
+    [switch]$EnableCaptureDiagnostics
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,12 +35,20 @@ foreach ($directory in @($publishDirectory, $installerOutputDirectory)) {
     }
 }
 
+$publishDefineConstants = "TRACE"
+if ($EnableCaptureDiagnostics) {
+    # MSBuild treats semicolons as list separators even when passed through
+    # PowerShell's native argument binder. Escape them for dotnet publish.
+    $publishDefineConstants += "%3BSNAPCUT_CAPTURE_DIAGNOSTICS%3BSNAPCUT_INPUT_DIAGNOSTICS"
+}
+
 dotnet publish $appProject `
     -c Release `
     -r win-x64 `
     --self-contained true `
     -p:PublishSingleFile=true `
     -p:IncludeNativeLibrariesForSelfExtract=true `
+    -p:DefineConstants=$publishDefineConstants `
     -p:DebugType=None `
     -p:DebugSymbols=false `
     -p:Version=$Version `
@@ -136,6 +145,15 @@ foreach ($requiredFileName in $requiredPublishFiles) {
         (Get-Item -LiteralPath $requiredFilePath).Length -le 0) {
         throw "Required publish file is missing or empty: $requiredFilePath"
     }
+}
+
+if ($EnableCaptureDiagnostics) {
+    $diagnosticsDirectory = Join-Path $publishDirectory "ScreenshotData\Diagnostics"
+    New-Item -ItemType Directory -Path $diagnosticsDirectory -Force | Out-Null
+    Set-Content `
+        -LiteralPath (Join-Path $diagnosticsDirectory "capture-timing.enabled") `
+        -Value "enabled" `
+        -Encoding ASCII
 }
 
 & $innoCompiler "/DAppVersion=$Version" $setupScript

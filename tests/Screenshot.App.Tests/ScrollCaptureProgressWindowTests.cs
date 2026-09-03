@@ -1,10 +1,52 @@
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Windows.Interop;
 using Screenshot.App.Capture;
 
 namespace Screenshot.App.Tests;
 
 public sealed class ScrollCaptureProgressWindowTests
 {
+    [Fact]
+    public void PreviewRemainsTransparentWithoutDesktopCaptureExclusion()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var window = new ScrollCaptureProgressWindow();
+            try
+            {
+            Assert.True(window.AllowsTransparency);
+            }
+            finally
+            {
+                window.CloseFromCoordinator();
+            }
+        });
+    }
+
+    [Fact]
+    public void PreviewWindowIsExcludedFromDesktopCapture()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var window = new ScrollCaptureProgressWindow();
+            try
+            {
+                window.Show();
+                var handle = new WindowInteropHelper(window).Handle;
+                Assert.NotEqual(IntPtr.Zero, handle);
+                Assert.True(NativeMethods.GetWindowDisplayAffinity(
+                    handle,
+                    out var displayAffinity));
+                Assert.Equal(0x11u, displayAffinity);
+            }
+            finally
+            {
+                window.CloseFromCoordinator();
+            }
+        });
+    }
+
     [Fact]
     public void WaitingStateRequiresAClickToChooseTheScrollDirection()
     {
@@ -220,5 +262,14 @@ public sealed class ScrollCaptureProgressWindowTests
         return Assert.IsType<int>(method.Invoke(
             null,
             [captureRegion, monitorBounds, dpiScaleX]));
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetWindowDisplayAffinity(
+            IntPtr windowHandle,
+            out uint affinity);
     }
 }

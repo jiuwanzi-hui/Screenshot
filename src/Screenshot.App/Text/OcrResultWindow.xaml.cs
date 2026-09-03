@@ -40,6 +40,14 @@ public partial class OcrResultWindow : Window
             ? "识别完成"
             : result.ErrorMessage ?? "文字识别失败。";
         _ocrSucceeded = result.IsSuccess;
+        // Keep the first layout pass off-screen from the compositor. This
+        // prevents a transient white window when the capture overlay closes.
+        Opacity = 0;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Left = (SystemParameters.WorkArea.Width - Width) / 2 +
+               SystemParameters.WorkArea.Left;
+        Top = (SystemParameters.WorkArea.Height - Height) / 2 +
+              SystemParameters.WorkArea.Top;
         Loaded += OnLoaded;
     }
 
@@ -117,6 +125,8 @@ public partial class OcrResultWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
+        UpdateLayout();
+        Opacity = 1;
 
         // Auto-translate once, matching the WeChat flow where recognized text is
         // rendered translated without a second click.

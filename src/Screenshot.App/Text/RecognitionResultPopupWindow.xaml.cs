@@ -18,6 +18,12 @@ public partial class RecognitionResultPopupWindow : Window
     {
         _closeAfterCopy = closeAfterCopy;
         InitializeComponent();
+        // Do not let WPF present the window at its default location for one
+        // compositor frame. Position it first, then reveal it in OnLoaded.
+        Opacity = 0;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Left = SystemParameters.WorkArea.Right - Width - 18;
+        Top = SystemParameters.WorkArea.Bottom - Height - 18;
         TitleText.Text = title;
         ResultTextBox.Text = string.IsNullOrWhiteSpace(translatedText)
             ? sourceText
@@ -40,11 +46,11 @@ public partial class RecognitionResultPopupWindow : Window
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
+        UpdateLayout();
         Left = SystemParameters.WorkArea.Right - ActualWidth - 18;
         Top = SystemParameters.WorkArea.Bottom - ActualHeight - 18;
-        Opacity = 0;
-        BeginAnimation(OpacityProperty, new DoubleAnimation(
-            0, 1, TimeSpan.FromMilliseconds(180)));
+        BeginAnimation(OpacityProperty, null);
+        Opacity = 1;
     }
 
     private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)

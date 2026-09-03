@@ -2,7 +2,9 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using Screenshot.App.Capture;
 using Screenshot.App.Core;
+using Screenshot.App.Infrastructure;
 using DrawingPoint = System.Drawing.Point;
 
 namespace Screenshot.App.Editor;
@@ -23,6 +25,7 @@ internal sealed class NativeDrawingPreviewWindow : Form
     private const int HideCommand = 0;
 
     private readonly object _sync = new();
+    private readonly TimeSpan _interactionFrameInterval;
     private bool _disposed;
     private CancellationTokenSource? _trackingCancellation;
     private Thread? _trackingThread;
@@ -42,6 +45,14 @@ internal sealed class NativeDrawingPreviewWindow : Form
 
     public NativeDrawingPreviewWindow()
     {
+        var virtualBounds = VirtualScreen.GetBounds();
+        _interactionFrameInterval =
+            DisplayRefreshRateService.GetInteractionFrameInterval(
+                new Rectangle(
+                    virtualBounds.X,
+                    virtualBounds.Y,
+                    virtualBounds.Width,
+                    virtualBounds.Height));
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         ShowInTaskbar = false;
@@ -101,26 +112,39 @@ internal sealed class NativeDrawingPreviewWindow : Form
         _trackingCancellation = cancellation;
         _trackingThread = new Thread(() =>
         {
-            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            var last = DrawingPoint.Empty;
-            while (!cancellation.IsCancellationRequested && !_disposed)
+            _ = timeBeginPeriod(1);
+            try
             {
-                if (stopwatch.ElapsedMilliseconds >= 1 && GetCursorPos(out var cursor))
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                var last = DrawingPoint.Empty;
+                while (!cancellation.IsCancellationRequested && !_disposed)
                 {
-                    stopwatch.Restart();
-                    if (cursor.X != last.X || cursor.Y != last.Y)
+                    if (stopwatch.Elapsed >= _interactionFrameInterval &&
+                        GetCursorPos(out var cursor))
                     {
-                        last = cursor;
-                        UpdateCursor(cursor);
+                        stopwatch.Restart();
+                        if (cursor.X != last.X || cursor.Y != last.Y)
+                        {
+                            last = cursor;
+                            UpdateCursor(cursor);
+                        }
                     }
-                }
 
-                Thread.Sleep(1);
+                    var remaining = _interactionFrameInterval - stopwatch.Elapsed;
+                    Thread.Sleep(remaining > TimeSpan.Zero
+                        ? remaining
+                        : TimeSpan.FromMilliseconds(1));
+                }
+            }
+            finally
+            {
+                _ = timeEndPeriod(1);
             }
         })
         {
             IsBackground = true,
             Name = "SnapCut native drawing preview",
+            Priority = ThreadPriority.BelowNormal,
         };
         _trackingThread.Start();
         UpdateCursor(start);
@@ -525,6 +549,12 @@ internal sealed class NativeDrawingPreviewWindow : Form
 
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out NativePoint point);
+
+    [DllImport("winmm.dll")]
+    private static extern uint timeBeginPeriod(uint periodMilliseconds);
+
+    [DllImport("winmm.dll")]
+    private static extern uint timeEndPeriod(uint periodMilliseconds);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePoint

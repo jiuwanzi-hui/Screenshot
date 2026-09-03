@@ -12,6 +12,7 @@ using Screenshot.App.Infrastructure;
 using Screenshot.App.Text;
 using DrawingRectangle = System.Drawing.Rectangle;
 using WpfButton = System.Windows.Controls.Button;
+using WpfButtonBase = System.Windows.Controls.Primitives.ButtonBase;
 using WpfBrushes = System.Windows.Media.Brushes;
 using WpfColor = System.Windows.Media.Color;
 using WpfCursors = System.Windows.Input.Cursors;
@@ -62,6 +63,9 @@ public partial class PinnedImageWindow : Window
     private double _restoreMinWidth;
     private double _restoreMinHeight;
     private bool _isDraggingThumbnail;
+    private readonly TimeSpan _interactionFrameInterval;
+    private long _lastThumbnailDragTimestamp;
+    private long _lastInlinePanTimestamp;
     private bool _thumbnailDragMoved;
     private WpfPoint _thumbnailDragStart;
     private WpfPoint _thumbnailDragStartScreen;
@@ -98,6 +102,14 @@ public partial class PinnedImageWindow : Window
         _arrowToolModeChanged = arrowToolModeChanged;
         _shapeToolModeChanged = shapeToolModeChanged;
         _lastAnnotationToolChanged = lastAnnotationToolChanged;
+        var virtualBounds = VirtualScreen.GetBounds();
+        _interactionFrameInterval =
+            DisplayRefreshRateService.GetInteractionFrameInterval(
+                new DrawingRectangle(
+                    virtualBounds.X,
+                    virtualBounds.Y,
+                    virtualBounds.Width,
+                    virtualBounds.Height));
         InitializeComponent();
         _windowDragTracker = new NativeWindowDragTracker(this, EndWindowDrag);
         DataContext = _capturedImage;
@@ -276,7 +288,7 @@ public partial class PinnedImageWindow : Window
 
     private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
-        if (e.OriginalSource is WpfButton or WpfSlider)
+        if (IsHeaderCommandSource(e.OriginalSource))
         {
             return;
         }
@@ -657,6 +669,7 @@ public partial class PinnedImageWindow : Window
         }
 
         _isPanningInlineEditor = true;
+        _lastInlinePanTimestamp = 0;
         _inlineEditorPanStartPoint = e.GetPosition(InlineEditorViewport);
         _inlineEditorPanStartHorizontalOffset = InlineEditorViewport.HorizontalOffset;
         _inlineEditorPanStartVerticalOffset = InlineEditorViewport.VerticalOffset;
@@ -671,11 +684,23 @@ public partial class PinnedImageWindow : Window
         {
             return;
         }
+        e.Handled = true;
         if (e.MiddleButton != MouseButtonState.Pressed)
         {
             EndInlineEditorPanning();
             return;
         }
+
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        var frameTicks = (long)Math.Ceiling(
+            _interactionFrameInterval.TotalSeconds *
+            System.Diagnostics.Stopwatch.Frequency);
+        if (_lastInlinePanTimestamp != 0 &&
+            now - _lastInlinePanTimestamp < frameTicks)
+        {
+            return;
+        }
+        _lastInlinePanTimestamp = now;
 
         var current = e.GetPosition(InlineEditorViewport);
         InlineEditorViewport.ScrollToHorizontalOffset(
@@ -899,6 +924,7 @@ public partial class PinnedImageWindow : Window
             _thumbnailDragStart = e.GetPosition(this);
             _thumbnailDragStartScreen = GetCurrentScreenCursorPosition();
             _thumbnailStartTop = Top;
+            _lastThumbnailDragTimestamp = 0;
             ImageSurface.Cursor = WpfCursors.SizeAll;
             _ = ImageSurface.CaptureMouse();
             e.Handled = true;
@@ -918,6 +944,15 @@ public partial class PinnedImageWindow : Window
         {
             return;
         }
+
+        var now = Environment.TickCount64;
+        if (_lastThumbnailDragTimestamp != 0 &&
+            now - _lastThumbnailDragTimestamp <
+            _interactionFrameInterval.TotalMilliseconds)
+        {
+            return;
+        }
+        _lastThumbnailDragTimestamp = now;
 
         var workArea = SystemParameters.WorkArea;
         var currentScreen = GetCurrentScreenCursorPosition();
@@ -958,7 +993,6 @@ public partial class PinnedImageWindow : Window
         }
 
         EndWindowDrag();
-        e.Handled = true;
     }
 
     private void OnWindowLostMouseCapture(object sender, WpfMouseEventArgs e) =>
@@ -1562,8 +1596,31 @@ public partial class PinnedImageWindow : Window
             return;
         }
 
-        _windowDragTracker.Start();
-        e.Handled = true;
+        // Start native capture while the original button-down is still
+        // active. Activating first can consume the first press as a focus
+        // change, which makes the window move only after a second click.
+        if (_windowDragTracker.Start())
+        {
+            e.Handled = true;
+        }
+    }
+
+    private static bool IsHeaderCommandSource(object source)
+    {
+        var current = source as DependencyObject;
+        while (current is not null)
+        {
+            if (current is WpfButtonBase or WpfSlider)
+            {
+                return true;
+            }
+
+            current = current is Visual or System.Windows.Media.Media3D.Visual3D
+                ? VisualTreeHelper.GetParent(current)
+                : LogicalTreeHelper.GetParent(current);
+        }
+
+        return false;
     }
 
     private void EndWindowDrag()

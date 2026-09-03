@@ -21,7 +21,7 @@ internal sealed class NativeSelectionMaskWindow : Form
     // Keep the dimming layer neutral. The selection border follows the theme,
     // but the mask must not inherit the accent color.
     private static readonly Color NeutralMaskColor = Color.Black;
-    private Rectangle? _excludedRegion;
+    private Rectangle[] _excludedRegions = [];
 
     public NativeSelectionMaskWindow()
     {
@@ -55,11 +55,24 @@ internal sealed class NativeSelectionMaskWindow : Form
         Rectangle? excluded,
         IntPtr belowWindow)
     {
+        UpdateNative(
+            surface,
+            selection,
+            excluded is { Width: > 0, Height: > 0 } ? [excluded.Value] : [],
+            belowWindow);
+    }
+
+    public void UpdateNative(
+        Rectangle surface,
+        Rectangle selection,
+        IReadOnlyList<Rectangle> excluded,
+        IntPtr belowWindow)
+    {
         lock (_updateLock)
         {
-            _excludedRegion = excluded is { Width: > 0, Height: > 0 }
-                ? excluded
-                : null;
+            _excludedRegions = excluded
+                .Where(region => region.Width > 0 && region.Height > 0)
+                .ToArray();
             UpdateCore(surface, selection, show: true, belowWindow);
         }
     }
@@ -94,7 +107,7 @@ internal sealed class NativeSelectionMaskWindow : Form
                     Math.Max(0, hole.Height)));
                 AddRegion(region, new Rectangle(hole.Right, hole.Top,
                     Math.Max(0, surface.Width - hole.Right), Math.Max(0, hole.Height)));
-                if (_excludedRegion is { } excluded)
+                foreach (var excluded in _excludedRegions)
                 {
                     var exclusion = Rectangle.Intersect(
                         new Rectangle(excluded.X - surface.X, excluded.Y - surface.Y,
@@ -102,9 +115,20 @@ internal sealed class NativeSelectionMaskWindow : Form
                         new Rectangle(0, 0, surface.Width, surface.Height));
                     if (!exclusion.IsEmpty)
                     {
-                        var exclusionRegion = CreateRectRgn(
-                            exclusion.Left, exclusion.Top,
-                            exclusion.Right, exclusion.Bottom);
+                        // Keep the exclusion shape aligned with the rounded
+                        // WPF toolbar/picker. A rectangular exclusion exposes
+                        // the four corners as a visible hole in the mask.
+                        var cornerRadius = Math.Clamp(
+                            Math.Min(exclusion.Width, exclusion.Height) / 6,
+                            4,
+                            12);
+                        var exclusionRegion = CreateRoundRectRgn(
+                            exclusion.Left,
+                            exclusion.Top,
+                            exclusion.Right,
+                            exclusion.Bottom,
+                            cornerRadius,
+                            cornerRadius);
                         try
                         {
                             _ = CombineRgn(region, region, exclusionRegion, 4);
@@ -144,9 +168,9 @@ internal sealed class NativeSelectionMaskWindow : Form
     {
         lock (_updateLock)
         {
-            _excludedRegion = region is { Width: > 0, Height: > 0 }
-                ? region
-                : null;
+            _excludedRegions = region is { Width: > 0, Height: > 0 }
+                ? [region.Value]
+                : [];
         }
     }
 
@@ -239,6 +263,14 @@ internal sealed class NativeSelectionMaskWindow : Form
     private static extern bool UpdateWindow(IntPtr window);
     [DllImport("gdi32.dll")]
     private static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateRoundRectRgn(
+        int left,
+        int top,
+        int right,
+        int bottom,
+        int width,
+        int height);
     [DllImport("gdi32.dll")]
     private static extern int CombineRgn(IntPtr destination, IntPtr source1,
         IntPtr source2, int mode);

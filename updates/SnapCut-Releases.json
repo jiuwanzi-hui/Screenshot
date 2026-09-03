@@ -1,4 +1,18 @@
 [{
+    "tag_name": "v3.8.0",
+    "name": "SnapCut 3.8.0",
+    "body": "- 优化截图、钉图和录屏快捷键的首帧输入路径，覆盖层先响应鼠标，减少低性能设备上的瞬时停顿和取色放大镜延迟。\n- 统一选区、拖动、缩放和取色跟随的高频刷新调度，改善截图框选与钉图移动的连续性。\n- PP-OCRv6 使用受控线程预算、较小输入尺寸和按需预热，缩短本地识别等待；Release 构建不启用输入追踪调试日志。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v3.8.0",
+    "published_at": "2026-09-03T18:22:19+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.0/SnapCut-Update.json" },
+      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.0/Screenshot-Update.json" },
+      { "name": "SnapCut-Setup-3.8.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.0/SnapCut-Setup-3.8.0-win-x64.exe" },
+      { "name": "SnapCut-Portable-3.8.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.0/SnapCut-Portable-3.8.0-win-x64.zip" }
+    ]
+  }, {
     "tag_name": "v3.7.9",
     "name": "SnapCut 3.7.9",
     "body": "- 修复高回报率鼠标移动时按快捷键进入截图的首帧卡顿：截图窗口先以非激活方式显示，桌面帧在后台获取并在首帧完成后接管鼠标。\n- 移除进入时默认十字光标和首帧大图同步绑定，减少光标切换、窗口合成对输入的阻塞。\n- Release 构建不启用输入时序调试日志。",
@@ -12,7 +26,7 @@
       { "name": "SnapCut-Setup-3.7.9-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.9/SnapCut-Setup-3.7.9-win-x64.exe" },
       { "name": "SnapCut-Portable-3.7.9-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.9/SnapCut-Portable-3.7.9-win-x64.zip" }
     ]
-  },
+  }, {
     "tag_name": "v3.7.8",
     "name": "SnapCut 3.7.8",
     "body": "- 增加最多五个预设截图区域：支持编号悬浮面板、区域高亮、左键直接截图、右键编辑、Delete 删除和一键清空。\n- 预览区域改为高透明度、主题适配并支持面板外点击关闭；区域设置支持右键逐步返回和完成保存。\n- 延续截图、钉图和录屏框选的原生更新、首次快捷键预热、遮罩同步和标注编辑修复；Release 构建不启用输入时序调试日志。",

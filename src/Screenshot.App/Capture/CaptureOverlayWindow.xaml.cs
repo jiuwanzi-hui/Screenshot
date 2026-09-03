@@ -4,9 +4,12 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Interop;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using System.Drawing.Imaging;
 using Screenshot.App.Editor;
 using Screenshot.App.Core;
+using Screenshot.App.Infrastructure;
 using Screenshot.App.Pin;
 using Screenshot.App.Presentation;
 using Screenshot.App.Text;
@@ -20,6 +23,7 @@ using WpfPoint = System.Windows.Point;
 using WinForms = System.Windows.Forms;
 using DrawingColor = System.Drawing.Color;
 using DrawingPoint = System.Drawing.Point;
+using DrawingRectangle = System.Drawing.Rectangle;
 
 namespace Screenshot.App.Capture;
 
@@ -193,6 +197,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private const int RegionCombineDifference = 4;
     private const double MinimumSelectionEdge = 2;
     private const double ResizeThumbHalfSize = 6;
+    private const int ColorPickerSampleRadius = 12;
+    private const int ColorPickerSampleSize = ColorPickerSampleRadius * 2 + 1;
+    // Keep the existing 104px source size; the XAML image scales it to the
+    // same 112px visual box while the backing bitmap is reused between moves.
+    private const int ColorPickerMagnifierSize = 104;
     // The move affordances sit immediately inside each resize corner. Their
     // small size leaves the visible corner thumb itself untouched.
     private const double MoveZoneInset = 14;
@@ -221,8 +230,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private Rect? _lastRenderedSelectionBounds;
     private bool _selectionBoundsUpdateScheduled;
     private long _lastSelectionPreviewTimestamp;
-    private double _selectionPreviewHz = 120;
-    private int _selectionPreviewStableSamples;
+    private double _selectionPreviewHz = 60;
     private long _lastSelectionBadgeTimestamp;
     private ScreenRegion? _selectionAdjustmentStartPhysicalBounds;
     private Rect? _selectionAdjustmentProtectedBounds;
@@ -237,6 +245,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private Task _continuedSelectionReleaseTask = Task.CompletedTask;
     private bool _isMovingSelection;
     private bool _toolbarHiddenForMove;
+    private bool _toolbarMaskPublishScheduled;
     private bool _isSelectionAdjustmentInProgress;
     private bool _isResizeDragging;
     private bool _resizeControlsSuppressed;
@@ -256,12 +265,18 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private bool _cancelScrollCaptureAfterRightButtonUp;
     private bool _isWindowSnapClickPending;
     private bool _isColorPickerActive;
+    private bool _colorPickerPreviewScheduled;
+    private WpfPoint _pendingColorPickerPoint;
     // Keyboard-triggered sessions defer cursor capture until after Show().
     private bool _initialPickerActivationQueued;
+    // Keep the bootstrap overlay out of the mouse hit-test path until its
+    // first desktop frame has been committed.
+    private bool _initialInputPassthrough;
     private DrawingColor _selectedPixelColor = DrawingColor.Black;
     private Rect? _windowSnapBounds;
     private IntPtr _windowHandle;
     private bool _isCompleted;
+    private bool _closedCleanupScheduled;
     private bool _isInitializing = true;
     private OcrRecognitionResult? _inlineOcrResult;
     private ContentRecognitionResult? _inlineQrResult;
@@ -280,8 +295,21 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private bool _isScrollCaptureTemporarilyHidden;
     private bool _hasVisibleInlineEditorTools;
     private bool _isDisposed;
+    private bool _closeQueued;
     private bool _isUpdatingInlineColorPanel;
     private bool _hasCustomToolbarPosition;
+    private bool _interactiveInputOwnershipAcquired;
+    private long _lastColorPickerUpdateTimestamp;
+    private long _colorPickerSampleRevision;
+    private int _colorPickerSampleWorkerActive;
+    private int _pendingColorPickerPixelX;
+    private int _pendingColorPickerPixelY;
+    private System.Drawing.Bitmap? _pendingColorPickerBitmap;
+    private ColorPickerSample? _pendingColorPickerResult;
+    private long _pendingColorPickerResultRevision;
+    private int _colorPickerResultDispatchScheduled;
+    private readonly object _colorPickerSampleLock = new();
+    private readonly object _colorPickerBitmapLifetimeLock = new();
     private bool _isToolbarSurfaceDragging;
     private WpfPoint _toolbarSurfaceDragStart;
     private WpfPoint _toolbarSurfaceStartPosition;
@@ -289,6 +317,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     private double _toolbarPositionYRatio = -1;
     private readonly ToolbarDragHintBehavior _toolbarDragHint;
     private readonly double _toolbarScale;
+    private readonly MonitorDpiScale _overlayDpi;
+    private readonly double _interactionRefreshRate;
+    private readonly System.Windows.Media.TranslateTransform _colorPickerPanelTransform = new();
     private WpfColor _inlineColorPanelPreviewColor = WpfColor.FromRgb(0, 127, 115);
     private WpfColor? _inlineCustomColor;
     private int[] _inlineCustomColorPalette = [];
@@ -296,22 +327,34 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         _publishedScrollCaptureSelection;
     private HwndSource? _windowSource;
 
+    private readonly record struct ColorPickerSample(
+        DrawingColor Color,
+        BitmapSource Magnifier);
+
     internal CaptureOverlayWindow(
         CaptureOverlayOptions? options,
         bool isScrollCaptureSelection = false,
         CapturedImage? initialScreenSnapshot = null,
         CapturePointerContinuation? initialPointerContinuation = null,
         bool isStartupPrewarm = false,
-        bool deferInitialColorPickerActivation = false)
+        bool deferInitialColorPickerActivation = false,
+        bool deferInitialScreenCapture = false,
+        NativeWindowPool? preparedNativeWindowPool = null)
     {
         using var timing = CaptureTimingDiagnostics.Begin(
             "overlay-constructor",
             $"startup={isStartupPrewarm} hasSnapshot={initialScreenSnapshot is not null}");
         _options = options;
+        CaptureTimingDiagnostics.Mark(
+            "overlay-constructor-options-ready",
+            $"startup={isStartupPrewarm} deferCapture={deferInitialScreenCapture}");
         _deferInitialColorPickerActivation =
             deferInitialColorPickerActivation ||
             options?.DeferInitialColorPickerActivation == true;
-        _deferInitialScreenCapture = options?.DeferInitialScreenCapture == true;
+        _deferInitialScreenCapture =
+            deferInitialScreenCapture ||
+            options?.DeferInitialScreenCapture == true;
+        _initialInputPassthrough = _deferInitialScreenCapture;
         _toolbarScale = Math.Clamp(
             double.IsFinite(options?.ToolbarScalePercent ?? 100)
                 ? (options?.ToolbarScalePercent ?? 100) / 100d
@@ -358,14 +401,22 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         {
             InitializeComponent();
         }
+        // Move the picker in the compositor without invalidating the full
+        // overlay layout on every mouse packet.
+        ColorPickerPanel.RenderTransform = _colorPickerPanelTransform;
+        CaptureTimingDiagnostics.Mark("overlay-xaml-ready");
+        // Keep the declarative Topmost=True state stable for the deferred
+        // bootstrap. The window is click-through through WM_NCHITTEST until
+        // the first frame is ready, so changing z-order later is unnecessary
+        // and would retarget the current cursor packet.
         using (CaptureTimingDiagnostics.Begin("overlay-native-windows"))
         {
-            var nativeWindows = isStartupPrewarm
+            var nativeWindows = preparedNativeWindowPool ?? (isStartupPrewarm
                 ? new NativeWindowPool(
                     new NativeSelectionFrameWindow(),
                     new NativeSelectionMaskWindow(),
                     new NativeSelectionSizeWindow())
-                : TakeNativeWindowPool();
+                : TakeNativeWindowPool());
             _nativeSelectionFrame = nativeWindows.Frame;
             _nativeSelectionMask = nativeWindows.Mask;
             _nativeSelectionSize = nativeWindows.Size;
@@ -474,17 +525,31 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         _virtualScreenBounds = VirtualScreen.GetBounds();
+        _interactionRefreshRate = DisplayRefreshRateService.GetInteractionRefreshRate(
+            new DrawingRectangle(
+                _virtualScreenBounds.X,
+                _virtualScreenBounds.Y,
+                _virtualScreenBounds.Width,
+                _virtualScreenBounds.Height));
+        _selectionPreviewHz = _interactionRefreshRate;
+        _overlayDpi = MonitorGeometryService.GetDpiScale(
+            new DrawingRectangle(
+                _virtualScreenBounds.X,
+                _virtualScreenBounds.Y,
+                _virtualScreenBounds.Width,
+                _virtualScreenBounds.Height));
         _nativeSelectionFrame.AttachMaskWindow(
             _nativeSelectionMask,
             ToDrawingRectangle(_virtualScreenBounds));
         if ((!isStartupPrewarm || initialScreenSnapshot is not null) &&
-            !_deferInitialScreenCapture)
+            (!_deferInitialScreenCapture || initialScreenSnapshot is not null))
         {
             try
             {
                 _screenSnapshot = initialScreenSnapshot ??
                     ScreenCaptureService.Capture(_virtualScreenBounds);
-                if (!(_deferInitialColorPickerActivation &&
+                if (!_deferInitialScreenCapture &&
+                    !(_deferInitialColorPickerActivation &&
                       initialScreenSnapshot is not null))
                 {
                     FrozenScreenImage.Source = _screenSnapshot.Preview;
@@ -492,31 +557,144 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             }
             catch
             {
-                _screenSnapshot?.Dispose();
-                _screenSnapshot = null;
+                lock (_colorPickerBitmapLifetimeLock)
+                {
+                    _screenSnapshot?.Dispose();
+                    _screenSnapshot = null;
+                }
                 FrozenScreenImage.Source = null;
             }
         }
-        Left = _virtualScreenBounds.X;
-        Top = _virtualScreenBounds.Y;
-        Width = _virtualScreenBounds.Width;
-        Height = _virtualScreenBounds.Height;
+        if (_deferInitialScreenCapture)
+        {
+            // 直接设置全屏大小但不显示，避免后续从1x1调整到全屏的卡顿
+            // 虽然创建大的透明窗口有开销，但比后续调整大小的卡顿要好
+            Left = _virtualScreenBounds.X / _overlayDpi.X;
+            Top = _virtualScreenBounds.Y / _overlayDpi.Y;
+            Width = _virtualScreenBounds.Width / _overlayDpi.X;
+            Height = _virtualScreenBounds.Height / _overlayDpi.Y;
+        }
+        else
+        {
+            Left = _virtualScreenBounds.X / _overlayDpi.X;
+            Top = _virtualScreenBounds.Y / _overlayDpi.Y;
+            Width = _virtualScreenBounds.Width / _overlayDpi.X;
+            Height = _virtualScreenBounds.Height / _overlayDpi.Y;
+        }
         SourceInitialized += OnSourceInitialized;
+        Core.StartupDiagnostics.LogWindowCreation(
+            $"Overlay geometry: physical={_virtualScreenBounds.X},{_virtualScreenBounds.Y}," +
+            $"{_virtualScreenBounds.Width}x{_virtualScreenBounds.Height}; " +
+            $"dpi={_overlayDpi.X:0.###}x{_overlayDpi.Y:0.###}; " +
+            $"logical={Left:0.##},{Top:0.##},{Width:0.##}x{Height:0.##}");
+        CaptureTimingDiagnostics.Mark(
+            "overlay-constructor-ready",
+            $"physicalBounds={_virtualScreenBounds.X},{_virtualScreenBounds.Y}," +
+            $"{_virtualScreenBounds.Width}x{_virtualScreenBounds.Height} " +
+            $"dpi={_overlayDpi.X:0.###}x{_overlayDpi.Y:0.###} " +
+            $"logicalBounds={Left:0.##},{Top:0.##},{Width:0.##}x{Height:0.##} " +
+            $"deferCapture={_deferInitialScreenCapture}");
     }
 
     public static Task<ScreenRegion?> SelectAsync(
         CapturePointerContinuation? initialPointerContinuation = null,
         CapturedImage? initialScreenSnapshot = null,
-        bool deferInitialColorPickerActivation = false)
+        bool deferInitialColorPickerActivation = false,
+        bool deferInitialScreenCapture = false)
     {
-        var overlay = new CaptureOverlayWindow(
-            options: null,
-            initialScreenSnapshot: initialScreenSnapshot,
-            initialPointerContinuation: initialPointerContinuation,
-            deferInitialColorPickerActivation:
-                deferInitialColorPickerActivation);
-        overlay.Show();
-        return overlay._selectionCompletionSource.Task;
+        var completion = new TaskCompletionSource<ScreenRegion?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        NativeWindowPool? nativePool = null;
+        try
+        {
+            nativePool = PrepareNativeBootstrap();
+            var dispatcher = System.Windows.Application.Current?.Dispatcher ??
+                Dispatcher.CurrentDispatcher;
+            _ = dispatcher.BeginInvoke(
+                DispatcherPriority.Background,
+                new Action(() =>
+                {
+                    try
+                    {
+                        var overlay = new CaptureOverlayWindow(
+                            options: null,
+                            initialScreenSnapshot: initialScreenSnapshot,
+                            initialPointerContinuation: initialPointerContinuation,
+                            deferInitialColorPickerActivation:
+                                deferInitialColorPickerActivation,
+                            deferInitialScreenCapture: deferInitialScreenCapture,
+                            preparedNativeWindowPool: nativePool);
+                        nativePool = null;
+                        if (deferInitialScreenCapture)
+                        {
+                            overlay.ShowActivated = false;
+                            overlay.Opacity = 0;
+                            Core.StartupDiagnostics.LogWindowCreation("CaptureOverlay: deferred capture mode, ShowActivated=false, Opacity=0");
+                        }
+                        else
+                        {
+                            Core.StartupDiagnostics.LogWindowCreation("CaptureOverlay: normal mode");
+                        }
+                        overlay.Show();
+                        Core.StartupDiagnostics.LogWindowCreation("CaptureOverlay: Show() called");
+                        if (deferInitialScreenCapture &&
+                            initialScreenSnapshot is null)
+                        {
+                            // Take input ownership before the asynchronous
+                            // desktop BitBlt starts. The surface is
+                            // transparent and the native mask supplies the
+                            // initial dimming, so the user can move or drag
+                            // immediately instead of waiting for the bitmap.
+                            overlay.ActivateDeferredInputSurface();
+                            Core.StartupDiagnostics.LogWindowCreation(
+                                "CaptureOverlay: deferred input surface ready");
+                        }
+                        if (deferInitialScreenCapture &&
+                            initialScreenSnapshot is null)
+                        {
+                            _ = overlay.Dispatcher.BeginInvoke(
+                                DispatcherPriority.Background,
+                                new Action(() =>
+                                {
+                                    Core.StartupDiagnostics.LogWindowCreation("CaptureOverlay: starting deferred screen capture");
+                                    _ = overlay.CaptureInitialScreenAsync();
+                                }));
+                        }
+                        else if (deferInitialScreenCapture &&
+                                 initialScreenSnapshot is not null)
+                        {
+                            _ = overlay.Dispatcher.BeginInvoke(
+                                DispatcherPriority.ContextIdle,
+                                new Action(() =>
+                                {
+                                    Core.StartupDiagnostics.LogWindowCreation("CaptureOverlay: publishing initial screen frame");
+                                    overlay.PublishInitialScreenFrame();
+                                }));
+                        }
+
+                        _ = overlay._selectionCompletionSource.Task.ContinueWith(
+                            task => completion.TrySetResult(task.Result),
+                            CancellationToken.None,
+                            TaskContinuationOptions.ExecuteSynchronously,
+                            TaskScheduler.Default);
+                    }
+                    catch
+                    {
+                        nativePool?.Dispose();
+                        nativePool = null;
+                        initialScreenSnapshot?.Dispose();
+                        completion.TrySetResult(null);
+                    }
+                }));
+        }
+        catch
+        {
+            nativePool?.Dispose();
+            initialScreenSnapshot?.Dispose();
+            completion.TrySetResult(null);
+        }
+
+        return completion.Task;
     }
 
     public static Task<ScrollCaptureSelection?> SelectForScrollCaptureAsync(
@@ -573,13 +751,71 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         CaptureOverlayOptions options,
         CapturedImage? initialScreenSnapshot = null)
     {
+        return ShowInteractiveCore(options, initialScreenSnapshot, null);
+    }
+
+    internal static async Task<CaptureOverlayWindow?> BeginInteractive(
+        CaptureOverlayOptions options,
+        CapturedImage? initialScreenSnapshot = null)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        var completion = new TaskCompletionSource<CaptureOverlayWindow?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        NativeWindowPool? nativePool = null;
+        try
+        {
+            nativePool = PrepareNativeBootstrap();
+            var dispatcher = System.Windows.Application.Current?.Dispatcher ??
+                Dispatcher.CurrentDispatcher;
+
+            _ = dispatcher.BeginInvoke(
+                // Let the current mouse burst drain before constructing the
+                // WPF overlay. The constructor is intentionally unchanged,
+                // but it must not run ahead of pointer delivery.
+                DispatcherPriority.Background,
+                new Action(() =>
+                {
+                    try
+                    {
+                        var overlay = ShowInteractiveCore(
+                            options,
+                            initialScreenSnapshot,
+                            nativePool);
+                        nativePool = null;
+                        completion.TrySetResult(overlay);
+                    }
+                    catch (Exception exception)
+                    {
+                        nativePool?.Dispose();
+                        nativePool = null;
+                        initialScreenSnapshot?.Dispose();
+                        completion.TrySetException(exception);
+                    }
+                }));
+        }
+        catch (Exception exception)
+        {
+            nativePool?.Dispose();
+            initialScreenSnapshot?.Dispose();
+            completion.TrySetException(exception);
+        }
+
+        return await completion.Task;
+    }
+
+    private static CaptureOverlayWindow ShowInteractiveCore(
+        CaptureOverlayOptions options,
+        CapturedImage? initialScreenSnapshot,
+        NativeWindowPool? preparedNativeWindowPool)
+    {
         ArgumentNullException.ThrowIfNull(options);
         CaptureTimingDiagnostics.Mark(
             "show-interactive",
             $"hasSnapshot={initialScreenSnapshot is not null}");
         var overlay = new CaptureOverlayWindow(
             options,
-            initialScreenSnapshot: initialScreenSnapshot);
+            initialScreenSnapshot: initialScreenSnapshot,
+            preparedNativeWindowPool: preparedNativeWindowPool);
         var deferKeyboardPickerActivation =
             options.InitialPointerContinuation is null &&
             options.InitialSelection is null;
@@ -606,15 +842,23 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
         _activeInteractiveOverlay = overlay;
         CaptureTimingDiagnostics.Mark("before-overlay-show");
-        if (options.DeferInitialScreenCapture)
-        {
-            // Start GDI capture before WPF enters its first Show/layout pass.
-            // The worker and window initialization can then overlap instead
-            // of serializing both costs on the shortcut's first frame.
-            _ = overlay.CaptureInitialScreenAsync();
-        }
         overlay.Show();
         CaptureTimingDiagnostics.Mark("after-overlay-show");
+        if (options.DeferInitialScreenCapture && initialScreenSnapshot is null)
+        {
+            // Do not leave the topmost window click-through while GDI copies
+            // the desktop. Mouse packets must be handled by the overlay from
+            // the first frame; the image is only a visual payload.
+            overlay.ActivateDeferredInputSurface();
+            // Start the desktop copy only after the transparent overlay has
+            // entered the compositor. This prevents GDI/DWM initialization
+            // from competing with the first Show/layout pass and blocking
+            // the cursor on slower machines.
+            _ = overlay.Dispatcher.BeginInvoke(
+                DispatcherPriority.ContextIdle,
+                new Action(() => _ = overlay.CaptureInitialScreenAsync()));
+            CaptureTimingDiagnostics.Mark("initial-screen-capture-queued");
+        }
         if (deferKeyboardPickerActivation && initialScreenSnapshot is not null)
         {
             _ = overlay.Dispatcher.BeginInvoke(
@@ -655,14 +899,14 @@ public partial class CaptureOverlayWindow : Window, IDisposable
     internal void SetInitialScreenSnapshot(CapturedImage snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
-        if (Dispatcher.CheckAccess())
-        {
-            SetInitialScreenSnapshotCore(snapshot);
-            return;
-        }
-
+        // A completed background capture must not synchronously publish a
+        // full-screen BitmapSource from the continuation that won the frame.
+        // That update can invalidate the current mouse hit-test and briefly
+        // make the cursor appear frozen on slower machines. Always publish
+        // from an idle dispatcher turn so pending pointer packets are drained
+        // first, regardless of which thread completed the capture.
         _ = Dispatcher.BeginInvoke(
-            DispatcherPriority.Input,
+            DispatcherPriority.ApplicationIdle,
             new Action(() => SetInitialScreenSnapshotCore(snapshot)));
     }
 
@@ -674,20 +918,15 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return;
         }
 
-        _screenSnapshot?.Dispose();
-        _screenSnapshot = snapshot;
-        FrozenScreenImage.Source = snapshot.Preview;
-        // The deferred keyboard path creates the overlay before the desktop
-        // frame is ready. Publish the native mask only after the image source
-        // is available so slower machines never present an empty mask frame.
-        _nativeSelectionFrame.ShowIdleMask(
-            ToDrawingRectangle(_virtualScreenBounds));
-        if (_deferInitialScreenCapture)
+        lock (_colorPickerBitmapLifetimeLock)
         {
-            // Publish the first complete frame atomically. Showing the window
-            // before this point would expose a stale/empty compositor frame.
-            Opacity = 1;
+            _screenSnapshot?.Dispose();
+            _screenSnapshot = snapshot;
         }
+        FrozenScreenImage.Source = snapshot.Preview;
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Render,
+            new Action(PublishInitialScreenVisuals));
         if (_options is not null &&
             !_isSelecting &&
             !HasValidSelection() &&
@@ -717,22 +956,49 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private async Task CaptureInitialScreenAsync()
     {
+        Core.StartupDiagnostics.LogWindowCreation("CaptureInitialScreenAsync: starting background screen capture");
         try
         {
             var snapshot = await Task.Factory.StartNew(() =>
             {
+                var previousPriority = Thread.CurrentThread.Priority;
+                try
+                {
+                    Thread.CurrentThread.Priority = ThreadPriority.BelowNormal;
+                }
+                catch
+                {
+                }
+
                 using var timing = CaptureTimingDiagnostics.Begin(
                     "keyboard-gdi-capture-worker");
-                var captured = ScreenCaptureService.Capture(
-                    VirtualScreen.GetBounds());
-                _ = captured.WarmPreview();
-                return captured;
+                try
+                {
+                    Core.StartupDiagnostics.LogWindowCreation("CaptureInitialScreenAsync: calling ScreenCaptureService.Capture");
+                    var captured = ScreenCaptureService.Capture(
+                        VirtualScreen.GetBounds());
+                    _ = captured.WarmPreview();
+                    Core.StartupDiagnostics.LogWindowCreation("CaptureInitialScreenAsync: screen capture completed");
+                    return captured;
+                }
+                finally
+                {
+                    try
+                    {
+                        Thread.CurrentThread.Priority = previousPriority;
+                    }
+                    catch
+                    {
+                    }
+                }
             }, CancellationToken.None, TaskCreationOptions.LongRunning,
                 TaskScheduler.Default);
+            Core.StartupDiagnostics.LogWindowCreation("CaptureInitialScreenAsync: setting initial screen snapshot");
             SetInitialScreenSnapshot(snapshot);
         }
-        catch
+        catch (Exception ex)
         {
+            Core.StartupDiagnostics.LogWindowCreation($"CaptureInitialScreenAsync: exception={ex.Message}");
             CompleteSelection(result: null);
         }
     }
@@ -777,6 +1043,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
     }
 
+    internal static BitmapSource? PrewarmColorPickerSample(
+        System.Drawing.Bitmap bitmap)
+    {
+        ArgumentNullException.ThrowIfNull(bitmap);
+        return BuildColorPickerSample(bitmap, 12, 12).Magnifier;
+    }
+
     private static NativeWindowPool TakeNativeWindowPool()
     {
         lock (NativeWindowPoolLock)
@@ -796,7 +1069,20 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             new NativeSelectionSizeWindow());
     }
 
-    private sealed class NativeWindowPool
+    private static NativeWindowPool PrepareNativeBootstrap()
+    {
+        var pool = TakeNativeWindowPool();
+        // A pooled HWND can still carry a visible state if a previous session
+        // was closed during a dispatcher transition. Clear all native
+        // surfaces before handing the pool to the next session; the hotkey
+        // edge must not flash a stale mask or border.
+        pool.Frame.Hide();
+        pool.Mask.HideMask();
+        pool.Size.HideSize();
+        return pool;
+    }
+
+    internal sealed class NativeWindowPool
     {
         public NativeWindowPool(
             NativeSelectionFrameWindow frame,
@@ -813,6 +1099,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         public NativeSelectionMaskWindow Mask { get; }
 
         public NativeSelectionSizeWindow Size { get; }
+
+        public void Dispose()
+        {
+            Frame.Dispose();
+            Mask.Dispose();
+            Size.Dispose();
+        }
     }
 
     internal static bool TryCompleteActiveInteractiveSelection()
@@ -854,6 +1147,51 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         return overlay.TryCompleteFromConfiguredHotKey();
     }
 
+    internal static bool TryHandleGlobalPickerKey(
+        uint virtualKey,
+        HotKeyModifiers modifiers)
+    {
+        const uint virtualKeyEscape = 0x1B;
+        const uint virtualKeyC = 0x43;
+        var overlay = _activeInteractiveOverlay;
+        if (overlay is null ||
+            overlay._isDisposed ||
+            !overlay._isColorPickerActive ||
+            (virtualKey != virtualKeyC && virtualKey != virtualKeyEscape))
+        {
+            return false;
+        }
+
+        // The initial picker intentionally stays NOACTIVATE so its first
+        // mouse move cannot be retargeted. Route its two keyboard commands
+        // from the low-level hook instead of requiring foreground focus.
+        // Always queue, including when the hook happens to run on the WPF
+        // thread. Completing a capture or touching the clipboard must never
+        // execute synchronously inside WH_KEYBOARD_LL.
+        _ = overlay.Dispatcher.BeginInvoke(
+            DispatcherPriority.Input,
+            new Action(() => overlay.HandleGlobalPickerKey(virtualKey)));
+        return true;
+    }
+
+    private void HandleGlobalPickerKey(uint virtualKey)
+    {
+        if (!_isColorPickerActive || _isDisposed || _isCompleted)
+        {
+            return;
+        }
+
+        if (virtualKey == 0x1B)
+        {
+            ExitColorPicker();
+            CompleteSelection(result: null);
+        }
+        else if (virtualKey == 0x43)
+        {
+            _ = CopyPickedColorAsync();
+        }
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         CaptureTimingDiagnostics.Mark(
@@ -872,6 +1210,12 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
         _toolbarDragHint.Detach();
         _lifetimeCancellationSource.Cancel();
+        Interlocked.Increment(ref _colorPickerSampleRevision);
+        lock (_colorPickerSampleLock)
+        {
+            _pendingColorPickerBitmap = null;
+            _pendingColorPickerResult = null;
+        }
         _isSelecting = false;
         _continuedSelectionButton = null;
         StopSelectionPreviewRendering();
@@ -880,12 +1224,16 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         _windowSnapTimer.Tick -= OnWindowSnapTimerTick;
         _selectionIdleTimer.Stop();
         _selectionIdleTimer.Tick -= OnSelectionIdleTimerTick;
-        _nativeSelectionFrame.Dispose();
-        _nativeSelectionMask.Dispose();
-        _nativeSelectionSize.Dispose();
+        // Hide the native surfaces immediately, but defer their destruction.
+        // Dispose stops a polling thread (including a bounded Join) and
+        // releases layered bitmaps; doing that inside Close() steals the
+        // foreground app's next mouse turn.
+        _nativeSelectionFrame.Hide();
+        _nativeSelectionMask.HideMask();
+        _nativeSelectionSize.HideSize();
         if (_windowSource is not null)
         {
-            _windowSource.RemoveHook(OnScrollCaptureWindowMessage);
+            _windowSource.RemoveHook(OnOverlayWindowMessage);
             _windowSource = null;
         }
 
@@ -894,11 +1242,15 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             OnInlineAnnotationSelectionChanged;
         InlineEditorCanvas.PreviewMouseLeftButtonDown -=
             OnInlineEditorCanvasPreviewMouseLeftButtonDown;
-        _inlineEditorImage?.Dispose();
+        var inlineEditorImage = _inlineEditorImage;
         _inlineEditorImage = null;
         FrozenScreenImage.Source = null;
-        _screenSnapshot?.Dispose();
-        _screenSnapshot = null;
+        CapturedImage? screenSnapshot;
+        lock (_colorPickerBitmapLifetimeLock)
+        {
+            screenSnapshot = _screenSnapshot;
+            _screenSnapshot = null;
+        }
 
         if (!_isCompleted)
         {
@@ -921,7 +1273,33 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         base.OnClosed(e);
-        Dispose();
+
+        if (!_closedCleanupScheduled &&
+            !Dispatcher.HasShutdownStarted &&
+            !Dispatcher.HasShutdownFinished)
+        {
+            _closedCleanupScheduled = true;
+            _ = Dispatcher.BeginInvoke(
+                DispatcherPriority.ApplicationIdle,
+                new Action(() =>
+                {
+                    inlineEditorImage?.Dispose();
+                    screenSnapshot?.Dispose();
+                    _nativeSelectionFrame.Dispose();
+                    _nativeSelectionMask.Dispose();
+                    _nativeSelectionSize.Dispose();
+                    Dispose();
+                }));
+        }
+        else
+        {
+            inlineEditorImage?.Dispose();
+            screenSnapshot?.Dispose();
+            _nativeSelectionFrame.Dispose();
+            _nativeSelectionMask.Dispose();
+            _nativeSelectionSize.Dispose();
+            Dispose();
+        }
 
         // Rebuild the reusable native HWND set only after the interaction has
         // fully closed. This keeps the next keyboard shortcut off the HWND
@@ -955,30 +1333,29 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         _nativeSelectionFrame.SetOwner(windowHandle);
         _nativeSelectionMask.SetOwner(windowHandle);
         _nativeSelectionSize.SetOwner(windowHandle);
-        _ = NativeMethods.SetWindowPos(
-            windowHandle,
-            new IntPtr(TopmostWindow),
-            _virtualScreenBounds.X,
-            _virtualScreenBounds.Y,
-            _virtualScreenBounds.Width,
-            _virtualScreenBounds.Height,
-            DoNotActivate | DoNotChangeOwnerZOrder);
+        // Normal sessions use the existing native z-order path. Deferred
+        // keyboard sessions already keep the WPF Topmost state from Show();
+        // repeating SetWindowPos when the bitmap arrives would recalculate
+        // hit-testing in the middle of a mouse burst.
+        if (!_deferInitialScreenCapture)
+        {
+            PositionOverlayWindowTopmost();
+        }
 
-        // Do not show the native mask until the first desktop frame has been
-        // committed. On slower machines the snapshot can arrive after the
-        // overlay handle is created; showing an empty full-screen mask here
-        // produces the visible one-frame flash reported on entry.
+        SetInitialInputPassthroughWindowStyle(_initialInputPassthrough);
+
+        // The native mask is published from PublishInitialScreenVisuals after
+        // the WPF desktop bitmap has reached a render pass. Creating it here
+        // races the first compositor frame and can flash a black origin block.
         if (_screenSnapshot is not null)
         {
-            _nativeSelectionFrame.ShowIdleMask(
-                ToDrawingRectangle(_virtualScreenBounds));
+            _ = Dispatcher.BeginInvoke(
+                DispatcherPriority.Render,
+                new Action(PublishInitialScreenVisuals));
         }
 
-        if (_isScrollCaptureSelection)
-        {
-            _windowSource = HwndSource.FromHwnd(windowHandle);
-            _windowSource?.AddHook(OnScrollCaptureWindowMessage);
-        }
+        _windowSource = HwndSource.FromHwnd(windowHandle);
+        _windowSource?.AddHook(OnOverlayWindowMessage);
     }
 
     private bool TryGetAccentColors(out WpfColor start, out WpfColor end)
@@ -1047,7 +1424,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             if (!_initialPickerActivationQueued &&
                 _initialPointerContinuation is not null)
             {
-                EnterColorPicker(
+                EnterColorPickerCore(
                     activateWindow: !_deferInitialColorPickerActivation);
             }
         }
@@ -1061,9 +1438,44 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         CaptureTimingDiagnostics.Mark("initial-color-picker-start");
-        EnterColorPicker(activateWindow: true);
+        // The full-screen surface already receives mouse messages at this
+        // point. Capturing the mouse on the same dispatcher turn as window
+        // activation causes USER32 to retarget the current cursor message,
+        // which is perceived as a one-frame mouse hitch on high polling-rate
+        // systems. Selection/drag paths still capture the mouse normally.
+        // Keep the panel hidden while its size and cursor-relative position
+        // are calculated. A newly shown Canvas child otherwise renders once
+        // at (0, 0), which is the brief top-left flash seen on hotkey entry.
+        ColorPickerPanel.Opacity = 0;
+        EnterColorPickerCore(
+            // The overlay is already topmost and receives mouse moves without
+            // activation. Activating here changes the foreground window and
+            // can retarget the cursor packet that opened the capture.
+            activateWindow: false,
+            captureMouse: false,
+            updatePreview: false,
+            updateLayout: false,
+            updateWindowSnap: false);
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.ApplicationIdle,
+            new Action(UpdateInitialColorPickerPreview));
         _initialPickerActivationQueued = false;
         CaptureTimingDiagnostics.Mark("initial-color-picker-end");
+    }
+
+    private void UpdateInitialColorPickerPreview()
+    {
+        if (_isDisposed || _isCompleted || !_isColorPickerActive)
+        {
+            return;
+        }
+
+        CaptureTimingDiagnostics.Mark("initial-color-picker-preview-start");
+        var cursor = WinForms.Cursor.Position;
+        UpdateColorPicker(CaptureSurface.PointFromScreen(
+            new WpfPoint(cursor.X, cursor.Y)));
+        UpdateWindowSnap(cursor.X, cursor.Y);
+        CaptureTimingDiagnostics.Mark("initial-color-picker-preview-end");
     }
 
     private void PublishInitialScreenFrame()
@@ -1074,9 +1486,97 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         FrozenScreenImage.Source = _screenSnapshot.Preview;
-        _nativeSelectionFrame.ShowIdleMask(
-            ToDrawingRectangle(_virtualScreenBounds));
-        CaptureTimingDiagnostics.Mark("initial-screen-frame-published");
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Render,
+            new Action(PublishInitialScreenVisuals));
+    }
+
+    private void PublishInitialScreenVisuals()
+    {
+        if (_isDisposed || _isCompleted || _screenSnapshot is null)
+        {
+            Core.StartupDiagnostics.LogWindowCreation($"PublishInitialScreenVisuals: skipped - disposed={_isDisposed}, completed={_isCompleted}, hasSnapshot={_screenSnapshot is not null}");
+            return;
+        }
+
+        Core.StartupDiagnostics.LogWindowCreation($"PublishInitialScreenVisuals: starting - deferInitialCapture={_deferInitialScreenCapture}");
+        CaptureTimingDiagnostics.Mark(
+            "initial-screen-visuals-before-layout",
+            $"opacity={Opacity:0.###} bounds={Width:0.##}x{Height:0.##}");
+
+        // Publish the native mask after the current render turn. Do not force a
+        // full-screen UpdateLayout here: the bitmap source is already assigned,
+        // and forcing layout synchronously competes with the pointer stream.
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.ContextIdle,
+            new Action(() =>
+            {
+                if (_isDisposed || _isCompleted)
+                {
+                    return;
+                }
+                _nativeSelectionFrame.ShowIdleMask(
+                    ToDrawingRectangle(_virtualScreenBounds));
+                Core.StartupDiagnostics.LogWindowCreation("PublishInitialScreenVisuals: native selection frame shown");
+                if (_deferInitialScreenCapture)
+                {
+                    // Switch hit-testing and visibility together. Keeping the
+                    // bootstrap window click-through until this exact turn
+                    // prevents an invisible topmost HWND from consuming a
+                    // mouse packet between Render and ContextIdle.
+                    _initialInputPassthrough = false;
+                    SetInitialInputPassthroughWindowStyle(enabled: false);
+                    CaptureTimingDiagnostics.Mark("initial-input-ready");
+                    Core.StartupDiagnostics.LogWindowCreation(
+                        $"PublishInitialScreenVisuals: input ready, stable topmost bounds {Width}x{Height}");
+                    // The source was assigned before this idle turn. Reveal the
+                    // already-sized overlay without changing HWND styles or z-order.
+                    Core.StartupDiagnostics.LogWindowCreation("PublishInitialScreenVisuals: setting opacity to 1");
+                    Opacity = 1;
+                }
+                CaptureTimingDiagnostics.Mark("initial-screen-frame-published");
+                Core.StartupDiagnostics.LogWindowCreation("PublishInitialScreenVisuals: completed");
+            }));
+    }
+
+    private void ActivateDeferredInputSurface()
+    {
+        if (!_deferInitialScreenCapture ||
+            _isDisposed ||
+            _isCompleted)
+        {
+            return;
+        }
+
+        _initialInputPassthrough = false;
+        SetInitialInputPassthroughWindowStyle(enabled: false);
+        // Keep this hand-off limited to HWND hit-testing and opacity. Updating
+        // a full-screen native region can itself take a frame on low-end
+        // machines, so the dimming mask is published with the captured image
+        // below. The transparent WPF surface can receive pointer input now.
+        // Keep the window visually hidden until PublishInitialScreenVisuals has
+        // committed both the desktop bitmap and the native dimming mask. A
+        // transparent WPF window is still hit-testable, so input ownership is
+        // acquired without exposing an empty frame at the origin.
+        CaptureTimingDiagnostics.Mark("initial-input-ready-before-frame");
+    }
+
+    private void PositionOverlayWindowTopmost()
+    {
+        if (_windowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        Topmost = true;
+        _ = NativeMethods.SetWindowPos(
+            _windowHandle,
+            new IntPtr(TopmostWindow),
+            _virtualScreenBounds.X,
+            _virtualScreenBounds.Y,
+            _virtualScreenBounds.Width,
+            _virtualScreenBounds.Height,
+            DoNotActivate | DoNotChangeOwnerZOrder);
     }
 
     private void ActivateDeferredColorPicker()
@@ -1089,18 +1589,27 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         CaptureTimingDiagnostics.Input(
             $"overlay-deferred-activation before active={IsActive} " +
             $"captured={CaptureSurface.IsMouseCaptured} cursor={CaptureSurface.Cursor}");
-        CaptureSurface.CaptureMouse();
-        CaptureTimingDiagnostics.Input(
-            $"overlay-capture-mouse after captured={CaptureSurface.IsMouseCaptured}");
-        var activated = Activate();
-        CaptureTimingDiagnostics.Input(
-            $"overlay-activate after result={activated} active={IsActive}");
-        CaptureSurface.Focus();
-        Keyboard.Focus(CaptureSurface);
+        // Do not activate or capture the mouse while merely presenting the
+        // picker. Full-screen hit testing is sufficient for pointer tracking;
+        // ownership is acquired by the first click via
+        // EnsureInteractiveInputOwnership.
         UpdateColorPicker(CaptureSurface.PointFromScreen(
             new WpfPoint(
                 WinForms.Cursor.Position.X,
                 WinForms.Cursor.Position.Y)));
+    }
+
+    private void EnsureColorPickerMouseCapture()
+    {
+        if (_isDisposed || _isCompleted || !_isColorPickerActive ||
+            CaptureSurface.IsMouseCaptured)
+        {
+            return;
+        }
+
+        CaptureSurface.CaptureMouse();
+        CaptureTimingDiagnostics.Input(
+            $"color-picker-capture captured={CaptureSurface.IsMouseCaptured}");
     }
 
     private void OnCaptureSurfaceKeyDown(object sender, WpfKeyEventArgs e)
@@ -1275,6 +1784,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         object sender,
         MouseButtonEventArgs e)
     {
+        EnsureInteractiveInputOwnership();
         if (InlineCustomColorPanel.Visibility == Visibility.Visible &&
             InlineSharedColorPicker.TryHandlePaletteRightClick(e.OriginalSource))
         {
@@ -1439,6 +1949,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         object sender,
         MouseButtonEventArgs e)
     {
+        EnsureInteractiveInputOwnership();
         if (e.Handled ||
             e.ClickCount == 2 ||
             _isSelecting ||
@@ -1596,6 +2107,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void OnCaptureSurfaceMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        EnsureInteractiveInputOwnership();
         if (InlineCustomColorPanel.Visibility == Visibility.Visible &&
             !IsSourceInsideInlineCustomColorPanel(e.OriginalSource))
         {
@@ -1825,7 +2337,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                    $"active={IsActive} captured={CaptureSurface.IsMouseCaptured}");
         if (_isColorPickerActive)
         {
-            UpdateColorPicker(point);
+            QueueColorPickerPreview(point);
             return;
         }
 
@@ -2203,7 +2715,15 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         ConfirmCurrentSelection();
     }
 
-    private void EnterColorPicker(bool activateWindow = true)
+    private void EnterColorPicker() =>
+        EnterColorPickerCore();
+
+    private void EnterColorPickerCore(
+        bool activateWindow = true,
+        bool captureMouse = true,
+        bool updatePreview = true,
+        bool updateLayout = true,
+        bool updateWindowSnap = true)
     {
         using var timing = CaptureTimingDiagnostics.Begin(
             "enter-color-picker",
@@ -2214,28 +2734,48 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         _isColorPickerActive = true;
+        _lastColorPickerUpdateTimestamp = 0;
         _windowSnapTimer.Start();
         CaptureTimingDiagnostics.Input(
             $"enter-picker before cursor={CaptureSurface.Cursor} active={IsActive} " +
             $"captured={CaptureSurface.IsMouseCaptured} activate={activateWindow}");
         CaptureSurface.Cursor = System.Windows.Input.Cursors.Cross;
+        // Position the panel before making it visible. Canvas children render
+        // at their default origin for one frame when Visibility changes first,
+        // which causes the magnifier to flash in the top-left corner.
+        ColorPickerPanel.Opacity = 0;
         ColorPickerPanel.Visibility = Visibility.Visible;
-        ColorPickerPanel.UpdateLayout();
+        if (updateLayout)
+        {
+            ColorPickerPanel.UpdateLayout();
+        }
         if (activateWindow)
         {
-            CaptureSurface.CaptureMouse();
-            CaptureTimingDiagnostics.Input(
-                $"enter-picker capture-mouse captured={CaptureSurface.IsMouseCaptured}");
+            if (captureMouse)
+            {
+                CaptureSurface.CaptureMouse();
+                CaptureTimingDiagnostics.Input(
+                    $"enter-picker capture-mouse captured={CaptureSurface.IsMouseCaptured}");
+            }
             Activate();
             CaptureTimingDiagnostics.Input(
                 $"enter-picker activate active={IsActive}");
             CaptureSurface.Focus();
         }
-        UpdateColorPicker(CaptureSurface.PointFromScreen(
-            new WpfPoint(WinForms.Cursor.Position.X, WinForms.Cursor.Position.Y)));
-        UpdateWindowSnap(
-            WinForms.Cursor.Position.X,
-            WinForms.Cursor.Position.Y);
+        if (updatePreview)
+        {
+            UpdateColorPicker(CaptureSurface.PointFromScreen(
+                new WpfPoint(
+                    WinForms.Cursor.Position.X,
+                    WinForms.Cursor.Position.Y)));
+        }
+        if (updateWindowSnap)
+        {
+            UpdateWindowSnap(
+                WinForms.Cursor.Position.X,
+                WinForms.Cursor.Position.Y);
+        }
+        // The panel remains hidden until the first magnifier bitmap is ready.
     }
 
     private void OnCaptureWindowTextInput(object sender, TextCompositionEventArgs e)
@@ -2250,6 +2790,14 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void OnCaptureWindowPreviewKeyDown(object sender, WpfKeyEventArgs e)
     {
+        if (_isColorPickerActive && e.Key == Key.Escape)
+        {
+            ExitColorPicker();
+            CompleteSelection(result: null);
+            e.Handled = true;
+            return;
+        }
+
         if (_isColorPickerActive && IsColorCopyKey(e))
         {
             _ = CopyPickedColorAsync();
@@ -2273,7 +2821,20 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         _isColorPickerActive = false;
+        Interlocked.Increment(ref _colorPickerSampleRevision);
+        lock (_colorPickerSampleLock)
+        {
+            _pendingColorPickerBitmap = null;
+            _pendingColorPickerResult = null;
+        }
+        if (_colorPickerPreviewScheduled)
+        {
+            _colorPickerPreviewScheduled = false;
+            System.Windows.Media.CompositionTarget.Rendering -=
+                OnColorPickerPreviewRendering;
+        }
         ColorPickerPanel.Visibility = Visibility.Collapsed;
+        ColorPickerPanel.Opacity = 1;
         ColorPickerMagnifier.Source = null;
         CaptureSurface.Cursor = System.Windows.Input.Cursors.Cross;
         if (CaptureSurface.IsMouseCaptured)
@@ -2286,6 +2847,36 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             _windowSnapTimer.Start();
             CaptureSurface.Focus();
         }
+    }
+
+    private void QueueColorPickerPreview(WpfPoint point)
+    {
+        _pendingColorPickerPoint = point;
+        if (_colorPickerPreviewScheduled)
+        {
+            return;
+        }
+
+        _colorPickerPreviewScheduled = true;
+        System.Windows.Media.CompositionTarget.Rendering +=
+            OnColorPickerPreviewRendering;
+    }
+
+    private void OnColorPickerPreviewRendering(object? sender, EventArgs e)
+    {
+        // Consume one coalesced pointer position per compositor frame. A new
+        // mouse move will subscribe again; leaving this handler attached would
+        // rebuild the magnifier every frame even while the pointer is idle.
+        _colorPickerPreviewScheduled = false;
+        System.Windows.Media.CompositionTarget.Rendering -=
+            OnColorPickerPreviewRendering;
+
+        if (!_isColorPickerActive || _isDisposed || _isCompleted)
+        {
+            return;
+        }
+
+        UpdateColorPicker(_pendingColorPickerPoint);
     }
 
     private async Task CopyPickedColorAsync()
@@ -2305,7 +2896,6 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void UpdateColorPicker(WpfPoint point)
     {
-        using var timing = CaptureTimingDiagnostics.Begin("update-color-picker");
         if (!_isColorPickerActive || _screenSnapshot is null)
         {
             return;
@@ -2322,41 +2912,25 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 (int)Math.Round(screenPoint.Y) - _virtualScreenBounds.Y,
                 0,
                 Math.Max(0, _screenSnapshot.Bitmap.Height - 1));
-            _selectedPixelColor = _screenSnapshot.Bitmap.GetPixel(pixelX, pixelY);
-            ColorPickerValueText.Text = $"#{_selectedPixelColor.R:X2}{_selectedPixelColor.G:X2}{_selectedPixelColor.B:X2}";
-            ColorPickerRgbText.Text = $"RGB({_selectedPixelColor.R}, {_selectedPixelColor.G}, {_selectedPixelColor.B})";
-
-            const int sampleRadius = 12;
-            var sourceLeft = Math.Clamp(pixelX - sampleRadius, 0, Math.Max(0, _screenSnapshot.Bitmap.Width - (sampleRadius * 2 + 1)));
-            var sourceTop = Math.Clamp(pixelY - sampleRadius, 0, Math.Max(0, _screenSnapshot.Bitmap.Height - (sampleRadius * 2 + 1)));
-            using var sample = _screenSnapshot.Bitmap.Clone(
-                new System.Drawing.Rectangle(sourceLeft, sourceTop, sampleRadius * 2 + 1, sampleRadius * 2 + 1),
-                System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
-            using var magnified = new System.Drawing.Bitmap(104, 104);
-            using (var graphics = System.Drawing.Graphics.FromImage(magnified))
+            var now = System.Diagnostics.Stopwatch.GetTimestamp();
+            var minInterval = System.Diagnostics.Stopwatch.Frequency /
+                _interactionRefreshRate;
+            if (now - _lastColorPickerUpdateTimestamp >= minInterval)
             {
-                graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
-                graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
-                graphics.DrawImage(sample, new System.Drawing.Rectangle(0, 0, magnified.Width, magnified.Height));
-                using var crossPen = new System.Drawing.Pen(System.Drawing.Color.White, 2);
-                graphics.DrawLine(crossPen, 52, 46, 52, 58);
-                graphics.DrawLine(crossPen, 46, 52, 58, 52);
-                using var outlinePen = new System.Drawing.Pen(System.Drawing.Color.Black, 1);
-                graphics.DrawRectangle(outlinePen, 50, 50, 4, 4);
+                _lastColorPickerUpdateTimestamp = now;
+                QueueColorPickerSample(_screenSnapshot.Bitmap, pixelX, pixelY);
             }
-
-            ColorPickerMagnifier.Source = CapturedImage.ToBitmapSource(magnified);
         }
         catch (OutOfMemoryException)
         {
-            // A transient magnifier allocation must never escape through the
-            // WPF input loop and strand the capture state. The next pointer
-            // sample can retry after the previous bitmap is released.
-            ColorPickerMagnifier.Source = null;
+            // A transient preview failure must never escape through the WPF
+            // input loop and strand the capture state. Keep the last frame so
+            // the pointer path remains responsive and the next sample retries.
         }
         catch (ArgumentException)
         {
-            ColorPickerMagnifier.Source = null;
+            // Screen captures are normally 32bpp; unsupported imported pixel
+            // formats fall back to the direct color sample above.
         }
 
         var surfaceWidth = Math.Max(0, CaptureSurface.ActualWidth);
@@ -2391,8 +2965,276 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             panelY,
             edgeMargin,
             Math.Max(edgeMargin, surfaceHeight - panelHeight - edgeMargin));
-        Canvas.SetLeft(ColorPickerPanel, panelX);
-        Canvas.SetTop(ColorPickerPanel, panelY);
+        _colorPickerPanelTransform.X = panelX;
+        _colorPickerPanelTransform.Y = panelY;
+    }
+
+    private void QueueColorPickerSample(
+        System.Drawing.Bitmap bitmap,
+        int pixelX,
+        int pixelY)
+    {
+        lock (_colorPickerSampleLock)
+        {
+            _pendingColorPickerBitmap = bitmap;
+            _pendingColorPickerPixelX = pixelX;
+            _pendingColorPickerPixelY = pixelY;
+        }
+
+        if (Interlocked.Exchange(ref _colorPickerSampleWorkerActive, 1) == 0)
+        {
+            _ = Task.Run(ProcessColorPickerSamples);
+        }
+    }
+
+    private void ProcessColorPickerSamples()
+    {
+        try
+        {
+            while (true)
+            {
+                System.Drawing.Bitmap? bitmap;
+                int pixelX;
+                int pixelY;
+                long revision;
+                lock (_colorPickerSampleLock)
+                {
+                    bitmap = _pendingColorPickerBitmap;
+                    pixelX = _pendingColorPickerPixelX;
+                    pixelY = _pendingColorPickerPixelY;
+                    _pendingColorPickerBitmap = null;
+                    revision = Volatile.Read(ref _colorPickerSampleRevision);
+                }
+
+                if (bitmap is null)
+                {
+                    return;
+                }
+
+                ColorPickerSample sample;
+                try
+                {
+                    using var timing = CaptureTimingDiagnostics.Begin(
+                        "color-picker-sample-worker");
+                    lock (_colorPickerBitmapLifetimeLock)
+                    {
+                        sample = BuildColorPickerSample(bitmap, pixelX, pixelY);
+                    }
+                }
+                catch (ArgumentException)
+                {
+                    continue;
+                }
+                catch (ObjectDisposedException)
+                {
+                    continue;
+                }
+                catch (ExternalException)
+                {
+                    continue;
+                }
+                catch (Exception exception)
+                {
+                    CaptureTimingDiagnostics.Exception(
+                        "color-picker-sample-worker",
+                        exception);
+                    continue;
+                }
+
+                if (revision != Volatile.Read(ref _colorPickerSampleRevision))
+                {
+                    continue;
+                }
+
+                lock (_colorPickerSampleLock)
+                {
+                    _pendingColorPickerResult = sample;
+                    _pendingColorPickerResultRevision = revision;
+                }
+                ScheduleColorPickerResultDispatch();
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref _colorPickerSampleWorkerActive, 0);
+            lock (_colorPickerSampleLock)
+            {
+                if (_pendingColorPickerBitmap is not null &&
+                    Interlocked.Exchange(ref _colorPickerSampleWorkerActive, 1) == 0)
+                {
+                    _ = Task.Run(ProcessColorPickerSamples);
+                }
+            }
+        }
+    }
+
+    private void ApplyColorPickerSample(long revision, ColorPickerSample sample)
+    {
+        if (!_isColorPickerActive || _isDisposed || _isCompleted ||
+            revision != Volatile.Read(ref _colorPickerSampleRevision))
+        {
+            return;
+        }
+
+        _selectedPixelColor = sample.Color;
+        ColorPickerValueText.Text = $"#{sample.Color.R:X2}{sample.Color.G:X2}{sample.Color.B:X2}";
+        ColorPickerRgbText.Text = $"RGB({sample.Color.R}, {sample.Color.G}, {sample.Color.B})";
+        ColorPickerMagnifier.Source = sample.Magnifier;
+        ColorPickerPanel.Opacity = 1;
+    }
+
+    private void ScheduleColorPickerResultDispatch()
+    {
+        if (Interlocked.Exchange(ref _colorPickerResultDispatchScheduled, 1) != 0)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(ApplyPendingColorPickerResult));
+    }
+
+    private void ApplyPendingColorPickerResult()
+    {
+        ColorPickerSample? sample;
+        long revision;
+        lock (_colorPickerSampleLock)
+        {
+            sample = _pendingColorPickerResult;
+            revision = _pendingColorPickerResultRevision;
+            _pendingColorPickerResult = null;
+            // Keep the dispatch flag set while a producer has already placed a
+            // newer result in the slot; otherwise a result can be stranded
+            // between the check and the flag reset.
+            if (_pendingColorPickerResult is null)
+            {
+                Volatile.Write(ref _colorPickerResultDispatchScheduled, 0);
+            }
+        }
+
+        if (sample is { } ready)
+        {
+            ApplyColorPickerSample(revision, ready);
+        }
+
+        lock (_colorPickerSampleLock)
+        {
+            if (_pendingColorPickerResult is not null &&
+                Interlocked.Exchange(ref _colorPickerResultDispatchScheduled, 1) == 0)
+            {
+                _ = Dispatcher.BeginInvoke(
+                    DispatcherPriority.Background,
+                    new Action(ApplyPendingColorPickerResult));
+            }
+        }
+    }
+
+    private static ColorPickerSample BuildColorPickerSample(
+        System.Drawing.Bitmap bitmap,
+        int pixelX,
+        int pixelY)
+    {
+        const int bytesPerPixel = 4;
+        var sourceLeft = Math.Clamp(
+            pixelX - ColorPickerSampleRadius,
+            0,
+            Math.Max(0, bitmap.Width - ColorPickerSampleSize));
+        var sourceTop = Math.Clamp(
+            pixelY - ColorPickerSampleRadius,
+            0,
+            Math.Max(0, bitmap.Height - ColorPickerSampleSize));
+        var sourceRectangle = new System.Drawing.Rectangle(
+            sourceLeft,
+            sourceTop,
+            ColorPickerSampleSize,
+            ColorPickerSampleSize);
+        var pixelFormat = bitmap.PixelFormat == PixelFormat.Format32bppArgb
+            ? PixelFormat.Format32bppArgb
+            : PixelFormat.Format32bppPArgb;
+        var data = bitmap.LockBits(sourceRectangle, ImageLockMode.ReadOnly, pixelFormat);
+        try
+        {
+            var sourceStride = Math.Abs(data.Stride);
+            var sampleStride = ColorPickerSampleSize * bytesPerPixel;
+            var sampleBuffer = new byte[sampleStride * ColorPickerSampleSize];
+            for (var row = 0; row < ColorPickerSampleSize; row++)
+            {
+                var sourceRow = data.Stride >= 0 ? row : ColorPickerSampleSize - row - 1;
+                Marshal.Copy(
+                    IntPtr.Add(data.Scan0, sourceRow * sourceStride),
+                    sampleBuffer,
+                    row * sampleStride,
+                    sampleStride);
+            }
+
+            var centerOffset = ColorPickerSampleRadius * sampleStride +
+                ColorPickerSampleRadius * bytesPerPixel;
+            var selected = DrawingColor.FromArgb(
+                sampleBuffer[centerOffset + 3],
+                sampleBuffer[centerOffset + 2],
+                sampleBuffer[centerOffset + 1],
+                sampleBuffer[centerOffset]);
+
+            var magnifierStride = ColorPickerMagnifierSize * bytesPerPixel;
+            var magnifierBuffer = new byte[magnifierStride * ColorPickerMagnifierSize];
+            for (var y = 0; y < ColorPickerMagnifierSize; y++)
+            {
+                var sampleY = y * ColorPickerSampleSize / ColorPickerMagnifierSize;
+                for (var x = 0; x < ColorPickerMagnifierSize; x++)
+                {
+                    var sampleX = x * ColorPickerSampleSize / ColorPickerMagnifierSize;
+                    var sourceOffset = sampleY * sampleStride + sampleX * bytesPerPixel;
+                    var destinationOffset = y * magnifierStride + x * bytesPerPixel;
+                    Buffer.BlockCopy(sampleBuffer, sourceOffset, magnifierBuffer, destinationOffset, bytesPerPixel);
+                }
+            }
+
+            DrawColorPickerCrosshair(magnifierBuffer, magnifierStride);
+            var magnifier = BitmapSource.Create(
+                ColorPickerMagnifierSize,
+                ColorPickerMagnifierSize,
+                96,
+                96,
+                System.Windows.Media.PixelFormats.Pbgra32,
+                null,
+                magnifierBuffer,
+                magnifierStride);
+            magnifier.Freeze();
+            return new ColorPickerSample(selected, magnifier);
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
+        }
+    }
+
+    private static void DrawColorPickerCrosshair(byte[] buffer, int stride)
+    {
+        static void SetPixel(byte[] buffer, int offset, byte b, byte g, byte r)
+        {
+            buffer[offset] = b;
+            buffer[offset + 1] = g;
+            buffer[offset + 2] = r;
+            buffer[offset + 3] = 255;
+        }
+
+        for (var i = 46; i <= 58; i++)
+        {
+            SetPixel(buffer, i * stride + 52 * 4, 255, 255, 255);
+            SetPixel(buffer, 52 * stride + i * 4, 255, 255, 255);
+        }
+
+        for (var x = 50; x <= 54; x++)
+        {
+            SetPixel(buffer, 50 * stride + x * 4, 0, 0, 0);
+            SetPixel(buffer, 54 * stride + x * 4, 0, 0, 0);
+        }
+        for (var y = 50; y <= 54; y++)
+        {
+            SetPixel(buffer, y * stride + 50 * 4, 0, 0, 0);
+            SetPixel(buffer, y * stride + 54 * 4, 0, 0, 0);
+        }
     }
 
     private static bool IsColorCopyKey(WpfKeyEventArgs e)
@@ -2409,12 +3251,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return false;
         }
 
-        var left = Canvas.GetLeft(ColorPickerPanel);
-        var top = Canvas.GetTop(ColorPickerPanel);
-        if (double.IsNaN(left) || double.IsNaN(top))
-        {
-            return false;
-        }
+        var left = _colorPickerPanelTransform.X;
+        var top = _colorPickerPanelTransform.Y;
 
         return new Rect(left, top, ColorPickerPanel.ActualWidth, ColorPickerPanel.ActualHeight)
             .Contains(point);
@@ -3223,17 +4061,20 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         RightResizeThumb.Visibility = thumbVisibility;
         BottomResizeThumb.Opacity = opacity;
         BottomResizeThumb.Visibility = thumbVisibility;
-        CaptureToolbar.Opacity = opacity;
-        CaptureToolbar.Visibility = suppressed || _toolbarHiddenForMove
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-        // The native mask leaves a hole for the visible toolbar.  Clear that
-        // hole as soon as the toolbar is suppressed; otherwise its old
-        // position remains undimmed and appears as an empty panel while the
-        // selection is moved or resized.
-        if (suppressed && _nativeSelectionFrame.IsMaskEnabled)
+        // A move keeps the existing toolbar frame and mask exclusion intact;
+        // only a resize hides it because the resize handles would otherwise
+        // overlap the live native border. This avoids a one-frame blank hole
+        // when a move starts or ends.
+        var hideToolbar = suppressed;
+        if (hideToolbar)
         {
-            _nativeSelectionFrame.SetMaskExcludedRegion(null);
+            CaptureToolbar.Opacity = 0;
+            CaptureToolbar.Visibility = Visibility.Collapsed;
+        }
+        if (hideToolbar && _nativeSelectionFrame.IsMaskEnabled)
+        {
+            _nativeSelectionFrame.SetMaskExclusionsSuspended(true);
+            _nativeSelectionFrame.SetMaskExcludedRegions(null);
         }
         InlineEditorOptions.Opacity = opacity;
         InlineEditorOptions.Visibility = suppressed || !_hasVisibleInlineEditorTools
@@ -3257,9 +4098,15 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         _toolbarHiddenForMove = true;
         CaptureToolbar.Visibility = Visibility.Collapsed;
+        CaptureToolbar.Opacity = 0;
+        CaptureToolbar.UpdateLayout();
         if (_nativeSelectionFrame.IsMaskEnabled)
         {
-            _nativeSelectionFrame.SetMaskExcludedRegion(null);
+            _nativeSelectionFrame.SetMaskExclusionsSuspended(true);
+            // Commit the continuous mask after the toolbar has been removed
+            // from the visual tree. This prevents its old exclusion rectangle
+            // from becoming a white hole during the first drag sample.
+            _nativeSelectionFrame.SetMaskExcludedRegions(null);
         }
     }
 
@@ -3281,6 +4128,10 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             return;
         }
 
+        // Keep the full native mask while WPF lays out and paints the toolbar.
+        // The exclusion is published only after that paint pass, so the
+        // desktop can never show an empty toolbar hole.
+        CaptureToolbar.Opacity = 0;
         CaptureToolbar.Visibility = Visibility.Visible;
         InlineEditorOptions.Visibility = _hasVisibleInlineEditorTools
             ? Visibility.Visible
@@ -3297,11 +4148,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
         if (_nativeSelectionFrame.IsMaskEnabled && HasValidSelection())
         {
-            var refreshBounds = finalBounds ?? GetSelectionBounds();
-            // The old toolbar exclusion was cleared while the toolbar was
-            // hidden. Commit the new exclusion immediately after UpdateLayout
-            // so completion never waits behind the WPF dispatcher queue.
-            UpdateNativeSelectionVisuals(refreshBounds);
+            ScheduleToolbarMaskPublication(finalBounds ?? GetSelectionBounds());
         }
     }
 
@@ -3437,32 +4284,89 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         SyncNativeSelectionFrameColor();
-        _nativeSelectionFrame.SetMaskExcludedRegion(
-            GetVisibleToolbarScreenBounds());
+        _nativeSelectionFrame.SetMaskExcludedRegions(
+            GetVisibleOverlayScreenBounds());
         _nativeSelectionFrame.SetSizeEnabled(ShouldShowSelectionSize);
         _nativeSelectionFrame.Update(ToDrawingRectangle(
             GetPhysicalSelectionBoundsForBounds(bounds)));
         _nativeSelectionFrame.RefreshMask();
         _nativeSelectionFrame.EnsureVisible();
+        CaptureToolbar.Opacity = 1;
     }
 
-    private System.Drawing.Rectangle? GetVisibleToolbarScreenBounds()
+    private void ScheduleToolbarMaskPublication(Rect bounds)
     {
-        if (CaptureToolbar.Visibility != Visibility.Visible ||
-            CaptureToolbar.ActualWidth <= 0 ||
-            CaptureToolbar.ActualHeight <= 0)
+        if (_isDisposed || _isCompleted ||
+            _isScrollCaptureSelection ||
+            !_nativeSelectionFrame.IsMaskEnabled ||
+            _toolbarMaskPublishScheduled)
         {
-            return null;
+            return;
         }
 
-        var topLeft = CaptureToolbar.PointToScreen(new WpfPoint(0, 0));
-        var bottomRight = CaptureToolbar.PointToScreen(
-            new WpfPoint(CaptureToolbar.ActualWidth, CaptureToolbar.ActualHeight));
-        return new System.Drawing.Rectangle(
+        _toolbarMaskPublishScheduled = true;
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Render,
+            new Action(() =>
+            {
+                _toolbarMaskPublishScheduled = false;
+                if (_isDisposed || _isCompleted ||
+                    _isScrollCaptureSelection ||
+                    _isMovingSelection || _isResizeDragging ||
+                    !_nativeSelectionFrame.IsMaskEnabled)
+                {
+                    return;
+                }
+
+                CaptureToolbar.Visibility = Visibility.Visible;
+                CaptureToolbar.Opacity = 1;
+                CaptureToolbar.UpdateLayout();
+                _ = Dispatcher.BeginInvoke(
+                    DispatcherPriority.ContextIdle,
+                    new Action(() =>
+                    {
+                        if (_isDisposed || _isCompleted ||
+                            _isScrollCaptureSelection ||
+                            _isMovingSelection || _isResizeDragging ||
+                            !_nativeSelectionFrame.IsMaskEnabled)
+                        {
+                            return;
+                        }
+
+                        _nativeSelectionFrame.SetMaskExclusionsSuspended(false);
+                        UpdateNativeSelectionVisuals(bounds);
+                    }));
+            }));
+    }
+
+    private List<System.Drawing.Rectangle> GetVisibleOverlayScreenBounds()
+    {
+        var bounds = new List<System.Drawing.Rectangle>(capacity: 3);
+        AddVisibleScreenBounds(CaptureToolbar, bounds);
+        AddVisibleScreenBounds(InlineCustomColorPanel, bounds);
+        AddVisibleScreenBounds(ColorPickerPanel, bounds);
+        return bounds;
+    }
+
+    private static void AddVisibleScreenBounds(
+        FrameworkElement element,
+        List<System.Drawing.Rectangle> bounds)
+    {
+        if (element.Visibility != Visibility.Visible ||
+            element.ActualWidth <= 0 ||
+            element.ActualHeight <= 0)
+        {
+            return;
+        }
+
+        var topLeft = element.PointToScreen(new WpfPoint(0, 0));
+        var bottomRight = element.PointToScreen(
+            new WpfPoint(element.ActualWidth, element.ActualHeight));
+        bounds.Add(new System.Drawing.Rectangle(
             (int)Math.Round(topLeft.X),
             (int)Math.Round(topLeft.Y),
             Math.Max(1, (int)Math.Round(bottomRight.X - topLeft.X)),
-            Math.Max(1, (int)Math.Round(bottomRight.Y - topLeft.Y)));
+            Math.Max(1, (int)Math.Round(bottomRight.Y - topLeft.Y))));
     }
 
     private bool TryGetMovePreviewBounds(out Rect bounds)
@@ -6116,8 +7020,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void ResetSelectionPreviewRate()
     {
-        _selectionPreviewHz = 120;
-        _selectionPreviewStableSamples = 0;
+        _selectionPreviewHz = _interactionRefreshRate;
         _lastSelectionPreviewTimestamp = 0;
         _lastSelectionBadgeTimestamp = 0;
     }
@@ -6139,28 +7042,12 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void AdjustSelectionPreviewRate(long applyTicks)
     {
-        var frequency = (double)System.Diagnostics.Stopwatch.Frequency;
-        var intervalTicks = frequency / _selectionPreviewHz;
-        if (applyTicks > intervalTicks * 0.70)
-        {
-            _selectionPreviewHz = Math.Max(60, _selectionPreviewHz * 0.80);
-            _selectionPreviewStableSamples = 0;
-            return;
-        }
-
-        if (applyTicks < intervalTicks * 0.20)
-        {
-            _selectionPreviewStableSamples++;
-            if (_selectionPreviewStableSamples >= 8)
-            {
-                _selectionPreviewHz = Math.Min(120, _selectionPreviewHz * 1.20);
-                _selectionPreviewStableSamples = 0;
-            }
-        }
-        else
-        {
-            _selectionPreviewStableSamples = 0;
-        }
+        // Keep the producer cadence fixed at the requested 1ms. Expensive
+        // visual work must be reduced or moved off-thread, not compensated by
+        // silently dropping the pointer update rate back to a display-derived
+        // value.
+        _ = applyTicks;
+        _selectionPreviewHz = _interactionRefreshRate;
     }
 
     private void StopSelectionPreviewRendering()
@@ -6561,8 +7448,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             CaptureToolbar.Visibility == Visibility.Visible)
         {
             CaptureToolbar.UpdateLayout();
-            _nativeSelectionFrame.SetMaskExcludedRegion(
-                GetVisibleToolbarScreenBounds());
+            _nativeSelectionFrame.SetMaskExcludedRegions(
+                GetVisibleOverlayScreenBounds());
         }
     }
 
@@ -6637,11 +7524,6 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         if (_nativeSelectionFrame.IsMaskEnabled)
         {
             _nativeSelectionFrame.SetSizeEnabled(ShouldShowSelectionSize);
-            if (HasValidSelection())
-            {
-                UpdateNativeSelectionVisuals(GetSelectionBounds());
-            }
-            _nativeSelectionFrame.RefreshMask();
             SetNativeSelectionVisualSuppressed(true);
         }
         else
@@ -6667,15 +7549,33 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         LeftResizeThumb.Visibility = Visibility.Visible;
         RightResizeThumb.Visibility = Visibility.Visible;
         BottomResizeThumb.Visibility = Visibility.Visible;
-        CaptureToolbar.Visibility = Visibility.Visible;
-        CaptureToolbar.UpdateLayout();
+        // Long-capture selection uses the separate progress/preview window;
+        // never materialize the normal annotation toolbar on that overlay.
+        CaptureToolbar.Visibility = _isScrollCaptureSelection
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        CaptureToolbar.Opacity = 0;
+        if (!_isScrollCaptureSelection)
+        {
+            CaptureToolbar.UpdateLayout();
+        }
+        if (_nativeSelectionFrame.IsMaskEnabled)
+        {
+            _nativeSelectionFrame.SetMaskExclusionsSuspended(true);
+            _nativeSelectionFrame.SetMaskExcludedRegions(null);
+        }
         UpdateSelectionControlPositions(GetSelectionBounds());
         // Keep the native frame/size windows as the last visual update after
         // WPF has laid out the controls. This prevents a WPF z-order/layout
         // pass from leaving only the handles visible.
-        if (_nativeSelectionFrame.IsMaskEnabled && HasValidSelection())
+        if (_nativeSelectionFrame.IsMaskEnabled && HasValidSelection() &&
+            !_isScrollCaptureSelection)
         {
-            UpdateNativeSelectionVisuals(GetSelectionBounds());
+            ScheduleToolbarMaskPublication(GetSelectionBounds());
+        }
+        else
+        {
+            CaptureToolbar.Opacity = 1;
         }
 
         if (TryGetCaptureSurfacePoint(WinForms.Cursor.Position, out var cursorPoint))
@@ -6795,6 +7695,9 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void HideSelectionControls(bool keepNativeMask = false)
     {
+        // A queued normal-capture toolbar publication must never resurrect
+        // the toolbar while a scroll-capture overlay is being locked.
+        _toolbarMaskPublishScheduled = false;
         if (keepNativeMask)
         {
             _nativeSelectionFrame.HideBorderKeepMask();
@@ -7100,8 +8003,13 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         // Keep the frozen bitmap removed so the selection and its surroundings
         // remain live while it scrolls. The native mask owns the dimming.
-        _screenSnapshot?.Dispose();
-        _screenSnapshot = null;
+        lock (_colorPickerBitmapLifetimeLock)
+        {
+            _pendingColorPickerBitmap = null;
+            _pendingColorPickerResult = null;
+            _screenSnapshot?.Dispose();
+            _screenSnapshot = null;
+        }
     }
 
     private void EnableScrollCaptureClickThrough()
@@ -7191,13 +8099,20 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
     }
 
-    private IntPtr OnScrollCaptureWindowMessage(
+    private IntPtr OnOverlayWindowMessage(
         IntPtr windowHandle,
         int message,
         IntPtr wParam,
         IntPtr lParam,
         ref bool handled)
     {
+        if (_initialInputPassthrough &&
+            message == NonClientHitTestMessage)
+        {
+            handled = true;
+            return new IntPtr(TransparentHitTest);
+        }
+
         if (_isScrollCaptureSelectionLocked &&
             message == NonClientHitTestMessage)
         {
@@ -7214,6 +8129,68 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
 
         return IntPtr.Zero;
+    }
+
+    private void SetInitialInputPassthroughWindowStyle(bool enabled)
+    {
+        if (_windowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var style = NativeMethods.GetWindowLongPtr(
+            _windowHandle,
+            ExtendedWindowStyleIndex).ToInt64();
+        // Use WM_NCHITTEST for the short bootstrap pass-through window. The
+        // WS_EX_TRANSPARENT bit makes USER32 skip this layered HWND entirely
+        // on some systems, so WPF never receives MouseMove/Button messages
+        // after the capture bitmap is published. Keep only NOACTIVATE until
+        // the first real click, then remove it in EnsureInteractiveInputOwnership.
+        var updatedStyle = enabled
+            ? style | ExtendedStyleNoActivate
+            : style & ~ExtendedStyleNoActivate;
+        if (updatedStyle == style)
+        {
+            return;
+        }
+
+        _ = NativeMethods.SetWindowLongPtr(
+            _windowHandle,
+            ExtendedWindowStyleIndex,
+            new IntPtr(updatedStyle));
+        _ = NativeMethods.SetWindowPos(
+            _windowHandle,
+            IntPtr.Zero,
+            0,
+            0,
+            0,
+            0,
+            DoNotResize |
+            DoNotMove |
+            DoNotChangeZOrder |
+            DoNotActivate |
+            FrameChanged);
+    }
+
+    private void EnsureInteractiveInputOwnership()
+    {
+        if (!_deferInitialScreenCapture ||
+            _interactiveInputOwnershipAcquired ||
+            _windowHandle == IntPtr.Zero ||
+            _isDisposed ||
+            _isCompleted)
+        {
+            return;
+        }
+
+        _interactiveInputOwnershipAcquired = true;
+        _initialInputPassthrough = false;
+        SetInitialInputPassthroughWindowStyle(enabled: false);
+        Activate();
+        CaptureSurface.Focus();
+        CaptureTimingDiagnostics.Input(
+            $"overlay-input-ownership-acquired active={IsActive} " +
+            $"captured={CaptureSurface.IsMouseCaptured}");
     }
 
     private Rect GetSelectionBounds()
@@ -7439,7 +8416,31 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         _continuedSelectionButton = null;
         ReleaseOverlayMouseCapture();
         _selectionCompletionSource.TrySetResult(result);
-        Close();
+
+        // Remove the visible/native surfaces immediately, then defer WPF
+        // window teardown until the current input burst has drained. Closing
+        // a full-screen transparent window synchronously can still make the
+        // next cursor packet wait on visual-tree destruction.
+        _nativeSelectionFrame.Hide();
+        _nativeSelectionMask.HideMask();
+        _nativeSelectionSize.HideSize();
+        Hide();
+        if (!_closeQueued &&
+            !Dispatcher.HasShutdownStarted &&
+            !Dispatcher.HasShutdownFinished)
+        {
+            _closeQueued = true;
+            _ = Dispatcher.BeginInvoke(
+                DispatcherPriority.ContextIdle,
+                new Action(() =>
+                {
+                    if (!_isDisposed && !Dispatcher.HasShutdownStarted &&
+                        !Dispatcher.HasShutdownFinished)
+                    {
+                        Close();
+                    }
+                }));
+        }
     }
 
     private void ReleaseOverlayMouseCapture()

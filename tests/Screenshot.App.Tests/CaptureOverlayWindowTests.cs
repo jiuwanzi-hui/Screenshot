@@ -2563,7 +2563,7 @@ public sealed class CaptureOverlayWindowTests
                     windowHandle,
                     out var displayAffinity));
                 Assert.Equal(0u, displayAffinity);
-                Assert.True(surface.IsHitTestVisible);
+                Assert.False(surface.IsHitTestVisible);
                 Assert.Equal(Visibility.Visible, outline.Visibility);
                 Assert.True(outline.Width > 0);
                 Assert.True(outline.Height > 0);

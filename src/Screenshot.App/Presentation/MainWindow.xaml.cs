@@ -8,9 +8,12 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using Microsoft.Win32;
+using Screenshot.App.Capture;
 using Screenshot.App.Core;
 using Screenshot.App.Infrastructure;
 using Screenshot.App.Text;
@@ -87,6 +90,17 @@ public partial class MainWindow : Window, IDisposable
     private bool _disposed;
     private bool _updateRetryRequested;
     private int _communityQrLoadStarted;
+    private bool _isDisplayStateSubscribed;
+    private bool _settingsStatusInitialized;
+    private readonly TimeSpan _interactionFrameInterval =
+        DisplayRefreshRateService.GetInteractionFrameInterval(
+            new System.Drawing.Rectangle(
+                VirtualScreen.GetBounds().X,
+                VirtualScreen.GetBounds().Y,
+                VirtualScreen.GetBounds().Width,
+                VirtualScreen.GetBounds().Height));
+    private long _lastTranslationProfileDragTimestamp;
+    private long _lastTranslationSettingsScrollTimestamp;
 
     public MainWindow(
         AppSettings initialSettings,
@@ -156,14 +170,12 @@ public partial class MainWindow : Window, IDisposable
             captureBox.HotKeyCaptureRequested += OnHotKeyCaptureRequested;
         }
         WindowPlacementService.Track(this, WindowPlacementKeys.Settings);
+        SourceInitialized += OnSettingsWindowSourceInitialized;
         _globalHotKeyManager.HotKeyCaptureInputReceived +=
             OnGlobalHotKeyCaptureInputReceived;
         Activated += OnSettingsWindowActivated;
         DataContext = _settingsViewModel;
         RefreshTranslationProviderDetails();
-        RefreshOfflineTranslationModelStatus();
-        RefreshHighQualityOcrModelStatus();
-        RefreshLocalLargeModelStatus();
         UpdateThemeSelection(initialSettings.Theme);
         UpdateCloseBehaviorSelection(initialSettings.CloseBehavior);
         UpdateFloatingCaptureClickBehaviorSelection(
@@ -173,12 +185,7 @@ public partial class MainWindow : Window, IDisposable
             TranslationProviderFactory.ResolveProviderId(
                 initialSettings.TranslationProvider));
         RefreshOnlineTranslationAvailability();
-        // Restore cached profile results synchronously through the view model,
-        // then validate them in the background without making the settings
-        // page wait for network access.
-        _ = VerifyTranslationProfilesAvailabilityAsync();
         ShowSettingsSection(sectionIndex: 0);
-        ShowOcrLanguageAvailability();
         CurrentVersionText.Text =
             $"当前版本 {AppMetadata.DisplayVersion} · " +
             (AppMetadata.IsInstalled ? "安装版" : "免安装版");
@@ -390,10 +397,20 @@ public partial class MainWindow : Window, IDisposable
 
     private void OnSettingsWindowActivated(object? sender, EventArgs e)
     {
+        ApplySettingsWindowRenderMode();
         _ = CheckForUpdatesOnOpenAsync();
         RefreshCachedOfflineTranslationInstallationState();
         RefreshHighQualityOcrModelStatus();
         RefreshLocalLargeModelStatus();
+        if (!_settingsStatusInitialized)
+        {
+            _settingsStatusInitialized = true;
+            // Model/catalog checks are settings-page state, not application
+            // startup work. Keep them off the hidden startup window and run
+            // them only when the user actually opens settings.
+            RefreshOfflineTranslationModelStatus();
+            ShowOcrLanguageAvailability();
+        }
         if (TranslationSettingsPanel?.Visibility == Visibility.Visible)
         {
             _ = VerifyTranslationProfilesAvailabilityAsync();
@@ -454,8 +471,73 @@ public partial class MainWindow : Window, IDisposable
         _idleMemoryTrimTimer.Stop();
         _idleMemoryTrimTimer.Tick -= OnIdleMemoryTrimTimerTick;
         Activated -= OnSettingsWindowActivated;
+        SourceInitialized -= OnSettingsWindowSourceInitialized;
+        if (_isDisplayStateSubscribed)
+        {
+            SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
+            SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+            _isDisplayStateSubscribed = false;
+        }
         Dispose();
         base.OnClosed(e);
+    }
+
+    private void OnSettingsWindowSourceInitialized(
+        object? sender,
+        EventArgs e)
+    {
+        SourceInitialized -= OnSettingsWindowSourceInitialized;
+        ApplySettingsWindowRenderMode();
+        if (!_isDisplayStateSubscribed)
+        {
+            SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+            SystemEvents.PowerModeChanged += OnPowerModeChanged;
+            _isDisplayStateSubscribed = true;
+        }
+    }
+
+    private void OnDisplaySettingsChanged(object? sender, EventArgs e)
+    {
+        QueueSettingsWindowRenderModeRefresh();
+    }
+
+    private void OnPowerModeChanged(object? sender, PowerModeChangedEventArgs e)
+    {
+        QueueSettingsWindowRenderModeRefresh();
+    }
+
+    private void QueueSettingsWindowRenderModeRefresh()
+    {
+        if (_disposed || Dispatcher.HasShutdownStarted ||
+            Dispatcher.HasShutdownFinished)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Render,
+            new Action(ApplySettingsWindowRenderMode));
+    }
+
+    private void ApplySettingsWindowRenderMode()
+    {
+        if (_disposed || !IsInitialized)
+        {
+            return;
+        }
+
+        var source = PresentationSource.FromVisual(this);
+        if (source?.CompositionTarget is not HwndTarget target)
+        {
+            return;
+        }
+
+        // The settings window must remain paintable when a laptop lid closes
+        // and Windows removes the hardware display target. Keep this window's
+        // WPF composition on the CPU; capture, recording, and other windows
+        // retain the process-wide rendering policy configured at startup.
+        target.RenderMode = RenderMode.SoftwareOnly;
+        InvalidateVisual();
     }
 
     public void Dispose()
@@ -1335,6 +1417,11 @@ public partial class MainWindow : Window, IDisposable
         var current = e.GetPosition(this);
         if (Math.Abs(current.X - dragStart.X) < SystemParameters.MinimumHorizontalDragDistance &&
             Math.Abs(current.Y - dragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
+        {
+            return;
+        }
+
+        if (!IsInteractionFrameDue(ref _lastTranslationProfileDragTimestamp))
         {
             return;
         }
@@ -2776,9 +2863,28 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
+        if (!IsInteractionFrameDue(ref _lastTranslationSettingsScrollTimestamp))
+        {
+            return;
+        }
+
         e.Handled = true;
         TranslationSettingsPanel.ScrollToVerticalOffset(
             TranslationSettingsPanel.VerticalOffset - (e.Delta / 3d));
+    }
+
+    private bool IsInteractionFrameDue(ref long lastTimestamp)
+    {
+        var now = Stopwatch.GetTimestamp();
+        var frameTicks = (long)Math.Ceiling(
+            _interactionFrameInterval.TotalSeconds * Stopwatch.Frequency);
+        if (lastTimestamp != 0 && now - lastTimestamp < frameTicks)
+        {
+            return false;
+        }
+
+        lastTimestamp = now;
+        return true;
     }
 
     private string CreateOnlineConfigurationFingerprint()

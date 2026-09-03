@@ -542,7 +542,8 @@
                            Width="112"
                            Height="112"
                            Stretch="Fill"
-                           SnapsToDevicePixels="True" />
+                           SnapsToDevicePixels="True"
+                           RenderOptions.BitmapScalingMode="NearestNeighbor" />
                     <StackPanel Grid.Column="1"
                                 Margin="8,0,3,0"
                                 VerticalAlignment="Center">

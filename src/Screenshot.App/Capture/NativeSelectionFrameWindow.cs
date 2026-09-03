@@ -2,14 +2,16 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using Screenshot.App.Infrastructure;
 using DrawingPoint = System.Drawing.Point;
 
 namespace Screenshot.App.Capture;
 
 /// <summary>
 /// A native layered HWND used for the live selection border. During a drag it
-/// is paired with the native region mask window; both are updated directly from
-/// the same polling sample without a dispatcher hop.
+/// is paired with the native region mask window; the border follows the cursor
+/// on the interaction thread while auxiliary windows consume the latest state
+/// on the UI dispatcher.
 /// </summary>
 internal sealed class NativeSelectionFrameWindow : Form
 {
@@ -33,7 +35,8 @@ internal sealed class NativeSelectionFrameWindow : Form
     private bool _maskEnabled;
     private NativeSelectionMaskWindow? _maskWindow;
     private Rectangle _maskSurface;
-    private Rectangle? _maskExcludedRegion;
+    private Rectangle[] _maskExcludedRegions = [];
+    private bool _maskExclusionsSuspended;
     private bool _borderVisible = true;
     private int _renderedWidth;
     private int _renderedHeight;
@@ -54,9 +57,17 @@ internal sealed class NativeSelectionFrameWindow : Form
     private Action? _trackingReleaseCallback;
     private bool _nativeMouseCaptured;
     private readonly object _nativeUpdateLock = new();
+    private readonly TimeSpan _interactionFrameInterval;
 
     public NativeSelectionFrameWindow()
     {
+        _interactionFrameInterval =
+            DisplayRefreshRateService.GetInteractionFrameInterval(
+                new Rectangle(
+                    VirtualScreen.GetBounds().X,
+                    VirtualScreen.GetBounds().Y,
+                    VirtualScreen.GetBounds().Width,
+                    VirtualScreen.GetBounds().Height));
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
         ShowInTaskbar = false;
@@ -103,9 +114,18 @@ internal sealed class NativeSelectionFrameWindow : Form
 
     public void SetMaskExcludedRegion(Rectangle? region)
     {
+        SetMaskExcludedRegions(region is { } value ? [value] : null);
+    }
+
+    public void SetMaskExcludedRegions(IReadOnlyList<Rectangle>? regions)
+    {
         lock (_nativeUpdateLock)
         {
-            _maskExcludedRegion = region;
+            _maskExcludedRegions = regions is null
+                ? []
+                : regions
+                    .Where(region => region.Width > 0 && region.Height > 0)
+                    .ToArray();
         }
         RefreshMask();
     }
@@ -124,6 +144,19 @@ internal sealed class NativeSelectionFrameWindow : Form
         RefreshMask();
     }
 
+    public void SetMaskExclusionsSuspended(bool suspended)
+    {
+        lock (_nativeUpdateLock)
+        {
+            _maskExclusionsSuspended = suspended;
+            if (suspended)
+            {
+                _maskExcludedRegions = [];
+            }
+        }
+        RefreshMask();
+    }
+
     public void ShowIdleMask(Rectangle surface)
     {
         if (_disposed || !IsHandleCreated || surface.Width <= 0 || surface.Height <= 0)
@@ -135,8 +168,12 @@ internal sealed class NativeSelectionFrameWindow : Form
         {
             _maskSurface = surface;
             _maskEnabled = true;
-            _maskExcludedRegion = null;
-            _maskWindow?.UpdateNative(surface, Rectangle.Empty, null, Handle);
+            _maskExcludedRegions = [];
+            _maskWindow?.UpdateNative(
+                surface,
+                Rectangle.Empty,
+                Array.Empty<Rectangle>(),
+                Handle);
         }
     }
 
@@ -254,7 +291,14 @@ internal sealed class NativeSelectionFrameWindow : Form
                 RenderLayered(windowBounds, bounds);
                 if (_maskEnabled)
                 {
-                    _maskWindow?.UpdateNative(_maskSurface, bounds, _maskExcludedRegion, Handle);
+                    var excludedRegions = _maskExclusionsSuspended
+                        ? Array.Empty<Rectangle>()
+                        : _maskExcludedRegions;
+                    _maskWindow?.UpdateNative(
+                        _maskSurface,
+                        bounds,
+                        excludedRegions,
+                        Handle);
                 }
             }
         }
@@ -329,7 +373,14 @@ internal sealed class NativeSelectionFrameWindow : Form
                 }
                 if (_maskEnabled)
                 {
-                    _maskWindow?.UpdateNative(_maskSurface, bounds, _maskExcludedRegion, Handle);
+                    var excludedRegions = _maskExclusionsSuspended
+                        ? Array.Empty<Rectangle>()
+                        : _maskExcludedRegions;
+                    _maskWindow?.UpdateNative(
+                        _maskSurface,
+                        bounds,
+                        excludedRegions,
+                        Handle);
                 }
                 if (_sizeEnabled)
                 {
@@ -373,10 +424,9 @@ internal sealed class NativeSelectionFrameWindow : Form
                 {
                     MoveLayeredWindow(windowBounds);
                 }
-                if (_maskEnabled)
-                {
-                    _maskWindow?.UpdateNative(_maskSurface, bounds, _maskExcludedRegion, Handle);
-                }
+                // The dimming mask and size badge are owned by the UI thread.
+                // Queue their newest state instead of calling into those HWNDs
+                // from the high-frequency cursor thread.
                 QueueAuxiliaryWindowUpdate(bounds, version);
                 _ = ShowWindow(Handle, ShowNormal);
                 return true;
@@ -449,6 +499,18 @@ internal sealed class NativeSelectionFrameWindow : Form
             }
 
             return;
+        }
+
+        if (_maskEnabled)
+        {
+            var excludedRegions = _maskExclusionsSuspended
+                ? Array.Empty<Rectangle>()
+                : _maskExcludedRegions;
+            _maskWindow?.UpdateNative(
+                _maskSurface,
+                bounds,
+                excludedRegions,
+                Handle);
         }
 
         if (_sizeEnabled)
@@ -838,17 +900,19 @@ internal sealed class NativeSelectionFrameWindow : Form
         _trackingReleaseCallback = releaseCallback;
         _trackingThread = new Thread(() =>
         {
-            // Sleep(1) is otherwise rounded up to the system timer quantum
-            // on machines that do not already request a 1 ms timer. Scope the
-            // higher resolution to an active drag so idle CPU/power usage is
-            // unchanged and mouse polling stays independent of report rate.
             _ = timeBeginPeriod(1);
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var frameTicks = Math.Max(
+                1,
+                (long)Math.Ceiling(
+                    _interactionFrameInterval.TotalSeconds *
+                    System.Diagnostics.Stopwatch.Frequency));
+            var nextFrameTimestamp = stopwatch.ElapsedTicks + frameTicks;
+            var lastBounds = Rectangle.Empty;
+            var buttonWasDown = false;
+            var consecutiveButtonUpSamples = 0;
             try
             {
-                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-                var lastBounds = Rectangle.Empty;
-                var buttonWasDown = false;
-                var consecutiveButtonUpSamples = 0;
                 while (!cancellation.IsCancellationRequested && !_disposed)
                 {
                     var buttonIsDown = (GetAsyncKeyState(LeftButton) & unchecked((short)0x8000)) != 0;
@@ -864,26 +928,42 @@ internal sealed class NativeSelectionFrameWindow : Form
                         // native frame region. Do not finish the drag on one
                         // sample; require a stable release window instead.
                         consecutiveButtonUpSamples++;
-                        if (consecutiveButtonUpSamples >= 8)
+                        // Two display-frame samples are enough to filter a
+                        // transient GetAsyncKeyState glitch without adding
+                        // the old 8ms-polling release delay to a 60Hz drag.
+                        if (consecutiveButtonUpSamples >= 2)
                         {
                             _trackingReleaseCallback?.Invoke();
                             break;
                         }
                     }
 
-                    if (stopwatch.ElapsedMilliseconds >= 1 &&
-                        GetCursorPos(out var cursor))
+                    var now = stopwatch.ElapsedTicks;
+                    if (now >= nextFrameTimestamp)
                     {
-                        stopwatch.Restart();
-                        var bounds = projection(new DrawingPoint(cursor.X, cursor.Y));
-                        if (bounds != lastBounds)
+                        nextFrameTimestamp = now + frameTicks;
+                        if (GetCursorPos(out var cursor))
                         {
-                            _ = UpdateBorderOnly(bounds);
-                            lastBounds = bounds;
+                            var bounds = projection(new DrawingPoint(cursor.X, cursor.Y));
+                            if (bounds != lastBounds)
+                            {
+                                _ = UpdateBorderOnly(bounds);
+                                lastBounds = bounds;
+                            }
                         }
                     }
 
-                    Thread.Sleep(1);
+                    var remainingTicks = nextFrameTimestamp - stopwatch.ElapsedTicks;
+                    if (remainingTicks > 0)
+                    {
+                        Thread.Sleep(TimeSpan.FromSeconds(
+                            (double)remainingTicks /
+                            System.Diagnostics.Stopwatch.Frequency));
+                    }
+                    else
+                    {
+                        Thread.Yield();
+                    }
                 }
             }
             finally
@@ -894,6 +974,7 @@ internal sealed class NativeSelectionFrameWindow : Form
         {
             IsBackground = true,
             Name = "SnapCut native selection frame",
+            Priority = ThreadPriority.BelowNormal,
         };
         _trackingThread.Start();
     }

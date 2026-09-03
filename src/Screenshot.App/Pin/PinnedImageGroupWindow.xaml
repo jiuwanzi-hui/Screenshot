@@ -193,7 +193,7 @@
                     BorderBrush="{DynamicResource AppSeparatorBrush}"
                     BorderThickness="0,0,0,1"
                     Cursor="SizeAll"
-                    MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+                    PreviewMouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
                 <DockPanel LastChildFill="True">
                     <StackPanel DockPanel.Dock="Right" Margin="0,0,5,0" VerticalAlignment="Center" Orientation="Horizontal">
                         <Button x:Name="GroupCropButton" Click="OnCropClick" Style="{StaticResource GroupIconButton}" ToolTip="在当前页面裁剪完整组合图">
@@ -229,7 +229,7 @@
 
             <Grid x:Name="GroupCanvas" Grid.Row="1"
                   PreviewMouseLeftButtonDown="OnGroupCanvasMouseLeftButtonDown"
-                  Background="{StaticResource PinnedCheckerboardBrush}"
+                  Background="{DynamicResource AppPanelBackgroundBrush}"
                   PreviewMouseWheel="OnCanvasMouseWheel"
                   PreviewMouseMove="OnGroupCanvasMouseMove"
                   PreviewMouseLeftButtonUp="OnGroupCanvasMouseLeftButtonUp"
@@ -238,9 +238,9 @@
                 <Image x:Name="CompositeImage" IsHitTestVisible="False"
                        RenderOptions.BitmapScalingMode="HighQuality" Stretch="Uniform" />
 
-                <ScrollViewer x:Name="InlineEditorViewport" Visibility="Collapsed"
+                    <ScrollViewer x:Name="InlineEditorViewport" Visibility="Collapsed"
                               Panel.ZIndex="10"
-                              Background="{StaticResource PinnedCheckerboardBrush}"
+                              Background="{DynamicResource AppPanelBackgroundBrush}"
                               HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                               HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
                               PreviewMouseDown="OnInlineEditorPreviewMouseDown"

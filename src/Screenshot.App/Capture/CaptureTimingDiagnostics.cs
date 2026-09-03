@@ -28,6 +28,7 @@ internal static class CaptureTimingDiagnostics
             FullMode = BoundedChannelFullMode.DropOldest,
         });
     private static int _started;
+    private static Task? _writerTask;
     private static long _inputWindowUntil;
     private static long _lastMouseMoveTimestamp;
     private static int _mouseMoveSampleCount;
@@ -161,7 +162,7 @@ internal static class CaptureTimingDiagnostics
             return;
         }
 
-        _ = Task.Run(async () =>
+        _writerTask = Task.Run(async () =>
         {
             try
             {
@@ -180,6 +181,24 @@ internal static class CaptureTimingDiagnostics
                 // Diagnostics must never affect capture input or application exit.
             }
         });
+    }
+
+    public static void Flush()
+    {
+        if (!IsEnabled || Volatile.Read(ref _started) == 0)
+        {
+            return;
+        }
+
+        Queue.Writer.TryComplete();
+        try
+        {
+            _writerTask?.Wait(TimeSpan.FromSeconds(1));
+        }
+        catch
+        {
+            // Diagnostics must never affect application exit.
+        }
     }
 
     private static void Write(string message)

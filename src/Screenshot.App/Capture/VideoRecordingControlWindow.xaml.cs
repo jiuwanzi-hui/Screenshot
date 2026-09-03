@@ -59,6 +59,7 @@ public partial class VideoRecordingControlWindow : Window
     private VideoRecordingPreferences _recorderPreferences;
     private readonly DispatcherTimer _elapsedTimer;
     private readonly DispatcherTimer _collapsedToolbarTopmostTimer;
+    private readonly TimeSpan _interactionFrameInterval;
     private readonly Stopwatch _elapsed = new();
     private readonly TaskCompletionSource<RegionVideoRecordingResult> _completion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -95,6 +96,8 @@ public partial class VideoRecordingControlWindow : Window
         TimeSpan.FromMilliseconds(600);
     private DrawingPoint _controlPointerStart;
     private DrawingRectangle _controlWindowStart;
+    private long _lastControlDragUpdateTimestamp;
+    private long _lastCollapsedDragUpdateTimestamp;
     private int _feedbackVersion;
     private System.Windows.Media.Color _annotationColor =
         System.Windows.Media.Color.FromRgb(240, 68, 85);
@@ -163,6 +166,13 @@ public partial class VideoRecordingControlWindow : Window
             microphoneDeviceId,
             cameraDeviceId);
         _recorder = recorder;
+        _interactionFrameInterval =
+            DisplayRefreshRateService.GetInteractionFrameInterval(
+                new DrawingRectangle(
+                    recorder.Region.X,
+                    recorder.Region.Y,
+                    recorder.Region.Width,
+                    recorder.Region.Height));
         _inputOverlay = inputOverlay;
         _annotationOverlay = annotationOverlay;
         _annotationOverlay.AnnotationSelectionChanged +=
@@ -1170,6 +1180,7 @@ public partial class VideoRecordingControlWindow : Window
 
         EnsureManualPositionTracking();
         _isControlSurfaceDragging = true;
+        _lastControlDragUpdateTimestamp = 0;
         Mouse.UpdateCursor();
         _controlPointerStart = WinForms.Cursor.Position;
         _controlWindowStart = bounds;
@@ -1227,6 +1238,11 @@ public partial class VideoRecordingControlWindow : Window
             return;
         }
 
+        if (!IsInteractionFrameDue(ref _lastControlDragUpdateTimestamp))
+        {
+            return;
+        }
+
         var current = WinForms.Cursor.Position;
         var targetX = _controlWindowStart.Left +
             current.X - _controlPointerStart.X;
@@ -1276,6 +1292,7 @@ public partial class VideoRecordingControlWindow : Window
         }
 
         _collapsedDragStartCursor = WinForms.Cursor.Position;
+        _lastCollapsedDragUpdateTimestamp = 0;
         _collapsedToolbarDragMoved = false;
         _isCollapsedToolbarDragging = true;
         CollapsedToolbarButton.Cursor = System.Windows.Input.Cursors.SizeAll;
@@ -1378,6 +1395,11 @@ public partial class VideoRecordingControlWindow : Window
         System.Windows.Input.MouseEventArgs e)
     {
         if (!_isCollapsedToolbarDragging)
+        {
+            return;
+        }
+
+        if (!IsInteractionFrameDue(ref _lastCollapsedDragUpdateTimestamp))
         {
             return;
         }
@@ -2013,6 +2035,20 @@ public partial class VideoRecordingControlWindow : Window
 
         await SetCameraVisibilityAsync(CameraToggleButton.IsChecked == true);
         e.Handled = true;
+    }
+
+    private bool IsInteractionFrameDue(ref long lastTimestamp)
+    {
+        var now = Stopwatch.GetTimestamp();
+        var intervalTicks = (long)Math.Ceiling(
+            _interactionFrameInterval.TotalSeconds * Stopwatch.Frequency);
+        if (lastTimestamp != 0 && now - lastTimestamp < intervalTicks)
+        {
+            return false;
+        }
+
+        lastTimestamp = now;
+        return true;
     }
 
     private void ApplySavedAnnotationPreferences(int strokeWidth)

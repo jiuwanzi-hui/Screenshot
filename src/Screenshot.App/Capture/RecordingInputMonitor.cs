@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Windows.Threading;
 using Screenshot.App.Core;
+using Screenshot.App.Infrastructure;
 
 namespace Screenshot.App.Capture;
 
@@ -52,6 +53,7 @@ internal sealed class RecordingInputMonitor : IDisposable
     private readonly List<uint> _pressedKeys = [];
     private readonly List<string> _pressedMouseButtons = [];
     private readonly DispatcherTimer _keyboardStateTimer;
+    private readonly TimeSpan _interactionFrameInterval;
     private IntPtr _keyboardHook;
     private IntPtr _mouseHook;
     private bool _isPaused;
@@ -90,9 +92,17 @@ internal sealed class RecordingInputMonitor : IDisposable
         _showKeyboard = showKeyboard;
         _showMouse = showMouse;
         _showMouseTrail = showMouseTrail;
+        var virtualBounds = VirtualScreen.GetBounds();
+        _interactionFrameInterval =
+            DisplayRefreshRateService.GetInteractionFrameInterval(
+                new System.Drawing.Rectangle(
+                    virtualBounds.X,
+                    virtualBounds.Y,
+                    virtualBounds.Width,
+                    virtualBounds.Height));
         _keyboardStateTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromMilliseconds(16),
+            Interval = _interactionFrameInterval,
         };
         _keyboardStateTimer.Tick += OnInputStateTimerTick;
         _keyboardProcedure = OnKeyboardInput;
@@ -325,6 +335,20 @@ internal sealed class RecordingInputMonitor : IDisposable
     {
         if (code >= 0 && !_isPaused)
         {
+            var nativeMessage = unchecked((int)message.ToInt64());
+            // Cursor position is sampled by RecordingInputOverlayWindow on
+            // the display frame. Parsing every raw move in this low-level
+            // hook only adds synchronous work to the system input path and
+            // can make high-report-rate mice appear to pause.
+            if (nativeMessage == MouseMoveMessage)
+            {
+                return NativeMethods.CallNextHookEx(
+                    _mouseHook,
+                    code,
+                    message,
+                    dataPointer);
+            }
+
             var data = Marshal.PtrToStructure<NativeMethods.LowLevelMouseData>(
                 dataPointer);
             if ((data.Flags & InjectedMouseFlag) == 0)
@@ -395,7 +419,9 @@ internal sealed class RecordingInputMonitor : IDisposable
         var timestamp = Environment.TickCount64;
         var movedEnough = Math.Abs(point.X - _lastMousePoint.X) >= 2 ||
             Math.Abs(point.Y - _lastMousePoint.Y) >= 2;
-        if (!movedEnough || timestamp - _lastMouseMoveTimestamp < 12)
+        if (!movedEnough ||
+            timestamp - _lastMouseMoveTimestamp <
+            _interactionFrameInterval.TotalMilliseconds)
         {
             return;
         }

@@ -201,6 +201,8 @@ public partial class FloatingCaptureWindow : Window
 
     private readonly DispatcherTimer _menuCloseTimer;
     private readonly DispatcherTimer _dockCollapseTimer;
+    private readonly TimeSpan _interactionFrameInterval;
+    private long _lastDragUpdateTimestamp;
     private readonly bool _hasSavedPosition;
     private DrawingPoint _dragStartCursor;
     private DrawingRectangle _dragStartBounds;
@@ -213,6 +215,14 @@ public partial class FloatingCaptureWindow : Window
 
     public FloatingCaptureWindow()
     {
+        var virtualBounds = VirtualScreen.GetBounds();
+        _interactionFrameInterval =
+            DisplayRefreshRateService.GetInteractionFrameInterval(
+                new DrawingRectangle(
+                    virtualBounds.X,
+                    virtualBounds.Y,
+                    virtualBounds.Width,
+                    virtualBounds.Height));
         InitializeComponent();
         _menuCloseTimer = new DispatcherTimer
         {
@@ -545,6 +555,7 @@ public partial class FloatingCaptureWindow : Window
         FeatureMenuPopup.IsOpen = false;
         SetDockVisual(collapsed: false, animated: false);
         _dragStartCursor = WinForms.Cursor.Position;
+        _lastDragUpdateTimestamp = 0;
         _ = TryGetWindowBounds(out _dragStartBounds);
         _isDragging = false;
         FloatingButton.CaptureMouse();
@@ -560,6 +571,15 @@ public partial class FloatingCaptureWindow : Window
         {
             return;
         }
+
+        var now = Environment.TickCount64;
+        if (_lastDragUpdateTimestamp != 0 &&
+            now - _lastDragUpdateTimestamp <
+            _interactionFrameInterval.TotalMilliseconds)
+        {
+            return;
+        }
+        _lastDragUpdateTimestamp = now;
 
         var cursor = WinForms.Cursor.Position;
         var deltaX = cursor.X - _dragStartCursor.X;

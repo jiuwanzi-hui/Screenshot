@@ -22,13 +22,6 @@
             BorderBrush="{DynamicResource AppBorderBrush}"
             BorderThickness="1"
             CornerRadius="6">
-        <Border.Effect>
-            <DropShadowEffect BlurRadius="18"
-                              Direction="270"
-                              Opacity="0.34"
-                              ShadowDepth="6"
-                              Color="#001014" />
-        </Border.Effect>
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="78" />

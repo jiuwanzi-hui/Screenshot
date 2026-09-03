@@ -19,6 +19,9 @@ public partial class ScrollCaptureProgressWindow : Window
     private const int MinimumWindowHeightDip = 280;
     private const int PreferredMaximumWindowHeightDip = 640;
     private const int TopmostWindow = -1;
+    // Windows 10 2004+: exclude this HWND from desktop duplication and
+    // screen-copy APIs while keeping it visible to the user.
+    private const uint WindowDisplayAffinityExcludeFromCapture = 0x00000011;
     private const uint DoNotResize = 0x0001;
     private const uint DoNotMove = 0x0002;
     private const uint DoNotChangeZOrder = 0x0004;
@@ -42,6 +45,7 @@ public partial class ScrollCaptureProgressWindow : Window
     public ScrollCaptureProgressWindow()
     {
         InitializeComponent();
+        SourceInitialized += OnSourceInitialized;
     }
 
     public void ExcludeFromScreenCapture()
@@ -275,8 +279,27 @@ public partial class ScrollCaptureProgressWindow : Window
 
         var width = windowBounds.Right - windowBounds.Left;
         var height = windowBounds.Bottom - windowBounds.Top;
-        var monitorBounds = GetMonitorWorkArea(captureRegion);
+        // Before Show(), a WPF window can report a placeholder 1x1 native
+        // rect even after Width/Height have been configured. Using that
+        // placeholder makes ChoosePreviewBounds place the preview at the
+        // far edge of a wide selection, leaving only a tooltip strip visible.
+        // Use the measured WPF size whenever the native rect is not useful.
         var dpi = VisualTreeHelper.GetDpi(this);
+        var measuredWidthDip = ActualWidth > 1 ? ActualWidth : Width;
+        var measuredHeightDip = ActualHeight > 1 ? ActualHeight : Height;
+        var measuredWidth = (int)Math.Round(measuredWidthDip * dpi.DpiScaleX);
+        var measuredHeight = (int)Math.Round(measuredHeightDip * dpi.DpiScaleY);
+        if (width <= 1 && measuredWidth > 1)
+        {
+            width = measuredWidth;
+        }
+
+        if (height <= 1 && measuredHeight > 1)
+        {
+            height = measuredHeight;
+        }
+
+        var monitorBounds = GetMonitorWorkArea(captureRegion);
         var previewBounds = ChoosePreviewBounds(
             captureRegion,
             monitorBounds,
@@ -285,8 +308,11 @@ public partial class ScrollCaptureProgressWindow : Window
             (int)Math.Round(MinimumPreviewWidthDip * dpi.DpiScaleX));
         MoveWindow(windowHandle, previewBounds.X, previewBounds.Y);
 
-        // Also set WPF coordinates so layout/measure does not snap the window
-        // back to the default Manual origin on the next render pass.
+        // Keep WPF's logical position synchronized with the native pixel
+        // position. This prevents the next layout pass from snapping the
+        // already-visible preview back to its default origin. The conversion
+        // is valid here because the window has been shown and measured, and
+        // the current monitor DPI is the one used for its Width/Height.
         Left = previewBounds.X / dpi.DpiScaleX;
         Top = previewBounds.Y / dpi.DpiScaleY;
         return ScreenRegion.Intersect(previewBounds, captureRegion).IsEmpty;
@@ -339,7 +365,16 @@ public partial class ScrollCaptureProgressWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _isClosed = true;
+        SourceInitialized -= OnSourceInitialized;
         base.OnClosed(e);
+    }
+
+    private void OnSourceInitialized(object? sender, EventArgs e)
+    {
+        SourceInitialized -= OnSourceInitialized;
+        // Keep the progress preview excluded from supported desktop-capture
+        // APIs. The capture pipeline still controls visibility as needed.
+        ExcludeFromScreenCapture();
     }
 
     protected override void OnClosing(CancelEventArgs e)
@@ -471,19 +506,15 @@ public partial class ScrollCaptureProgressWindow : Window
             return new ScreenRegion(x, centeredY, clampedWidth, height);
         }
 
-        // Last resort: still prefer the side with more room, glued as close as possible.
-        var preferRight = rightSpace >= leftSpace;
-        if (preferRight)
-        {
-            var x = Math.Min(
-                rightX,
-                monitorBounds.X + monitorBounds.Width - width);
-            x = Math.Max(monitorBounds.X, x);
-            return new ScreenRegion(x, centeredY, width, height);
-        }
-
-        var leftFallbackX = Math.Max(monitorBounds.X, leftX);
-        return new ScreenRegion(leftFallbackX, centeredY, width, height);
+        // Neither side has enough room. Keep the documented right-side
+        // fallback instead of jumping above/below the selection or moving to
+        // the far left. The capture callback temporarily hides an overlapping
+        // preview while the frame is sampled so it cannot enter the result.
+        var fallbackRightX = Math.Min(
+            rightX,
+            monitorBounds.X + monitorBounds.Width - width);
+        fallbackRightX = Math.Max(monitorBounds.X, fallbackRightX);
+        return new ScreenRegion(fallbackRightX, centeredY, width, height);
     }
 
     private static int GetPreviewPhysicalWidth(
@@ -551,10 +582,14 @@ public partial class ScrollCaptureProgressWindow : Window
             DoNotResize | DoNotChangeZOrder | DoNotActivate);
     }
 
-    private const uint WindowDisplayAffinityExcludeFromCapture = 0x00000011;
-
     private static class NativeMethods
     {
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool SetWindowDisplayAffinity(
+            IntPtr windowHandle,
+            uint displayAffinity);
+
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool GetWindowRect(
@@ -583,11 +618,6 @@ public partial class ScrollCaptureProgressWindow : Window
             IntPtr monitorHandle,
             ref NativeMonitorInfo monitorInfo);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool SetWindowDisplayAffinity(
-            IntPtr windowHandle,
-            uint affinity);
     }
 
     [StructLayout(LayoutKind.Sequential)]

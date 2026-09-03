@@ -9,7 +9,7 @@
     <AssemblyName>SnapCut</AssemblyName>
     <RootNamespace>Screenshot.App</RootNamespace>
     <ApplicationIcon>Assets\Screenshot.ico</ApplicationIcon>
-    <Version>3.7.9</Version>
+    <Version>3.8.0</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Authors>九万字 (jiuwanzi-hui)</Authors>
     <Copyright>Copyright © 2026 九万字 (jiuwanzi-hui). All rights reserved.</Copyright>

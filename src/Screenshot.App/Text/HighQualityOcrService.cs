@@ -9,7 +9,10 @@ namespace Screenshot.App.Text;
 
 public static class HighQualityOcrService
 {
-    private static readonly TimeSpan EngineIdleTimeout = TimeSpan.FromSeconds(30);
+    // Model initialization is the dominant cost of the first local OCR run.
+    // Keep the native engine warm for a few minutes so repeated captures do
+    // not pay that cost again on slower machines.
+    private static readonly TimeSpan EngineIdleTimeout = TimeSpan.FromMinutes(5);
     private static readonly object EngineLifecycleLock = new();
     private static readonly SemaphoreSlim EngineLock = new(1, 1);
     private static readonly System.Threading.Timer EngineUnloadTimer = new(
@@ -40,9 +43,16 @@ public static class HighQualityOcrService
         {
             await EngineLock.WaitAsync(cancellationToken);
             engineLockAcquired = true;
-            EnsureEngine(modelManager);
             return await Task.Run(
-                () => RecognizeCore(capturedImage, cancellationToken),
+                () =>
+                {
+                    // OCR itself is native CPU work. Keep a small fixed budget
+                    // instead of borrowing every logical processor: on
+                    // low-power/mobile CPUs ONNX's thread pool otherwise
+                    // oversubscribes the cores and makes a 600px crop slower.
+                    EnsureEngine(modelManager, HeavyWorkloadBudget.OcrThreadCount);
+                    return RecognizeCore(capturedImage, cancellationToken);
+                },
                 cancellationToken);
         }
         catch (OperationCanceledException)
@@ -54,9 +64,12 @@ public static class HighQualityOcrService
             ResetEngine();
             try
             {
-                EnsureEngine(modelManager);
                 return await Task.Run(
-                    () => RecognizeCore(capturedImage, cancellationToken),
+                    () =>
+                    {
+                        EnsureEngine(modelManager, HeavyWorkloadBudget.OcrThreadCount);
+                        return RecognizeCore(capturedImage, cancellationToken);
+                    },
                     cancellationToken);
             }
             catch (OperationCanceledException)
@@ -82,6 +95,73 @@ public static class HighQualityOcrService
 
             EndEngineUse();
         }
+    }
+
+    /// <summary>
+    /// Loads the local OCR model during an idle period. The work is serialized
+    /// with real recognition and never runs on the WPF dispatcher.
+    /// </summary>
+    public static Task PrewarmAsync(CancellationToken cancellationToken = default)
+    {
+        var manager = HighQualityOcrModelManager.Shared;
+        if (!manager.GetStatus().IsInstalled)
+        {
+            return Task.CompletedTask;
+        }
+
+        return Task.Run(async () =>
+        {
+            var previousPriority = Thread.CurrentThread.Priority;
+            try
+            {
+                Thread.CurrentThread.Priority = ThreadPriority.BelowNormal;
+            }
+            catch
+            {
+            }
+
+            BeginEngineUse();
+            var acquired = false;
+            try
+            {
+                CaptureTimingDiagnostics.Mark("ocr-engine-prewarm-start");
+                await EngineLock.WaitAsync(cancellationToken);
+                acquired = true;
+                // Prewarming overlaps the user's capture gesture. Keep the
+                // native session deliberately background-sized so it cannot
+                // starve the compositor or pointer input on a low-end CPU.
+                EnsureEngine(manager, HeavyWorkloadBudget.CpuThreadCount);
+                CaptureTimingDiagnostics.Mark("ocr-engine-prewarm-end");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception exception)
+            {
+                // Prewarming is best-effort. A missing/incompatible native
+                // runtime must not surface as an unobserved task exception;
+                // the normal recognition path will report its own failure.
+                CaptureTimingDiagnostics.Mark(
+                    "ocr-engine-prewarm-failed",
+                    $"error={exception.GetType().Name}");
+            }
+            finally
+            {
+                if (acquired)
+                {
+                    EngineLock.Release();
+                }
+
+                EndEngineUse();
+                try
+                {
+                    Thread.CurrentThread.Priority = previousPriority;
+                }
+                catch
+                {
+                }
+            }
+        }, cancellationToken);
     }
 
     private static void BeginEngineUse()
@@ -132,7 +212,9 @@ public static class HighQualityOcrService
         }
     }
 
-    private static void EnsureEngine(HighQualityOcrModelManager manager)
+    private static void EnsureEngine(
+        HighQualityOcrModelManager manager,
+        int cpuThreadCount)
     {
         if (_engine is not null && string.Equals(
                 _loadedDirectory,
@@ -142,6 +224,9 @@ public static class HighQualityOcrService
             return;
         }
 
+        using var timing = CaptureTimingDiagnostics.Begin(
+            "ocr-engine-init",
+            $"directory={manager.InstallationDirectory}");
         ResetEngine();
         var engine = new RapidOcr();
         try
@@ -153,7 +238,10 @@ public static class HighQualityOcrService
                 RecModelPath = manager.RecognitionModelPath,
                 KeysPath = manager.DictionaryPath,
             };
-            engine.InitModels(modelSet, HeavyWorkloadBudget.CpuThreadCount);
+            // Keep the same bounded budget used by the recognition worker.
+            // The call runs off the WPF dispatcher, so native model startup
+            // cannot synchronously block pointer input or rendering.
+            engine.InitModels(modelSet, Math.Max(1, cpuThreadCount));
         }
         catch
         {
@@ -214,19 +302,46 @@ public static class HighQualityOcrService
     {
         cancellationToken.ThrowIfCancellationRequested();
         using var encoded = new MemoryStream();
-        capturedImage.Bitmap.Save(encoded, ImageFormat.Png);
+        using (CaptureTimingDiagnostics.Begin(
+                   "ocr-image-encode",
+                   $"size={capturedImage.Bitmap.Width}x{capturedImage.Bitmap.Height}"))
+        {
+            capturedImage.Bitmap.Save(encoded, ImageFormat.Png);
+        }
         encoded.Position = 0;
-        using var bitmap = SKBitmap.Decode(encoded);
+        SKBitmap? decodedBitmap;
+        using (CaptureTimingDiagnostics.Begin("ocr-image-decode"))
+        {
+            decodedBitmap = SKBitmap.Decode(encoded);
+        }
+        using var bitmap = decodedBitmap;
         if (bitmap is null)
         {
             return OcrRecognitionResult.Failure("无法读取待识别图片。");
         }
 
+        // Screenshots are normally upright and the selection is often a
+        // narrow UI strip. The stock v6 preset upsizes the short side to 736
+        // pixels. A 600x100 capture would therefore become roughly 4400x736
+        // before DBNet runs, which is the dominant source of the multi-second
+        // delay reported in diagnostics. Keep the native pixels and cap only
+        // the long side; this preserves the same detector/recognizer and box
+        // output without manufacturing a huge tensor for small UI captures.
         var options = RapidOcrOptions.PPOCRv6 with
         {
+            // 960 px is enough resolution for the small UI text normally
+            // selected in a screenshot, while avoiding the v6 preset's
+            // short-side upscale to several thousand pixels.
+            ImgResize = 960,
+            LimitSideLen = 0,
+            MaxSideLen = 1600,
+            DoAngle = false,
             ReturnWordBox = true,
             TextScore = 0.45f,
         };
+        using var timing = CaptureTimingDiagnostics.Begin(
+            "ocr-detect",
+            $"size={bitmap.Width}x{bitmap.Height}");
         var result = _engine!.Detect(bitmap, options);
         var blocks = result.TextBlocks
             .Where(block => !string.IsNullOrWhiteSpace(block.Text))

@@ -21,6 +21,7 @@ TestResults/
 
 # Local diagnostics and scratch files
 tmp_*
+tmp-*
 tmp_diag/
 tmp_test_out/
 *.log
@@ -30,3 +31,4 @@ artifacts/
 
 # Release binaries are uploaded to GitHub/Gitee Releases, not Git history.
 installer/dist/*
+/dist/

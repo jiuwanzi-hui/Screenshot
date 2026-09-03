@@ -26,6 +26,7 @@ public partial class PinnedImageGroupWindow : Window
     private static readonly DrawingBrush CompositeCheckerboardBrush =
         CreateCompositeCheckerboardBrush();
     private readonly Func<AppSettings>? _settingsProvider;
+    private readonly Action<CapturedImage>? _copyImageToClipboardAndHistory;
     private bool _isClosed;
 
     private sealed record CompositionResult(
@@ -54,6 +55,9 @@ public partial class PinnedImageGroupWindow : Window
     private double _restoreMinWidth;
     private double _restoreMinHeight;
     private bool _isDraggingThumbnail;
+    private readonly TimeSpan _interactionFrameInterval;
+    private long _lastThumbnailDragTimestamp;
+    private long _lastInlinePanTimestamp;
     private bool _thumbnailDragMoved;
     private WpfPoint _thumbnailDragStart;
     private WpfPoint _thumbnailDragStartScreen;
@@ -64,9 +68,19 @@ public partial class PinnedImageGroupWindow : Window
 
     public PinnedImageGroupWindow(
         IReadOnlyList<PinnedImageWindow> members,
-        Func<AppSettings>? settingsProvider = null)
+        Func<AppSettings>? settingsProvider = null,
+        Action<CapturedImage>? copyImageToClipboardAndHistory = null)
     {
         _settingsProvider = settingsProvider;
+        _copyImageToClipboardAndHistory = copyImageToClipboardAndHistory;
+        var virtualBounds = VirtualScreen.GetBounds();
+        _interactionFrameInterval =
+            DisplayRefreshRateService.GetInteractionFrameInterval(
+                new System.Drawing.Rectangle(
+                    virtualBounds.X,
+                    virtualBounds.Y,
+                    virtualBounds.Width,
+                    virtualBounds.Height));
         InitializeComponent();
         _windowDragTracker = new NativeWindowDragTracker(this, EndWindowDrag);
         SetMembers(members);
@@ -153,6 +167,14 @@ public partial class PinnedImageGroupWindow : Window
 
     internal bool IsInlineCropVisible => _isCropMode;
 
+    internal void FitToCompositeImage()
+    {
+        if (_compositePreview is { } image)
+        {
+            ApplyCompositeWindowSize(image);
+        }
+    }
+
     internal bool ToolbarHasCustomPosition =>
         _editorToolbar?.HasCustomPosition == true;
 
@@ -214,6 +236,7 @@ public partial class PinnedImageGroupWindow : Window
         _memberBounds = result.MemberBounds;
         _hasCompositeEdits = false;
         CompositeImage.Source = result.Image;
+        ApplyCompositeWindowSize(result.Image);
         _recognition = null;
         GroupTextOverlay.Children.Clear();
     }
@@ -366,16 +389,70 @@ public partial class PinnedImageGroupWindow : Window
     private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.LeftButton == MouseButtonState.Pressed &&
-            e.OriginalSource is not WpfButtonBase and not Slider)
+            !IsHeaderCommandSource(e.OriginalSource))
         {
+            // Start native capture from the original button-down. Activating
+            // here can consume the first press as a focus change, requiring a
+            // second click before the group begins moving.
             BeginWindowDrag(e);
             e.Handled = true;
         }
     }
 
+    private void ApplyCompositeWindowSize(BitmapSource image)
+    {
+        if (_isMinimized || image.PixelWidth <= 0 || image.PixelHeight <= 0)
+        {
+            return;
+        }
+
+        var workArea = SystemParameters.WorkArea;
+        const double headerHeight = 36;
+        const double horizontalBorder = 2;
+        const double verticalBorder = 2;
+        var maxContentWidth = Math.Max(1, workArea.Width * 0.92);
+        var maxContentHeight = Math.Max(1, workArea.Height * 0.90 - headerHeight);
+        var scale = Math.Min(
+            1,
+            Math.Min(
+                maxContentWidth / image.PixelWidth,
+                maxContentHeight / image.PixelHeight));
+        Width = Math.Max(MinWidth, Math.Min(maxContentWidth + horizontalBorder, image.PixelWidth * scale + horizontalBorder));
+        Height = Math.Max(MinHeight, Math.Min(maxContentHeight + headerHeight + verticalBorder, image.PixelHeight * scale + headerHeight + verticalBorder));
+    }
+
+    private static bool IsHeaderCommandSource(object source)
+    {
+        var current = source as DependencyObject;
+        while (current is not null)
+        {
+            if (current is WpfButtonBase or Slider)
+            {
+                return true;
+            }
+
+            current = current is Visual or System.Windows.Media.Media3D.Visual3D
+                ? VisualTreeHelper.GetParent(current)
+                : LogicalTreeHelper.GetParent(current);
+        }
+
+        return false;
+    }
+
     private void BeginWindowDrag(MouseButtonEventArgs e)
     {
-        _windowDragTracker.Start();
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            return;
+        }
+
+        // Start native capture while the original button-down is still
+        // active. Activating first can consume the first press as a focus
+        // change, which makes the window move only after a second click.
+        if (_windowDragTracker.Start())
+        {
+            e.Handled = true;
+        }
     }
 
     private void OnWindowPreviewMouseMove(object sender, WpfMouseEventArgs e)
@@ -388,8 +465,15 @@ public partial class PinnedImageGroupWindow : Window
 
     private void OnWindowPreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
+        // Only consume the release that belongs to a native window drag.
+        // Handling every preview mouse-up also swallows Button.Click for the
+        // command buttons in the group header.
+        var wasDragging = _windowDragTracker.IsActive;
         _windowDragTracker.Stop();
-        e.Handled = true;
+        if (wasDragging)
+        {
+            e.Handled = true;
+        }
     }
 
     private void OnWindowLostMouseCapture(object sender, WpfMouseEventArgs e) =>
@@ -410,6 +494,7 @@ public partial class PinnedImageGroupWindow : Window
             _thumbnailDragStart = e.GetPosition(this);
             _thumbnailDragStartScreen = GetCurrentScreenCursorPosition();
             _thumbnailStartTop = Top;
+            _lastThumbnailDragTimestamp = 0;
             GroupCanvas.Cursor = WpfCursors.SizeAll;
             _ = GroupCanvas.CaptureMouse();
             e.Handled = true;
@@ -422,6 +507,15 @@ public partial class PinnedImageGroupWindow : Window
         {
             return;
         }
+
+        var now = Environment.TickCount64;
+        if (_lastThumbnailDragTimestamp != 0 &&
+            now - _lastThumbnailDragTimestamp <
+            _interactionFrameInterval.TotalMilliseconds)
+        {
+            return;
+        }
+        _lastThumbnailDragTimestamp = now;
 
         var workArea = SystemParameters.WorkArea;
         var currentScreen = GetCurrentScreenCursorPosition();
@@ -1117,6 +1211,15 @@ public partial class PinnedImageGroupWindow : Window
     {
         try
         {
+            if (_copyImageToClipboardAndHistory is not null)
+            {
+                var image = _isEditorMode
+                    ? CapturedImage.FromBitmapSource(InlineEditorCanvas.RenderEditedImage())
+                    : CapturedImage.FromBitmapSource(CompositePreview);
+                _copyImageToClipboardAndHistory(image);
+                return;
+            }
+
             if (_isEditorMode)
             {
                 System.Windows.Clipboard.SetImage(InlineEditorCanvas.RenderEditedImage());
@@ -1142,6 +1245,10 @@ public partial class PinnedImageGroupWindow : Window
         {
             throw new ArgumentException("At least one image is required.", nameof(images));
         }
+        // Remove only fully transparent outer margins. Transparent pixels
+        // inside an image remain untouched, while separate pins no longer
+        // contribute large empty bands to the group layout.
+        images = images.Select(TrimTransparentBounds).ToArray();
         const int gap = 1;
         var columns = Math.Min(2, images.Count);
         var columnHeights = new int[columns];
@@ -1192,8 +1299,8 @@ public partial class PinnedImageGroupWindow : Window
                 new Rect(0, 0, outputWidth, outputHeight));
             foreach (var placement in placements)
             {
-                var width = Math.Max(1, placement.Image.PixelWidth * scale);
                 var height = Math.Max(1, placement.Image.PixelHeight * scale);
+                var width = Math.Max(1, placement.Image.PixelWidth * scale);
                 var destination = new Rect(
                     columnOffsets[placement.Column] * scale,
                     placement.Top * scale,
@@ -1216,6 +1323,62 @@ public partial class PinnedImageGroupWindow : Window
         result.Render(visual);
         result.Freeze();
         return new CompositionResult(result, memberBounds);
+    }
+
+    private static BitmapSource TrimTransparentBounds(BitmapSource source)
+    {
+        if (!source.Format.Equals(PixelFormats.Bgra32) &&
+            !source.Format.Equals(PixelFormats.Pbgra32) &&
+            !source.Format.Equals(PixelFormats.Prgba64))
+        {
+            return source;
+        }
+
+        var bytesPerPixel = source.Format.BitsPerPixel / 8;
+        if (bytesPerPixel < 4)
+        {
+            return source;
+        }
+
+        var stride = source.PixelWidth * bytesPerPixel;
+        var pixels = new byte[stride * source.PixelHeight];
+        source.CopyPixels(pixels, stride, 0);
+        var left = source.PixelWidth;
+        var top = source.PixelHeight;
+        var right = -1;
+        var bottom = -1;
+        for (var y = 0; y < source.PixelHeight; y++)
+        {
+            var row = y * stride;
+            for (var x = 0; x < source.PixelWidth; x++)
+            {
+                var alpha = bytesPerPixel == 8
+                    ? BitConverter.ToUInt16(pixels, row + x * bytesPerPixel + 6)
+                    : pixels[row + x * bytesPerPixel + 3] * 257;
+                if (alpha == 0)
+                {
+                    continue;
+                }
+
+                left = Math.Min(left, x);
+                top = Math.Min(top, y);
+                right = Math.Max(right, x);
+                bottom = Math.Max(bottom, y);
+            }
+        }
+
+        if (right < left || bottom < top ||
+            (left == 0 && top == 0 && right == source.PixelWidth - 1 &&
+             bottom == source.PixelHeight - 1))
+        {
+            return source;
+        }
+
+        var cropped = new CroppedBitmap(
+            source,
+            new Int32Rect(left, top, right - left + 1, bottom - top + 1));
+        cropped.Freeze();
+        return cropped;
     }
 
     private static DrawingBrush CreateCompositeCheckerboardBrush()
@@ -1323,6 +1486,7 @@ public partial class PinnedImageGroupWindow : Window
         }
 
         _isPanningInlineEditor = true;
+        _lastInlinePanTimestamp = 0;
         _inlineEditorPanStartPoint = e.GetPosition(InlineEditorViewport);
         _inlineEditorPanStartHorizontalOffset = InlineEditorViewport.HorizontalOffset;
         _inlineEditorPanStartVerticalOffset = InlineEditorViewport.VerticalOffset;
@@ -1337,18 +1501,29 @@ public partial class PinnedImageGroupWindow : Window
         {
             return;
         }
+        e.Handled = true;
         if (e.MiddleButton != MouseButtonState.Pressed)
         {
             EndInlineEditorPanning();
             return;
         }
 
+        var now = System.Diagnostics.Stopwatch.GetTimestamp();
+        var frameTicks = (long)Math.Ceiling(
+            _interactionFrameInterval.TotalSeconds *
+            System.Diagnostics.Stopwatch.Frequency);
+        if (_lastInlinePanTimestamp != 0 &&
+            now - _lastInlinePanTimestamp < frameTicks)
+        {
+            return;
+        }
+        _lastInlinePanTimestamp = now;
+
         var current = e.GetPosition(InlineEditorViewport);
         InlineEditorViewport.ScrollToHorizontalOffset(
             _inlineEditorPanStartHorizontalOffset + _inlineEditorPanStartPoint.X - current.X);
         InlineEditorViewport.ScrollToVerticalOffset(
             _inlineEditorPanStartVerticalOffset + _inlineEditorPanStartPoint.Y - current.Y);
-        e.Handled = true;
     }
 
     private void OnInlineEditorPreviewMouseUp(

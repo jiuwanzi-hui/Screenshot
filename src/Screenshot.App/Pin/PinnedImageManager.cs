@@ -23,6 +23,7 @@ public sealed class PinnedImageManager : IDisposable
     private readonly Action<ArrowToolMode>? _arrowToolModeChanged;
     private readonly Action<ShapeToolMode>? _shapeToolModeChanged;
     private readonly Action<AnnotationToolMode>? _lastAnnotationToolChanged;
+    private readonly Action<CapturedImage>? _copyImageToClipboardAndHistory;
     private readonly PinnedImagePersistenceStore _persistenceStore;
     private readonly Dictionary<PinnedImageWindow, (double Left, double Top)>
         _lastPositions = [];
@@ -43,7 +44,8 @@ public sealed class PinnedImageManager : IDisposable
         Action<ArrowStyle>? arrowStyleChanged = null,
         Action<ArrowToolMode>? arrowToolModeChanged = null,
         Action<ShapeToolMode>? shapeToolModeChanged = null,
-        Action<AnnotationToolMode>? lastAnnotationToolChanged = null)
+        Action<AnnotationToolMode>? lastAnnotationToolChanged = null,
+        Action<CapturedImage>? copyImageToClipboardAndHistory = null)
     {
         _recognizeTextAsync = recognizeTextAsync;
         _translateTextAsync = translateTextAsync;
@@ -55,6 +57,7 @@ public sealed class PinnedImageManager : IDisposable
         _arrowToolModeChanged = arrowToolModeChanged;
         _shapeToolModeChanged = shapeToolModeChanged;
         _lastAnnotationToolChanged = lastAnnotationToolChanged;
+        _copyImageToClipboardAndHistory = copyImageToClipboardAndHistory;
         _persistenceStore = new PinnedImagePersistenceStore();
         _saveTimer = new DispatcherTimer
         {
@@ -66,6 +69,8 @@ public sealed class PinnedImageManager : IDisposable
     public int Count => _windows.Count;
 
     public bool HasHiddenWindows => _hasHiddenWindows;
+
+    internal int HistoryLimit => _settingsProvider?.Invoke().HistoryLimit ?? 50;
 
     public event EventHandler? DisplayStateChanged;
 
@@ -230,17 +235,10 @@ public sealed class PinnedImageManager : IDisposable
     {
         AttachWindow(window);
         _windows.Add(window);
-        if (_hasHiddenWindows)
-        {
-            // The minimized state is still an active pin surface. New pins
-            // must join the thumbnail stack instead of becoming unreachable.
-            window.Show();
-            window.MinimizeTo(_windows.Count - 1);
-        }
-        else
-        {
-            window.Show();
-        }
+        // A minimized pin/group is an existing thumbnail state. New pins must
+        // remain normal visible windows so the newly captured image is
+        // immediately reachable instead of being minimized on arrival.
+        window.Show();
         _lastPositions[window] = (window.Left, window.Top);
         NotifyDisplayStateChanged();
     }
@@ -387,7 +385,10 @@ public sealed class PinnedImageManager : IDisposable
 
         if (_groupWindow is null)
         {
-            _groupWindow = new PinnedImageGroupWindow(members, _settingsProvider);
+            _groupWindow = new PinnedImageGroupWindow(
+                members,
+                _settingsProvider,
+                _copyImageToClipboardAndHistory);
             _groupWindow.UngroupRequested += OnUngroupRequested;
             _groupWindow.CloseGroupRequested += OnCloseGroupRequested;
             _groupWindow.SettingsRequested += OnPinnedImageSettingsRequested;
@@ -416,24 +417,19 @@ public sealed class PinnedImageManager : IDisposable
         IReadOnlyList<PinnedImageWindow> members)
     {
         var workArea = System.Windows.SystemParameters.WorkArea;
+        groupWindow.FitToCompositeImage();
         var left = members.Min(window => window.Left);
         var top = members.Min(window => window.Top);
         var right = members.Max(window => window.Left + window.Width);
         var bottom = members.Max(window => window.Top + window.Height);
-        groupWindow.Width = Math.Clamp(
-            Math.Max(620, right - left),
-            groupWindow.MinWidth,
-            workArea.Width * 0.92);
-        groupWindow.Height = Math.Clamp(
-            Math.Max(360, bottom - top),
-            groupWindow.MinHeight,
-            workArea.Height * 0.90);
+        var centeredLeft = ((left + right) / 2) - (groupWindow.Width / 2);
+        var centeredTop = ((top + bottom) / 2) - (groupWindow.Height / 2);
         groupWindow.Left = Math.Clamp(
-            left,
+            centeredLeft,
             workArea.Left,
             Math.Max(workArea.Left, workArea.Right - groupWindow.Width));
         groupWindow.Top = Math.Clamp(
-            top,
+            centeredTop,
             workArea.Top,
             Math.Max(workArea.Top, workArea.Bottom - groupWindow.Height));
     }

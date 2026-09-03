@@ -15,6 +15,7 @@ internal sealed class NativeWindowDragTracker
     private const uint NoActivate = 0x0010;
     private readonly Window _window;
     private readonly Action _released;
+    private readonly TimeSpan _frameInterval;
     private Thread? _thread;
     private IntPtr _handle;
     private DrawingPoint _startCursor;
@@ -25,6 +26,9 @@ internal sealed class NativeWindowDragTracker
     {
         _window = window;
         _released = released;
+        _frameInterval = DisplayRefreshRateService.GetInteractionFrameInterval(
+            System.Windows.Forms.Screen.PrimaryScreen?.Bounds ??
+            System.Windows.Forms.SystemInformation.VirtualScreen);
     }
 
     public bool IsActive => Volatile.Read(ref _active) != 0;
@@ -38,7 +42,14 @@ internal sealed class NativeWindowDragTracker
         }
 
         _handle = new WindowInteropHelper(_window).Handle;
-        if (_handle == IntPtr.Zero || SetCapture(_handle) == IntPtr.Zero)
+        if (_handle == IntPtr.Zero)
+        {
+            _handle = IntPtr.Zero;
+            return false;
+        }
+
+        SetCapture(_handle);
+        if (GetCapture() != _handle)
         {
             _handle = IntPtr.Zero;
             return false;
@@ -50,6 +61,7 @@ internal sealed class NativeWindowDragTracker
         {
             IsBackground = true,
             Name = "SnapCut native pinned window drag",
+            Priority = ThreadPriority.BelowNormal,
         };
         _thread.Start();
         return true;
@@ -77,6 +89,7 @@ internal sealed class NativeWindowDragTracker
 
     private void Run()
     {
+        _ = timeBeginPeriod(1);
         try
         {
             while (IsActive)
@@ -108,11 +121,16 @@ internal sealed class NativeWindowDragTracker
                         NoSize | NoZOrder | NoActivate);
                 }
 
-                Thread.Sleep(1);
+                var delay = _frameInterval;
+                if (delay > TimeSpan.Zero)
+                {
+                    Thread.Sleep(delay);
+                }
             }
         }
         finally
         {
+            _ = timeEndPeriod(1);
             if (ReferenceEquals(_thread, Thread.CurrentThread))
             {
                 _thread = null;
@@ -144,4 +162,10 @@ internal sealed class NativeWindowDragTracker
         int width,
         int height,
         uint flags);
+
+    [DllImport("winmm.dll")]
+    private static extern uint timeBeginPeriod(uint periodMilliseconds);
+
+    [DllImport("winmm.dll")]
+    private static extern uint timeEndPeriod(uint periodMilliseconds);
 }

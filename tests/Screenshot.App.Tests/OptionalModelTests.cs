@@ -48,6 +48,24 @@ public sealed class OptionalModelTests : IDisposable
                 logicalProcessorCount));
     }
 
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(2, 1)]
+    [InlineData(4, 2)]
+    [InlineData(8, 2)]
+    [InlineData(12, 4)]
+    [InlineData(16, 4)]
+    [InlineData(24, 4)]
+    public void OcrCpuBudgetStaysBoundedForForegroundRecognition(
+        int logicalProcessorCount,
+        int expectedThreadCount)
+    {
+        Assert.Equal(
+            expectedThreadCount,
+            HeavyWorkloadBudget.CalculateOcrThreadCount(
+                logicalProcessorCount));
+    }
+
     [Fact]
     public void OfflineTranslationConfigurationUsesTheSharedCpuBudget()
     {

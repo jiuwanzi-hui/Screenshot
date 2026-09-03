@@ -6,8 +6,8 @@
         Height="390"
         MinWidth="420"
         MinHeight="260"
-        AllowsTransparency="True"
-        Background="Transparent"
+        AllowsTransparency="False"
+        Background="{DynamicResource AppPanelBackgroundBrush}"
         FontFamily="Microsoft YaHei UI"
         ResizeMode="CanResizeWithGrip"
         ShowInTaskbar="False"
@@ -19,13 +19,6 @@
             BorderBrush="{DynamicResource AppBorderBrush}"
             BorderThickness="1"
             CornerRadius="12">
-        <Border.Effect>
-            <DropShadowEffect BlurRadius="24"
-                              Direction="270"
-                              Opacity="0.36"
-                              ShadowDepth="8"
-                              Color="#001014" />
-        </Border.Effect>
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />

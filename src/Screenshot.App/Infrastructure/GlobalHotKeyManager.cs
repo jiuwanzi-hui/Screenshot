@@ -186,7 +186,7 @@ public sealed class GlobalHotKeyManager : IDisposable
         _capturePointerContinuations = [];
     private IntPtr _keyboardHook;
     private IntPtr _mouseHook;
-    private readonly int _mouseHookErrorCode;
+    private int _mouseHookErrorCode;
     private CapturedImage? _preCapturedScreen;
     private readonly object _immediatePreCaptureLock = new();
     private CapturedImage? _immediatePreCapturedScreen;
@@ -206,12 +206,15 @@ public sealed class GlobalHotKeyManager : IDisposable
     private bool _isKeyboardCaptureActive;
     private bool _rawKeyboardRegistered;
     private bool _rawMouseRegistered;
+    private bool _mouseInputHooksSuspended;
+    private readonly bool _inputHooksDeferred;
     private Window? _modifierProbeWindow;
     private int _mouseReplayDepth;
     private bool _disposed;
 
-    public GlobalHotKeyManager()
+    public GlobalHotKeyManager(bool deferLowLevelInputHooks = false)
     {
+        _inputHooksDeferred = deferLowLevelInputHooks;
         CaptureTimingDiagnostics.Mark(
             "hotkey-manager-created",
             $"pid={Environment.ProcessId} base={AppContext.BaseDirectory}");
@@ -223,8 +226,6 @@ public sealed class GlobalHotKeyManager : IDisposable
 
         _messageSource = new HwndSource(parameters);
         _messageSource.AddHook(WindowProcedure);
-        _rawKeyboardRegistered = RegisterRawKeyboardInput();
-        _rawMouseRegistered = RegisterRawMouseInput();
         _preCaptureExpiryTimer = new DispatcherTimer
         {
             Interval = PreCaptureLifetime,
@@ -236,12 +237,41 @@ public sealed class GlobalHotKeyManager : IDisposable
         };
         _mouseHoldTimer.Tick += OnMouseHoldTimerTick;
         _keyboardProcedure = OnLowLevelKeyboardMessage;
+        _mouseProcedure = OnLowLevelMouseMessage;
+        if (!deferLowLevelInputHooks)
+        {
+            StartInputHooks();
+        }
+
+        WriteInputDiagnostic(
+            $"manager-created keyboardHook=0x{_keyboardHook.ToInt64():X} " +
+            $"mouseHook=0x{_mouseHook.ToInt64():X} " +
+            $"mouseHookError={_mouseHookErrorCode} " +
+            $"rawKeyboard={_rawKeyboardRegistered} " +
+            $"rawMouse={_rawMouseRegistered}");
+    }
+
+    /// <summary>
+    /// Installs the low-level/raw input paths after the launch dispatcher has
+    /// completed its first UI turn. RegisterHotKey does not depend on these
+    /// hooks, so deferring them keeps the startup mouse path free of hook and
+    /// raw-input initialization work.
+    /// </summary>
+    public void StartInputHooks()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_keyboardHook != IntPtr.Zero || _mouseHook != IntPtr.Zero)
+        {
+            return;
+        }
+
+        _rawKeyboardRegistered = RegisterRawKeyboardInput();
+        _rawMouseRegistered = RegisterRawMouseInput();
         _keyboardHook = NativeMethods.SetWindowsHookEx(
             LowLevelKeyboardHook,
             _keyboardProcedure,
             NativeMethods.GetModuleHandle(moduleName: null),
             threadId: 0);
-        _mouseProcedure = OnLowLevelMouseMessage;
         _mouseHook = NativeMethods.SetWindowsHookEx(
             LowLevelMouseHook,
             _mouseProcedure,
@@ -252,12 +282,11 @@ public sealed class GlobalHotKeyManager : IDisposable
             _mouseHookErrorCode = Marshal.GetLastWin32Error();
         }
 
-        WriteInputDiagnostic(
-            $"manager-created keyboardHook=0x{_keyboardHook.ToInt64():X} " +
+        CaptureTimingDiagnostics.Mark(
+            "low-level-input-hooks-started",
+            $"keyboardHook=0x{_keyboardHook.ToInt64():X} " +
             $"mouseHook=0x{_mouseHook.ToInt64():X} " +
-            $"mouseHookError={_mouseHookErrorCode} " +
-            $"rawKeyboard={_rawKeyboardRegistered} " +
-            $"rawMouse={_rawMouseRegistered}");
+            $"rawKeyboard={_rawKeyboardRegistered} rawMouse={_rawMouseRegistered}");
     }
 
     public event EventHandler<HotKeyPressedEventArgs>? HotKeyPressed;
@@ -295,6 +324,17 @@ public sealed class GlobalHotKeyManager : IDisposable
         _areMouseShortcutsSuspended = suspended;
         if (!suspended)
         {
+            if (_mouseInputHooksSuspended &&
+                !_messageSource.Dispatcher.HasShutdownStarted &&
+                !_messageSource.Dispatcher.HasShutdownFinished)
+            {
+                // Re-register only after the close/input burst has drained.
+                // Reinstalling WH_MOUSE_LL synchronously in OnClosed can
+                // itself delay the first cursor move in the foreground app.
+                _ = _messageSource.Dispatcher.BeginInvoke(
+                    DispatcherPriority.ApplicationIdle,
+                    new Action(ResumeMouseInputHooks));
+            }
             return;
         }
 
@@ -307,6 +347,53 @@ public sealed class GlobalHotKeyManager : IDisposable
         _suppressedTransientMenuKeys.Clear();
         _earlyKeyboardHotKeys.Clear();
         _mouseHoldTimer.Stop();
+
+        // Keyboard-triggered captures have no pointer continuation that
+        // needs the global hook. Remove both mouse input paths before the
+        // overlay starts constructing windows, so that WPF/native setup can
+        // never compete with the system cursor. Mouse-triggered captures
+        // retain the hooks until their held button is released.
+        if (_capturePointerContinuations.Count == 0)
+        {
+            SuspendMouseInputHooks();
+        }
+    }
+
+    private void SuspendMouseInputHooks()
+    {
+        if (_mouseInputHooksSuspended)
+        {
+            return;
+        }
+
+        if (_mouseHook != IntPtr.Zero)
+        {
+            _ = NativeMethods.UnhookWindowsHookEx(_mouseHook);
+            _mouseHook = IntPtr.Zero;
+        }
+
+        UnregisterRawMouseInput();
+        _mouseInputHooksSuspended = true;
+    }
+
+    private void ResumeMouseInputHooks()
+    {
+        if (!_mouseInputHooksSuspended || _disposed)
+        {
+            return;
+        }
+
+        _mouseInputHooksSuspended = false;
+        _rawMouseRegistered = RegisterRawMouseInput();
+        _mouseHook = NativeMethods.SetWindowsHookEx(
+            LowLevelMouseHook,
+            _mouseProcedure,
+            NativeMethods.GetModuleHandle(moduleName: null),
+            threadId: 0);
+        if (_mouseHook == IntPtr.Zero)
+        {
+            _mouseHookErrorCode = Marshal.GetLastWin32Error();
+        }
     }
 
     public void BeginKeyboardCapture()
@@ -481,7 +568,7 @@ public sealed class GlobalHotKeyManager : IDisposable
 
         if (binding.Gesture.IsMouseButton)
         {
-            if (_mouseHook == IntPtr.Zero)
+            if (_mouseHook == IntPtr.Zero && !_inputHooksDeferred)
             {
                 registrationError =
                     $"无法启用鼠标快捷键 {binding.Gesture}（Windows 错误代码 {_mouseHookErrorCode}）。";
@@ -557,7 +644,15 @@ public sealed class GlobalHotKeyManager : IDisposable
     {
         if (message == WindowMessageInput)
         {
-            ProcessRawInput(lParam);
+            // Capture sessions suspend mouse shortcuts for their lifetime.
+            // Raw input is still registered so it can be used when the app
+            // is idle, but parsing every hardware report while the overlay
+            // owns the pointer only adds work to the hidden message window
+            // and competes with the compositor on high-report-rate mice.
+            if (!_areMouseShortcutsSuspended)
+            {
+                ProcessRawInput(lParam);
+            }
         }
 
         if (message == WindowMessageHotKey)
@@ -682,6 +777,13 @@ public sealed class GlobalHotKeyManager : IDisposable
                     return new IntPtr(1);
                 }
 
+                if (CaptureOverlayWindow.TryHandleGlobalPickerKey(
+                        keyboardData.VirtualKey,
+                        GetCurrentModifiersIncluding(keyboardData.VirtualKey)))
+                {
+                    return new IntPtr(1);
+                }
+
                 if (!_isKeyboardCaptureActive &&
                     CaptureOverlayWindow.TryHandleGlobalCompletionKey(
                         keyboardData.VirtualKey,
@@ -727,6 +829,19 @@ public sealed class GlobalHotKeyManager : IDisposable
         IntPtr wParam,
         IntPtr lParam)
     {
+        if (_areMouseShortcutsSuspended)
+        {
+            // Screenshot, pin and recording overlays own the interaction
+            // while mouse shortcuts are suspended. Keep WH_MOUSE_LL a pure
+            // pass-through during that window so cursor packets are never
+            // delayed by shortcut bookkeeping that cannot trigger.
+            return NativeMethods.CallNextHookEx(
+                _mouseHook,
+                code,
+                wParam,
+                lParam);
+        }
+
         if (code >= 0)
         {
             var message = wParam.ToInt32();
@@ -2490,8 +2605,32 @@ public sealed class GlobalHotKeyManager : IDisposable
         Volatile.Write(ref _lastRightButtonUpLikelyExplorer, 0);
         Interlocked.Increment(ref _contextMenuCaptureGeneration);
         Interlocked.Increment(ref _preCaptureGeneration);
-        ClearStandardPreCapturedScreen();
-        ClearImmediatePreCapturedScreen();
+
+        // Detach capture buffers immediately so a subsequent hotkey cannot
+        // reuse stale pixels, but release their GDI memory off the input/UI
+        // turn. Bitmap disposal can take a measurable interval on large
+        // multi-monitor desktops and was visible as a hitch right after Esc.
+        var standard = _preCapturedScreen;
+        _preCapturedScreen = null;
+        _preCapturedActions.Clear();
+        _preCapturedAt = default;
+        _preCaptureExpiryTimer.Stop();
+        CapturedImage? immediate;
+        lock (_immediatePreCaptureLock)
+        {
+            immediate = _immediatePreCapturedScreen;
+            _immediatePreCapturedScreen = null;
+            _immediatePreCapturedActions.Clear();
+            _immediatePreCapturedAt = default;
+        }
+        if (standard is not null || immediate is not null)
+        {
+            _ = Task.Run(() =>
+            {
+                standard?.Dispose();
+                immediate?.Dispose();
+            });
+        }
     }
 
     internal void SetCaptureOverlayActive(bool active)

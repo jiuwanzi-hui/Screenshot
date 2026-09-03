@@ -20,6 +20,22 @@ public partial class ContentRecognitionWindow : Window
         StatusText.Text = result.IsSuccess
             ? "识别完成"
             : "未能识别";
+        // Do not show the centered default frame before WPF has measured the
+        // content. Reveal the dialog only after its first layout pass.
+        Opacity = 0;
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Left = (SystemParameters.WorkArea.Width - Width) / 2 +
+               SystemParameters.WorkArea.Left;
+        Top = (SystemParameters.WorkArea.Height - Height) / 2 +
+              SystemParameters.WorkArea.Top;
+        Loaded += OnLoaded;
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        Loaded -= OnLoaded;
+        UpdateLayout();
+        Opacity = 1;
     }
 
     private void OnTitleMouseLeftButtonDown(object sender, MouseButtonEventArgs e)

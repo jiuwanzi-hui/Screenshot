@@ -40,6 +40,14 @@ public partial class CaptureHistoryWindow : Window, IDisposable
     private WpfPoint _videoDragStart;
     private CaptureHistoryItem? _draggingScreenshotItem;
     private WpfPoint _screenshotDragStart;
+    private readonly TimeSpan _interactionFrameInterval =
+        DisplayRefreshRateService.GetInteractionFrameInterval(
+            new System.Drawing.Rectangle(
+                VirtualScreen.GetBounds().X,
+                VirtualScreen.GetBounds().Y,
+                VirtualScreen.GetBounds().Width,
+                VirtualScreen.GetBounds().Height));
+    private long _lastHistoryDragTimestamp;
 
     public CaptureHistoryWindow(
         CaptureHistoryService historyService,
@@ -478,6 +486,11 @@ public partial class CaptureHistoryWindow : Window, IDisposable
             return;
         }
 
+        if (!IsInteractionFrameDue())
+        {
+            return;
+        }
+
         _draggingVideoItem = null;
         var data = new WpfDataObject(WpfDataFormats.FileDrop, new[] { item.FilePath });
         WpfDragDrop.DoDragDrop(
@@ -546,6 +559,11 @@ public partial class CaptureHistoryWindow : Window, IDisposable
             return;
         }
 
+        if (!IsInteractionFrameDue())
+        {
+            return;
+        }
+
         var path = EnsureScreenshotDragPath(item);
         _draggingScreenshotItem = null;
         if (path is null)
@@ -560,6 +578,21 @@ public partial class CaptureHistoryWindow : Window, IDisposable
             data,
             WpfDragDropEffects.Copy);
         e.Handled = true;
+    }
+
+    private bool IsInteractionFrameDue()
+    {
+        var now = Stopwatch.GetTimestamp();
+        var intervalTicks = (long)Math.Ceiling(
+            _interactionFrameInterval.TotalSeconds * Stopwatch.Frequency);
+        if (_lastHistoryDragTimestamp != 0 &&
+            now - _lastHistoryDragTimestamp < intervalTicks)
+        {
+            return false;
+        }
+
+        _lastHistoryDragTimestamp = now;
+        return true;
     }
 
     private void OnScreenshotCardMouseLeftButtonUp(

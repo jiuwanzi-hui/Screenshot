@@ -554,11 +554,10 @@ public sealed class PinnedImageManagerTests
             manager.Pin(new CapturedImage(new System.Drawing.Bitmap(30, 20)));
 
             Assert.Equal(2, manager.Count);
-            Assert.All(manager.Windows, window =>
-            {
-                Assert.True(window.IsVisible);
-                Assert.True(window.IsMinimized);
-            });
+            Assert.True(manager.Windows[0].IsMinimized);
+            Assert.True(manager.Windows[0].IsVisible);
+            Assert.True(manager.Windows[1].IsVisible);
+            Assert.False(manager.Windows[1].IsMinimized);
         });
     }
 

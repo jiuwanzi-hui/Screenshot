@@ -8,6 +8,7 @@ using Windows.Graphics.Imaging;
 using Windows.Media.Ocr;
 using Windows.Storage.Streams;
 using Screenshot.App.Capture;
+using Screenshot.App.Core;
 
 namespace Screenshot.App.Text;
 
@@ -35,6 +36,9 @@ public static class OcrService
 
         try
         {
+            using var timing = CaptureTimingDiagnostics.Begin(
+                "ocr-windows",
+                $"language={languageTag}");
             var language = new Language(languageTag);
 
             if (!OcrEngine.IsLanguageSupported(language))
@@ -50,7 +54,12 @@ public static class OcrService
                 return OcrRecognitionResult.Failure("无法创建 Windows OCR 引擎。");
             }
 
-            using var ocrBitmap = PrepareBitmap(capturedImage.Bitmap);
+            // Resizing a full desktop capture with GDI+ is synchronous and can
+            // take a noticeable slice of a low-end CPU. Keep it off the WPF
+            // dispatcher; the OCR WinRT awaits below remain asynchronous.
+            using var ocrBitmap = await Task.Run(
+                () => PrepareBitmap(capturedImage.Bitmap),
+                cancellationToken);
             var recognition = await RecognizeBitmapAsync(
                 engine,
                 ocrBitmap,

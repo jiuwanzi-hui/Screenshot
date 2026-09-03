@@ -1,5 +1,6 @@
 using System.IO;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using Screenshot.App.Capture;
@@ -16,6 +17,16 @@ namespace Screenshot.App;
 public partial class App : System.Windows.Application, IDisposable
 {
     private const string SingleInstanceName = "Screenshot.App";
+    // Keep the shortcut's current input/compositor turn free of WPF window
+    // creation. This is deliberately limited to the shortcut hand-off; the
+    // capture and long-screenshot algorithms are unchanged.
+    // The WM_HOTKEY callback already returns before this dispatcher hand-off.
+    // Waiting another display frame here only leaves the cursor in the old
+    // foreground window while the user is already moving it. The overlay's
+    // first screen copy remains asynchronous, so there is no GDI work on the
+    // hook thread to protect with this delay.
+    private static readonly TimeSpan HotKeyInputSettleDelay =
+        TimeSpan.Zero;
     internal const long MaximumCrashLogSizeBytes = 10 * 1024 * 1024;
     private static readonly Encoding CrashLogEncoding = new UTF8Encoding(
         encoderShouldEmitUTF8Identifier: false);
@@ -34,8 +45,12 @@ public partial class App : System.Windows.Application, IDisposable
     private AppThemeManager? _themeManager;
     private SingleInstanceCoordinator? _singleInstanceCoordinator;
     private AppSettings _currentSettings = AppSettings.CreateDefault();
+    private Func<MainWindow>? _mainWindowFactory;
+    private string? _pendingStartupStatus;
+    private string? _pendingUpdateFailureStatus;
     private bool _isShuttingDown;
     private bool _isCaptureInProgress;
+    private int _interactiveHotKeyPending;
     private long _captureStateNotificationVersion;
     private long _appliedCaptureStateNotificationVersion;
     private bool _startupCompleted;
@@ -51,6 +66,8 @@ public partial class App : System.Windows.Application, IDisposable
         TaskScheduler.UnobservedTaskException += OnDebugUnobservedTaskException;
         AppDomain.CurrentDomain.ProcessExit += OnDebugProcessExit;
 #endif
+        StartupDiagnostics.ClearOldLogs();
+        StartupDiagnostics.LogElevation($"OnStartup: pid={Environment.ProcessId}, args=[{string.Join(", ", e.Args)}]");
         TrimCrashLogIfOversized();
         DispatcherUnhandledException += OnDispatcherUnhandledException;
 
@@ -78,6 +95,7 @@ public partial class App : System.Windows.Application, IDisposable
         }
 
         var settingsStore = new SettingsStore();
+        CaptureTimingDiagnostics.Mark("startup-settings-store-created");
         var elevationLaunchService = new ElevationLaunchService();
         var elevationSettings = settingsStore.Load().Settings;
         var elevationResult = new ElevationLaunchResult(
@@ -88,41 +106,68 @@ public partial class App : System.Windows.Application, IDisposable
                 argument,
                 ElevationLaunchService.ElevatedRelaunchArgument,
                 StringComparison.OrdinalIgnoreCase));
+        var isElevated = ElevationLaunchService.IsCurrentProcessElevated();
+        var isPortableLaunch = !AppMetadata.IsInstalled;
+        StartupDiagnostics.LogElevation($"Elevation state check: elevated={isElevated}, marker={hasElevatedRelaunchMarker}, request={elevationSettings.RequestAdministratorPrivileges}");
+        CaptureTimingDiagnostics.Mark(
+            "elevation-state",
+            $"elevated={isElevated} portable={isPortableLaunch} marker={hasElevatedRelaunchMarker} request={elevationSettings.RequestAdministratorPrivileges}");
 
         // The elevated child is the only process that can create the
         // highest-run-level task. This is done after the first UAC consent;
         // failures are intentionally non-fatal and retain the runas fallback.
-        if (hasElevatedRelaunchMarker &&
-            ElevationLaunchService.IsCurrentProcessElevated() &&
+        if (!isPortableLaunch &&
+            hasElevatedRelaunchMarker &&
+            isElevated &&
             Environment.ProcessPath is { } elevatedProcessPath)
         {
-            ElevationLaunchService.TryEnsurePersistentElevationTask(
+            StartupDiagnostics.LogElevation($"Attempting to create persistent elevation task for: {elevatedProcessPath}");
+            // Register the task before this elevated child becomes the
+            // primary instance. A fire-and-forget registration can race with
+            // shutdown/restart and cause another UAC prompt on the next run.
+            var created = ElevationLaunchService.TryEnsurePersistentElevationTask(
                 elevatedProcessPath);
+            StartupDiagnostics.LogElevation($"Persistent elevation task creation result: {created}");
+            CaptureTimingDiagnostics.Mark(
+                "elevation-task-ensured",
+                $"created={created}");
         }
 
 #if !DEBUG
-        if (elevationLaunchService.ShouldRequestElevation(elevationSettings, e.Args))
+        if (!isPortableLaunch &&
+            elevationLaunchService.ShouldRequestElevation(elevationSettings, e.Args))
         {
+            StartupDiagnostics.LogElevation("Elevation required - entering elevation path");
+            CaptureTimingDiagnostics.Mark("elevation-path-entered");
             // Release the per-session instance event before either the
             // persistent task or the UAC child starts. Otherwise the new
             // elevated process can be mistaken for a duplicate and exit.
             _singleInstanceCoordinator.Dispose();
             _singleInstanceCoordinator = null;
 
-            if (Environment.ProcessPath is { } processPath &&
-                ElevationLaunchService.TryRunPersistentElevationTask(
-                    processPath,
-                    e.Args))
+            if (Environment.ProcessPath is { } processPath)
             {
-                Shutdown();
-                return;
+                StartupDiagnostics.LogElevation($"Attempting to run persistent elevation task for: {processPath}");
+                var taskStarted = ElevationLaunchService.TryRunPersistentElevationTask(
+                    processPath,
+                    e.Args);
+                StartupDiagnostics.LogElevation($"Persistent task run result: {taskStarted}");
+                if (taskStarted)
+                {
+                    CaptureTimingDiagnostics.Mark("elevation-persistent-task-selected");
+                    Shutdown();
+                    return;
+                }
             }
 
+            StartupDiagnostics.LogElevation("Persistent task not available, falling back to UAC relaunch");
             elevationResult = elevationLaunchService.TryRelaunchElevated(
                 elevationSettings,
                 e.Args);
+            StartupDiagnostics.LogElevation($"UAC relaunch result: started={elevationResult.RelaunchStarted}, warning={elevationResult.Warning}");
             if (elevationResult.RelaunchStarted)
             {
+                CaptureTimingDiagnostics.Mark("elevation-runas-child-started");
                 // Keep the user's preference unchanged. The elevated child
                 // carries the relaunch marker, while the persisted setting
                 // remains checked for the next normal/startup launch.
@@ -141,6 +186,7 @@ public partial class App : System.Windows.Application, IDisposable
             }
         }
 #endif
+        CaptureTimingDiagnostics.Mark("elevation-path-complete");
         var elevationWarning = elevationResult.Warning;
 
         var dataMigrationResult = InstalledDataMigration.TryMigrateLegacyData();
@@ -154,6 +200,7 @@ public partial class App : System.Windows.Application, IDisposable
             loadedSettings,
             settingsStore,
             credentialStore);
+        CaptureTimingDiagnostics.Mark("startup-settings-loaded");
         _ = Task.Run(() =>
         {
             CaptureHistoryService.PruneCacheDirectory(
@@ -172,22 +219,19 @@ public partial class App : System.Windows.Application, IDisposable
         _themeManager = new AppThemeManager();
         _themeManager.ThemeChanged += OnThemeChanged;
         _themeManager.Apply(_currentSettings.Theme);
+        CaptureTimingDiagnostics.Mark("startup-theme-applied");
         var startupRegistrationService = new StartupRegistrationService();
         var startupWarning = elevationWarning ?? (loadResult.Warning is null
             ? SynchronizeStartupRegistration(
                 startupRegistrationService,
                 _currentSettings.LaunchAtStartup)
             : null);
-        // Build the complete capture overlay before registering global
-        // hotkeys. The first shortcut must not pay the one-time WPF/XAML,
-        // layout, and native-window initialization cost.
-        PrewarmScreenCaptureBackend();
-        PrewarmCaptureWindows();
-        // Complete this before installing the hotkey hook. An idle callback
-        // can still race with the first shortcut after a fast launch, which
-        // puts the one-time WPF/native window cost back on the input edge.
-        PrewarmInteractiveCaptureWindow();
-        _hotKeyManager = new GlobalHotKeyManager();
+        // RegisterHotKey is enough for keyboard actions during startup. The
+        // low-level/raw input hooks are installed after the first dispatcher
+        // turn so hook setup cannot contend with the launch cursor.
+        _hotKeyManager = new GlobalHotKeyManager(
+            deferLowLevelInputHooks: true);
+        CaptureTimingDiagnostics.Mark("startup-hotkey-manager-created");
         _hotKeyManager.HotKeyPressed += OnHotKeyPressed;
         var hotKeyWarning = TryApplyInitialHotKeys(
             _hotKeyManager,
@@ -200,7 +244,10 @@ public partial class App : System.Windows.Application, IDisposable
             Timeout = TimeSpan.FromSeconds(30),
         };
 
-        _mainWindow = new MainWindow(
+        // The settings window is not needed by the tray or capture paths. Its
+        // XAML tree is the largest synchronous startup cost, so keep a factory
+        // and construct it only when settings are actually opened.
+        _mainWindowFactory = () => new MainWindow(
             _currentSettings,
             settingsStore,
             startupRegistrationService,
@@ -210,13 +257,6 @@ public partial class App : System.Windows.Application, IDisposable
         AnnotationToolPreferences.Configure(
             _currentSettings.AnnotationToolSettings,
             settings => _mainWindow?.SaveAnnotationToolSettings(settings));
-        _mainWindow.ApplySettingsPalette(_themeManager.ResolvedTheme);
-        MainWindow = _mainWindow;
-        _mainWindow.SettingsSaved += OnSettingsSaved;
-        _mainWindow.ExitRequested += OnExitRequested;
-        _mainWindow.UpdateInstallationStarted += OnUpdateInstallationStarted;
-        _mainWindow.TextTranslationRequested += OnTextTranslationRequested;
-        _mainWindow.ConfigureTaskbarVisibility(_currentSettings.ShowTaskbarIcon);
         _captureHistoryService = new CaptureHistoryService();
         _captureHistoryService.ConfigureRetentionPolicy(
             _currentSettings.ScreenshotHistoryRetentionDays,
@@ -231,10 +271,12 @@ public partial class App : System.Windows.Application, IDisposable
             arrowStyle => _mainWindow?.SaveArrowStyle(arrowStyle),
             arrowToolMode => _mainWindow?.SaveArrowToolMode(arrowToolMode),
             shapeToolMode => _mainWindow?.SaveShapeToolMode(shapeToolMode),
-            tool => _mainWindow?.SaveLastAnnotationTool(tool));
+            tool => _mainWindow?.SaveLastAnnotationTool(tool),
+            CopyPinnedGroupImageToClipboardAndHistory);
         _pinnedImageManager.DisplayStateChanged +=
             OnPinnedImageDisplayStateChanged;
-        _pinnedImageManager.RestorePersisted();
+        // Persisted pin images are optional state recovery. Defer image decode
+        // and window creation until the shell has become responsive.
         _regionCaptureCoordinator = new RegionCaptureCoordinator(
             () => _currentSettings,
             _captureHistoryService,
@@ -266,30 +308,28 @@ public partial class App : System.Windows.Application, IDisposable
 
         if (updateFailureRequested)
         {
-            _mainWindow.ShowUpdateFailureRetry(
-                ReadUpdateFailureStatus(),
-                showWindow: !startInBackground);
+            _pendingUpdateFailureStatus = ReadUpdateFailureStatus();
         }
         else if (dataMigrationResult.Warning is not null)
         {
-            _mainWindow.ShowStatus(dataMigrationResult.Warning);
+            _pendingStartupStatus = dataMigrationResult.Warning;
         }
         else if (loadResult.Warning is not null)
         {
-            _mainWindow.ShowStatus(loadResult.Warning);
+            _pendingStartupStatus = loadResult.Warning;
         }
         else if (startupWarning is not null)
         {
-            _mainWindow.ShowStatus(startupWarning);
+            _pendingStartupStatus = startupWarning;
         }
         else if (hotKeyWarning is not null)
         {
-            _mainWindow.ShowStatus(hotKeyWarning);
+            _pendingStartupStatus = hotKeyWarning;
         }
         else if (TryGetArgumentValue(e.Args, "--updated") is { } updatedVersion)
         {
-            _mainWindow.ShowStatus(
-                AppMetadata.FormatUpdatedVersionStatus(updatedVersion));
+            _pendingStartupStatus =
+                AppMetadata.FormatUpdatedVersionStatus(updatedVersion);
         }
 
         _trayIconService = new TrayIconService(_themeManager.ResolvedTheme);
@@ -302,7 +342,9 @@ public partial class App : System.Windows.Application, IDisposable
         _trayIconService.ExitRequested += OnExitRequested;
         UpdatePinnedImageTrayCommands();
         _trayIconService.SetVisible(_currentSettings.ShowNotificationIcon);
-        UpdateFloatingCaptureWindow();
+        CaptureTimingDiagnostics.Mark("startup-tray-ready");
+        // The floating button is optional chrome; create it during deferred
+        // startup so its HWND transition cannot hitch the launch cursor.
 
         if (startInBackground)
         {
@@ -315,17 +357,145 @@ public partial class App : System.Windows.Application, IDisposable
         // turn a tray/background launch into a settings window.
         if (!startInBackground && _currentSettings.OpenSettingsOnStartup)
         {
-            ShowMainWindow();
+            _ = Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                new Action(ShowMainWindow));
+        }
+        else if (!startInBackground && _pendingUpdateFailureStatus is not null)
+        {
+            _ = Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                new Action(ShowMainWindow));
         }
 
-        _ = Dispatcher.BeginInvoke(
-            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
-            Core.MemoryFootprint.TrimAfterHeavyOperation);
+        // Do not force a full GC/workset trim during the first idle turn. It
+        // suspends managed threads and can pause the desktop cursor exactly
+        // when a low-end machine is still finishing its first paint. Capture
+        // sessions keep their existing boundary trim after heavy work.
         _ = Dispatcher.BeginInvoke(
             System.Windows.Threading.DispatcherPriority.ApplicationIdle,
             new Action(PrewarmVideoRecordingAsync));
 
         _startupCompleted = true;
+
+        // Keep startup responsive. These are best-effort warm-ups and must
+        // never occupy the launch dispatcher or delay hotkey registration.
+        _ = BeginCaptureWarmupAfterStartupAsync();
+        _ = BeginDeferredStartupInfrastructureAsync();
+    }
+
+    private async Task BeginDeferredStartupInfrastructureAsync()
+    {
+        await Task.Delay(TimeSpan.FromMilliseconds(250));
+        if (_isShuttingDown)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.Background,
+            new Action(() =>
+            {
+                if (!_isShuttingDown)
+                {
+                    try
+                    {
+                        _hotKeyManager?.StartInputHooks();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // The process may exit during the deferred startup window.
+                    }
+                }
+            }));
+
+        // Give the shell a longer quiet period before creating optional WPF
+        // chrome. On low-end machines the first desktop interaction often
+        // lands during this window; floating/pinned HWND creation must not
+        // compete with that input burst.
+        // Optional chrome is deliberately kept away from the launch/input
+        // window. Creating the floating HWND at 1.5s still caused a visible
+        // hitch on slower systems.
+        await Task.Delay(TimeSpan.FromMilliseconds(5000));
+        if (_isShuttingDown)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+            new Action(() =>
+            {
+                if (!_isShuttingDown)
+                {
+                    UpdateFloatingCaptureWindow();
+                }
+            }));
+
+        await Task.Delay(TimeSpan.FromMilliseconds(2500));
+        if (_isShuttingDown)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+            new Action(() =>
+            {
+                if (!_isShuttingDown)
+                {
+                    _pinnedImageManager?.RestorePersisted();
+                }
+            }));
+    }
+
+    private async Task BeginCaptureWarmupAfterStartupAsync()
+    {
+        // Do not construct a complete CaptureOverlayWindow during startup.
+        // Its XAML/resource tree and layout are UI-thread work (the diagnostic
+        // logs measured roughly 0.4-0.5 s), which steals pointer/compositor
+        // time a few seconds after launch. Only the cheap native/screen/OCR
+        // warm-ups remain, and they happen after the initial launch burst.
+        await Task.Delay(TimeSpan.FromMilliseconds(3500));
+        if (_isShuttingDown)
+        {
+            return;
+        }
+
+        CaptureTimingDiagnostics.Mark("startup-warmup-scheduled");
+        _ = Task.Run(() =>
+        {
+            CaptureTimingDiagnostics.Mark("startup-screen-warmup-start");
+            PrewarmScreenCaptureBackend();
+            PrewarmColorPickerSampleBackend();
+            CaptureTimingDiagnostics.Mark("startup-screen-warmup-end");
+        });
+
+        // WinForms HWND creation must remain on the WPF STA. Run it after the
+        // application is idle so it cannot add launch latency.
+        _ = Dispatcher.BeginInvoke(
+            System.Windows.Threading.DispatcherPriority.ContextIdle,
+            new Action(() =>
+            {
+                CaptureTimingDiagnostics.Mark("startup-native-warmup-start");
+                PrewarmCaptureWindows();
+                // Warm the WPF capture visual tree while the dispatcher is
+                // genuinely idle. The first shortcut then reuses parsed
+                // templates, brushes and control metadata instead of doing
+                // that work on the user's first mouse movement.
+                CaptureOverlayWindow.PrewarmForStartup();
+                CaptureTimingDiagnostics.Mark("startup-native-warmup-end");
+            }));
+
+        // PP-OCR model loading is optional and can be several seconds on a
+        // low-power CPU. Start it from the worker as soon as the launch burst
+        // is over; it never runs on the WPF dispatcher.
+        await Task.Delay(TimeSpan.FromMilliseconds(1200));
+        if (!_isShuttingDown)
+        {
+            _ = HighQualityOcrService.PrewarmAsync();
+        }
+
     }
 
     private static void PrewarmCaptureWindows()
@@ -336,48 +506,48 @@ public partial class App : System.Windows.Application, IDisposable
         CaptureOverlayWindow.PrewarmNativeWindows();
     }
 
-    private static void PrewarmInteractiveCaptureWindow()
-    {
-        // Construct the WPF capture surface during startup idle time. The
-        // window is never shown and therefore cannot affect the desktop; the
-        // first hotkey only creates the real session after this one-time XAML
-        // and visual-tree cost has already been paid.
-        try
-        {
-            // Include one real desktop frame so WPF also initializes the
-            // Image/BitmapSource rendering path before a keyboard shortcut.
-            // Otherwise the first live overlay still performs this work at
-            // the exact moment the mouse is expected to remain fluid.
-            using var snapshot = ScreenCaptureService.Capture(
-                VirtualScreen.GetBounds());
-            _ = snapshot.WarmPreview();
-            CaptureOverlayWindow.PrewarmForStartup(snapshot);
-        }
-        catch
-        {
-            // The interactive path keeps its normal fallback if a desktop
-            // environment rejects construction during startup.
-        }
-    }
-
     private static void PrewarmScreenCaptureBackend()
     {
-        // Touch both GDI capture modes before the global hook is installed.
-        // Running this synchronously avoids a first-hotkey race with a
-        // background warm-up task and keeps the input path free of cold-start
-        // graphics initialization.
-        var bounds = VirtualScreen.GetBounds();
+        // Touch the GDI capture paths with a tiny probe. Capturing the whole
+        // virtual desktop here can itself steal DWM time a few seconds after
+        // launch, which is exactly when users expect the pointer to remain
+        // responsive. The real full-frame capture remains on the interaction
+        // path where it is shown asynchronously behind the overlay.
         try
         {
-            using var snapshot = ScreenCaptureService.Capture(bounds);
+            var screen = System.Windows.Forms.Screen.PrimaryScreen;
+            if (screen is null || screen.Bounds.Width < 2 || screen.Bounds.Height < 2)
+            {
+                return;
+            }
+
+            var probe = new ScreenRegion(screen.Bounds.X, screen.Bounds.Y, 2, 2);
+            using var snapshot = ScreenCaptureService.Capture(probe);
             _ = snapshot.WarmPreview();
-            using var layeredSnapshot =
-                ScreenCaptureService.CaptureIncludingLayeredWindows(bounds);
+            using var layeredSnapshot = ScreenCaptureService.CaptureIncludingLayeredWindows(probe);
             _ = layeredSnapshot.WarmPreview();
         }
         catch
         {
             // The normal capture path retains its existing fallback handling.
+        }
+    }
+
+    private static void PrewarmColorPickerSampleBackend()
+    {
+        // Warm the first magnifier BitmapSource/JIT path away from the user's
+        // first pointer move without changing the existing sample algorithm.
+        try
+        {
+            using var bitmap = new System.Drawing.Bitmap(
+                25,
+                25,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            _ = CaptureOverlayWindow.PrewarmColorPickerSample(bitmap);
+        }
+        catch
+        {
+            // The interactive path retains its normal lazy initialization.
         }
     }
 
@@ -415,6 +585,8 @@ public partial class App : System.Windows.Application, IDisposable
             $"capture={_isCaptureInProgress}");
 #endif
         Dispose();
+        StartupDiagnostics.Flush();
+        CaptureTimingDiagnostics.Flush();
         base.OnExit(e);
     }
 
@@ -523,6 +695,7 @@ public partial class App : System.Windows.Application, IDisposable
 
     public void Dispose()
     {
+        _mainWindowFactory = null;
         DisposeFloatingCaptureWindow();
         if (_regionCaptureCoordinator is not null)
         {
@@ -854,14 +1027,72 @@ public partial class App : System.Windows.Application, IDisposable
             !_isShuttingDown &&
             _currentSettings.ShowFloatingCaptureButton)
         {
-            UpdateFloatingCaptureWindow();
-            CaptureTimingDiagnostics.Mark("floating-recreated-after-capture");
+            // Recreating/showing the floating HWND in the same turn as the
+            // capture hotkey adds another z-order transition. Let the cursor
+            // finish its current input burst before restoring the button.
+            _ = Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.ContextIdle,
+                new Action(() =>
+                {
+                    if (!_isShuttingDown &&
+                        !_isCaptureInProgress &&
+                        _floatingCaptureWindow is null &&
+                        _currentSettings.ShowFloatingCaptureButton)
+                    {
+                        UpdateFloatingCaptureWindow();
+                        CaptureTimingDiagnostics.Mark(
+                            "floating-recreated-after-capture");
+                    }
+                }));
         }
         else
         {
             try
             {
-                _floatingCaptureWindow?.SetCaptureInProgress(isInProgress);
+                var floatingWindow = _floatingCaptureWindow;
+                if (isInProgress && floatingWindow is not null)
+                {
+                    // Hiding a WPF window synchronously here causes another
+                    // z-order/DWM transition on the shortcut's first frame.
+                    // The capture overlay is already queued at Background,
+                    // so perform this secondary visibility change afterwards.
+                    _ = Dispatcher.BeginInvoke(
+                        System.Windows.Threading.DispatcherPriority.Background,
+                        new Action(() =>
+                        {
+                            if (!_isShuttingDown &&
+                                _isCaptureInProgress &&
+                                ReferenceEquals(
+                                    _floatingCaptureWindow,
+                                    floatingWindow))
+                            {
+                                floatingWindow.SetCaptureInProgress(true);
+                            }
+                        }));
+                }
+                else
+                {
+                    // Restoring the floating HWND can synchronously perform
+                    // layout and display reconciliation. Keep it out of the
+                    // overlay close/input turn so the pointer returns to the
+                    // foreground app without a final hitch.
+                    if (floatingWindow is not null)
+                    {
+                        _ = Dispatcher.BeginInvoke(
+                            System.Windows.Threading.DispatcherPriority.ContextIdle,
+                            new Action(() =>
+                            {
+                                if (!_isShuttingDown &&
+                                    !_isCaptureInProgress &&
+                                    ReferenceEquals(
+                                        _floatingCaptureWindow,
+                                        floatingWindow))
+                                {
+                                    floatingWindow.SetCaptureInProgress(false);
+                                }
+                            }));
+                    }
+                }
             }
             catch (Exception)
             {
@@ -1049,15 +1280,18 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void OnHotKeyPressed(object? sender, HotKeyPressedEventArgs e)
     {
+        StartupDiagnostics.LogHotKey($"HotKey pressed: action={e.Action}");
         CaptureTimingDiagnostics.BeginInputWindow($"hotkey action={e.Action}");
         CaptureTimingDiagnostics.Mark("hotkey-handler", $"action={e.Action}");
         if (_mainWindow?.IsCapturingHotKey == true)
         {
+            StartupDiagnostics.LogHotKey("HotKey ignored: main window is capturing");
             return;
         }
 
         if (e.Action == HotKeyAction.RegionCapture)
         {
+            StartupDiagnostics.LogHotKey("Queueing RegionCapture");
             QueueHotKeyCapture(e, static (app, snapshot, continuation) =>
                 app.RequestRegionCapture(
                     snapshot,
@@ -1069,10 +1303,12 @@ public partial class App : System.Windows.Application, IDisposable
         }
         else if (e.Action == HotKeyAction.CompleteCapture)
         {
+            StartupDiagnostics.LogHotKey("CompleteCapture action");
             CaptureOverlayWindow.TryCompleteActiveInteractiveSelection();
         }
         else if (e.Action == HotKeyAction.RecognizeText)
         {
+            StartupDiagnostics.LogHotKey("Queueing RecognizeText");
             QueueHotKeyCapture(e, static (app, snapshot, continuation) =>
                 app.RequestTranslationCapture(
                     snapshot,
@@ -1082,6 +1318,7 @@ public partial class App : System.Windows.Application, IDisposable
         }
         else if (e.Action == HotKeyAction.PinImage)
         {
+            StartupDiagnostics.LogHotKey("Queueing PinImage");
             QueueHotKeyCapture(e, static (app, snapshot, continuation) =>
                 app.RequestPinCapture(
                     snapshot,
@@ -1095,7 +1332,39 @@ public partial class App : System.Windows.Application, IDisposable
         }
         else if (e.Action == HotKeyAction.VideoRecording)
         {
-            _ = RequestVideoRecordingAsync(e.CapturePointerContinuation);
+            if (!TryClaimInteractiveHotKey(e.Action))
+            {
+                return;
+            }
+
+            StartupDiagnostics.LogHotKey("Queueing VideoRecording");
+            // Keep the hotkey/message callback input-only. Starting the
+            // coordinator changes capture state and creates WPF/native
+            // windows, both of which can occupy the UI dispatcher for a
+            // frame on slower machines. Hand it off after the shortcut
+            // message has returned so mouse input remains responsive.
+            _ = Dispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.Input,
+                new Func<Task>(async () =>
+                {
+                    try
+                    {
+                        StartupDiagnostics.LogHotKey("VideoRecording delay started");
+                        await Task.Delay(HotKeyInputSettleDelay);
+                        if (_isCaptureInProgress)
+                        {
+                            return;
+                        }
+
+                        StartupDiagnostics.LogHotKey("VideoRecording requesting");
+                        await RequestVideoRecordingAsync(
+                            e.CapturePointerContinuation);
+                    }
+                    finally
+                    {
+                        Interlocked.Exchange(ref _interactiveHotKeyPending, 0);
+                    }
+                }));
         }
         else if (e.Action == HotKeyAction.EndVideoRecording)
         {
@@ -1126,15 +1395,52 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void ShowMainWindow()
     {
+        EnsureMainWindow();
         if (_mainWindow is null)
         {
-            _ = Dispatcher.BeginInvoke(
-                System.Windows.Threading.DispatcherPriority.ApplicationIdle,
-                new Action(ShowMainWindow));
             return;
         }
 
+        if (_pendingUpdateFailureStatus is { } updateStatus)
+        {
+            _pendingUpdateFailureStatus = null;
+            _mainWindow.ShowUpdateFailureRetry(updateStatus, showWindow: false);
+        }
+
+        if (_pendingStartupStatus is { } startupStatus)
+        {
+            _pendingStartupStatus = null;
+            _mainWindow.ShowStatus(startupStatus);
+        }
+
         _mainWindow.ShowFromTray();
+    }
+
+    private void EnsureMainWindow()
+    {
+        if (_mainWindow is not null || _mainWindowFactory is not { } factory)
+        {
+            return;
+        }
+
+        _mainWindowFactory = null;
+        using (CaptureTimingDiagnostics.Begin("main-window-constructor"))
+        {
+            _mainWindow = factory();
+        }
+
+        if (_themeManager is not null)
+        {
+            _mainWindow.ApplySettingsPalette(_themeManager.ResolvedTheme);
+        }
+
+        MainWindow = _mainWindow;
+        _mainWindow.SettingsSaved += OnSettingsSaved;
+        _mainWindow.ExitRequested += OnExitRequested;
+        _mainWindow.UpdateInstallationStarted += OnUpdateInstallationStarted;
+        _mainWindow.TextTranslationRequested += OnTextTranslationRequested;
+        _mainWindow.ConfigureTaskbarVisibility(_currentSettings.ShowTaskbarIcon);
+        CaptureTimingDiagnostics.Mark("main-window-created");
     }
 
     private void RequestPrimaryWindowActivation()
@@ -1423,6 +1729,41 @@ public partial class App : System.Windows.Application, IDisposable
         }
     }
 
+    private void CopyPinnedGroupImageToClipboardAndHistory(CapturedImage image)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        var historyLimit = Math.Max(1, _currentSettings.HistoryLimit);
+        _ = CopyPinnedGroupImageToClipboardAndHistoryAsync(image, historyLimit);
+    }
+
+    private async Task CopyPinnedGroupImageToClipboardAndHistoryAsync(
+        CapturedImage image,
+        int historyLimit)
+    {
+        CaptureHistoryItem? historyItem = null;
+        try
+        {
+            historyItem = _captureHistoryService?.Add(image, historyLimit);
+            try
+            {
+                await ClipboardImageService.SetImageAsync(image.Preview);
+                historyItem?.MarkCopied();
+            }
+            catch (ExternalException)
+            {
+                _mainWindow?.ShowStatus("剪贴板正被其他程序使用，请重试。");
+            }
+        }
+        catch (Exception)
+        {
+            _mainWindow?.ShowStatus("保存钉图编组失败，请重试。");
+        }
+        finally
+        {
+            image.Dispose();
+        }
+    }
+
     private async Task<TranslationSegmentsResult> TranslatePinnedImageAsync(
         OcrRecognitionResult recognition)
     {
@@ -1675,8 +2016,15 @@ public partial class App : System.Windows.Application, IDisposable
         HotKeyPressedEventArgs eventArgs,
         Action<App, CapturedImage?, CapturePointerContinuation?> request)
     {
+        if (!TryClaimInteractiveHotKey(eventArgs.Action))
+        {
+            eventArgs.DetachPreCapturedScreen()?.Dispose();
+            return;
+        }
+
         var snapshot = DetachUsablePreCapturedScreen(eventArgs);
         var continuation = eventArgs.CapturePointerContinuation;
+        StartupDiagnostics.LogHotKey($"QueueHotKeyCapture: action={eventArgs.Action}, hasSnapshot={snapshot is not null}");
         CaptureTimingDiagnostics.Mark(
             "hotkey-queue-detached",
             $"action={eventArgs.Action} hasSnapshot={snapshot is not null}");
@@ -1686,18 +2034,48 @@ public partial class App : System.Windows.Application, IDisposable
         // keyboard message returns; the prepared frame is still reused, so
         // this does not add another desktop capture.
         _ = Dispatcher.BeginInvoke(
-            // The overlay remains invisible until its first frame is ready, so
-            // the hand-off can yield behind the current input/render pass.
-            // Running at Input priority made WPF perform the first full-screen
-            // window layout while the cursor was still completing the shortcut,
-            // which is the remaining one-frame hitch users could see.
-            System.Windows.Threading.DispatcherPriority.Background,
-            new Action(() =>
+            System.Windows.Threading.DispatcherPriority.Input,
+            new Func<Task>(async () =>
             {
-                CaptureTimingDiagnostics.Mark(
-                    "hotkey-dispatcher-callback",
-                    $"action={eventArgs.Action}");
-                request(this, snapshot, continuation);
+                try
+                {
+                    // Keep the hand-off on the input queue, but do not add an
+                    // artificial frame delay. The WPF show path is already
+                    // asynchronous and the initial desktop copy is deferred.
+                    StartupDiagnostics.LogHotKey($"QueueHotKeyCapture delay: action={eventArgs.Action}");
+                    await Task.Delay(HotKeyInputSettleDelay);
+                    if (_isCaptureInProgress)
+                    {
+                        snapshot?.Dispose();
+                        return;
+                    }
+
+                    StartupDiagnostics.LogHotKey($"QueueHotKeyCapture executing: action={eventArgs.Action}");
+                    CaptureTimingDiagnostics.Mark(
+                        "hotkey-dispatcher-callback",
+                        $"action={eventArgs.Action}");
+                    request(this, snapshot, continuation);
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _interactiveHotKeyPending, 0);
+                }
             }));
+    }
+
+    private bool TryClaimInteractiveHotKey(HotKeyAction action)
+    {
+        if (_isCaptureInProgress ||
+            Interlocked.CompareExchange(ref _interactiveHotKeyPending, 1, 0) != 0)
+        {
+            StartupDiagnostics.LogHotKey(
+                $"HotKey ignored: interactive request already pending, action={action}");
+            CaptureTimingDiagnostics.Mark(
+                "hotkey-coalesced",
+                $"action={action} captureInProgress={_isCaptureInProgress}");
+            return false;
+        }
+
+        return true;
     }
 }
