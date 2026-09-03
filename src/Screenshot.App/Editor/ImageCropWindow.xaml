@@ -1,0 +1,159 @@
+<Window x:Class="Screenshot.App.Editor.ImageCropWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="裁剪图片"
+        Width="860"
+        Height="680"
+        MinWidth="620"
+        MinHeight="500"
+        Background="{DynamicResource AppWindowBackgroundBrush}"
+        FontFamily="Microsoft YaHei UI"
+        WindowStartupLocation="CenterOwner">
+    <Window.Resources>
+        <Style x:Key="CropMoveThumb" TargetType="Thumb">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Cursor" Value="SizeAll" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border Background="{TemplateBinding Background}" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="CropResizeThumb" TargetType="Thumb">
+            <Setter Property="Width" Value="11" />
+            <Setter Property="Height" Value="11" />
+            <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource ImageEditorSliderThumbBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="2" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <Grid Margin="18"
+          TextElement.Foreground="{DynamicResource AppControlForegroundBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <DockPanel Margin="0,0,0,12">
+            <TextBlock FontSize="20"
+                       FontWeight="SemiBold"
+                       Foreground="{DynamicResource AppTextPrimaryBrush}"
+                       Text="框选裁剪范围" />
+            <TextBlock x:Name="CropSizeText"
+                       DockPanel.Dock="Right"
+                       VerticalAlignment="Center"
+                       FontFamily="Consolas"
+                       Foreground="{DynamicResource AppTextSecondaryBrush}" />
+        </DockPanel>
+
+        <Border Grid.Row="1"
+                Padding="10"
+                Background="{DynamicResource AppPanelBackgroundBrush}"
+                BorderBrush="{DynamicResource AppBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="8">
+            <Grid x:Name="CropInteractionSurface"
+                  Background="{DynamicResource ImageEditorViewportBackgroundBrush}"
+                  ClipToBounds="True"
+                  Cursor="Cross"
+                  MouseLeftButtonDown="OnSurfaceMouseLeftButtonDown"
+                  MouseLeftButtonUp="OnSurfaceMouseLeftButtonUp"
+                  MouseMove="OnSurfaceMouseMove"
+                  SizeChanged="OnSurfaceSizeChanged">
+                <Image x:Name="CropPreviewImage"
+                       HorizontalAlignment="Stretch"
+                       VerticalAlignment="Stretch"
+                       IsHitTestVisible="False"
+                       RenderOptions.BitmapScalingMode="HighQuality"
+                       Stretch="Uniform" />
+                <Canvas x:Name="CropOverlay"
+                        Background="Transparent">
+                    <Path x:Name="CropMask" Fill="#99000000" IsHitTestVisible="False" />
+                    <Rectangle x:Name="CropSelection"
+                               Fill="Transparent"
+                               IsHitTestVisible="False"
+                               Stroke="{DynamicResource AppAccentBrush}"
+                               StrokeDashArray="5,3"
+                               StrokeThickness="2" />
+                    <Thumb x:Name="CropMoveThumb"
+                           DragDelta="OnCropHandleDragDelta"
+                           Style="{StaticResource CropMoveThumb}"
+                           Tag="Move" />
+                    <Thumb x:Name="CropTopLeftThumb"
+                           Cursor="SizeNWSE"
+                           DragDelta="OnCropHandleDragDelta"
+                           Style="{StaticResource CropResizeThumb}"
+                           Tag="TopLeft" />
+                    <Thumb x:Name="CropTopThumb"
+                           Cursor="SizeNS"
+                           DragDelta="OnCropHandleDragDelta"
+                           Style="{StaticResource CropResizeThumb}"
+                           Tag="Top" />
+                    <Thumb x:Name="CropTopRightThumb"
+                           Cursor="SizeNESW"
+                           DragDelta="OnCropHandleDragDelta"
+                           Style="{StaticResource CropResizeThumb}"
+                           Tag="TopRight" />
+                    <Thumb x:Name="CropRightThumb"
+                           Cursor="SizeWE"
+                           DragDelta="OnCropHandleDragDelta"
+                           Style="{StaticResource CropResizeThumb}"
+                           Tag="Right" />
+                    <Thumb x:Name="CropBottomRightThumb"
+                           Cursor="SizeNWSE"
+                           DragDelta="OnCropHandleDragDelta"
+                           Style="{StaticResource CropResizeThumb}"
+                           Tag="BottomRight" />
+                    <Thumb x:Name="CropBottomThumb"
+                           Cursor="SizeNS"
+                           DragDelta="OnCropHandleDragDelta"
+                           Style="{StaticResource CropResizeThumb}"
+                           Tag="Bottom" />
+                    <Thumb x:Name="CropBottomLeftThumb"
+                           Cursor="SizeNESW"
+                           DragDelta="OnCropHandleDragDelta"
+                           Style="{StaticResource CropResizeThumb}"
+                           Tag="BottomLeft" />
+                    <Thumb x:Name="CropLeftThumb"
+                           Cursor="SizeWE"
+                           DragDelta="OnCropHandleDragDelta"
+                           Style="{StaticResource CropResizeThumb}"
+                           Tag="Left" />
+                </Canvas>
+            </Grid>
+        </Border>
+
+        <DockPanel Grid.Row="2" Margin="0,14,0,0">
+            <TextBlock x:Name="CropPositionText"
+                       VerticalAlignment="Center"
+                       Foreground="{DynamicResource AppTextSecondaryBrush}"
+                       Text="选区 X 0 · Y 0" />
+            <StackPanel DockPanel.Dock="Right"
+                        HorizontalAlignment="Right"
+                        Orientation="Horizontal">
+                <Button Width="76" Height="34" Margin="0,0,8,0" Click="OnResetClick" Content="重置" />
+                <Button Width="76" Height="34" Margin="0,0,8,0" Click="OnCancelClick" Content="取消" />
+                <Button Width="88"
+                        Height="34"
+                        Background="{DynamicResource AppAccentBrush}"
+                        BorderBrush="{DynamicResource AppAccentBrush}"
+                        Click="OnConfirmClick"
+                        Content="应用裁剪"
+                        Foreground="#FFFFFF" />
+            </StackPanel>
+        </DockPanel>
+    </Grid>
+</Window>

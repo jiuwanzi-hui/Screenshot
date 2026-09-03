@@ -1,0 +1,42 @@
+<Window x:Class="Screenshot.App.Capture.PresetCaptureWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        AllowsTransparency="True"
+        Background="Transparent"
+        Cursor="Cross"
+        Focusable="True"
+        ResizeMode="NoResize"
+        ShowActivated="True"
+        ShowInTaskbar="False"
+        Title="预设截图区域"
+        Topmost="True"
+        WindowStartupLocation="Manual"
+        WindowStyle="None"
+        PreviewKeyDown="OnPreviewKeyDown">
+    <Grid x:Name="Root" Background="#01000000"
+          PreviewMouseLeftButtonDown="OnMouseLeftButtonDown"
+          PreviewMouseLeftButtonUp="OnMouseLeftButtonUp"
+          PreviewMouseMove="OnMouseMove"
+          PreviewMouseRightButtonDown="OnMouseRightButtonDown">
+        <Canvas x:Name="OverlayCanvas" IsHitTestVisible="False" />
+        <Border HorizontalAlignment="Center" VerticalAlignment="Top"
+                Margin="0,24,0,0" Padding="14,8"
+                Background="{DynamicResource AppPanelBackgroundBrush}"
+                BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1"
+                CornerRadius="6" IsHitTestVisible="False">
+            <TextBlock Foreground="{DynamicResource AppTextPrimaryBrush}" FontSize="14"
+                       Text="拖选区域；拖动已有区域可移动，右下角可调整大小；选中后按 Delete 删除；右键退出并保存框选" />
+        </Border>
+        <StackPanel Orientation="Horizontal"
+                    HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                    Margin="0,0,0,28">
+            <Button x:Name="DoneButton" Width="110" Height="34"
+                    Margin="0,0,8,0" Content="完成设置"
+                    Click="OnDoneClick" />
+            <Button x:Name="DeleteButton" Width="110" Height="34"
+                    Visibility="Collapsed"
+                    Content="删除当前区域"
+                    Click="OnDeleteClick" />
+        </StackPanel>
+    </Grid>
+</Window>

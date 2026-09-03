@@ -1,0 +1,275 @@
+<Window x:Class="Screenshot.App.Pin.PinnedImageGroupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:editor="clr-namespace:Screenshot.App.Editor"
+        Title="钉图编组"
+        Width="900"
+        Height="560"
+        MinWidth="520"
+        MinHeight="320"
+        Background="{DynamicResource AppPanelBackgroundBrush}"
+        FontFamily="Microsoft YaHei UI"
+        ResizeMode="CanResizeWithGrip"
+        ShowInTaskbar="False"
+        Topmost="True"
+        WindowStartupLocation="Manual"
+        WindowStyle="None"
+        PreviewMouseMove="OnWindowPreviewMouseMove"
+        PreviewMouseLeftButtonUp="OnWindowPreviewMouseLeftButtonUp"
+        LostMouseCapture="OnWindowLostMouseCapture">
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="../Themes/ThemedContextMenus.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        <DrawingBrush x:Key="PinnedCheckerboardBrush"
+                      TileMode="Tile"
+                      Viewport="0,0,12,12"
+                      ViewportUnits="Absolute"
+                      Viewbox="0,0,12,12"
+                      ViewboxUnits="Absolute">
+            <DrawingBrush.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="#FFFFFFFF" Geometry="M0,0 H12 V12 H0 Z" />
+                    <GeometryDrawing Brush="#FF9C9C9C" Geometry="M0,0 H6 V6 H0 Z" />
+                    <GeometryDrawing Brush="#FF9C9C9C" Geometry="M6,6 H12 V12 H6 Z" />
+                </DrawingGroup>
+            </DrawingBrush.Drawing>
+        </DrawingBrush>
+        <Style x:Key="GroupCommandButton" TargetType="Button">
+            <Setter Property="Height" Value="27" />
+            <Setter Property="MinWidth" Value="34" />
+            <Setter Property="Padding" Value="7,1" />
+            <Setter Property="Margin" Value="0,0,5,0" />
+            <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppSubtleBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder"
+                                Padding="{TemplateBinding Padding}"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Opacity" Value="0.68" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="GroupIconButton" BasedOn="{StaticResource GroupCommandButton}" TargetType="Button">
+            <Setter Property="MinWidth" Value="28" />
+            <Setter Property="Width" Value="28" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style x:Key="GroupToolToggle" TargetType="RadioButton">
+            <Setter Property="Width" Value="64" />
+            <Setter Property="Height" Value="29" />
+            <Setter Property="Margin" Value="3" />
+            <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="ToolBorder"
+                                Background="{DynamicResource AppInputBackgroundBrush}"
+                                BorderBrush="{DynamicResource AppSubtleBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="5">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ToolBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="ToolBorder" Property="Background" Value="{DynamicResource AppAccentMutedBrush}" />
+                                <Setter TargetName="ToolBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="GroupOpacitySlider" TargetType="Slider">
+            <Setter Property="Width" Value="64" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid VerticalAlignment="Center">
+                            <Border Height="4" Background="{DynamicResource ImageEditorSliderTrackBrush}" CornerRadius="2" />
+                            <Track x:Name="PART_Track" Height="14" VerticalAlignment="Center">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}" IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton">
+                                                <Border Height="4" VerticalAlignment="Center" Background="{DynamicResource AppAccentBrush}" CornerRadius="2" />
+                                            </ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}" IsTabStop="False">
+                                        <RepeatButton.Template>
+                                            <ControlTemplate TargetType="RepeatButton"><Border Background="Transparent" /></ControlTemplate>
+                                        </RepeatButton.Template>
+                                    </RepeatButton>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="12" Height="12" Background="{DynamicResource AppAccentBrush}" Cursor="Hand">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb"><Ellipse Fill="{TemplateBinding Background}" /></ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="GroupCropHandle" TargetType="Thumb">
+            <Setter Property="Width" Value="12" />
+            <Setter Property="Height" Value="12" />
+            <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{DynamicResource ImageEditorSliderThumbBorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="3" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <Border x:Name="GroupShell" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
+        <Border.ContextMenu>
+            <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
+                <MenuItem Header="打开设置"
+                          Click="OnOpenSettingsClick"
+                          Style="{StaticResource ThemedMenuItemStyle}" />
+                <MenuItem Header="重启后恢复编组内钉图"
+                          Click="OnRestoreClick"
+                          Style="{StaticResource ThemedMenuItemStyle}" />
+                <MenuItem Header="解除钉图编组"
+                          Click="OnUngroupClick"
+                          Style="{StaticResource ThemedMenuItemStyle}" />
+                <MenuItem Header="最小化此编组"
+                          Click="OnMinimizeClick"
+                          Style="{StaticResource ThemedMenuItemStyle}" />
+                <MenuItem Header="最小化全部钉图"
+                          Click="OnHideAllClick"
+                          Style="{StaticResource ThemedMenuItemStyle}" />
+                <MenuItem Header="关闭编组内全部钉图"
+                          Click="OnCloseClick"
+                          Style="{StaticResource ThemedMenuItemStyle}" />
+            </ContextMenu>
+        </Border.ContextMenu>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition x:Name="GroupHeaderRow" Height="36" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Border x:Name="GroupHeader" Grid.Row="0"
+                    Background="{DynamicResource AppSidebarBackgroundBrush}"
+                    BorderBrush="{DynamicResource AppSeparatorBrush}"
+                    BorderThickness="0,0,0,1"
+                    Cursor="SizeAll"
+                    PreviewMouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+                <DockPanel LastChildFill="True">
+                    <StackPanel DockPanel.Dock="Right" Margin="0,0,5,0" VerticalAlignment="Center" Orientation="Horizontal">
+                        <Button x:Name="GroupCropButton" Click="OnCropClick" Style="{StaticResource GroupIconButton}" ToolTip="在当前页面裁剪完整组合图">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE7A8;" />
+                        </Button>
+                        <Button x:Name="GroupEditButton" Click="OnEditClick" Style="{StaticResource GroupIconButton}" ToolTip="在当前页面标注编辑完整组合图">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE70F;" />
+                        </Button>
+                        <Button Click="OnCopyClick" Content="复制组合" Style="{StaticResource GroupCommandButton}" />
+                        <Button Click="OnUngroupClick" Content="解除编组" Style="{StaticResource GroupCommandButton}" />
+                        <Slider x:Name="GroupOpacitySlider" Minimum="0.2" Maximum="1" SmallChange="0.1"
+                                Style="{StaticResource GroupOpacitySlider}" Value="1"
+                                ValueChanged="OnOpacityValueChanged" ToolTip="透明度" />
+                        <Button Margin="5,0,0,0" Click="OnCloseClick" Style="{StaticResource GroupIconButton}" ToolTip="关闭编组内全部钉图">
+                            <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="12" Text="&#xE711;" />
+                        </Button>
+                    </StackPanel>
+                    <StackPanel Margin="10,0,8,0"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal">
+                        <TextBlock x:Name="HeaderStatusText"
+                                   FontSize="12"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   TextTrimming="CharacterEllipsis"
+                                   Text="钉图编组" />
+                        <TextBlock Margin="7,0,0,0"
+                                   FontSize="11"
+                                   Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                   Text="右键更多 | 滚轮缩放 | 中键按住拖动画面" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <Grid x:Name="GroupCanvas" Grid.Row="1"
+                  PreviewMouseLeftButtonDown="OnGroupCanvasMouseLeftButtonDown"
+                  Background="{DynamicResource AppPanelBackgroundBrush}"
+                  PreviewMouseWheel="OnCanvasMouseWheel"
+                  PreviewMouseMove="OnGroupCanvasMouseMove"
+                  PreviewMouseLeftButtonUp="OnGroupCanvasMouseLeftButtonUp"
+                  LostMouseCapture="OnGroupCanvasLostMouseCapture"
+                  SizeChanged="OnGroupCanvasSizeChanged">
+                <Image x:Name="CompositeImage" IsHitTestVisible="False"
+                       RenderOptions.BitmapScalingMode="HighQuality" Stretch="Uniform" />
+
+                    <ScrollViewer x:Name="InlineEditorViewport" Visibility="Collapsed"
+                              Panel.ZIndex="10"
+                              Background="{DynamicResource AppPanelBackgroundBrush}"
+                              HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                              HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                              PreviewMouseDown="OnInlineEditorPreviewMouseDown"
+                              PreviewMouseMove="OnInlineEditorPreviewMouseMove"
+                              PreviewMouseUp="OnInlineEditorPreviewMouseUp"
+                              LostMouseCapture="OnInlineEditorLostMouseCapture">
+                    <Border x:Name="InlineEditorFrame" Background="{StaticResource PinnedCheckerboardBrush}" ClipToBounds="True">
+                        <editor:ImageEditorCanvas x:Name="InlineEditorCanvas" HorizontalAlignment="Left" VerticalAlignment="Top" />
+                    </Border>
+                </ScrollViewer>
+
+                <Canvas x:Name="GroupTextOverlay"
+                        Panel.ZIndex="20"
+                        Background="{x:Null}" />
+                <Canvas x:Name="CropOverlay" Panel.ZIndex="30" Visibility="Collapsed" Background="Transparent" Cursor="Cross"
+                        MouseLeftButtonDown="OnCropMouseLeftButtonDown"
+                        MouseLeftButtonUp="OnCropMouseLeftButtonUp"
+                        MouseMove="OnCropMouseMove">
+                    <Path x:Name="CropMask" Fill="#99000000" IsHitTestVisible="False" />
+                    <Rectangle x:Name="CropSelection" Fill="Transparent" Stroke="{DynamicResource AppAccentBrush}"
+                               StrokeDashArray="5,3" StrokeThickness="2" IsHitTestVisible="False" />
+                    <Thumb x:Name="CropMoveThumb" Tag="Move" Opacity="0" Cursor="SizeAll" DragDelta="OnCropHandleDragDelta" />
+                    <Thumb x:Name="CropTopLeftThumb" Tag="TopLeft" Cursor="SizeNWSE" Style="{StaticResource GroupCropHandle}" DragDelta="OnCropHandleDragDelta" />
+                    <Thumb x:Name="CropTopRightThumb" Tag="TopRight" Cursor="SizeNESW" Style="{StaticResource GroupCropHandle}" DragDelta="OnCropHandleDragDelta" />
+                    <Thumb x:Name="CropBottomLeftThumb" Tag="BottomLeft" Cursor="SizeNESW" Style="{StaticResource GroupCropHandle}" DragDelta="OnCropHandleDragDelta" />
+                    <Thumb x:Name="CropBottomRightThumb" Tag="BottomRight" Cursor="SizeNWSE" Style="{StaticResource GroupCropHandle}" DragDelta="OnCropHandleDragDelta" />
+                </Canvas>
+
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

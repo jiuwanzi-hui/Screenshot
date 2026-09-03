@@ -1,0 +1,164 @@
+<Window x:Class="Screenshot.App.Text.RecognitionResultPopupWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="识别结果"
+        Width="430"
+        Height="330"
+        MinWidth="300"
+        MinHeight="220"
+        AllowsTransparency="False"
+        Background="{DynamicResource AppPanelBackgroundBrush}"
+        FontFamily="Microsoft YaHei UI"
+        ResizeMode="CanResizeWithGrip"
+        ShowActivated="True"
+        ShowInTaskbar="True"
+        Topmost="False"
+        WindowStartupLocation="Manual"
+        WindowStyle="None">
+    <Window.Resources>
+        <Geometry x:Key="PinIconGeometry">M 6,2 H 12 L 11.5,6 L 14,8.5 L 10,9.5 L 9,16 L 8,9.5 L 4,8.5 L 6.5,6 Z</Geometry>
+        <Style x:Key="PopupIconToggle" TargetType="ToggleButton">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Background" Value="{DynamicResource AppPanelBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="ToggleBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ToggleBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="ToggleBorder" Property="Background" Value="{DynamicResource AppAccentBrush}" />
+                                <Setter TargetName="ToggleBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ToggleBorder" Property="Opacity" Value="0.78" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="PopupResizeThumb" TargetType="Thumb">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Thumb">
+                        <Border Background="Transparent" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+    <Grid>
+        <Border x:Name="Shell"
+                Margin="8"
+                Padding="14"
+                Background="{DynamicResource AppPanelBackgroundBrush}"
+                BorderBrush="{DynamicResource AppBorderBrush}"
+                BorderThickness="1"
+                CornerRadius="10">
+            <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Grid Background="Transparent"
+                  Cursor="SizeAll"
+                  MouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal">
+                    <Ellipse Width="8" Height="8" Margin="0,0,8,0" Fill="{DynamicResource AppAccentBrush}" />
+                    <TextBlock x:Name="TitleText" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource AppTextPrimaryBrush}" />
+                </StackPanel>
+                <ToggleButton x:Name="PinButton" Grid.Column="1" Width="30" Height="28" Margin="4,0,4,0" Click="OnPinClick" Style="{StaticResource PopupIconToggle}" ToolTip="置顶窗口">
+                    <Path Data="{StaticResource PinIconGeometry}"
+                          Width="14"
+                          Height="16"
+                          Fill="{DynamicResource AppTextPrimaryBrush}"
+                          Stretch="Uniform" />
+                </ToggleButton>
+                <Button Grid.Column="2" Width="30" Height="28" Padding="0" Content="×" Click="OnCloseClick" Cursor="Hand" ToolTip="关闭" />
+            </Grid>
+            <TextBox x:Name="ResultTextBox"
+                     Grid.Row="1"
+                     Margin="0,12,0,12"
+                     Padding="10"
+                     AcceptsReturn="True"
+                     Background="{DynamicResource AppInputBackgroundBrush}"
+                     BorderBrush="{DynamicResource AppSubtleBorderBrush}"
+                     Foreground="{DynamicResource AppTextPrimaryBrush}"
+                     FontSize="14"
+                     IsReadOnly="True"
+                     TextWrapping="Wrap"
+                     VerticalScrollBarVisibility="Auto" />
+            <DockPanel Grid.Row="2" LastChildFill="False">
+                <TextBlock x:Name="SourceText" DockPanel.Dock="Left" MaxWidth="250" FontSize="11" Foreground="{DynamicResource AppTextSecondaryBrush}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                <Button DockPanel.Dock="Right" MinWidth="86" Padding="12,6" Content="复制全部" Click="OnCopyClick" />
+            </DockPanel>
+            </Grid>
+        </Border>
+        <Thumb Width="18"
+               Height="18"
+               Margin="7"
+               HorizontalAlignment="Left"
+               VerticalAlignment="Top"
+               Panel.ZIndex="2"
+               Cursor="SizeNWSE"
+               DragDelta="OnResizeThumbDragDelta"
+               Style="{StaticResource PopupResizeThumb}"
+               Tag="TopLeft"
+               ToolTip="调整弹窗大小" />
+        <Thumb Width="18"
+               Height="18"
+               Margin="7"
+               HorizontalAlignment="Right"
+               VerticalAlignment="Top"
+               Panel.ZIndex="2"
+               Cursor="SizeNESW"
+               DragDelta="OnResizeThumbDragDelta"
+               Style="{StaticResource PopupResizeThumb}"
+               Tag="TopRight"
+               ToolTip="调整弹窗大小" />
+        <Thumb Width="18"
+               Height="18"
+               Margin="7"
+               HorizontalAlignment="Left"
+               VerticalAlignment="Bottom"
+               Panel.ZIndex="2"
+               Cursor="SizeNESW"
+               DragDelta="OnResizeThumbDragDelta"
+               Style="{StaticResource PopupResizeThumb}"
+               Tag="BottomLeft"
+               ToolTip="调整弹窗大小" />
+        <Thumb Width="18"
+               Height="18"
+               Margin="7"
+               HorizontalAlignment="Right"
+               VerticalAlignment="Bottom"
+               Panel.ZIndex="2"
+               Cursor="SizeNWSE"
+               DragDelta="OnResizeThumbDragDelta"
+               Style="{StaticResource PopupResizeThumb}"
+               Tag="BottomRight"
+               ToolTip="调整弹窗大小" />
+    </Grid>
+</Window>
