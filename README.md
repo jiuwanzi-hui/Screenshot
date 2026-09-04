@@ -46,7 +46,7 @@ SnapCut（简截）是一款以 Windows 10/11 正式版为主的轻量截图工�
 
 免安装版解压后直接运行 `SnapCut.exe`，不需要安装或预先配置 .NET 或 Visual C++ 运行库。安装版和免安装版的数据都保存在各自程序目录的 `ScreenshotData` 中；移动或卸载程序前请按需备份该目录。2.8.3 延续现有数据布局，并会在发现 1.0.0 的 `%LocalAppData%\Screenshot` 旧数据时尝试迁移到新位置，迁移成功后删除旧目录。
 
-3.8.1 优化钉图画面缩放：缩放期间采用轻量采样并暂时隐藏密集棋盘底色，连续滚轮操作结束后自动恢复高清显示，减少卡顿和底纹闪烁；普通钉图、钉图编组及编辑模式保持缩放中心和编辑流程一致。
+3.8.1 优化钉图画面缩放：缩放期间采用轻量采样并暂时隐藏密集棋盘底色，连续滚轮操作结束后自动恢复高清显示，减少卡顿和底纹闪烁；普通钉图、钉图编组及编辑模式保持缩放中心和编辑流程一致；更新交流联系页的交流群二维码资源。
 3.8.0 进一步优化快捷键进入截图、钉图和录屏的首帧输入路径：覆盖层先响应鼠标，桌面帧获取移出输入关键路径，减少低性能设备上的鼠标瞬时停顿和取色放大镜延迟；统一拖动、缩放和取色跟随的高频刷新调度，改善选区与钉图的连续移动。PP-OCRv6 采用受控线程预算、较小输入尺寸和按需预热，缩短本地识别等待；正式 Release 不启用输入追踪调试日志。
 3.7.9 修复高回报率鼠标下快捷键进入截图时的首帧卡顿：截图窗口先以非激活方式显示，桌面帧在后台获取并在首帧完成后接管鼠标，避免光标切换和窗口合成阻塞输入；同时移除进入时默认十字光标和首帧大图同步绑定。正式 Release 不启用输入时序调试日志。
 3.7.8 在 3.7.5 的截图、钉图和录屏框选稳定性修复基础上，补充预设截图区域管理：支持最多五个区域、悬浮编号面板、区域高亮、直接截图、右键编辑、删除和一键清空，并改善透明预览、主题适配及面板外关闭行为。快捷键首次进入截图的预热流程、原生选区与遮罩同步更新、标注编辑和复制行为继续修正；正式 Release 不启用输入时序调试日志。
@@ -193,7 +193,7 @@ Download the latest self-contained x64 build. Release assets use `SnapCut-Setup-
 
 Extract the portable archive and run `SnapCut.exe`; neither installation nor a preinstalled .NET or Visual C++ runtime is required. Both packages store their data in `ScreenshotData` under their respective application directories, so back up that directory before moving or uninstalling the application. Version 2.8.3 retains the existing data layout and attempts to migrate legacy 1.0.0 `%LocalAppData%\Screenshot` data when found, removing the old directory after a successful migration.
 
-Version 3.8.1 improves pinned-image zoom: lightweight sampling and a temporary solid background reduce stutter and dense checkerboard flicker while zooming, then restore high-quality rendering after the wheel interaction settles. The same behavior covers single pins, grouped pins, and inline editing.
+Version 3.8.1 improves pinned-image zoom: lightweight sampling and a temporary solid background reduce stutter and dense checkerboard flicker while zooming, then restore high-quality rendering after the wheel interaction settles. The same behavior covers single pins, grouped pins, and inline editing. The community QR resource on the Contact page is also refreshed.
 
 Version 3.8.0 further optimizes the first-input path for screenshot, pin, and recording shortcuts: the overlay begins receiving pointer input before desktop capture completes, reducing pointer stalls and magnifier latency on slower systems. High-frequency scheduling is shared by selection, zoom, pin dragging, and color picking. PP-OCRv6 uses bounded device-aware threads, smaller inputs, and on-demand warm-up to reduce local recognition latency; Release builds keep input-trace diagnostics disabled.
 
