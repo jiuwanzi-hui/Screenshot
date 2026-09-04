@@ -105,6 +105,8 @@ public partial class VideoRecordingControlWindow : Window
     private ArrowToolMode _recordingArrowToolMode = ArrowToolMode.Straight;
     private ShapeToolMode _recordingShapeToolMode = ShapeToolMode.Rectangle;
     private int[] _customColorPalette = [];
+    private IReadOnlyDictionary<CaptureToolbarFeature, string> _toolbarFeatureShortcuts =
+        new Dictionary<CaptureToolbarFeature, string>();
 
     private VideoRecordingControlWindow(
         RegionVideoRecorder recorder,
@@ -130,6 +132,7 @@ public partial class VideoRecordingControlWindow : Window
         Action<int[]>? customColorPaletteChanged,
         string endRecordingHotKey,
         double toolbarScalePercent,
+        IReadOnlyDictionary<CaptureToolbarFeature, string>? toolbarFeatureShortcuts,
         RecordingRegionFrameWindow? frameWindow)
     {
         ArgumentNullException.ThrowIfNull(recorder);
@@ -143,6 +146,7 @@ public partial class VideoRecordingControlWindow : Window
             ? AppSettings.DefaultEndVideoRecordingHotKey
             : endRecordingHotKey;
         _toolbarScale = NormalizeToolbarScale(toolbarScalePercent);
+        _toolbarFeatureShortcuts = toolbarFeatureShortcuts ?? new Dictionary<CaptureToolbarFeature, string>();
         _recordingShapeToolMode = Enum.IsDefined(annotationPreferences.ShapeToolMode)
             ? annotationPreferences.ShapeToolMode
             : ShapeToolMode.Rectangle;
@@ -177,6 +181,10 @@ public partial class VideoRecordingControlWindow : Window
         _annotationOverlay = annotationOverlay;
         _annotationOverlay.AnnotationSelectionChanged +=
             OnAnnotationSelectionChanged;
+        _annotationOverlay.AddHandler(
+            Keyboard.PreviewKeyDownEvent,
+            new System.Windows.Input.KeyEventHandler(OnAnnotationOverlayPreviewKeyDown),
+            handledEventsToo: true);
         _frameWindow = frameWindow ?? new RecordingRegionFrameWindow(_recorder.Region);
         _elapsedTimer = new DispatcherTimer
         {
@@ -250,7 +258,8 @@ public partial class VideoRecordingControlWindow : Window
         int[]? customColorPalette = null,
         Action<int[]>? customColorPaletteChanged = null,
         string endRecordingHotKey = AppSettings.DefaultEndVideoRecordingHotKey,
-        double toolbarScalePercent = 100)
+        double toolbarScalePercent = 100,
+        IReadOnlyDictionary<CaptureToolbarFeature, string>? toolbarFeatureShortcuts = null)
     {
         // ScreenRecorderLib may initialize Desktop Duplication, hardware
         // encoders, and audio devices synchronously. Keep that native work
@@ -309,6 +318,7 @@ public partial class VideoRecordingControlWindow : Window
                 customColorPaletteChanged,
                 endRecordingHotKey,
                 toolbarScalePercent,
+                toolbarFeatureShortcuts,
                 frameWindow);
             frameWindow = null!;
         }
@@ -2123,6 +2133,9 @@ public partial class VideoRecordingControlWindow : Window
         {
             _annotationOverlay.AnnotationSelectionChanged -=
                 OnAnnotationSelectionChanged;
+            _annotationOverlay.RemoveHandler(
+                Keyboard.PreviewKeyDownEvent,
+                new System.Windows.Input.KeyEventHandler(OnAnnotationOverlayPreviewKeyDown));
         }
         _annotationOverlay?.Close();
         _annotationOverlay = null;
@@ -2139,6 +2152,13 @@ public partial class VideoRecordingControlWindow : Window
             width,
             AnnotationStrokeWidthSlider.Minimum,
             AnnotationStrokeWidthSlider.Maximum);
+    }
+
+    private void OnAnnotationOverlayPreviewKeyDown(
+        object sender,
+        System.Windows.Input.KeyEventArgs e)
+    {
+        OnFeatureShortcutPreviewKeyDown(sender, e);
     }
 
     private void OnAnnotationToolClick(object sender, RoutedEventArgs e)
@@ -2512,6 +2532,48 @@ public partial class VideoRecordingControlWindow : Window
         else
         {
             _ = StopAndCloseAsync();
+        }
+    }
+
+    private void OnFeatureShortcutPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.None ||
+            Keyboard.FocusedElement is System.Windows.Controls.TextBox ||
+            _annotationOverlay?.DrawingCanvas.IsTextInputActive == true)
+        {
+            return;
+        }
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var shortcut = key >= Key.D0 && key <= Key.D9
+                ? key.ToString()[1..]
+                : key >= Key.NumPad0 && key <= Key.NumPad9
+                    ? ((int)key - (int)Key.NumPad0).ToString(CultureInfo.InvariantCulture)
+                    : string.Empty;
+        if (string.IsNullOrEmpty(shortcut)) return;
+        var match = _toolbarFeatureShortcuts.FirstOrDefault(pair =>
+            string.Equals(pair.Value, shortcut, StringComparison.OrdinalIgnoreCase));
+        if (match.Equals(default(KeyValuePair<CaptureToolbarFeature, string>))) return;
+        var tool = match.Key switch
+        {
+            CaptureToolbarFeature.Shape => _recordingShapeToolMode == ShapeToolMode.Ellipse
+                ? RecordingAnnotationTool.Ellipse
+                : RecordingAnnotationTool.Rectangle,
+            CaptureToolbarFeature.Arrow => _recordingArrowToolMode == ArrowToolMode.Curved
+                ? RecordingAnnotationTool.CurvedArrow
+                : RecordingAnnotationTool.Arrow,
+            CaptureToolbarFeature.Emoji => RecordingAnnotationTool.Emoji,
+            CaptureToolbarFeature.Number => RecordingAnnotationTool.Number,
+            CaptureToolbarFeature.Brush => RecordingAnnotationTool.Brush,
+            CaptureToolbarFeature.Text => RecordingAnnotationTool.Text,
+            CaptureToolbarFeature.Mosaic => RecordingAnnotationTool.Mosaic,
+            _ => RecordingAnnotationTool.Pointer,
+        };
+        if (match.Key is CaptureToolbarFeature.Shape or CaptureToolbarFeature.Arrow or
+            CaptureToolbarFeature.Emoji or CaptureToolbarFeature.Number or
+            CaptureToolbarFeature.Brush or CaptureToolbarFeature.Text or CaptureToolbarFeature.Mosaic)
+        {
+            SelectAnnotationTool(tool);
+            e.Handled = true;
         }
     }
 

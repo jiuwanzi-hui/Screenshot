@@ -160,7 +160,10 @@
         </ResourceDictionary>
     </Window.Resources>
 
-    <Border x:Name="GroupShell" BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
+    <Border x:Name="GroupShell"
+            ContextMenuOpening="OnGroupShellContextMenuOpening"
+            BorderBrush="{DynamicResource AppBorderBrush}"
+            BorderThickness="1">
         <Border.ContextMenu>
             <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
                 <MenuItem Header="打开设置"

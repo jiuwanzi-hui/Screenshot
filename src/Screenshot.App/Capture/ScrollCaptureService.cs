@@ -2936,8 +2936,7 @@ public static class ScrollCaptureService
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return ForegroundWindowCaptureService.CaptureRegion(
-                target.CaptureRegion);
+            return ForegroundWindowCaptureService.CaptureScrollTargetRegion(target);
         }
         finally
         {
@@ -4458,8 +4457,7 @@ public static class ScrollCaptureService
 
             await Task.Delay(options.FrameDelayMilliseconds, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            return ForegroundWindowCaptureService.CaptureRegion(
-                target.CaptureRegion);
+            return ForegroundWindowCaptureService.CaptureScrollTargetRegion(target);
         }
         finally
         {

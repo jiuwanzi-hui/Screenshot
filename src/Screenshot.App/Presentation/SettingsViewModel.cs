@@ -4,10 +4,11 @@ using System.Globalization;
 using System.Runtime.CompilerServices;
 using Screenshot.App.Core;
 using Screenshot.App.Text;
+using Screenshot.App.Capture;
 
 namespace Screenshot.App.Presentation;
 
-public sealed record SettingOption(string Value, string Label);
+public sealed record SettingOption(string Value, string Label, string Description = "");
 
 public sealed class AiTranslationProfileItem : INotifyPropertyChanged
 {
@@ -155,6 +156,7 @@ public enum CaptureToolbarFeatureGroup
 public sealed class CaptureToolbarFeatureItem : INotifyPropertyChanged
 {
     private bool _isVisible;
+    private string _shortcut = string.Empty;
 
     public CaptureToolbarFeatureItem(
         CaptureToolbarFeature feature,
@@ -171,6 +173,27 @@ public sealed class CaptureToolbarFeatureItem : INotifyPropertyChanged
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    public string Shortcut
+    {
+        get => _shortcut;
+        set
+        {
+            var normalized = value?.Trim() ?? string.Empty;
+            normalized = normalized.Length == 1 && IsAsciiDigit(normalized[0])
+                ? normalized.ToUpperInvariant()
+                : string.Empty;
+            if (_shortcut == normalized) return;
+            _shortcut = normalized;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Shortcut)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(HasShortcut)));
+        }
+    }
+
+    /// <summary>Whether this feature has a configured single-key shortcut.</summary>
+    public bool HasShortcut => !string.IsNullOrWhiteSpace(Shortcut);
+
+    private static bool IsAsciiDigit(char value) => value is >= '0' and <= '9';
 
     public CaptureToolbarFeature Feature { get; }
 
@@ -287,6 +310,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private PngSaveLocationMode _pngSaveLocationMode;
     private bool _autoSaveOnComplete;
     private int _screenshotScalePercent;
+    private CaptureAspectRatio _captureAspectRatio;
     private bool _recordSystemAudio;
     private bool _recordMicrophone;
     private string? _microphoneDeviceId;
@@ -360,6 +384,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _pngSaveLocationMode = settings.PngSaveLocationMode;
         _autoSaveOnComplete = settings.AutoSaveOnComplete;
         _screenshotScalePercent = settings.ScreenshotScalePercent;
+        _captureAspectRatio = settings.CaptureAspectRatio;
         _recordSystemAudio = settings.RecordSystemAudio;
         _recordMicrophone = settings.RecordMicrophone;
         _microphoneDeviceId = settings.MicrophoneDeviceId;
@@ -386,7 +411,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _toolbarScalePercent = settings.ToolbarScalePercent;
         SetCaptureToolbarFeatures(
             settings.VisibleCaptureToolbarFeatures,
-            settings.CaptureToolbarFeatureOrder);
+            settings.CaptureToolbarFeatureOrder,
+            settings.CaptureToolbarFeatureShortcuts);
         _customStrokeColor = settings.CustomStrokeColor;
         _customColorPalette = settings.CustomColorPalette.ToArray();
         _annotationToolSettings = settings.AnnotationToolSettings.ToArray();
@@ -560,6 +586,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public ObservableCollection<CaptureToolbarFeatureItem>
         CaptureToolbarFeatureItems { get; } = [];
+
+    // Shortcut assignment is intentionally limited to annotation tools. The
+    // action/history buttons below the toolbar remain configurable internally
+    // but are not exposed as individual shortcut fields in this page.
+    public IEnumerable<CaptureToolbarFeatureItem> CaptureToolbarAnnotationFeatureItems =>
+        CaptureToolbarFeatureItems.Where(item => item.Group == CaptureToolbarFeatureGroup.Annotation);
 
     public CaptureToolbarRowCount CaptureToolbarRows
     {
@@ -865,6 +897,38 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _screenshotScalePercent, Math.Clamp(value, 25, 200));
     }
 
+    public CaptureAspectRatio CaptureAspectRatio
+    {
+        get => _captureAspectRatio;
+        set => SetProperty(ref _captureAspectRatio, value);
+    }
+
+    public IReadOnlyList<SettingOption> CaptureAspectRatioOptions { get; } =
+    [
+        new(nameof(CaptureAspectRatio.Free), "自由比例"),
+        new(nameof(CaptureAspectRatio.Ratio16x9), "16:9（横屏）"),
+        new(nameof(CaptureAspectRatio.Ratio16x10), "16:10（横屏）"),
+        new(nameof(CaptureAspectRatio.Ratio3x2), "3:2（横屏）"),
+        new(nameof(CaptureAspectRatio.Ratio4x3), "4:3（横屏）"),
+        new(nameof(CaptureAspectRatio.Ratio5x4), "5:4（横屏）"),
+        new(nameof(CaptureAspectRatio.Ratio1x1), "1:1（正方形）"),
+        new(nameof(CaptureAspectRatio.Ratio9x16), "9:16（手机竖屏）"),
+        new(nameof(CaptureAspectRatio.Ratio10x16), "10:16（竖屏）"),
+        new(nameof(CaptureAspectRatio.Ratio2x3), "2:3（竖屏）"),
+        new(nameof(CaptureAspectRatio.Ratio19x5x9), "19.5:9（手机）"),
+        new(nameof(CaptureAspectRatio.Ratio20x9), "20:9（手机）"),
+    ];
+
+    public IReadOnlyList<SettingOption> ThemeOptions { get; } =
+    [
+        new(nameof(AppTheme.AuroraMist), "极光晨雾", "浅色 · 雾白与靛蓝"),
+        new(nameof(AppTheme.CoralSky), "珊瑚晴空", "浅色 · 珊瑚与天青"),
+        new(nameof(AppTheme.GinkgoPaper), "银杏纸白", "浅色 · 纸白与银杏"),
+        new(nameof(AppTheme.ForestNight), "松林夜雨", "深色 · 石墨与松绿"),
+        new(nameof(AppTheme.ObsidianGold), "熔金曜石", "深色 · 曜石与暖金"),
+        new(nameof(AppTheme.NeonDeep), "霓虹深海", "深色 · 深海与玫红"),
+    ];
+
     public AnnotationToolSetting[] AnnotationToolSettings
     {
         get => _annotationToolSettings;
@@ -1011,6 +1075,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             PngSaveLocationMode = PngSaveLocationMode,
             AutoSaveOnComplete = AutoSaveOnComplete,
             ScreenshotScalePercent = ScreenshotScalePercent,
+            CaptureAspectRatio = CaptureAspectRatio,
             RecordSystemAudio = RecordSystemAudio,
             RecordMicrophone = RecordMicrophone,
             MicrophoneDeviceId = MicrophoneDeviceId,
@@ -1040,6 +1105,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             CaptureToolbarFeatureOrder = CaptureToolbarFeatureItems
                 .Select(item => item.Feature)
                 .ToArray(),
+            CaptureToolbarFeatureShortcuts = CaptureToolbarFeatureItems
+                .Where(item => item.Shortcut.Length == 1)
+                .ToDictionary(item => item.Feature, item => item.Shortcut),
             CaptureToolbarRows = CaptureToolbarRows,
             ToolbarScalePercent = ToolbarScalePercent,
             CustomStrokeColor = CustomStrokeColor,
@@ -1104,6 +1172,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         PngSaveLocationMode = settings.PngSaveLocationMode;
         AutoSaveOnComplete = settings.AutoSaveOnComplete;
         ScreenshotScalePercent = settings.ScreenshotScalePercent;
+        CaptureAspectRatio = settings.CaptureAspectRatio;
         RecordSystemAudio = settings.RecordSystemAudio;
         RecordMicrophone = settings.RecordMicrophone;
         MicrophoneDeviceId = settings.MicrophoneDeviceId;
@@ -1130,7 +1199,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         ToolbarScalePercent = settings.ToolbarScalePercent;
         SetCaptureToolbarFeatures(
             settings.VisibleCaptureToolbarFeatures,
-            settings.CaptureToolbarFeatureOrder);
+            settings.CaptureToolbarFeatureOrder,
+            settings.CaptureToolbarFeatureShortcuts);
         CustomStrokeColor = settings.CustomStrokeColor;
         CustomColorPalette = settings.CustomColorPalette.ToArray();
         AnnotationToolSettings = settings.AnnotationToolSettings.ToArray();
@@ -1226,7 +1296,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     private void SetCaptureToolbarFeatures(
         IEnumerable<CaptureToolbarFeature>? visibleFeatures,
-        IEnumerable<CaptureToolbarFeature>? orderedFeatures)
+        IEnumerable<CaptureToolbarFeature>? orderedFeatures,
+        IReadOnlyDictionary<CaptureToolbarFeature, string>? shortcuts = null)
     {
         var visible = (visibleFeatures ?? []).ToHashSet();
         var metadata = new Dictionary<
@@ -1269,12 +1340,17 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             foreach (var feature in order)
             {
                 var (label, glyph, group) = metadata[feature];
-                CaptureToolbarFeatureItems.Add(new CaptureToolbarFeatureItem(
+                var item = new CaptureToolbarFeatureItem(
                     feature,
                     label,
                     glyph,
                     group,
-                    visible.Contains(feature)));
+                    visible.Contains(feature));
+                if (shortcuts is not null && shortcuts.TryGetValue(feature, out var shortcut))
+                {
+                    item.Shortcut = shortcut;
+                }
+                CaptureToolbarFeatureItems.Add(item);
             }
 
             return;
@@ -1283,6 +1359,10 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         foreach (var item in CaptureToolbarFeatureItems)
         {
             item.IsVisible = visible.Contains(item.Feature);
+            if (shortcuts is not null && shortcuts.TryGetValue(item.Feature, out var shortcut))
+            {
+                item.Shortcut = shortcut;
+            }
         }
 
         for (var targetIndex = 0; targetIndex < order.Count; targetIndex++)

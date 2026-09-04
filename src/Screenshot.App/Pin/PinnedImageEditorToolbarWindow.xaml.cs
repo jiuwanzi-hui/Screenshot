@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -44,6 +45,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
     private int _programmaticWidthChangesPending;
     private ArrowToolMode _arrowToolMode = ArrowToolMode.Straight;
     private ShapeToolMode _shapeToolMode = ShapeToolMode.Rectangle;
+    private IReadOnlyDictionary<CaptureToolbarFeature, string> _toolbarFeatureShortcuts =
+        new Dictionary<CaptureToolbarFeature, string>();
 
     private readonly Window _attachedWindow;
     private readonly Action<string>? _customStrokeColorChanged;
@@ -100,6 +103,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
             ToolbarSurface);
         PopulateEmojiPalette();
         ApplyPreferences(settings);
+        _toolbarFeatureShortcuts = settings?.CaptureToolbarFeatureShortcuts ??
+            new Dictionary<CaptureToolbarFeature, string>();
         ApplyToolbarFeatureVisibility(settings?.VisibleCaptureToolbarFeatures);
         ApplyToolbarLayout(
             settings?.CaptureToolbarFeatureOrder,
@@ -112,10 +117,67 @@ public partial class PinnedImageEditorToolbarWindow : Window
         _attachedWindow.SizeChanged += OnAttachedWindowBoundsChanged;
         _attachedWindow.StateChanged += OnAttachedWindowBoundsChanged;
         _attachedWindow.Closed += OnAttachedWindowClosed;
+        _attachedWindow.AddHandler(
+            Keyboard.PreviewKeyDownEvent,
+            new System.Windows.Input.KeyEventHandler(OnAttachedWindowPreviewKeyDown),
+            handledEventsToo: true);
         Loaded += OnLoaded;
     }
 
     public event Action<EditorTool>? ToolSelected;
+
+    private void OnFeatureShortcutPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.None || Keyboard.FocusedElement is System.Windows.Controls.TextBox)
+            return;
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var shortcut = key >= Key.D0 && key <= Key.D9 ? key.ToString()[1..] :
+            key >= Key.NumPad0 && key <= Key.NumPad9
+                ? ((int)key - (int)Key.NumPad0).ToString(CultureInfo.InvariantCulture)
+                : string.Empty;
+        var match = _toolbarFeatureShortcuts.FirstOrDefault(pair =>
+            string.Equals(pair.Value, shortcut, StringComparison.OrdinalIgnoreCase));
+        if (match.Equals(default(KeyValuePair<CaptureToolbarFeature, string>))) return;
+        var tool = match.Key switch
+        {
+            CaptureToolbarFeature.Shape => _shapeToolMode == ShapeToolMode.Ellipse
+                ? EditorTool.Ellipse
+                : EditorTool.Rectangle,
+            CaptureToolbarFeature.Arrow => _arrowToolMode == ArrowToolMode.Curved
+                ? EditorTool.CurvedArrow
+                : EditorTool.Arrow,
+            CaptureToolbarFeature.Emoji => EditorTool.Emoji,
+            CaptureToolbarFeature.Number => EditorTool.Number,
+            CaptureToolbarFeature.Brush => EditorTool.Brush,
+            CaptureToolbarFeature.Text => EditorTool.Text,
+            CaptureToolbarFeature.Mosaic => EditorTool.Mosaic,
+            _ => (EditorTool?)null,
+        };
+        if (tool is { } selected)
+        {
+            SelectToolButton(selected);
+            _lastTool = selected;
+            ApplySelectedToolPreferences();
+            ToolSelected?.Invoke(selected);
+            e.Handled = true;
+            return;
+        }
+        var action = match.Key switch
+        {
+            CaptureToolbarFeature.Save => SaveButton,
+            CaptureToolbarFeature.TextRecognition => OcrButton,
+            CaptureToolbarFeature.CopyTable => CopyTableButton,
+            CaptureToolbarFeature.CopyRecognizedText => CopyTextButton,
+            CaptureToolbarFeature.Translation => TranslateActionButton,
+            CaptureToolbarFeature.PrivacyRedaction => PrivacyButton,
+            _ => null,
+        };
+        if (action is not null && action.IsEnabled)
+        {
+            action.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            e.Handled = true;
+        }
+    }
 
     public event Action<string>? EmojiSelected;
 
@@ -197,6 +259,21 @@ public partial class PinnedImageEditorToolbarWindow : Window
         {
             StrokeWidthText.Text = $"{value:0.#} px";
         }
+    }
+
+    internal void SetColorFromCanvas(WpfColor color)
+    {
+        _selectedColor = color;
+        _customColor = color;
+        if (CustomColorButton is not null &&
+            ResolveSelectedColorButton(color) == CustomColorButton)
+        {
+            var brush = new SolidColorBrush(color);
+            brush.Freeze();
+            CustomColorButton.Background = brush;
+        }
+
+        UpdateSelectedColorButton(ResolveSelectedColorButton(color));
     }
 
     internal void ShowCrop(int pixelWidth, int pixelHeight)
@@ -306,6 +383,9 @@ public partial class PinnedImageEditorToolbarWindow : Window
         _attachedWindow.SizeChanged -= OnAttachedWindowBoundsChanged;
         _attachedWindow.StateChanged -= OnAttachedWindowBoundsChanged;
         _attachedWindow.Closed -= OnAttachedWindowClosed;
+        _attachedWindow.RemoveHandler(
+            Keyboard.PreviewKeyDownEvent,
+            new System.Windows.Input.KeyEventHandler(OnAttachedWindowPreviewKeyDown));
         base.OnClosed(e);
     }
 
@@ -338,6 +418,13 @@ public partial class PinnedImageEditorToolbarWindow : Window
         {
             Close();
         }
+    }
+
+    private void OnAttachedWindowPreviewKeyDown(
+        object sender,
+        System.Windows.Input.KeyEventArgs e)
+    {
+        OnFeatureShortcutPreviewKeyDown(sender, e);
     }
 
     private DrawingRectangle GetOwnerBounds()
@@ -497,10 +584,16 @@ public partial class PinnedImageEditorToolbarWindow : Window
         EmojiPalette.Visibility = _lastTool == EditorTool.Emoji
             ? Visibility.Visible
             : Visibility.Collapsed;
-        ColorOptions.Visibility = _lastTool == EditorTool.Emoji ||
-            !_colorOptionsAvailable
+        ColorOptions.Visibility = !_colorOptionsAvailable
             ? Visibility.Collapsed
             : Visibility.Visible;
+        var colorVisibility = _lastTool == EditorTool.Emoji
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        RedColorButton.Visibility = colorVisibility;
+        CyanColorButton.Visibility = colorVisibility;
+        DarkColorButton.Visibility = colorVisibility;
+        CustomColorButton.Visibility = colorVisibility;
     }
 
     private void PopulateEmojiPalette()
@@ -535,6 +628,10 @@ public partial class PinnedImageEditorToolbarWindow : Window
         _lastTool = EditorTool.Emoji;
         var wasEmojiSelected = EmojiToolButton.IsChecked == true;
         EmojiToolButton.IsChecked = true;
+        // Emoji has its own persisted size just like every other annotation
+        // tool. Refresh the shared per-tool preference before notifying the
+        // canvas, including the case where Emoji was already selected.
+        ApplySelectedToolPreferences();
         if (wasEmojiSelected)
         {
             UpdateEmojiPaletteVisibility();
@@ -797,6 +894,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
                 : ShapeToolMode.Rectangle);
         _lastAnnotationToolChanged?.Invoke(ToAnnotationToolMode(tool));
         SelectToolButton(tool);
+        ApplySelectedToolPreferences();
         ToolSelected?.Invoke(tool);
     }
 
@@ -828,6 +926,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
             ? ArrowToolMode.Curved
             : ArrowToolMode.Straight;
         SelectToolButton(tool);
+        ApplySelectedToolPreferences();
         ToolSelected?.Invoke(tool);
         ArrowStyleSelected?.Invoke(style);
         _arrowStyleChanged?.Invoke(style);

@@ -41,6 +41,8 @@ public partial class ScrollCaptureProgressWindow : Window
     private double _workAreaTopDip;
     private double _workAreaBottomDip;
     private bool _captureExcluded;
+    private ScreenRegion _captureRegion;
+    private bool _captureRegionConfigured;
 
     public ScrollCaptureProgressWindow()
     {
@@ -58,9 +60,61 @@ public partial class ScrollCaptureProgressWindow : Window
         var handle = new WindowInteropHelper(this).EnsureHandle();
         if (handle != IntPtr.Zero)
         {
-            _captureExcluded = NativeMethods.SetWindowDisplayAffinity(
+            if (NativeMethods.SetWindowDisplayAffinity(
+                    handle,
+                    WindowDisplayAffinityExcludeFromCapture))
+            {
+                _captureExcluded = true;
+            }
+        }
+    }
+
+    public void SetScreenCaptureExcluded(bool excluded)
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        // Only exclude the preview while a frame is actually copied. Keeping
+        // the affinity clear between copies is required for remote-control and
+        // desktop-capture clients to render the live preview. No z-order or
+        // visibility changes are made here, so the selection border does not
+        // flash when the preview overlaps it.
+        var shouldExclude = excluded &&
+                            (!_captureRegionConfigured ||
+                             IsPreviewOverlappingCaptureRegion());
+        if (shouldExclude == _captureExcluded)
+        {
+            return;
+        }
+
+        var handle = new WindowInteropHelper(this).EnsureHandle();
+        if (handle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (NativeMethods.SetWindowDisplayAffinity(
                 handle,
-                WindowDisplayAffinityExcludeFromCapture);
+                shouldExclude ? WindowDisplayAffinityExcludeFromCapture : 0))
+        {
+            _captureExcluded = shouldExclude;
+        }
+    }
+
+    private void ClearScreenCaptureExclusion()
+    {
+        if (!_captureExcluded || _isClosed)
+        {
+            return;
+        }
+
+        var handle = new WindowInteropHelper(this).Handle;
+        if (handle != IntPtr.Zero &&
+            NativeMethods.SetWindowDisplayAffinity(handle, 0))
+        {
+            _captureExcluded = false;
         }
     }
 
@@ -78,6 +132,8 @@ public partial class ScrollCaptureProgressWindow : Window
 
     public void ConfigureForCaptureRegion(ScreenRegion captureRegion)
     {
+        _captureRegion = captureRegion;
+        _captureRegionConfigured = !captureRegion.IsEmpty;
         var monitorBounds = GetMonitorWorkArea(captureRegion);
         var dpi = VisualTreeHelper.GetDpi(this);
         var minimumPhysicalHeight = (int)Math.Round(
@@ -252,11 +308,11 @@ public partial class ScrollCaptureProgressWindow : Window
         var latest = Interlocked.Exchange(ref _pendingPreviewState, null);
         if (latest is not null && IsVisible)
         {
-            // The selection mask is a separate topmost native HWND and may
-            // reorder this WPF window below it while a frame is being sampled.
-            // Restore z-order on the dispatcher immediately before painting
-            // the coalesced preview update.
-            BringToFront();
+            // Keep preview painting independent from z-order changes. Calling
+            // SetWindowPos for every frame forces DWM to redraw any selection
+            // border underneath an overlapping preview and causes a visible
+            // flash on wide selections. Z-order is established when the
+            // window is shown and after owner transitions instead.
             UpdatePreview(latest);
         }
 
@@ -306,6 +362,7 @@ public partial class ScrollCaptureProgressWindow : Window
             width,
             height,
             (int)Math.Round(MinimumPreviewWidthDip * dpi.DpiScaleX));
+
         MoveWindow(windowHandle, previewBounds.X, previewBounds.Y);
 
         // Keep WPF's logical position synchronized with the native pixel
@@ -351,6 +408,37 @@ public partial class ScrollCaptureProgressWindow : Window
                y < bounds.Bottom;
     }
 
+    public ScreenRegion? GetScreenRegion()
+    {
+        var windowHandle = new WindowInteropHelper(this).Handle;
+        if (windowHandle == IntPtr.Zero ||
+            !NativeMethods.GetWindowRect(windowHandle, out var bounds))
+        {
+            return null;
+        }
+
+        var region = ScreenRegion.FromCorners(
+            bounds.Left,
+            bounds.Top,
+            bounds.Right,
+            bounds.Bottom);
+        return region.IsEmpty ? null : region;
+    }
+
+    private bool IsPreviewOverlappingCaptureRegion()
+    {
+        var windowHandle = new WindowInteropHelper(this).Handle;
+        return windowHandle != IntPtr.Zero &&
+               NativeMethods.GetWindowRect(windowHandle, out var bounds) &&
+               !ScreenRegion.Intersect(
+                   new ScreenRegion(
+                       bounds.Left,
+                       bounds.Top,
+                       bounds.Right - bounds.Left,
+                       bounds.Bottom - bounds.Top),
+                   _captureRegion).IsEmpty;
+    }
+
     public void CloseFromCoordinator()
     {
         if (_isClosed)
@@ -364,6 +452,7 @@ public partial class ScrollCaptureProgressWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        ClearScreenCaptureExclusion();
         _isClosed = true;
         SourceInitialized -= OnSourceInitialized;
         base.OnClosed(e);
@@ -372,9 +461,10 @@ public partial class ScrollCaptureProgressWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         SourceInitialized -= OnSourceInitialized;
-        // Keep the progress preview excluded from supported desktop-capture
-        // APIs. The capture pipeline still controls visibility as needed.
-        ExcludeFromScreenCapture();
+        // Leave capture affinity disabled while the preview is displayed so
+        // remote-control clients such as UU can see it. The capture callback
+        // toggles affinity around each native frame copy without hiding or
+        // showing the window, avoiding the visible flash on wide selections.
     }
 
     protected override void OnClosing(CancelEventArgs e)

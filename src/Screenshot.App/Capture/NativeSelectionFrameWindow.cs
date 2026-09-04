@@ -580,10 +580,11 @@ internal sealed class NativeSelectionFrameWindow : Form
         DrawingPoint start,
         Rectangle surface,
         Action? releaseCallback = null,
-        bool captureMouse = true)
+        bool captureMouse = true,
+        double? aspectRatio = null)
     {
         StartTracking(
-            cursor => NormalizeSelection(start, cursor, surface),
+            cursor => NormalizeSelection(start, cursor, surface, aspectRatio),
             releaseCallback,
             captureMouse);
     }
@@ -974,7 +975,13 @@ internal sealed class NativeSelectionFrameWindow : Form
         {
             IsBackground = true,
             Name = "SnapCut native selection frame",
-            Priority = ThreadPriority.BelowNormal,
+            // Remote-control encoders and desktop composition can consume the
+            // available worker cores on the controlled computer. A low-priority
+            // frame tracker is then starved even though cursor input keeps
+            // arriving, which makes resize handles trail far behind. The thread
+            // exists only for the active drag, so normal priority improves
+            // scheduling without adding idle CPU usage.
+            Priority = ThreadPriority.Normal,
         };
         _trackingThread.Start();
     }
@@ -1008,8 +1015,17 @@ internal sealed class NativeSelectionFrameWindow : Form
     private static Rectangle NormalizeSelection(
         DrawingPoint start,
         DrawingPoint end,
-        Rectangle surface)
+        Rectangle surface,
+        double? aspectRatio = null)
     {
+        if (aspectRatio is > 0)
+        {
+            return CaptureAspectRatioHelper.ConstrainFromAnchor(
+                start,
+                end,
+                surface,
+                aspectRatio);
+        }
         var left = Math.Clamp(Math.Min(start.X, end.X), surface.Left, surface.Right);
         var top = Math.Clamp(Math.Min(start.Y, end.Y), surface.Top, surface.Bottom);
         var right = Math.Clamp(Math.Max(start.X, end.X), surface.Left, surface.Right);

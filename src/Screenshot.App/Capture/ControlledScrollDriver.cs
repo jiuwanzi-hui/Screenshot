@@ -72,8 +72,8 @@ internal sealed class ControlledScrollDriver : IAsyncDisposable
         // frames are actually captured and processed.
         lock (_inputGate)
         {
-            var frame = ForegroundWindowCaptureService.CaptureRegion(
-                _target.CaptureRegion);
+            var frame = ForegroundWindowCaptureService.CaptureScrollTargetRegion(
+                _target);
             AcknowledgeCapturedFrameCore();
             return frame;
         }

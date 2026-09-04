@@ -5,6 +5,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Screenshot.App.Capture;
 using Screenshot.App.Core;
 using Screenshot.App.Editor;
@@ -65,6 +66,9 @@ public partial class PinnedImageGroupWindow : Window
     private Thickness _restoreShellBorderThickness;
     private ContextMenu? _restoreContextMenu;
     private readonly NativeWindowDragTracker _windowDragTracker;
+    private readonly DispatcherTimer _inlineZoomQualityTimer;
+    private WpfPoint _pendingInlineZoomPointer;
+    private int _pendingInlineZoomSteps;
 
     public PinnedImageGroupWindow(
         IReadOnlyList<PinnedImageWindow> members,
@@ -82,6 +86,13 @@ public partial class PinnedImageGroupWindow : Window
                     virtualBounds.Width,
                     virtualBounds.Height));
         InitializeComponent();
+        _inlineZoomQualityTimer = new DispatcherTimer(
+            DispatcherPriority.Background,
+            Dispatcher)
+        {
+            Interval = TimeSpan.FromMilliseconds(120),
+        };
+        _inlineZoomQualityTimer.Tick += OnInlineZoomQualityTimerTick;
         _windowDragTracker = new NativeWindowDragTracker(this, EndWindowDrag);
         SetMembers(members);
     }
@@ -156,6 +167,16 @@ public partial class PinnedImageGroupWindow : Window
     }
 
     public event EventHandler? RestoreRequested;
+
+    private void OnGroupShellContextMenuOpening(
+        object sender,
+        ContextMenuEventArgs e)
+    {
+        if (_isEditorMode || _isCropMode)
+        {
+            e.Handled = true;
+        }
+    }
 
     internal IReadOnlyList<PinnedImageWindow> Members => _members;
 
@@ -617,6 +638,7 @@ public partial class PinnedImageGroupWindow : Window
             return;
         }
         EndInlineEditorPanning();
+        CancelPendingInlineZoom();
         InlineEditorCanvas.Reset();
         _inlineEditorImage?.Dispose();
         _inlineEditorImage = null;
@@ -873,6 +895,11 @@ public partial class PinnedImageGroupWindow : Window
             if (_isEditorMode)
             {
                 InlineEditorCanvas.SelectTool(tool);
+                if (InlineEditorCanvas.SelectedAnnotationStrokeWidth is { } width)
+                {
+                    toolbar.SetStrokeWidthFromCanvas(width);
+                }
+                toolbar.SetColorFromCanvas(InlineEditorCanvas.CurrentSelectedColor);
                 InlineEditorCanvas.Focus();
             }
         };
@@ -918,13 +945,20 @@ public partial class PinnedImageGroupWindow : Window
         };
         toolbar.CancelRequested += (_, _) =>
         {
-            if (_isEditorMode)
+            switch (ShowEditorCloseConfirmation("关闭钉图编组编辑"))
             {
-                ExitInlineEditor(discardChanges: true);
-            }
-            else if (_isCropMode)
-            {
-                ExitCropMode();
+                case PinnedEditorCloseChoice.Save when _isEditorMode:
+                    CommitInlineEditor();
+                    break;
+                case PinnedEditorCloseChoice.Save when _isCropMode:
+                    ApplyInlineCrop();
+                    break;
+                case PinnedEditorCloseChoice.Discard when _isEditorMode:
+                    ExitInlineEditor(discardChanges: true);
+                    break;
+                case PinnedEditorCloseChoice.Discard when _isCropMode:
+                    ExitCropMode();
+                    break;
             }
         };
 
@@ -943,6 +977,13 @@ public partial class PinnedImageGroupWindow : Window
         var toolbar = _editorToolbar;
         _editorToolbar = null;
         toolbar?.Close();
+    }
+
+    private PinnedEditorCloseChoice ShowEditorCloseConfirmation(string title)
+    {
+        var dialog = new PinnedEditorCloseDialog(this, title);
+        _ = dialog.ShowDialog();
+        return dialog.Choice;
     }
 
     private BitmapSource GetCurrentToolbarImage() =>
@@ -1440,22 +1481,7 @@ public partial class PinnedImageGroupWindow : Window
     {
         if (_isEditorMode)
         {
-            var pointer = e.GetPosition(InlineEditorViewport);
-            var previousZoom = InlineEditorCanvas.Zoom;
-            var contentX =
-                (InlineEditorViewport.HorizontalOffset + pointer.X) / previousZoom;
-            var contentY =
-                (InlineEditorViewport.VerticalOffset + pointer.Y) / previousZoom;
-            var editorZoomFactor = e.Delta > 0 ? 1.1 : 1 / 1.1;
-            InlineEditorCanvas.SetZoom(InlineEditorCanvas.Zoom * editorZoomFactor);
-            InlineEditorFrame.Width = InlineEditorCanvas.DisplayWidth;
-            InlineEditorFrame.Height = InlineEditorCanvas.DisplayHeight;
-            InlineEditorViewport.UpdateLayout();
-            InlineEditorViewport.ScrollToHorizontalOffset(
-                (contentX * InlineEditorCanvas.Zoom) - pointer.X);
-            InlineEditorViewport.ScrollToVerticalOffset(
-                (contentY * InlineEditorCanvas.Zoom) - pointer.Y);
-            HeaderStatusText.Text = $"钉图编组 · {_members.Count} 张 · 正在编辑 · {InlineEditorCanvas.Zoom * 100:0}%";
+            RequestInlineZoom(e);
             e.Handled = true;
             return;
         }
@@ -1464,6 +1490,7 @@ public partial class PinnedImageGroupWindow : Window
             e.Handled = true;
             return;
         }
+        BeginInlineZoomInteraction();
         var factor = e.Delta > 0 ? 1.08 : 1 / 1.08;
         var previousWidth = Width;
         var previousHeight = Height;
@@ -1524,6 +1551,98 @@ public partial class PinnedImageGroupWindow : Window
             _inlineEditorPanStartHorizontalOffset + _inlineEditorPanStartPoint.X - current.X);
         InlineEditorViewport.ScrollToVerticalOffset(
             _inlineEditorPanStartVerticalOffset + _inlineEditorPanStartPoint.Y - current.Y);
+    }
+
+    private void RequestInlineZoom(MouseWheelEventArgs e)
+    {
+        BeginInlineZoomInteraction();
+        _pendingInlineZoomPointer = e.GetPosition(InlineEditorViewport);
+        _pendingInlineZoomSteps = Math.Clamp(
+            _pendingInlineZoomSteps + Math.Sign(e.Delta),
+            -8,
+            8);
+        ApplyPendingInlineZoom();
+    }
+
+    private void ApplyPendingInlineZoom()
+    {
+        if (!_isEditorMode || _pendingInlineZoomSteps == 0)
+        {
+            _pendingInlineZoomSteps = 0;
+            return;
+        }
+
+        var pointer = _pendingInlineZoomPointer;
+        var steps = _pendingInlineZoomSteps;
+        _pendingInlineZoomSteps = 0;
+        var previousZoom = InlineEditorCanvas.Zoom;
+        var contentX =
+            (InlineEditorViewport.HorizontalOffset + pointer.X) / previousZoom;
+        var contentY =
+            (InlineEditorViewport.VerticalOffset + pointer.Y) / previousZoom;
+        var editorZoomFactor = Math.Pow(1.1, steps);
+        InlineEditorCanvas.SetZoom(previousZoom * editorZoomFactor);
+        InlineEditorFrame.Width = InlineEditorCanvas.DisplayWidth;
+        InlineEditorFrame.Height = InlineEditorCanvas.DisplayHeight;
+        InlineEditorViewport.UpdateLayout();
+        InlineEditorViewport.ScrollToHorizontalOffset(
+            (contentX * InlineEditorCanvas.Zoom) - pointer.X);
+        InlineEditorViewport.ScrollToVerticalOffset(
+            (contentY * InlineEditorCanvas.Zoom) - pointer.Y);
+        HeaderStatusText.Text = $"钉图编组 · {_members.Count} 张 · 正在编辑 · {InlineEditorCanvas.Zoom * 100:0}%";
+    }
+
+    private void BeginInlineZoomInteraction()
+    {
+        RenderOptions.SetBitmapScalingMode(
+            InlineEditorCanvas,
+            BitmapScalingMode.LowQuality);
+        RenderOptions.SetBitmapScalingMode(
+            CompositeImage,
+            BitmapScalingMode.LowQuality);
+        GroupCanvas.SetResourceReference(
+            Grid.BackgroundProperty,
+            "AppPanelBackgroundBrush");
+        InlineEditorFrame.SetResourceReference(
+            Border.BackgroundProperty,
+            "AppPanelBackgroundBrush");
+        _inlineZoomQualityTimer.Stop();
+        _inlineZoomQualityTimer.Start();
+    }
+
+    private void OnInlineZoomQualityTimerTick(object? sender, EventArgs e)
+    {
+        _inlineZoomQualityTimer.Stop();
+        RenderOptions.SetBitmapScalingMode(
+            InlineEditorCanvas,
+            BitmapScalingMode.HighQuality);
+        RenderOptions.SetBitmapScalingMode(
+            CompositeImage,
+            BitmapScalingMode.HighQuality);
+        GroupCanvas.SetResourceReference(
+            Grid.BackgroundProperty,
+            "AppPanelBackgroundBrush");
+        InlineEditorFrame.SetResourceReference(
+            Border.BackgroundProperty,
+            "PinnedCheckerboardBrush");
+    }
+
+    private void CancelPendingInlineZoom()
+    {
+        _pendingInlineZoomSteps = 0;
+        _inlineZoomQualityTimer.Stop();
+        RenderOptions.SetBitmapScalingMode(
+            InlineEditorCanvas,
+            BitmapScalingMode.HighQuality);
+        RenderOptions.SetBitmapScalingMode(
+            CompositeImage,
+            BitmapScalingMode.HighQuality);
+        GroupCanvas.SetResourceReference(
+            Grid.BackgroundProperty,
+            "AppPanelBackgroundBrush");
+        InlineEditorFrame.SetResourceReference(
+            Border.BackgroundProperty,
+            "PinnedCheckerboardBrush");
     }
 
     private void OnInlineEditorPreviewMouseUp(

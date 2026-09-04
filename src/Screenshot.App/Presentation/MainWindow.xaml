@@ -361,6 +361,49 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <!-- Shortcut entries deliberately reuse the same dimensions and theme
+             resources as the toolbar designer buttons above. -->
+        <Style x:Key="ToolbarShortcutIcon" TargetType="Border">
+            <Setter Property="Width" Value="36" />
+            <Setter Property="Height" Value="32" />
+            <Setter Property="Background" Value="{DynamicResource EditorToolbarButtonBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource EditorToolbarButtonBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="7" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding HasShortcut}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource EditorToolbarButtonSelectedBackgroundBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource EditorToolbarButtonSelectedBorderBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="ToolbarShortcutCapture" TargetType="{x:Type local:HotKeyCaptureBox}">
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Background" Value="{DynamicResource EditorToolbarButtonBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource EditorToolbarButtonBorderBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Foreground" Value="{DynamicResource EditorToolbarIconBrush}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type local:HotKeyCaptureBox}">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="7">
+                            <ScrollViewer x:Name="PART_ContentHost"
+                                          Margin="{TemplateBinding Padding}"
+                                          Focusable="False" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding HasShortcut}" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource EditorToolbarButtonSelectedBackgroundBrush}" />
+                    <Setter Property="BorderBrush" Value="{DynamicResource EditorToolbarButtonSelectedBorderBrush}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
 
     <Border Margin="8"
@@ -549,14 +592,62 @@
                                FontSize="13"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
                                Text="保存、外观和运行方式" />
+                    <StackPanel Margin="0,18,0,0">
+                        <TextBlock Style="{StaticResource GeneralFieldLabel}"
+                                   Text="界面主题" />
+                        <ComboBox x:Name="ThemeComboBox"
+                                  Width="270"
+                                  Height="58"
+                                  Margin="0,9,0,0"
+                                  HorizontalAlignment="Left"
+                                  Padding="9,2"
+                                  ItemsSource="{Binding ThemeOptions}"
+                                  SelectedValuePath="Value"
+                                  SelectedValue="{Binding Theme, Mode=TwoWay}"
+                                  SelectionChanged="OnThemeSelectionChanged"
+                                  ToolTip="选择界面主题，选中后立即应用">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid MinHeight="48">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="38" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="28"
+                                                Height="36"
+                                                CornerRadius="5"
+                                                VerticalAlignment="Center">
+                                            <Border.Style>
+                                                <Style TargetType="Border">
+                                                    <Setter Property="Background" Value="#30343B" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding Value}" Value="AuroraMist"><Setter Property="Background"><Setter.Value><LinearGradientBrush><GradientStop Color="#F7F8FB"/><GradientStop Color="#7E91D5" Offset="1"/></LinearGradientBrush></Setter.Value></Setter></DataTrigger>
+                                                        <DataTrigger Binding="{Binding Value}" Value="CoralSky"><Setter Property="Background"><Setter.Value><LinearGradientBrush><GradientStop Color="#F7D8D4"/><GradientStop Color="#BFDCE6" Offset="1"/></LinearGradientBrush></Setter.Value></Setter></DataTrigger>
+                                                        <DataTrigger Binding="{Binding Value}" Value="GinkgoPaper"><Setter Property="Background"><Setter.Value><LinearGradientBrush><GradientStop Color="#FAFAF7"/><GradientStop Color="#D3AF5B" Offset="1"/></LinearGradientBrush></Setter.Value></Setter></DataTrigger>
+                                                        <DataTrigger Binding="{Binding Value}" Value="ForestNight"><Setter Property="Background"><Setter.Value><LinearGradientBrush><GradientStop Color="#15181C"/><GradientStop Color="#4E8B74" Offset="1"/></LinearGradientBrush></Setter.Value></Setter></DataTrigger>
+                                                        <DataTrigger Binding="{Binding Value}" Value="ObsidianGold"><Setter Property="Background"><Setter.Value><LinearGradientBrush><GradientStop Color="#141516"/><GradientStop Color="#D3A343" Offset="1"/></LinearGradientBrush></Setter.Value></Setter></DataTrigger>
+                                                        <DataTrigger Binding="{Binding Value}" Value="NeonDeep"><Setter Property="Background"><Setter.Value><LinearGradientBrush><GradientStop Color="#10151E"/><GradientStop Color="#D65E76" Offset="1"/></LinearGradientBrush></Setter.Value></Setter></DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </Border.Style>
+                                        </Border>
+                                        <StackPanel Grid.Column="1" Margin="10,3,0,3" VerticalAlignment="Center">
+                                            <TextBlock FontWeight="SemiBold" Text="{Binding Label}" />
+                                            <TextBlock Margin="0,3,0,0" FontSize="11" Opacity="0.68" Text="{Binding Description}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                    </StackPanel>
                 </StackPanel>
 
                 <StackPanel x:Name="GeneralAppearanceGroup"
                             Margin="0,28,0,0">
                     <TextBlock Style="{StaticResource GeneralGroupTitle}"
-                               Text="保存与外观" />
+                               Text="保存与输出" />
                     <TextBlock Style="{StaticResource GeneralGroupDescription}"
-                               Text="截图、视频文件与界面显示" />
+                               Text="截图、视频文件与输出方式" />
 
                     <Grid Margin="0,17,0,0">
                         <Grid.ColumnDefinitions>
@@ -670,7 +761,26 @@
                                TextWrapping="Wrap"
                                Text="仅应用于普通截图和钉图的保存、复制输出；长截图保持原始拼接像素。PNG 仍为无损格式。" />
 
-                    <StackPanel Margin="0,18,0,0">
+                    <TextBlock Margin="0,15,0,0"
+                               Style="{StaticResource GeneralFieldLabel}"
+                               Text="普通截图比例" />
+                    <ComboBox Width="270"
+                              Height="34"
+                              Margin="0,9,0,0"
+                              HorizontalAlignment="Left"
+                              Padding="9,2"
+                              ItemsSource="{Binding CaptureAspectRatioOptions}"
+                              DisplayMemberPath="Label"
+                              SelectedValuePath="Value"
+                              SelectedValue="{Binding CaptureAspectRatio, Mode=TwoWay}"
+                              SelectionChanged="OnImmediateSettingChanged"
+                              ToolTip="只限制普通截图框选；长截图、录屏和其他模式不受影响。" />
+                    <TextBlock Margin="0,7,0,0"
+                               FontSize="12"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               Text="选择比例后，拖动普通截图框选区会自动保持该比例；选择“自由比例”恢复自由伸缩。" />
+
+                    <StackPanel Margin="0,18,0,0" Visibility="Collapsed">
                         <TextBlock Style="{StaticResource GeneralFieldLabel}"
                                    Text="界面主题" />
                         <UniformGrid Margin="0,10,-10,0" Columns="2">
@@ -863,6 +973,44 @@
                     </Grid>
                     <local:CaptureToolbarLayoutEditor Margin="0,12,0,0"
                                                       LayoutChanged="OnCaptureToolbarLayoutChanged" />
+                    <TextBlock Margin="0,12,0,0"
+                               FontSize="12"
+                               Foreground="{DynamicResource AppTextSecondaryBrush}"
+                               Text="功能快捷键（仅支持单个数字；只在普通截图、钉图编辑和视频录制中生效）" />
+                    <ItemsControl Margin="0,7,0,0"
+                                  ItemsSource="{Binding CaptureToolbarAnnotationFeatureItems}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="0,0,16,8" Orientation="Horizontal">
+                                    <Border Style="{StaticResource ToolbarShortcutIcon}">
+                                        <local:ToolbarFeatureIcon Feature="{Binding Feature}"
+                                                                  Glyph="{Binding Glyph}" />
+                                    </Border>
+                                    <local:HotKeyCaptureBox Style="{StaticResource ToolbarShortcutCapture}"
+                                             Width="36"
+                                             Height="32"
+                                             Margin="7,0,0,0"
+                                             Padding="2"
+                                             MaxLength="1"
+                                             HorizontalContentAlignment="Center"
+                                             VerticalContentAlignment="Center"
+                                             HotKeyCaptureRequested="OnHotKeyCaptureRequested"
+                                             GotKeyboardFocus="OnHotKeyCaptureGotKeyboardFocus"
+                                             HotKeyCaptured="OnHotKeyCaptured"
+                                             HotKeyCaptureCanceled="OnHotKeyCaptureCanceled"
+                                             LostKeyboardFocus="OnHotKeyCaptureLostKeyboardFocus"
+                                             Tag="{Binding Feature}"
+                                             Text="{Binding Shortcut, Mode=TwoWay, UpdateSourceTrigger=Explicit}"
+                                             ToolTip="点击后按一个数字；按 Backspace 清空" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                 </StackPanel>
 
                 <Border Style="{StaticResource GeneralGroupSeparator}" />

@@ -5,7 +5,6 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Media;
-using MediaBrush = System.Windows.Media.Brush;
 using MediaFontFamily = System.Windows.Media.FontFamily;
 using WpfPath = System.Windows.Shapes.Path;
 using Screenshot.App.Core;
@@ -322,6 +321,8 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
             "EditorToolbarButtonBackgroundBrush");
         button.SetResourceReference(BorderBrushProperty,
             "EditorToolbarButtonBorderBrush");
+        button.SetResourceReference(ForegroundProperty,
+            "EditorToolbarIconBrush");
         return button;
     }
 
@@ -362,22 +363,29 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
 
         if (feature == CaptureToolbarFeature.Number)
         {
-            return new Border
+            var numberText = new TextBlock
+            {
+                Text = "1",
+                FontSize = 12,
+                FontWeight = FontWeights.Bold,
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+                VerticalAlignment = System.Windows.VerticalAlignment.Center,
+            };
+            numberText.SetResourceReference(
+                TextBlock.ForegroundProperty,
+                "EditorToolbarButtonBackgroundBrush");
+
+            var numberBorder = new Border
             {
                 Width = size - 1,
                 Height = size - 1,
-                Background = ResolveBrush("EditorToolbarIconBrush", Colors.DimGray),
                 CornerRadius = new CornerRadius((size - 1) / 2),
-                Child = new TextBlock
-                {
-                    Text = "1",
-                    Foreground = ResolveBrush("EditorToolbarButtonBackgroundBrush", Colors.White),
-                    FontSize = 12,
-                    FontWeight = FontWeights.Bold,
-                    HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
-                    VerticalAlignment = System.Windows.VerticalAlignment.Center,
-                },
+                Child = numberText,
             };
+            numberBorder.SetResourceReference(
+                BackgroundProperty,
+                "EditorToolbarIconBrush");
+            return numberBorder;
         }
 
         if (feature is CaptureToolbarFeature.TextRecognition or
@@ -385,16 +393,19 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
             CaptureToolbarFeature.Translation or
             CaptureToolbarFeature.PrivacyRedaction)
         {
-            return new TextBlock
+            var textIcon = new TextBlock
             {
                 Text = glyph,
                 FontFamily = new MediaFontFamily("Microsoft YaHei UI"),
                 FontSize = 18,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = ResolveBrush("EditorToolbarIconBrush", Colors.DimGray),
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
                 VerticalAlignment = System.Windows.VerticalAlignment.Center,
             };
+            textIcon.SetResourceReference(
+                TextBlock.ForegroundProperty,
+                "EditorToolbarIconBrush");
+            return textIcon;
         }
 
         var resourceKey = feature switch
@@ -425,17 +436,17 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
             path.Height = size - 2;
             if (feature is null)
             {
-                path.Stroke = ResolveBrush(
+                path.SetResourceReference(
+                    System.Windows.Shapes.Shape.StrokeProperty,
                     glyph == "✓"
                         ? "EditorToolbarConfirmIconBrush"
-                        : "EditorToolbarCancelIconBrush",
-                    Colors.White);
+                        : "EditorToolbarCancelIconBrush");
             }
 
             return path;
         }
 
-        return new TextBlock
+        var fallbackText = new TextBlock
         {
             Text = glyph,
             FontSize = 18,
@@ -443,21 +454,10 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
             HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
             VerticalAlignment = System.Windows.VerticalAlignment.Center,
         };
-    }
-
-    private MediaBrush ResolveBrush(string key, System.Windows.Media.Color fallback)
-    {
-        if (TryFindResource(key) is MediaBrush brush)
-        {
-            return brush;
-        }
-
-        if (System.Windows.Application.Current?.TryFindResource(key) is MediaBrush applicationBrush)
-        {
-            return applicationBrush;
-        }
-
-        return new SolidColorBrush(fallback);
+        fallbackText.SetResourceReference(
+            TextBlock.ForegroundProperty,
+            "EditorToolbarIconBrush");
+        return fallbackText;
     }
 
     private static Border CreateSeparator() => new()

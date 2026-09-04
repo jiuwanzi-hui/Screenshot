@@ -78,8 +78,6 @@ public partial class MainWindow : Window, IDisposable
     private HotKeyCaptureBox? _activeHotKeyCaptureBox;
     private int _automaticUpdateCheckInProgress;
     private int _onlineAvailabilityCheckInProgress;
-    private int _translationProfilesAvailabilityRevision;
-    private int _translationProfilesAvailabilityCheckInProgress;
     private System.Windows.Point? _translationProfileDragStart;
     private AiTranslationProfileItem? _translationProfileDragItem;
     private Border? _translationProfileDropTarget;
@@ -397,6 +395,9 @@ public partial class MainWindow : Window, IDisposable
 
     private void OnSettingsWindowActivated(object? sender, EventArgs e)
     {
+        // Keep a topmost capture surface from retaining keyboard input while
+        // the settings page is active (especially during shortcut editing).
+        CaptureOverlayWindow.CloseActiveInteractiveSelectionForTransition();
         ApplySettingsWindowRenderMode();
         _ = CheckForUpdatesOnOpenAsync();
         RefreshCachedOfflineTranslationInstallationState();
@@ -411,15 +412,28 @@ public partial class MainWindow : Window, IDisposable
             RefreshOfflineTranslationModelStatus();
             ShowOcrLanguageAvailability();
         }
-        if (TranslationSettingsPanel?.Visibility == Visibility.Visible)
-        {
-            _ = VerifyTranslationProfilesAvailabilityAsync();
-        }
     }
 
     public void ShowStatus(string message)
     {
         _settingsViewModel.SetStatus(message);
+    }
+
+    public void UpdateTranslationAvailabilityFromUse(
+        TranslationProviderKind provider,
+        bool isAvailable,
+        string reason)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _settingsViewModel.UpdateTranslationProviderAvailability(
+            provider,
+            isAvailable,
+            reason);
+        ScheduleSettingsApply();
     }
 
     public void ShowUpdateFailureRetry(string message, bool showWindow = true)
@@ -1338,6 +1352,10 @@ public partial class MainWindow : Window, IDisposable
                 !string.Equals(apiKeyBeforeEditing, apiKeyAfterEditing, StringComparison.Ordinal);
             if (!profileChanged)
             {
+                if (!editor.HasTestResultForCurrentValues)
+                {
+                    _ = VerifyTranslationProfileAvailabilityAsync(item);
+                }
                 return;
             }
 
@@ -1363,9 +1381,14 @@ public partial class MainWindow : Window, IDisposable
             _settingsViewModel.TranslationApiKey =
                 _translationCredentialStore.GetApiKey(item.Id, item.Provider) ?? string.Empty;
             ApplySettingsImmediately();
-            if (connectionChanged)
+            if (editor.HasTestResultForCurrentValues)
             {
-                _ = VerifyTranslationProfilesAvailabilityAsync();
+                RefreshTranslationProfilesProviderAvailability();
+                ScheduleSettingsApply();
+            }
+            else
+            {
+                _ = VerifyTranslationProfileAvailabilityAsync(item);
             }
         }
     }
@@ -1383,7 +1406,7 @@ public partial class MainWindow : Window, IDisposable
     private void OnTranslationProfileChanged(object sender, RoutedEventArgs e)
     {
         ApplySettingsImmediately();
-        _ = VerifyTranslationProfilesAvailabilityAsync();
+        RefreshTranslationProfilesProviderAvailability();
     }
 
     private void OnTranslationProfileRowPreviewMouseLeftButtonDown(
@@ -2411,9 +2434,28 @@ public partial class MainWindow : Window, IDisposable
         ApplySettingsImmediately();
     }
 
+    private void OnThemeSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!IsLoaded || _isApplyingSettings ||
+            ThemeComboBox.SelectedValue is not { } selectedValue ||
+            !Enum.TryParse<AppTheme>(selectedValue.ToString(), out var theme))
+        {
+            return;
+        }
+
+        _settingsViewModel.Theme = AppSettings.NormalizeTheme(theme);
+        ApplySettingsPalette(_settingsViewModel.Theme);
+        ApplySettingsImmediately();
+        UpdateThemeSelection(_settingsViewModel.Theme);
+    }
+
     private void UpdateThemeSelection(AppTheme theme)
     {
         theme = AppSettings.NormalizeTheme(theme);
+        if (ThemeComboBox is not null)
+        {
+            ThemeComboBox.SelectedValue = theme.ToString();
+        }
         AuroraMistThemeOption.IsChecked = theme == AppTheme.AuroraMist;
         CoralSkyThemeOption.IsChecked = theme == AppTheme.CoralSky;
         GinkgoPaperThemeOption.IsChecked = theme == AppTheme.GinkgoPaper;
@@ -2498,105 +2540,71 @@ public partial class MainWindow : Window, IDisposable
         KeyboardFocusChangedEventArgs e)
     {
         ApplySettingsImmediately();
-        RefreshOnlineTranslationAvailability();
     }
 
-    private async Task VerifyTranslationProfilesAvailabilityAsync()
+    private async Task VerifyTranslationProfileAvailabilityAsync(
+        AiTranslationProfileItem profile)
     {
-        var revision = Interlocked.Increment(
-            ref _translationProfilesAvailabilityRevision);
-        if (Interlocked.Exchange(
-                ref _translationProfilesAvailabilityCheckInProgress,
-                1) != 0)
-        {
-            return;
-        }
-
         try
         {
-            var enabledProfiles = _settingsViewModel.TranslationProfiles
-                .Where(profile => profile.IsEnabled)
-                .ToArray();
-            if (enabledProfiles.Length == 0)
+            if (!profile.IsEnabled ||
+                !_settingsViewModel.TranslationProfiles.Contains(profile))
             {
                 RefreshTranslationProfilesProviderAvailability();
                 return;
             }
 
-            foreach (var profile in enabledProfiles)
+            profile.SetAvailabilityChecking();
+            var endpoint = profile.Endpoint.Trim();
+            var model = profile.Model.Trim();
+            var providerId = TranslationProviderFactory.ResolveProviderId(
+                profile.Provider);
+            var apiKey = _translationCredentialStore.GetApiKey(
+                profile.Id,
+                providerId);
+
+            if (string.IsNullOrWhiteSpace(endpoint))
             {
-                profile.SetAvailabilityChecking();
-            }
-
-            // Check in sequence so opening the settings page never creates a
-            // burst of simultaneous requests against the user's model service.
-            foreach (var profile in enabledProfiles)
-            {
-                if (_disposed || revision != Volatile.Read(
-                        ref _translationProfilesAvailabilityRevision))
-                {
-                    return;
-                }
-
-                var endpoint = profile.Endpoint.Trim();
-                var model = profile.Model.Trim();
-                var providerId = TranslationProviderFactory.ResolveProviderId(
-                    profile.Provider);
-                var apiKey = _translationCredentialStore.GetApiKey(
-                    profile.Id,
-                    providerId);
-
-                if (string.IsNullOrWhiteSpace(endpoint))
-                {
-                    profile.SetAvailability(false, "请填写 API 接口地址");
-                    ScheduleSettingsApply();
-                    continue;
-                }
-
-                if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri) ||
-                    !endpointUri.Scheme.Equals(
-                        Uri.UriSchemeHttps,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    profile.SetAvailability(false, "API 接口必须使用有效的 HTTPS 地址");
-                    ScheduleSettingsApply();
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(apiKey))
-                {
-                    profile.SetAvailability(false, "请填写 API Key");
-                    ScheduleSettingsApply();
-                    continue;
-                }
-
-                if (string.IsNullOrWhiteSpace(model))
-                {
-                    profile.SetAvailability(false, "请选择或填写翻译模型");
-                    ScheduleSettingsApply();
-                    continue;
-                }
-
-                var result = await TranslationModelCatalogService.TestAsync(
-                    endpoint,
-                    model,
-                    apiKey,
-                    _modelCatalogHttpClient,
-                    _updateCancellationSource.Token);
-                if (_disposed || revision != Volatile.Read(
-                        ref _translationProfilesAvailabilityRevision))
-                {
-                    return;
-                }
-
-                profile.SetAvailability(result.IsSuccess, result.Message);
+                profile.SetAvailability(false, "请填写 API 接口地址");
                 ScheduleSettingsApply();
+                return;
             }
 
-            if (revision == Volatile.Read(
-                    ref _translationProfilesAvailabilityRevision))
+            if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var endpointUri) ||
+                !endpointUri.Scheme.Equals(
+                    Uri.UriSchemeHttps,
+                    StringComparison.OrdinalIgnoreCase))
             {
+                profile.SetAvailability(false, "API 接口必须使用有效的 HTTPS 地址");
+                ScheduleSettingsApply();
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                profile.SetAvailability(false, "请填写 API Key");
+                ScheduleSettingsApply();
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(model))
+            {
+                profile.SetAvailability(false, "请选择或填写翻译模型");
+                ScheduleSettingsApply();
+                return;
+            }
+
+            var result = await TranslationModelCatalogService.TestAsync(
+                endpoint,
+                model,
+                apiKey,
+                _modelCatalogHttpClient,
+                _updateCancellationSource.Token);
+            if (!_disposed)
+            {
+                profile.SetAvailability(result.IsSuccess, result.Message);
                 RefreshTranslationProfilesProviderAvailability();
+                ScheduleSettingsApply();
             }
         }
         catch (OperationCanceledException)
@@ -2607,18 +2615,6 @@ public partial class MainWindow : Window, IDisposable
         }
         finally
         {
-            Interlocked.Exchange(
-                ref _translationProfilesAvailabilityCheckInProgress,
-                0);
-
-            // A configuration may have been edited while its previous
-            // request was still in flight. Run one fresh pass for that state.
-            if (!_disposed && revision != Volatile.Read(
-                    ref _translationProfilesAvailabilityRevision))
-            {
-                _ = VerifyTranslationProfilesAvailabilityAsync();
-            }
-
             ScheduleIdleMemoryTrim();
         }
     }
@@ -2911,6 +2907,43 @@ public partial class MainWindow : Window, IDisposable
 
     private void OnHotKeyCaptured(object? sender, HotKeyCapturedEventArgs e)
     {
+        if (sender is HotKeyCaptureBox captureBox &&
+            captureBox.Tag is CaptureToolbarFeature feature)
+        {
+            EndHotKeyCapture(restoreRegistrations: true);
+            var shortcut = e.Gesture.Trim();
+            var item = _settingsViewModel.CaptureToolbarFeatureItems
+                .FirstOrDefault(candidate => candidate.Feature == feature);
+            var previousShortcut = item?.Shortcut ?? string.Empty;
+            if (shortcut.Length == 0 || shortcut.Length == 1 && IsAsciiDigit(shortcut[0]))
+            {
+                if (item is not null)
+                {
+                    var duplicate = shortcut.Length == 0
+                        ? null
+                        : _settingsViewModel.CaptureToolbarFeatureItems
+                            .FirstOrDefault(candidate => candidate.Feature != feature &&
+                                string.Equals(candidate.Shortcut, shortcut, StringComparison.OrdinalIgnoreCase));
+                    if (duplicate is not null)
+                    {
+                        captureBox.Text = previousShortcut;
+                        _settingsViewModel.SetStatus($"快捷键 {shortcut} 已分配给“{duplicate.Label}”，请换一个按键。");
+                        Keyboard.ClearFocus();
+                        return;
+                    }
+                    item.Shortcut = shortcut;
+                    ApplySettingsImmediately();
+                }
+            }
+            else
+            {
+                captureBox.Text = previousShortcut;
+                _settingsViewModel.SetStatus("工具栏快捷键只能设置单个数字。");
+            }
+            Keyboard.ClearFocus();
+            return;
+        }
+
         if (sender is not System.Windows.Controls.Control { Tag: string settingName })
         {
             return;
@@ -2960,6 +2993,8 @@ public partial class MainWindow : Window, IDisposable
         Keyboard.ClearFocus();
     }
 
+    private static bool IsAsciiDigit(char value) => value is >= '0' and <= '9';
+
     private void OnHotKeyCaptureGotKeyboardFocus(
         object sender,
         KeyboardFocusChangedEventArgs e)
@@ -2985,14 +3020,22 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
+        // The capture overlay is topmost and can still own text input when
+        // settings are opened from the tray or while a prior capture is
+        // active. Close that transient surface before accepting a shortcut
+        // key so letters cannot become annotations in its upper-left corner.
+        CaptureOverlayWindow.CloseActiveInteractiveSelectionForTransition();
+
         _suspendedHotKeyBindings = _globalHotKeyManager.SuspendRegistrations();
         _activeHotKeyCaptureBox = captureBox;
         _globalHotKeyManager.BeginKeyboardCapture();
         IsCapturingHotKey = true;
         _settingsViewModel.SetStatus(
-            "请按下键盘或鼠标组合；单独按左、中、右键会录为长按。" +
-            "录入期间会屏蔽其他应用的输入。" +
-            "按 Backspace 或 Delete 清空，按 Esc 取消。");
+            captureBox.Tag is CaptureToolbarFeature
+                ? "请按下一个数字；录入期间会屏蔽其他应用的输入，按 Esc 取消。"
+                : "请按下键盘或鼠标组合；单独按左、中、右键会录为长按。" +
+                  "录入期间会屏蔽其他应用的输入。" +
+                  "按 Backspace 或 Delete 清空，按 Esc 取消。");
     }
 
     private void OnGlobalHotKeyCaptureInputReceived(
@@ -3300,11 +3343,6 @@ public partial class MainWindow : Window, IDisposable
         ContactSettingsPanel.Visibility = sectionIndex == 6
             ? Visibility.Visible
             : Visibility.Collapsed;
-
-        if (sectionIndex == 3)
-        {
-            _ = VerifyTranslationProfilesAvailabilityAsync();
-        }
 
         if (sectionIndex == 6 &&
             Interlocked.Exchange(ref _communityQrLoadStarted, 1) == 0)

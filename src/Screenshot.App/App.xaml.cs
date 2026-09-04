@@ -297,7 +297,9 @@ public partial class App : System.Windows.Application, IDisposable
             (x, y) => _mainWindow?.SaveCaptureToolbarPosition(x, y),
             () => _ = Dispatcher.BeginInvoke(
                 () => ShowCaptureHistory(showVideo: true)),
-            () => _floatingCaptureWindow?.ShowRecordingAlreadyActiveFeedback());
+            () => _floatingCaptureWindow?.ShowRecordingAlreadyActiveFeedback(),
+            (kind, available, reason) => _mainWindow?.UpdateTranslationAvailabilityFromUse(
+                kind, available, reason));
         _regionCaptureCoordinator.CaptureStateChanged += OnCaptureStateChanged;
 
         var updateFailureRequested = e.Args.Any(argument =>
@@ -1395,6 +1397,11 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void ShowMainWindow()
     {
+        // Settings must own keyboard focus while shortcut fields are edited.
+        // A still-visible topmost capture overlay would otherwise receive
+        // standalone letters and create text annotations behind the settings
+        // window.
+        CaptureOverlayWindow.CloseActiveInteractiveSelectionForTransition();
         EnsureMainWindow();
         if (_mainWindow is null)
         {

@@ -25,7 +25,7 @@ public sealed class ScrollCaptureProgressWindowTests
     }
 
     [Fact]
-    public void PreviewWindowIsExcludedFromDesktopCapture()
+    public void PreviewWindowRemainsVisibleToRemoteDesktopCapture()
     {
         WpfTestHost.Invoke(() =>
         {
@@ -38,7 +38,44 @@ public sealed class ScrollCaptureProgressWindowTests
                 Assert.True(NativeMethods.GetWindowDisplayAffinity(
                     handle,
                     out var displayAffinity));
-                Assert.Equal(0x11u, displayAffinity);
+                Assert.Equal(0u, displayAffinity);
+            }
+            finally
+            {
+                window.CloseFromCoordinator();
+            }
+        });
+    }
+
+    [Fact]
+    public void CaptureExclusionCanBeEnabledAgainAfterItIsCleared()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var window = new ScrollCaptureProgressWindow();
+            try
+            {
+                window.Show();
+                var handle = new WindowInteropHelper(window).Handle;
+                Assert.NotEqual(IntPtr.Zero, handle);
+
+                window.SetScreenCaptureExcluded(true);
+                Assert.True(NativeMethods.GetWindowDisplayAffinity(
+                    handle,
+                    out var firstExcludedAffinity));
+                Assert.Equal(0x00000011u, firstExcludedAffinity);
+
+                window.SetScreenCaptureExcluded(false);
+                Assert.True(NativeMethods.GetWindowDisplayAffinity(
+                    handle,
+                    out var visibleAffinity));
+                Assert.Equal(0u, visibleAffinity);
+
+                window.SetScreenCaptureExcluded(true);
+                Assert.True(NativeMethods.GetWindowDisplayAffinity(
+                    handle,
+                    out var secondExcludedAffinity));
+                Assert.Equal(0x00000011u, secondExcludedAffinity);
             }
             finally
             {

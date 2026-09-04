@@ -197,6 +197,7 @@
         </ResourceDictionary>
     </Window.Resources>
     <Border x:Name="PinnedShell"
+            ContextMenuOpening="OnPinnedShellContextMenuOpening"
             Margin="12"
             Background="{DynamicResource AppPanelBackgroundBrush}"
             BorderBrush="{DynamicResource AppBorderBrush}"

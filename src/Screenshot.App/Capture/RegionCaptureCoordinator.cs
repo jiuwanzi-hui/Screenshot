@@ -17,6 +17,7 @@ public sealed class RegionCaptureCoordinator
     private readonly ITranslationCredentialStore _translationCredentialStore;
     private readonly HttpClient _httpClient;
     private readonly Action<string> _statusReporter;
+    private readonly Action<TranslationProviderKind, bool, string>? _translationAvailabilityReporter;
     private readonly Action<bool>? _mouseShortcutSuppressionChanged;
     private readonly Action<VideoRecordingPreferences>?
         _videoRecordingPreferencesChanged;
@@ -54,7 +55,8 @@ public sealed class RegionCaptureCoordinator
         Action<int[]>? customColorPaletteChanged = null,
         Action<double, double>? captureToolbarPositionChanged = null,
         Action? showVideoHistory = null,
-        Action? recordingAlreadyInProgressFeedback = null)
+        Action? recordingAlreadyInProgressFeedback = null,
+        Action<TranslationProviderKind, bool, string>? translationAvailabilityReporter = null)
     {
         ArgumentNullException.ThrowIfNull(settingsProvider);
         ArgumentNullException.ThrowIfNull(historyService);
@@ -69,6 +71,7 @@ public sealed class RegionCaptureCoordinator
         _translationCredentialStore = translationCredentialStore;
         _httpClient = httpClient;
         _statusReporter = statusReporter;
+        _translationAvailabilityReporter = translationAvailabilityReporter;
         _mouseShortcutSuppressionChanged = mouseShortcutSuppressionChanged;
         _videoRecordingPreferencesChanged = videoRecordingPreferencesChanged;
         _videoRecordingAnnotationPreferencesChanged =
@@ -415,6 +418,7 @@ public sealed class RegionCaptureCoordinator
                     PngSaveLocationMode = settings.PngSaveLocationMode,
                     AutoSaveOnComplete = settings.AutoSaveOnComplete,
                     ScreenshotScalePercent = settings.ScreenshotScalePercent,
+                    CaptureAspectRatio = settings.CaptureAspectRatio,
                     CompletionHotKey = settings.CompleteCaptureHotKey,
                     KeepHistory = true,
                     HistoryLimit = settings.HistoryLimit,
@@ -447,6 +451,8 @@ public sealed class RegionCaptureCoordinator
                         settings.VisibleCaptureToolbarFeatures.ToArray(),
                     ToolbarFeatureOrder =
                         settings.CaptureToolbarFeatureOrder.ToArray(),
+                    ToolbarFeatureShortcuts = new Dictionary<CaptureToolbarFeature, string>(
+                        settings.CaptureToolbarFeatureShortcuts),
                     ToolbarRows = settings.CaptureToolbarRows,
                     ToolbarScalePercent = settings.ToolbarScalePercent,
                     DeferInitialColorPickerActivation =
@@ -606,6 +612,10 @@ public sealed class RegionCaptureCoordinator
             // Screenshot translation is a user-visible blocking operation;
             // use the fast offline beam for this workflow.
             preferFastOffline: true);
+        if (provider is OrderedTranslationProvider ordered)
+        {
+            ordered.AvailabilityChanged += OnTranslationAvailabilityChanged;
+        }
         try
         {
             return await provider.TranslateSegmentsAsync(
@@ -615,6 +625,10 @@ public sealed class RegionCaptureCoordinator
         }
         finally
         {
+            if (provider is OrderedTranslationProvider orderedProvider)
+            {
+                orderedProvider.AvailabilityChanged -= OnTranslationAvailabilityChanged;
+            }
             // Translation models and OCR buffers are native/heavy allocations;
             // return their retired pages without blocking the overlay thread.
             _ = Task.Run(Core.MemoryFootprint.TrimAfterHeavyOperation);
@@ -781,23 +795,6 @@ public sealed class RegionCaptureCoordinator
                     // topmost after detaching from the full-screen overlay so
                     // the preview remains visible during target discovery.
                     progressWindow.BringToFront();
-                    async Task SetProgressVisibilityAsync(
-                        bool isVisible,
-                        CancellationToken token)
-                    {
-                        if (cancellationSource.IsCancellationRequested)
-                        {
-                            return;
-                        }
-
-                        // The preview is marked WDA_EXCLUDEFROMCAPTURE, so it can
-                        // remain visible over wide selections without introducing
-                        // a hide/show flash or contaminating the captured image.
-                        await progressWindow.Dispatcher.InvokeAsync(
-                            progressWindow.BringToFront,
-                            DispatcherPriority.Send,
-                            token);
-                    }
                     await scrollSelection.SetVisibleAsync(
                         isVisible: false,
                         cancellationSource.Token);
@@ -829,6 +826,11 @@ public sealed class RegionCaptureCoordinator
                         _statusReporter("无法识别选区下的可滚动窗口。");
                         return;
                     }
+
+                    target = target with
+                    {
+                        PreviewRegionProvider = progressWindow.GetScreenRegion,
+                    };
 
                     // Activate the window under the selection so controlled
                     // wheel input reaches the correct scroll viewer.
@@ -907,7 +909,7 @@ public sealed class RegionCaptureCoordinator
                             },
                             previewChanged: previewState =>
                                 UpdateProgress(progressWindow, previewState),
-                            setProgressVisibilityAsync: SetProgressVisibilityAsync,
+                            setProgressVisibilityAsync: null,
                             initialFrame: firstFrame,
                             cancellationToken: cancellationSource.Token);
                     }
@@ -1201,7 +1203,8 @@ public sealed class RegionCaptureCoordinator
                 customColorPalette: settings.CustomColorPalette,
                 customColorPaletteChanged: _customColorPaletteChanged,
                 endRecordingHotKey: settings.EndVideoRecordingHotKey,
-                toolbarScalePercent: settings.ToolbarScalePercent);
+                toolbarScalePercent: settings.ToolbarScalePercent,
+                toolbarFeatureShortcuts: settings.CaptureToolbarFeatureShortcuts);
             if (result.IsSuccess)
             {
                 var completedSettings = _settingsProvider();
@@ -1325,6 +1328,20 @@ public sealed class RegionCaptureCoordinator
             // A closing window may already have released its native handle;
             // the coordinator still has to finish its state transition.
         }
+    }
+
+    private void OnTranslationAvailabilityChanged(
+        string providerId,
+        bool isAvailable,
+        string reason)
+    {
+        var kind = string.Equals(
+            providerId,
+            TranslationProviderFactory.OfflineProviderId,
+            StringComparison.OrdinalIgnoreCase)
+            ? TranslationProviderKind.Offline
+            : TranslationProviderKind.Online;
+        _translationAvailabilityReporter?.Invoke(kind, isAvailable, reason);
     }
 
     private static async Task WaitForCaptureChromeToHideAsync()

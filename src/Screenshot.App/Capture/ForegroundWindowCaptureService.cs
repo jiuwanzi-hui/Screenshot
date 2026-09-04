@@ -218,6 +218,148 @@ public static class ForegroundWindowCaptureService
         }
     }
 
+    public static Bitmap CaptureScrollTargetRegion(ScrollCaptureTarget target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+
+        var frame = CaptureRegion(target.CaptureRegion);
+        var previewRegion = target.PreviewRegionProvider?.Invoke();
+        if (previewRegion is not { } preview)
+        {
+            return frame;
+        }
+
+        var overlap = ScreenRegion.Intersect(target.CaptureRegion, preview);
+        if (overlap.IsEmpty)
+        {
+            return frame;
+        }
+
+        // Keep the preview HWND visible at all times. Replace only the pixels
+        // it covers by copying the exact screen-correlated rectangle from the
+        // underlying target's client DC. PrintWindow cannot be clipped into a
+        // small destination reliably and previously copied the window's left
+        // edge into this right-side patch.
+        if (!TryCopyWindowClientRegion(target.ScrollTargetHandle, overlap, out var patch) &&
+            !TryCopyWindowClientRegion(target.WindowHandle, overlap, out patch))
+        {
+            return frame;
+        }
+
+        if (patch is null)
+        {
+            return frame;
+        }
+
+        using (patch)
+        using (var graphics = Graphics.FromImage(frame))
+        {
+            graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+            graphics.DrawImageUnscaled(
+                patch,
+                overlap.X - target.CaptureRegion.X,
+                overlap.Y - target.CaptureRegion.Y);
+        }
+
+        return frame;
+    }
+
+    private static bool TryCopyWindowClientRegion(
+        IntPtr windowHandle,
+        ScreenRegion screenRegion,
+        out Bitmap? patch)
+    {
+        patch = null;
+        if (windowHandle == IntPtr.Zero ||
+            !NativeMethods.IsWindow(windowHandle) ||
+            !NativeMethods.GetClientRect(windowHandle, out var clientBounds))
+        {
+            return false;
+        }
+
+        var clientTopLeft = new NativePoint
+        {
+            X = clientBounds.Left,
+            Y = clientBounds.Top,
+        };
+        var clientBottomRight = new NativePoint
+        {
+            X = clientBounds.Right,
+            Y = clientBounds.Bottom,
+        };
+        if (!NativeMethods.ClientToScreen(windowHandle, ref clientTopLeft) ||
+            !NativeMethods.ClientToScreen(windowHandle, ref clientBottomRight))
+        {
+            return false;
+        }
+
+        var clientRegion = ScreenRegion.FromCorners(
+            clientTopLeft.X,
+            clientTopLeft.Y,
+            clientBottomRight.X,
+            clientBottomRight.Y);
+        if (screenRegion.IsEmpty ||
+            screenRegion.X < clientRegion.X ||
+            screenRegion.Y < clientRegion.Y ||
+            screenRegion.X + screenRegion.Width > clientRegion.X + clientRegion.Width ||
+            screenRegion.Y + screenRegion.Height > clientRegion.Y + clientRegion.Height)
+        {
+            return false;
+        }
+
+        var result = new Bitmap(
+            screenRegion.Width,
+            screenRegion.Height,
+            PixelFormat.Format32bppPArgb);
+        var sourceDeviceContext = IntPtr.Zero;
+        var copied = false;
+        try
+        {
+            using var graphics = Graphics.FromImage(result);
+            var destinationDeviceContext = graphics.GetHdc();
+            try
+            {
+                sourceDeviceContext = NativeMethods.GetDC(windowHandle);
+                copied = sourceDeviceContext != IntPtr.Zero &&
+                    NativeMethods.BitBlt(
+                        destinationDeviceContext,
+                        0,
+                        0,
+                        screenRegion.Width,
+                        screenRegion.Height,
+                        sourceDeviceContext,
+                        screenRegion.X - clientRegion.X,
+                        screenRegion.Y - clientRegion.Y,
+                        NativeMethods.SourceCopy);
+            }
+            finally
+            {
+                if (sourceDeviceContext != IntPtr.Zero)
+                {
+                    _ = NativeMethods.ReleaseDC(
+                        windowHandle,
+                        sourceDeviceContext);
+                }
+
+                graphics.ReleaseHdc(destinationDeviceContext);
+            }
+
+            if (!copied)
+            {
+                result.Dispose();
+                return false;
+            }
+
+            patch = result;
+            return true;
+        }
+        catch
+        {
+            result.Dispose();
+            return false;
+        }
+    }
+
     public static bool TryFocusScrollTarget(ScrollCaptureTarget target)
     {
         ArgumentNullException.ThrowIfNull(target);
@@ -705,6 +847,7 @@ public static class ForegroundWindowCaptureService
         public const uint MouseEventWheel = 0x0800;
         public const uint MouseEventVirtualDesktop = 0x4000;
         public const uint MouseEventAbsolute = 0x8000;
+        public const uint SourceCopy = 0x00CC0020;
 
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
@@ -715,6 +858,27 @@ public static class ForegroundWindowCaptureService
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool GetClientRect(IntPtr windowHandle, out NativeRect rectangle);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetDC(IntPtr windowHandle);
+
+        [DllImport("user32.dll")]
+        public static extern int ReleaseDC(
+            IntPtr windowHandle,
+            IntPtr deviceContext);
+
+        [DllImport("gdi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool BitBlt(
+            IntPtr destinationDeviceContext,
+            int destinationX,
+            int destinationY,
+            int width,
+            int height,
+            IntPtr sourceDeviceContext,
+            int sourceX,
+            int sourceY,
+            uint rasterOperation);
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

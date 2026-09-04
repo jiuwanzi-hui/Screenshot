@@ -4,4 +4,7 @@ public sealed record ScrollCaptureTarget(
     IntPtr WindowHandle,
     IntPtr ScrollTargetHandle,
     ScreenRegion CaptureRegion,
-    bool SupportsVerticalScroll);
+    bool SupportsVerticalScroll)
+{
+    public Func<ScreenRegion?>? PreviewRegionProvider { get; init; }
+}

@@ -17,6 +17,7 @@
         WindowStartupLocation="Manual"
         WindowStyle="None"
         KeyDown="OnWindowKeyDown"
+        PreviewKeyDown="OnFeatureShortcutPreviewKeyDown"
         PreviewMouseLeftButtonDown="OnControlSurfaceMouseLeftButtonDown"
         PreviewMouseLeftButtonUp="OnControlSurfaceMouseLeftButtonUp"
         PreviewMouseMove="OnControlSurfaceMouseMove">

@@ -79,6 +79,8 @@ public sealed class CaptureOverlayOptions
 
     public int ScreenshotScalePercent { get; init; } = 100;
 
+    public CaptureAspectRatio CaptureAspectRatio { get; init; } = CaptureAspectRatio.Free;
+
     public PngSaveLocationMode PngSaveLocationMode { get; init; } =
         PngSaveLocationMode.DefaultDirectory;
 
@@ -165,6 +167,9 @@ public sealed class CaptureOverlayOptions
     public CaptureToolbarFeature[] ToolbarFeatureOrder { get; init; } =
         Enum.GetValues<CaptureToolbarFeature>();
 
+    public IReadOnlyDictionary<CaptureToolbarFeature, string> ToolbarFeatureShortcuts { get; init; } =
+        new Dictionary<CaptureToolbarFeature, string>();
+
     public CaptureToolbarRowCount ToolbarRows { get; init; } =
         CaptureToolbarRowCount.One;
 
@@ -208,6 +213,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private readonly ScreenRegion _virtualScreenBounds;
     private readonly CaptureOverlayOptions? _options;
+    private IReadOnlyDictionary<CaptureToolbarFeature, string> _toolbarFeatureShortcuts =
+        new Dictionary<CaptureToolbarFeature, string>();
     private readonly bool _deferInitialColorPickerActivation;
     private readonly bool _deferInitialScreenCapture;
     private readonly HotKeyGesture? _completionHotKeyGesture;
@@ -345,6 +352,8 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             "overlay-constructor",
             $"startup={isStartupPrewarm} hasSnapshot={initialScreenSnapshot is not null}");
         _options = options;
+        _toolbarFeatureShortcuts = options?.ToolbarFeatureShortcuts ??
+            new Dictionary<CaptureToolbarFeature, string>();
         CaptureTimingDiagnostics.Mark(
             "overlay-constructor-options-ready",
             $"startup={isStartupPrewarm} deferCapture={deferInitialScreenCapture}");
@@ -2285,7 +2294,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 ToDrawingRectangle(_virtualScreenBounds),
                 () => Dispatcher.BeginInvoke(new Action(() =>
                     _ = CompleteNativePointerSelectionAsync())),
-                captureMouse: !continuedButton.HasValue);
+                captureMouse: !continuedButton.HasValue,
+                aspectRatio: !_isScrollCaptureSelection
+                    ? CaptureAspectRatioHelper.GetValue(
+                        _options?.CaptureAspectRatio ?? CaptureAspectRatio.Free)
+                    : null);
             SetNativeSelectionVisualSuppressed(true);
             SelectionRectangle.Visibility = Visibility.Visible;
         }
@@ -2366,7 +2379,11 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                     ToDrawingRectangle(_virtualScreenBounds),
                     () => Dispatcher.BeginInvoke(new Action(() =>
                         _ = CompleteNativePointerSelectionAsync())),
-                    captureMouse: true);
+                    captureMouse: true,
+                    aspectRatio: !_isScrollCaptureSelection
+                        ? CaptureAspectRatioHelper.GetValue(
+                            _options?.CaptureAspectRatio ?? CaptureAspectRatio.Free)
+                        : null);
                 SetNativeSelectionVisualSuppressed(true);
                 SelectionRectangle.Fill = WpfBrushes.Transparent;
                 CaptureSurface.ReleaseMouseCapture();
@@ -2376,7 +2393,30 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 SelectionRectangle.Visibility = Visibility.Visible;
             }
 
-            QueueSelectionBoundsUpdate(new Rect(_selectionStartPoint, currentPoint));
+            if (!_isScrollCaptureSelection &&
+                CaptureAspectRatioHelper.GetValue(
+                    _options?.CaptureAspectRatio ?? CaptureAspectRatio.Free) is { } ratio)
+            {
+                var constrained = CaptureAspectRatioHelper.ConstrainFromAnchor(
+                    ToPhysicalScreenPoint(_selectionStartPoint),
+                    ToPhysicalScreenPoint(currentPoint),
+                    ToDrawingRectangle(_virtualScreenBounds),
+                    ratio);
+                if (TryGetCaptureSurfacePoint(
+                        new DrawingPoint(constrained.Left, constrained.Top),
+                        out var constrainedTopLeft) &&
+                    TryGetCaptureSurfacePoint(
+                        new DrawingPoint(constrained.Right, constrained.Bottom),
+                        out var constrainedBottomRight))
+                {
+                    QueueSelectionBoundsUpdate(
+                        new Rect(constrainedTopLeft, constrainedBottomRight));
+                }
+            }
+            else
+            {
+                QueueSelectionBoundsUpdate(new Rect(_selectionStartPoint, currentPoint));
+            }
             return;
         }
 
@@ -2520,9 +2560,27 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         }
         else
         {
-            UpdateSelectionBounds(new Rect(
-                _selectionStartPoint,
-                endPoint));
+            var requested = new Rect(_selectionStartPoint, endPoint);
+            if (!_isScrollCaptureSelection &&
+                CaptureAspectRatioHelper.GetValue(
+                    _options?.CaptureAspectRatio ?? CaptureAspectRatio.Free) is { } ratio)
+            {
+                var constrained = CaptureAspectRatioHelper.ConstrainFromAnchor(
+                    ToPhysicalScreenPoint(_selectionStartPoint),
+                    ToPhysicalScreenPoint(endPoint),
+                    ToDrawingRectangle(_virtualScreenBounds),
+                    ratio);
+                if (TryGetCaptureSurfacePoint(
+                        new DrawingPoint(constrained.Left, constrained.Top),
+                        out var topLeft) &&
+                    TryGetCaptureSurfacePoint(
+                        new DrawingPoint(constrained.Right, constrained.Bottom),
+                        out var bottomRight))
+                {
+                    requested = new Rect(topLeft, bottomRight);
+                }
+            }
+            UpdateSelectionBounds(requested);
         }
 
         if (!HasValidSelection())
@@ -2790,6 +2848,12 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private void OnCaptureWindowPreviewKeyDown(object sender, WpfKeyEventArgs e)
     {
+        if (!_isColorPickerActive && TrySelectToolbarFeatureShortcut(e))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (_isColorPickerActive && e.Key == Key.Escape)
         {
             ExitColorPicker();
@@ -2985,6 +3049,86 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         {
             _ = Task.Run(ProcessColorPickerSamples);
         }
+    }
+
+    private bool TrySelectToolbarFeatureShortcut(WpfKeyEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.None ||
+            Keyboard.FocusedElement is System.Windows.Controls.TextBox ||
+            InlineEditorCanvas.IsTextInputActive)
+        {
+            return false;
+        }
+
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var shortcut = key switch
+        {
+            >= Key.D0 and <= Key.D9 => key.ToString()[1..],
+            >= Key.NumPad0 and <= Key.NumPad9 => ((int)key - (int)Key.NumPad0).ToString(),
+            _ => string.Empty,
+        };
+        if (shortcut.Length == 0)
+        {
+            return false;
+        }
+
+        var match = _toolbarFeatureShortcuts.FirstOrDefault(pair =>
+            string.Equals(pair.Value, shortcut, StringComparison.OrdinalIgnoreCase));
+        if (match.Equals(default(KeyValuePair<CaptureToolbarFeature, string>)))
+        {
+            return false;
+        }
+        var feature = match.Key;
+
+        var annotationTool = feature switch
+        {
+            CaptureToolbarFeature.Shape => (EditorTool?)(_currentShapeToolMode == ShapeToolMode.Ellipse
+                ? EditorTool.Ellipse
+                : EditorTool.Rectangle),
+            CaptureToolbarFeature.Arrow => _currentArrowToolMode == ArrowToolMode.Curved
+                ? EditorTool.CurvedArrow
+                : EditorTool.Arrow,
+            CaptureToolbarFeature.Emoji => EditorTool.Emoji,
+            CaptureToolbarFeature.Number => EditorTool.Number,
+            CaptureToolbarFeature.Brush => EditorTool.Brush,
+            CaptureToolbarFeature.Text => EditorTool.Text,
+            CaptureToolbarFeature.Mosaic => EditorTool.Mosaic,
+            _ => null,
+        };
+        if (annotationTool is { } tool &&
+            GetInlineToolButton(tool).Visibility == Visibility.Visible)
+        {
+            SelectInlineTool(tool);
+            return true;
+        }
+
+        var actionButton = feature switch
+        {
+            CaptureToolbarFeature.VideoRecording => RecordButton,
+            CaptureToolbarFeature.Save => SaveButton,
+            CaptureToolbarFeature.ScrollCapture => ScrollCaptureButton,
+            CaptureToolbarFeature.TextRecognition => OcrButton,
+            CaptureToolbarFeature.CopyTable => CopyTableButton,
+            CaptureToolbarFeature.CopyRecognizedText => CopyRecognizedTextButton,
+            CaptureToolbarFeature.Translation => TranslateButton,
+            CaptureToolbarFeature.PrivacyRedaction => PrivacyRedactionButton,
+            CaptureToolbarFeature.PinImage => PinButton,
+            _ => null,
+        };
+        if (actionButton?.Visibility != Visibility.Visible || !actionButton.IsEnabled)
+        {
+            return false;
+        }
+        actionButton.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+        return true;
+    }
+
+    private void SelectInlineTool(EditorTool tool)
+    {
+        var button = GetInlineToolButton(tool);
+        button.Tag = tool.ToString();
+        button.IsChecked = true;
+        OnInlineEditorToolSelected(button, new RoutedEventArgs());
     }
 
     private void ProcessColorPickerSamples()
@@ -3695,8 +3839,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
                 _inlineEditorImage,
                 selectionBounds.Width,
                 selectionBounds.Height);
-            InlineEditorCanvas.SelectTool(_selectedInlineTool);
-            ApplyInlineToolStyleState();
+            ClearInlineToolSelection();
             Canvas.SetLeft(InlineEditorCanvas, selectionBounds.X);
             Canvas.SetTop(InlineEditorCanvas, selectionBounds.Y);
             InlineEditorCanvas.Visibility = Visibility.Visible;
@@ -4214,6 +4357,55 @@ public partial class CaptureOverlayWindow : Window, IDisposable
             {
                 bottom = Math.Max(bottom, protectedBounds.Bottom);
             }
+        }
+
+        if (!_isScrollCaptureSelection &&
+            CaptureAspectRatioHelper.GetValue(
+                _options?.CaptureAspectRatio ?? CaptureAspectRatio.Free) is { } ratio)
+        {
+            var original = _resizeDragStartPhysicalBounds;
+            var width = Math.Max(minimumEdge, right - left);
+            var height = Math.Max(minimumEdge, bottom - top);
+            var horizontal = _resizeLeftEdge || _resizeRightEdge;
+            var vertical = _resizeTopEdge || _resizeBottomEdge;
+            if (horizontal && !vertical)
+            {
+                // Side handles keep the opposite side fixed and adjust the
+                // other dimension around the original center line. Without
+                // this, the height changed but top/bottom stayed untouched,
+                // so the ratio was immediately lost on release.
+                height = Math.Max(minimumEdge, (int)Math.Round(width / ratio));
+                var centerY = original.Top + original.Height / 2d;
+                top = (int)Math.Round(centerY - height / 2d);
+                bottom = top + height;
+            }
+            else if (vertical && !horizontal)
+            {
+                width = Math.Max(minimumEdge, (int)Math.Round(height * ratio));
+                var centerX = original.Left + original.Width / 2d;
+                left = (int)Math.Round(centerX - width / 2d);
+                right = left + width;
+            }
+            else
+            {
+                var widthDelta = Math.Abs(width - original.Width);
+                var heightDelta = Math.Abs(height - original.Height);
+                if (widthDelta >= heightDelta * ratio)
+                    height = Math.Max(minimumEdge, (int)Math.Round(width / ratio));
+                else
+                    width = Math.Max(minimumEdge, (int)Math.Round(height * ratio));
+            }
+
+            if (_resizeLeftEdge) left = right - width;
+            else if (_resizeRightEdge) right = left + width;
+            if (_resizeTopEdge) top = bottom - height;
+            else if (_resizeBottomEdge) bottom = top + height;
+            left = Math.Max(surface.Left, left);
+            top = Math.Max(surface.Top, top);
+            right = Math.Min(surface.Right, right);
+            bottom = Math.Min(surface.Bottom, bottom);
+            if (_resizeLeftEdge) left = right - Math.Min(width, surface.Width);
+            if (_resizeTopEdge) top = bottom - Math.Min(height, surface.Height);
         }
 
         return new System.Drawing.Rectangle(
@@ -5992,6 +6184,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
         if (InlineEditorCanvas.HasImage)
         {
+            InlineEditorCanvas.SetAnnotationCreationEnabled(true);
             InlineEditorCanvas.SelectTool(tool);
             ApplyInlineToolStyleState();
             InlineEditorCanvas.Focus();
@@ -6249,6 +6442,7 @@ public partial class CaptureOverlayWindow : Window, IDisposable
 
     private System.Windows.Controls.RadioButton GetInlineToolButton(EditorTool tool) => tool switch
     {
+        EditorTool.Arrow or EditorTool.CurvedArrow => InlineArrowToolButton,
         EditorTool.Emoji => InlineEmojiToolButton,
         EditorTool.Number => InlineNumberToolButton,
         EditorTool.Brush => InlineBrushToolButton,
@@ -7048,6 +7242,22 @@ public partial class CaptureOverlayWindow : Window, IDisposable
         // value.
         _ = applyTicks;
         _selectionPreviewHz = _interactionRefreshRate;
+    }
+
+    private void ClearInlineToolSelection()
+    {
+        InlineShapeToolButton.IsChecked = false;
+        InlineArrowToolButton.IsChecked = false;
+        InlineEmojiToolButton.IsChecked = false;
+        InlineNumberToolButton.IsChecked = false;
+        InlineBrushToolButton.IsChecked = false;
+        InlineTextToolButton.IsChecked = false;
+        InlineMosaicToolButton.IsChecked = false;
+        // Entering the editor starts with no active annotation tool. Existing
+        // annotations remain selectable, but dragging empty canvas must not
+        // silently create a rectangle until the user chooses a tool.
+        InlineEditorCanvas.SetAnnotationCreationEnabled(false);
+        UpdateInlineToolOptionPanels();
     }
 
     private void StopSelectionPreviewRendering()

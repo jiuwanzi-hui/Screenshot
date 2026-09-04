@@ -3007,6 +3007,7 @@ public sealed class ImageEditorCanvas : Canvas
         var headHalfWidth = metrics.HeadHalfWidth;
         var baseHalfWidth = metrics.BaseHalfWidth;
         var tailHalfWidth = metrics.TailHalfWidth;
+        var outerHeadBase = basePoint - (direction * metrics.NeckInset);
         var left = new List<WpfPoint>(shaft.Count);
         var right = new List<WpfPoint>(shaft.Count);
         var shaftLength = Math.Max(1, GetPathLength(shaft));
@@ -3031,9 +3032,9 @@ public sealed class ImageEditorCanvas : Canvas
         {
             polygon.Add(left[index]);
         }
-        polygon.Add(basePoint + (headNormal * headHalfWidth));
+        polygon.Add(outerHeadBase + (headNormal * headHalfWidth));
         polygon.Add(tip);
-        polygon.Add(basePoint - (headNormal * headHalfWidth));
+        polygon.Add(outerHeadBase - (headNormal * headHalfWidth));
         for (var index = right.Count - 1; index >= 1; index--)
         {
             polygon.Add(right[index]);
@@ -3196,15 +3197,16 @@ public sealed class ImageEditorCanvas : Canvas
             length * 0.12);
         var tailBase = start + (direction * tailTransition);
         var basePoint = end - (direction * headLength);
+        var outerHeadBase = basePoint - (direction * metrics.NeckInset);
 
         return
         [
             start,
             tailBase + (perpendicular * tailHalfWidth),
             basePoint + (perpendicular * baseHalfWidth),
-            basePoint + (perpendicular * headHalfWidth),
+            outerHeadBase + (perpendicular * headHalfWidth),
             end,
-            basePoint - (perpendicular * headHalfWidth),
+            outerHeadBase - (perpendicular * headHalfWidth),
             basePoint - (perpendicular * baseHalfWidth),
             tailBase - (perpendicular * tailHalfWidth),
         ];

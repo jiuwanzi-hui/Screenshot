@@ -309,8 +309,9 @@ public partial class RecordingAnnotationOverlayWindow : Window
         var headLength = metrics.HeadLength;
         var headWidth = metrics.HeadHalfWidth;
         var headBase = end - (direction * headLength);
-        var first = headBase + (perpendicular * headWidth);
-        var second = headBase - (perpendicular * headWidth);
+        var outerHeadBase = headBase - (direction * metrics.NeckInset);
+        var first = outerHeadBase + (perpendicular * headWidth);
+        var second = outerHeadBase - (perpendicular * headWidth);
         var geometry = new StreamGeometry();
         using (var context = geometry.Open())
         {

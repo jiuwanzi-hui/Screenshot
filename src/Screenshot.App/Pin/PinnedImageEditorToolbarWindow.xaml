@@ -12,6 +12,7 @@
         SizeToContent="WidthAndHeight"
         Topmost="True"
         WindowStyle="None"
+        PreviewKeyDown="OnFeatureShortcutPreviewKeyDown"
         PreviewMouseLeftButtonDown="OnToolbarSurfaceMouseLeftButtonDown"
         PreviewMouseLeftButtonUp="OnToolbarSurfaceMouseLeftButtonUp"
         PreviewMouseMove="OnToolbarSurfaceMouseMove">

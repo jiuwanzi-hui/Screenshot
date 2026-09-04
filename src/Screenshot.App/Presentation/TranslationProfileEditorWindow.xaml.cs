@@ -9,6 +9,9 @@ public partial class TranslationProfileEditorWindow : Window
 {
     private readonly AiTranslationProfileItem _item;
     private readonly ITranslationCredentialStore _credentialStore;
+    private string? _testedFingerprint;
+    private bool? _testedAvailability;
+    private string? _testedMessage;
 
     public TranslationProfileEditorWindow(AiTranslationProfileItem item, ITranslationCredentialStore? credentialStore = null)
     {
@@ -38,6 +41,10 @@ public partial class TranslationProfileEditorWindow : Window
         };
     }
 
+    public bool HasTestResultForCurrentValues =>
+        _testedAvailability.HasValue &&
+        string.Equals(_testedFingerprint, CreateFingerprint(), StringComparison.Ordinal);
+
     private void OnSaveClick(object sender, RoutedEventArgs e)
     {
         if (ProviderBox.SelectedValue is not string provider) return;
@@ -46,6 +53,12 @@ public partial class TranslationProfileEditorWindow : Window
         _item.Endpoint = EndpointBox.Text.Trim();
         _item.Model = ModelBox.Text.Trim();
         _credentialStore.SetApiKey(_item.Id, provider, ApiKeyBox.Password);
+        if (HasTestResultForCurrentValues)
+        {
+            _item.SetAvailability(
+                _testedAvailability!.Value,
+                _testedMessage ?? (_testedAvailability.Value ? "模型可用" : "模型不可用"));
+        }
         DialogResult = true;
         Close();
     }
@@ -58,6 +71,7 @@ public partial class TranslationProfileEditorWindow : Window
             string.IsNullOrWhiteSpace(ApiKeyBox.Password))
         {
             TestStatusText.Text = "请先填写接口地址、模型名称和 API Key。";
+            RecordTestResult(false, TestStatusText.Text);
             return;
         }
 
@@ -71,15 +85,36 @@ public partial class TranslationProfileEditorWindow : Window
             TestStatusText.Text = result.IsSuccess
                 ? "模型测试成功，可以使用。"
                 : result.Message;
+            _testedFingerprint = CreateFingerprint();
+            _testedAvailability = result.IsSuccess;
+            _testedMessage = result.Message;
         }
         catch (Exception exception)
         {
             TestStatusText.Text = $"测试失败：{exception.Message}";
+            RecordTestResult(false, TestStatusText.Text);
         }
         finally
         {
             TestButton.IsEnabled = true;
         }
+    }
+
+    private string CreateFingerprint()
+    {
+        return string.Join("\n", [
+            ProviderBox.SelectedValue as string ?? string.Empty,
+            EndpointBox.Text.Trim(),
+            ModelBox.Text.Trim(),
+            ApiKeyBox.Password.Trim(),
+        ]);
+    }
+
+    private void RecordTestResult(bool isAvailable, string message)
+    {
+        _testedFingerprint = CreateFingerprint();
+        _testedAvailability = isAvailable;
+        _testedMessage = message;
     }
 
     private async void OnFetchModelsClick(object sender, RoutedEventArgs e)

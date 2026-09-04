@@ -40,7 +40,7 @@ public sealed class ImmediateSettingsTests : IDisposable
                 new FakeTranslationCredentialStore());
             try
             {
-                Assert.Equal("保存与外观", GetGroupTitle(
+                Assert.Equal("保存与输出", GetGroupTitle(
                     window,
                     "GeneralAppearanceGroup"));
                 Assert.Equal("窗口与后台", GetGroupTitle(

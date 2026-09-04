@@ -38,6 +38,10 @@ public sealed class HotKeyCaptureBox : WpfTextBox
         IsReadOnly = true;
         Cursor = System.Windows.Input.Cursors.Hand;
         VerticalContentAlignment = System.Windows.VerticalAlignment.Center;
+        // Shortcut fields represent physical keys, not text. Disabling IME
+        // processing here prevents a Chinese composition window from
+        // consuming the digit before the key-capture handler sees it.
+        InputMethod.SetIsInputMethodEnabled(this, false);
     }
 
     public event EventHandler<HotKeyCapturedEventArgs>? HotKeyCaptured;
@@ -122,7 +126,12 @@ public sealed class HotKeyCaptureBox : WpfTextBox
 
     protected override void OnPreviewKeyDown(WpfKeyEventArgs e)
     {
-        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var key = e.Key switch
+        {
+            Key.System => e.SystemKey,
+            Key.ImeProcessed => e.ImeProcessedKey,
+            _ => e.Key,
+        };
 
         if (key == Key.Escape && Keyboard.Modifiers == ModifierKeys.None)
         {
@@ -155,6 +164,27 @@ public sealed class HotKeyCaptureBox : WpfTextBox
         Text = gesture.ToString();
         HotKeyCaptured?.Invoke(this, new HotKeyCapturedEventArgs(Text));
         e.Handled = true;
+    }
+
+    protected override void OnPreviewTextInput(TextCompositionEventArgs e)
+    {
+        // IMEs can emit TextInput after the physical key event. Keep shortcut
+        // capture independent of the current Chinese/English IME state and
+        // never allow committed text to reach the canvas behind this box.
+        if (IsKeyboardFocusWithin)
+        {
+            var text = e.Text?.Trim() ?? string.Empty;
+            if (text.Length == 1 && IsAsciiDigit(text[0]))
+            {
+                Text = text.ToUpperInvariant();
+                HotKeyCaptured?.Invoke(this, new HotKeyCapturedEventArgs(Text));
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        base.OnPreviewTextInput(e);
     }
 
     protected override void OnPreviewKeyUp(WpfKeyEventArgs e)
@@ -207,10 +237,10 @@ public sealed class HotKeyCaptureBox : WpfTextBox
         out HotKeyGesture gesture)
     {
         gesture = default;
-        if (!IsCompletionCaptureSetting ||
+        if (!IsCompletionCaptureSetting && !IsToolbarFeatureCapture ||
             keyboardModifiers != ModifierKeys.None ||
             !TryGetVirtualKey(key, out var virtualKey) ||
-            virtualKey is < 'A' or > 'Z')
+            !IsStandaloneToolbarDigitKey(virtualKey))
         {
             return false;
         }
@@ -228,9 +258,9 @@ public sealed class HotKeyCaptureBox : WpfTextBox
             return true;
         }
 
-        if (IsCompletionCaptureSetting &&
+        if ((IsCompletionCaptureSetting || IsToolbarFeatureCapture) &&
             capturedGesture.Modifiers == HotKeyModifiers.None &&
-            capturedGesture.VirtualKey is >= 'A' and <= 'Z')
+            IsStandaloneToolbarDigitKey(capturedGesture.VirtualKey))
         {
             gesture = capturedGesture.ToString();
             return true;
@@ -245,6 +275,14 @@ public sealed class HotKeyCaptureBox : WpfTextBox
             Tag?.ToString(),
             "CompleteCaptureHotKey",
             StringComparison.Ordinal);
+
+    private bool IsToolbarFeatureCapture => Tag is CaptureToolbarFeature ||
+        Enum.TryParse<CaptureToolbarFeature>(Tag?.ToString(), out _);
+
+    private static bool IsStandaloneToolbarDigitKey(uint virtualKey) =>
+        virtualKey is >= '0' and <= '9' or >= 0x60 and <= 0x69;
+
+    private static bool IsAsciiDigit(char value) => value is >= '0' and <= '9';
 
     public static bool TryFormatGesture(
         Key key,

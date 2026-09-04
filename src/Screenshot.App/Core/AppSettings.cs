@@ -1,4 +1,5 @@
 using System.IO;
+using Screenshot.App.Capture;
 
 namespace Screenshot.App.Core;
 
@@ -44,6 +45,7 @@ public enum PngSaveLocationMode
     DefaultDirectory,
     AskEveryTime,
 }
+
 
 public enum ArrowStyle
 {
@@ -233,6 +235,8 @@ public sealed record AppSettings
     /// </summary>
     public int ScreenshotScalePercent { get; init; } = 100;
 
+    public CaptureAspectRatio CaptureAspectRatio { get; init; } = CaptureAspectRatio.Free;
+
     public bool RecordSystemAudio { get; init; } = true;
 
     public bool RecordMicrophone { get; init; }
@@ -287,6 +291,8 @@ public sealed record AppSettings
 
     public CaptureToolbarFeature[] CaptureToolbarFeatureOrder { get; init; } =
         Enum.GetValues<CaptureToolbarFeature>();
+
+    public Dictionary<CaptureToolbarFeature, string> CaptureToolbarFeatureShortcuts { get; init; } = [];
 
     public CaptureToolbarRowCount CaptureToolbarRows { get; init; } =
         CaptureToolbarRowCount.One;
@@ -521,6 +527,16 @@ public sealed record AppSettings
             }
         }
 
+        var captureToolbarFeatureShortcuts = (CaptureToolbarFeatureShortcuts ?? [])
+            .Where(pair => Enum.IsDefined(pair.Key))
+            .Select(pair => new KeyValuePair<CaptureToolbarFeature, string>(
+                pair.Key,
+                NormalizeToolbarShortcut(pair.Value)))
+            .Where(pair => pair.Value.Length == 1)
+            .GroupBy(pair => pair.Value)
+            .Select(group => group.First())
+            .ToDictionary(pair => pair.Key, pair => pair.Value);
+
         var migrateLegacyEndRecordingShortcut = SettingsVersion < 14 &&
             string.Equals(
                 EndVideoRecordingHotKey,
@@ -598,6 +614,7 @@ public sealed record AppSettings
             VisibleCaptureToolbarFeatures =
                 visibleCaptureToolbarFeatures.ToArray(),
             CaptureToolbarFeatureOrder = captureToolbarFeatureOrder.ToArray(),
+            CaptureToolbarFeatureShortcuts = captureToolbarFeatureShortcuts,
             CaptureToolbarRows = Enum.IsDefined(CaptureToolbarRows)
                 ? CaptureToolbarRows
                 : defaults.CaptureToolbarRows,
@@ -632,6 +649,9 @@ public sealed record AppSettings
                 ScreenshotScalePercent,
                 25,
                 200),
+            CaptureAspectRatio = Enum.IsDefined(CaptureAspectRatio)
+                ? CaptureAspectRatio
+                : defaults.CaptureAspectRatio,
             RegionCaptureHotKey = RegionCaptureHotKey?.Trim() ?? string.Empty,
             CompleteCaptureHotKey = string.IsNullOrWhiteSpace(CompleteCaptureHotKey)
                 ? defaults.CompleteCaptureHotKey
@@ -730,6 +750,16 @@ public sealed record AppSettings
                     : VideoHistoryRetentionDays),
         };
     }
+
+    private static string NormalizeToolbarShortcut(string? shortcut)
+    {
+        var value = shortcut?.Trim() ?? string.Empty;
+        return value.Length == 1 && IsAsciiDigit(value[0])
+            ? value.ToUpperInvariant()
+            : string.Empty;
+    }
+
+    private static bool IsAsciiDigit(char value) => value is >= '0' and <= '9';
 
     private static int NormalizeRetentionDays(int days)
     {

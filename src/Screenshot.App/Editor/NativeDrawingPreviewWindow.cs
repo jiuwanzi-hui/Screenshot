@@ -380,6 +380,8 @@ internal sealed class NativeDrawingPreviewWindow : Form
             length * 0.12));
         var baseX = end.X - (ux * metrics.HeadLength);
         var baseY = end.Y - (uy * metrics.HeadLength);
+        var outerBaseX = baseX - (ux * metrics.NeckInset);
+        var outerBaseY = baseY - (uy * metrics.NeckInset);
         var polygon = new[]
         {
             new PointF((float)start.X, (float)start.Y),
@@ -390,12 +392,12 @@ internal sealed class NativeDrawingPreviewWindow : Form
                 (float)(baseX + (perpendicularX * metrics.BaseHalfWidth)),
                 (float)(baseY + (perpendicularY * metrics.BaseHalfWidth))),
             new PointF(
-                (float)(baseX + (perpendicularX * metrics.HeadHalfWidth)),
-                (float)(baseY + (perpendicularY * metrics.HeadHalfWidth))),
+                (float)(outerBaseX + (perpendicularX * metrics.HeadHalfWidth)),
+                (float)(outerBaseY + (perpendicularY * metrics.HeadHalfWidth))),
             new PointF((float)end.X, (float)end.Y),
             new PointF(
-                (float)(baseX - (perpendicularX * metrics.HeadHalfWidth)),
-                (float)(baseY - (perpendicularY * metrics.HeadHalfWidth))),
+                (float)(outerBaseX - (perpendicularX * metrics.HeadHalfWidth)),
+                (float)(outerBaseY - (perpendicularY * metrics.HeadHalfWidth))),
             new PointF(
                 (float)(baseX - (perpendicularX * metrics.BaseHalfWidth)),
                 (float)(baseY - (perpendicularY * metrics.BaseHalfWidth))),
@@ -479,12 +481,14 @@ internal sealed class NativeDrawingPreviewWindow : Form
         var halfWidth = metrics.HeadHalfWidth;
         var baseX = end.X - (ux * headLength);
         var baseY = end.Y - (uy * headLength);
+        var outerBaseX = baseX - (ux * metrics.NeckInset);
+        var outerBaseY = baseY - (uy * metrics.NeckInset);
         var left = new PointF(
-            (float)(baseX - (uy * halfWidth)),
-            (float)(baseY + (ux * halfWidth)));
+            (float)(outerBaseX - (uy * halfWidth)),
+            (float)(outerBaseY + (ux * halfWidth)));
         var right = new PointF(
-            (float)(baseX + (uy * halfWidth)),
-            (float)(baseY - (ux * halfWidth)));
+            (float)(outerBaseX + (uy * halfWidth)),
+            (float)(outerBaseY - (ux * halfWidth)));
         var tip = new PointF(end.X, end.Y);
         if (style == ArrowStyle.Hollow)
         {

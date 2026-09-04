@@ -757,6 +757,80 @@ public sealed class ImageEditorCanvasTests
     }
 
     [Fact]
+    public void TaperedArrowHeadKeepsWideBarbedShoulders()
+    {
+        var method = typeof(ImageEditorCanvas).GetMethod(
+            "CreateTaperedArrowPoints",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var points = Assert.IsType<System.Windows.Media.PointCollection>(
+            method.Invoke(
+                null,
+                [new WpfPoint(0, 0), new WpfPoint(500, 0), 9d]));
+
+        // For a horizontal arrow, points 2 and 3 are the shaft-to-head step
+        // and the outer head shoulder respectively. Keep both the shoulder
+        // width and its step large enough to remain visible at 9px.
+        var baseHalfWidth = Math.Abs(points[2].Y);
+        var headHalfWidth = Math.Abs(points[3].Y);
+        Assert.True(headHalfWidth >= 19.5);
+        Assert.True(headHalfWidth - baseHalfWidth >= 8);
+        Assert.True(points[3].X < points[2].X);
+        Assert.Equal(points[3].X, points[5].X, precision: 6);
+    }
+
+    [Fact]
+    public void ShortTaperedArrowKeepsAReadableHeadLength()
+    {
+        var method = typeof(ImageEditorCanvas).GetMethod(
+            "CreateTaperedArrowPoints",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var points = Assert.IsType<System.Windows.Media.PointCollection>(
+            method.Invoke(
+                null,
+                [new WpfPoint(0, 0), new WpfPoint(100, 0), 9d]));
+
+        // Point 2 is the shaft-side head base on a horizontal arrow. Keep
+        // the short-arrow head long enough to read as an arrowhead.
+        Assert.True(100 - points[2].X >= 37);
+    }
+
+    [Fact]
+    public void ArrowProportionsStayBalancedAcrossLengthAndStrokeWidth()
+    {
+        var method = typeof(ImageEditorCanvas).GetMethod(
+            "CreateTaperedArrowPoints",
+            BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(method);
+
+        var longThin = Assert.IsType<System.Windows.Media.PointCollection>(
+            method.Invoke(
+                null,
+                [new WpfPoint(0, 0), new WpfPoint(600, 0), 3d]));
+        var shortThin = Assert.IsType<System.Windows.Media.PointCollection>(
+            method.Invoke(
+                null,
+                [new WpfPoint(0, 0), new WpfPoint(100, 0), 3d]));
+        var longThick = Assert.IsType<System.Windows.Media.PointCollection>(
+            method.Invoke(
+                null,
+                [new WpfPoint(0, 0), new WpfPoint(600, 0), 24d]));
+
+        var longThinHeadLength = 600 - longThin[2].X;
+        var shortThinHeadLength = 100 - shortThin[2].X;
+        var longThinHeadWidth = Math.Abs(longThin[3].Y);
+        var longThickBaseWidth = Math.Abs(longThick[2].Y);
+
+        Assert.InRange(shortThinHeadLength, 20, 40);
+        Assert.InRange(longThinHeadLength, 30, 48);
+        Assert.True(longThinHeadWidth <= 14);
+        Assert.True(longThickBaseWidth <= 18);
+    }
+
+    [Fact]
     public void ArrowDefaultsToFilledAndHollowStyleUsesAnOutlinedPolygon()
     {
         var annotation = new ArrowAnnotation(

@@ -2,6 +2,7 @@ namespace Screenshot.App.Text;
 
 public sealed class OrderedTranslationProvider : ITranslationProvider
 {
+    public event Action<string, bool, string>? AvailabilityChanged;
     // Smaller batches keep online providers under their latency budget; a
     // full-screen OCR pass still fans out across several batches, and a
     // timed-out batch is halved again before we give up on that provider.
@@ -122,17 +123,15 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                         [result.Text],
                         targetLanguage))
                 {
+                    AvailabilityChanged?.Invoke(provider.Id, true, "翻译成功");
                     return result;
                 }
 
-                errors.Add(FormatError(
-                    provider,
-                    result.IsSuccess
-                        ? GetInvalidTranslationMessage(
-                            [text],
-                            [result.Text],
-                            targetLanguage)
-                        : result.ErrorMessage));
+                var failureMessage = result.IsSuccess
+                    ? GetInvalidTranslationMessage([text], [result.Text], targetLanguage)
+                    : result.ErrorMessage;
+                AvailabilityChanged?.Invoke(provider.Id, false, failureMessage ?? "翻译失败");
+                errors.Add(FormatError(provider, failureMessage));
             }
             catch (OperationCanceledException) when (
                 cancellationToken.IsCancellationRequested)
@@ -141,6 +140,7 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
             }
             catch (Exception exception)
             {
+                AvailabilityChanged?.Invoke(provider.Id, false, exception.Message);
                 errors.Add(FormatError(provider, exception.Message));
             }
         }
@@ -1108,6 +1108,7 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                         targetLanguage))
                 {
                     chain.MarkSucceeded(provider);
+                    AvailabilityChanged?.Invoke(provider.Id, true, "翻译成功");
                     return result;
                 }
 
@@ -1122,6 +1123,7 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
                 // after those retries are exhausted, so later batches still
                 // skip a truly stuck provider without re-probing forever.
                 chain.MarkFailed(provider, providers);
+                AvailabilityChanged?.Invoke(provider.Id, false, failureMessage ?? "翻译失败");
                 errors.Add(FormatError(provider, failureMessage));
             }
             catch (OperationCanceledException) when (
@@ -1132,6 +1134,7 @@ public sealed class OrderedTranslationProvider : ITranslationProvider
             catch (Exception exception)
             {
                 chain.MarkFailed(provider, providers);
+                AvailabilityChanged?.Invoke(provider.Id, false, exception.Message);
                 errors.Add(FormatError(provider, exception.Message));
             }
         }

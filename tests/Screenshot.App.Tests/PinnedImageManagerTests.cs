@@ -504,6 +504,12 @@ public sealed class PinnedImageManagerTests
                 toolbar.FindName("EmojiPalette"));
             var palettePanel = Assert.IsType<System.Windows.Controls.WrapPanel>(
                 toolbar.FindName("EmojiPalettePanel"));
+            var colorOptions = Assert.IsType<System.Windows.Controls.StackPanel>(
+                toolbar.FindName("ColorOptions"));
+            var strokeSlider = Assert.IsType<System.Windows.Controls.Slider>(
+                toolbar.FindName("StrokeWidthSlider"));
+            var redColorButton = Assert.IsType<System.Windows.Controls.Button>(
+                toolbar.FindName("RedColorButton"));
             string? selectedEmoji = null;
             toolbar.EmojiSelected += emoji => selectedEmoji = emoji;
 
@@ -511,6 +517,9 @@ public sealed class PinnedImageManagerTests
                 System.Windows.Controls.Primitives.ToggleButton.CheckedEvent));
 
             Assert.Equal(System.Windows.Visibility.Visible, palette.Visibility);
+            Assert.Equal(System.Windows.Visibility.Visible, colorOptions.Visibility);
+            Assert.Equal(System.Windows.Visibility.Visible, strokeSlider.Visibility);
+            Assert.Equal(System.Windows.Visibility.Collapsed, redColorButton.Visibility);
             Assert.Equal(Editor.EmojiStickerCatalog.All.Count, palettePanel.Children.Count);
 
             var firstEmoji = Assert.IsType<System.Windows.Controls.Button>(
