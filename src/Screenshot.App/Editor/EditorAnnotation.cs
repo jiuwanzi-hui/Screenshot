@@ -7,6 +7,17 @@ namespace Screenshot.App.Editor;
 
 public abstract record EditorAnnotation;
 
+public sealed record LineAnnotation(
+    WpfPoint Start,
+    WpfPoint End,
+    WpfColor StrokeColor,
+    double StrokeWidth,
+    bool IsWavy = false) : EditorAnnotation;
+
+public sealed record RectangleMosaicAnnotation(
+    WpfRect Bounds,
+    int BlockSize) : EditorAnnotation;
+
 public sealed record RectangleAnnotation(
     WpfRect Bounds,
     WpfColor StrokeColor,
@@ -22,7 +33,8 @@ public sealed record ArrowAnnotation(
     WpfPoint End,
     WpfColor StrokeColor,
     double StrokeWidth,
-    ArrowStyle Style = ArrowStyle.Filled) : EditorAnnotation;
+    ArrowStyle Style = ArrowStyle.Filled,
+    bool IsDoubleArrow = false) : EditorAnnotation;
 
 public sealed record CurvedArrowAnnotation(
     IReadOnlyList<WpfPoint> Points,
@@ -39,7 +51,14 @@ public sealed record TextAnnotation(
     WpfPoint Position,
     string Text,
     WpfColor Color,
-    double FontSize) : EditorAnnotation;
+    double FontSize) : EditorAnnotation
+{
+    public TextAnnotationBackground? Background { get; init; }
+}
+
+// Capture the chosen theme colors so exports and subsequent edits retain the
+// same appearance even after the application theme changes.
+public sealed record TextAnnotationBackground(WpfColor Fill, WpfColor Border);
 
 public sealed record EmojiAnnotation(
     WpfPoint Position,
@@ -49,7 +68,9 @@ public sealed record EmojiAnnotation(
 public sealed record NumberAnnotation(
     WpfPoint Position,
     double Size,
-    WpfColor Color) : EditorAnnotation;
+    WpfColor Color,
+    int? Value = null,
+    NumberingStyle Style = NumberingStyle.Digits) : EditorAnnotation;
 
 public sealed record TranslatedTextAnnotationRegion(
     WpfRect Bounds,

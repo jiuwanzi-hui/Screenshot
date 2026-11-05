@@ -228,13 +228,16 @@ public sealed class ElevationLaunchService
             // repeatedly fall back to a second UAC process.
             queryInfo.ArgumentList.Add("/FO");
             queryInfo.ArgumentList.Add("LIST");
+            queryInfo.ArgumentList.Add("/V");
             var taskXml = ReadSchtasksOutput(queryInfo);
 
             Core.StartupDiagnostics.LogElevation($"TryRunPersistentElevationTask: task query result hasXml={taskXml is not null}");
 
-            // 对于便携版，只要任务存在就尝试运行，不验证路径
-            // 因为便携版可能每次解压到不同位置
-            if (taskXml is not null)
+            // Never run a task merely because its name matches. Older builds
+            // used one global task name, so it could still point at a stale
+            // checkout (for example the development Release directory).
+            if (taskXml is not null &&
+                TaskOutputTargetsProcess(taskXml, processPath))
             {
                 Core.StartupDiagnostics.LogElevation($"TryRunPersistentElevationTask: running task '{taskName}'");
                 var ran = RunPersistentTask(taskName);
@@ -254,10 +257,12 @@ public sealed class ElevationLaunchService
             stableQueryInfo.ArgumentList.Add(StablePersistentElevationTaskName);
             stableQueryInfo.ArgumentList.Add("/FO");
             stableQueryInfo.ArgumentList.Add("LIST");
+            stableQueryInfo.ArgumentList.Add("/V");
             var stableTaskXml = ReadSchtasksOutput(stableQueryInfo);
             Core.StartupDiagnostics.LogElevation($"TryRunPersistentElevationTask: stable task query result hasXml={stableTaskXml is not null}");
 
-            if (stableTaskXml is not null)
+            if (stableTaskXml is not null &&
+                TaskOutputTargetsProcess(stableTaskXml, processPath))
             {
                 Core.StartupDiagnostics.LogElevation($"TryRunPersistentElevationTask: running stable task '{StablePersistentElevationTaskName}'");
                 var ran = RunPersistentTask(StablePersistentElevationTaskName);
@@ -381,7 +386,7 @@ public sealed class ElevationLaunchService
             return false;
         }
 
-        if (!process.WaitForExit(3000))
+        if (!process.WaitForExit(1000))
         {
             try
             {
@@ -410,12 +415,33 @@ public sealed class ElevationLaunchService
 
         var output = process.StandardOutput.ReadToEnd();
         _ = process.StandardError.ReadToEnd();
-        if (!process.WaitForExit(3000) || process.ExitCode != 0)
+        if (!process.WaitForExit(1000) || process.ExitCode != 0)
         {
             return null;
         }
 
         return output;
+    }
+
+    private static bool TaskOutputTargetsProcess(
+        string taskOutput,
+        string processPath)
+    {
+        if (string.IsNullOrWhiteSpace(taskOutput) ||
+            string.IsNullOrWhiteSpace(processPath))
+        {
+            return false;
+        }
+
+        // /FO LIST prints the executable in the "Task To Run" field. Compare
+        // normalized paths so a task from another checkout can never hijack a
+        // Start-menu launch.
+        var normalizedOutput = taskOutput.Replace('/', '\\');
+        var normalizedPath = Path.GetFullPath(processPath)
+            .TrimEnd(Path.DirectorySeparatorChar)
+            .Replace('/', '\\');
+        return normalizedOutput.Contains(normalizedPath,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool TryRemoveTask(string taskName)
@@ -439,7 +465,22 @@ public sealed class ElevationLaunchService
         var runInfo = CreateSchtasksStartInfo("/Run");
         runInfo.ArgumentList.Add("/TN");
         runInfo.ArgumentList.Add(taskName);
-        return RunSchtasks(runInfo);
+        // /Run only queues the task. Waiting for schtasks.exe here blocks the
+        // startup dispatcher while Task Scheduler contacts the service and
+        // was the visible pause users saw on every elevated launch.
+        try
+        {
+            using var process = Process.Start(runInfo);
+            return process is not null;
+        }
+        catch (Win32Exception)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     private static bool WaitForReplacementProcess(string processPath)

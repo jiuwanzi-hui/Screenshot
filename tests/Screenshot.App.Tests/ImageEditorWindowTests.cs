@@ -260,27 +260,20 @@ public sealed class ImageEditorWindowTests
             {
                 window.Show();
                 window.UpdateLayout();
-                AssertBrushStartColor(window.Background, "#F7F8FB");
-                AssertBrushStartColor(
-                    Assert.IsType<System.Windows.Controls.Border>(
-                        window.FindName("EditorShell")).Background,
-                    "#FFFFFF");
-                AssertBrushStartColor(
-                    Assert.IsType<System.Windows.Controls.Border>(
-                        window.FindName("EditorToolbarPanel")).Background,
-                    "#FFFFFF");
+                var lightBackground = Assert.IsType<DrawingBrush>(window.Background);
+                Assert.Same(window.FindResource("ImageEditorWindowBackgroundBrush"), lightBackground);
+                AssertBrushColor(((System.Windows.Controls.Border)window.FindName("EditorShell")).Background, "#00FFFFFF");
+                Assert.Same(window.FindResource("AppGlassBackgroundBrush"), ((System.Windows.Controls.Border)window.Content).Background);
+                AssertBrushColor(((System.Windows.Controls.Border)window.FindName("EditorToolbarPanel")).Background, "#00FFFFFF");
 
                 themeManager.Apply(AppTheme.ForestNight);
                 window.UpdateLayout();
-                AssertBrushStartColor(window.Background, "#15181C");
-                AssertBrushStartColor(
-                    Assert.IsType<System.Windows.Controls.Border>(
-                        window.FindName("EditorShell")).Background,
-                    "#20262C");
-                AssertBrushStartColor(
-                    Assert.IsType<System.Windows.Controls.Border>(
-                        window.FindName("EditorToolbarPanel")).Background,
-                    "#1A2026");
+                Assert.IsType<DrawingBrush>(window.Background);
+                Assert.Same(window.FindResource("ImageEditorWindowBackgroundBrush"), window.Background);
+                Assert.NotSame(lightBackground, window.Background);
+                AssertBrushColor(((System.Windows.Controls.Border)window.FindName("EditorShell")).Background, "#00FFFFFF");
+                Assert.Same(window.FindResource("AppGlassBackgroundBrush"), ((System.Windows.Controls.Border)window.Content).Background);
+                AssertBrushColor(((System.Windows.Controls.Border)window.FindName("EditorToolbarPanel")).Background, "#00FFFFFF");
             }
             finally
             {
@@ -298,11 +291,4 @@ public sealed class ImageEditorWindowTests
             solidBrush.Color);
     }
 
-    private static void AssertBrushStartColor(Brush brush, string expected)
-    {
-        var gradient = Assert.IsType<LinearGradientBrush>(brush);
-        Assert.Equal(
-            (Color)ColorConverter.ConvertFromString(expected),
-            gradient.GradientStops[0].Color);
-    }
 }

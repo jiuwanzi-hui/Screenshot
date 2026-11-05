@@ -21,9 +21,9 @@ public static class AppMetadata
     public const string PinnedImagesDirectoryName = "PinnedImages";
     public const string ReleaseHistoryCacheFileName = "release-history-cache.json";
     public const string TranslationModelsDirectoryName = "TranslationModels";
-    public const string HighQualityOcrModelDirectoryName = "PP-OCRv6-Small";
+    public const string HighQualityOcrModelDirectoryName = "PP-OCRv6-Medium";
     public const string LocalLargeTranslationModelDirectoryName =
-        "Qwen2.5-1.5B-Instruct-Q4-K-M";
+        "TranslateGemma-4B-Q4-K-M";
     public const string StartupRegistrationValueName = "Screenshot.App";
 
     public static bool IsInstalled => File.Exists(Path.Combine(

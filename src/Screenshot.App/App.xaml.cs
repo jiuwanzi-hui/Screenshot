@@ -43,9 +43,12 @@ public partial class App : System.Windows.Application, IDisposable
     private PinnedImageManager? _pinnedImageManager;
     private HttpClient? _translationHttpClient;
     private AppThemeManager? _themeManager;
+    internal AppTheme FeedbackTheme => _themeManager?.ResolvedTheme ?? _currentSettings.Theme;
     private SingleInstanceCoordinator? _singleInstanceCoordinator;
     private AppSettings _currentSettings = AppSettings.CreateDefault();
     private Func<MainWindow>? _mainWindowFactory;
+    private SettingsStore? _captureSettingsStore;
+    private int _lastSettingsSection;
     private string? _pendingStartupStatus;
     private string? _pendingUpdateFailureStatus;
     private bool _isShuttingDown;
@@ -54,13 +57,17 @@ public partial class App : System.Windows.Application, IDisposable
     private long _captureStateNotificationVersion;
     private long _appliedCaptureStateNotificationVersion;
     private bool _startupCompleted;
+    private IdleEfficiencyController? _idleEfficiency;
+    private CancellationTokenSource? _modelCleanupCancellationSource;
 
     internal bool IsCaptureInProgressForDiagnostics => _isCaptureInProgress;
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        TranslationProfileHealth.Changed += OnTranslationProfileHealthChanged;
         WpfRenderingCompatibility.ConfigureForCurrentSession();
         base.OnStartup(e);
+        TextBoxClipboardCommands.Install();
 #if DEBUG
         AppDomain.CurrentDomain.UnhandledException += OnDebugUnhandledException;
         TaskScheduler.UnobservedTaskException += OnDebugUnobservedTaskException;
@@ -84,20 +91,37 @@ public partial class App : System.Windows.Application, IDisposable
         CaptureTimingDiagnostics.Mark(
             "app-startup",
             $"pid={Environment.ProcessId} base={AppContext.BaseDirectory} background={startInBackground}");
-        _singleInstanceCoordinator = SingleInstanceCoordinator.TryAcquire(
-            SingleInstanceName,
-            RequestPrimaryWindowActivation,
-            signalExistingInstance: !startInBackground);
-        if (_singleInstanceCoordinator is null)
+        if (_featureWorkerPipeName is null)
         {
-            Shutdown();
-            return;
+            _singleInstanceCoordinator = SingleInstanceCoordinator.TryAcquire(
+                SingleInstanceName,
+                RequestPrimaryWindowActivation,
+                signalExistingInstance: !startInBackground);
+            if (_singleInstanceCoordinator is null)
+            {
+                Shutdown();
+                return;
+            }
         }
-
         var settingsStore = new SettingsStore();
+        _captureSettingsStore = settingsStore;
+        settingsStore.DeferredSaveFailed += exception =>
+        {
+            if (Dispatcher.HasShutdownStarted) return;
+            _ = Dispatcher.BeginInvoke(new Action(() =>
+            {
+                var message = $"无法保存标注设置：{exception.Message}";
+                if (_mainWindow is { } window) window.ShowStatus(message);
+                else _pendingStartupStatus = message;
+            }));
+        };
         CaptureTimingDiagnostics.Mark("startup-settings-store-created");
         var elevationLaunchService = new ElevationLaunchService();
-        var elevationSettings = settingsStore.Load().Settings;
+        // A feature worker receives the resident's already validated settings
+        // in the activation packet. Do not repeat disk/DPAPI/migration work on
+        // every cold screenshot before that packet can be read.
+        var elevationSettings = _featureWorkerPipeName is null
+            ? settingsStore.Load().Settings : _currentSettings;
         var elevationResult = new ElevationLaunchResult(
             RelaunchStarted: false,
             Warning: null);
@@ -106,8 +130,8 @@ public partial class App : System.Windows.Application, IDisposable
                 argument,
                 ElevationLaunchService.ElevatedRelaunchArgument,
                 StringComparison.OrdinalIgnoreCase));
-        var isElevated = ElevationLaunchService.IsCurrentProcessElevated();
-        var isPortableLaunch = !AppMetadata.IsInstalled;
+        var isElevated = _featureWorkerPipeName is null && ElevationLaunchService.IsCurrentProcessElevated();
+        var isPortableLaunch = _featureWorkerPipeName is not null || !AppMetadata.IsInstalled;
         StartupDiagnostics.LogElevation($"Elevation state check: elevated={isElevated}, marker={hasElevatedRelaunchMarker}, request={elevationSettings.RequestAdministratorPrivileges}");
         CaptureTimingDiagnostics.Mark(
             "elevation-state",
@@ -116,7 +140,7 @@ public partial class App : System.Windows.Application, IDisposable
         // The elevated child is the only process that can create the
         // highest-run-level task. This is done after the first UAC consent;
         // failures are intentionally non-fatal and retain the runas fallback.
-        if (!isPortableLaunch &&
+        if (_featureWorkerPipeName is null && !isPortableLaunch &&
             hasElevatedRelaunchMarker &&
             isElevated &&
             Environment.ProcessPath is { } elevatedProcessPath)
@@ -134,7 +158,7 @@ public partial class App : System.Windows.Application, IDisposable
         }
 
 #if !DEBUG
-        if (!isPortableLaunch &&
+        if (_featureWorkerPipeName is null && !isPortableLaunch &&
             elevationLaunchService.ShouldRequestElevation(elevationSettings, e.Args))
         {
             StartupDiagnostics.LogElevation("Elevation required - entering elevation path");
@@ -142,7 +166,7 @@ public partial class App : System.Windows.Application, IDisposable
             // Release the per-session instance event before either the
             // persistent task or the UAC child starts. Otherwise the new
             // elevated process can be mistaken for a duplicate and exit.
-            _singleInstanceCoordinator.Dispose();
+            _singleInstanceCoordinator?.Dispose();
             _singleInstanceCoordinator = null;
 
             if (Environment.ProcessPath is { } processPath)
@@ -189,19 +213,26 @@ public partial class App : System.Windows.Application, IDisposable
         CaptureTimingDiagnostics.Mark("elevation-path-complete");
         var elevationWarning = elevationResult.Warning;
 
-        var dataMigrationResult = InstalledDataMigration.TryMigrateLegacyData();
+        var dataMigrationResult = _featureWorkerPipeName is null
+            ? InstalledDataMigration.TryMigrateLegacyData()
+            : new InstalledDataMigrationResult(false, null);
         WindowPlacementService.Initialize(AppMetadata.WindowPlacementsPath);
-        var loadResult = settingsStore.Load();
+        var loadResult = _featureWorkerPipeName is null
+            ? settingsStore.Load() : new SettingsLoadResult(_currentSettings, null);
         var credentialStore = new DpapiTranslationCredentialStore();
-        var loadedSettings = MigrateLegacySaveDirectory(
+        var loadedSettings = _featureWorkerPipeName is not null ? _currentSettings : MigrateLegacySaveDirectory(
             loadResult.Settings,
             dataMigrationResult.Migrated);
-        _currentSettings = MigrateLegacyTranslationSettings(
+        _currentSettings = _featureWorkerPipeName is not null ? loadedSettings : MigrateLegacyTranslationSettings(
             loadedSettings,
             settingsStore,
             credentialStore);
+        TranslationTargetPreferences.Configure(_currentSettings.TranslationTargetLanguage, language =>
+            PersistCapturePreference(current => current with { TranslationTargetLanguage = language },
+                window => window.SaveTranslationTargetLanguage(language)));
         CaptureTimingDiagnostics.Mark("startup-settings-loaded");
-        _ = Task.Run(() =>
+        UiLocalization.Apply(_currentSettings.InterfaceLanguage);
+        if (_featureWorkerPipeName is null) _ = Task.Run(() =>
         {
             CaptureHistoryService.PruneCacheDirectory(
                 _currentSettings.HistoryLimit);
@@ -216,12 +247,14 @@ public partial class App : System.Windows.Application, IDisposable
         {
             settingsStore.Save(_currentSettings);
         }
-        _themeManager = new AppThemeManager();
+        _themeManager = new AppThemeManager(residentShell: _useResidentHost);
+        WindowActivation.Initialize();
+        ClosedWindowAutomation.Initialize();
         _themeManager.ThemeChanged += OnThemeChanged;
-        _themeManager.Apply(_currentSettings.Theme);
+        if (_featureWorkerPipeName is null) _themeManager.Apply(_currentSettings.Theme);
         CaptureTimingDiagnostics.Mark("startup-theme-applied");
         var startupRegistrationService = new StartupRegistrationService();
-        var startupWarning = elevationWarning ?? (loadResult.Warning is null
+        var startupWarning = elevationWarning ?? (loadResult.Warning is null && _featureWorkerPipeName is null
             ? SynchronizeStartupRegistration(
                 startupRegistrationService,
                 _currentSettings.LaunchAtStartup)
@@ -233,15 +266,22 @@ public partial class App : System.Windows.Application, IDisposable
             deferLowLevelInputHooks: true);
         CaptureTimingDiagnostics.Mark("startup-hotkey-manager-created");
         _hotKeyManager.HotKeyPressed += OnHotKeyPressed;
-        var hotKeyWarning = TryApplyInitialHotKeys(
+        _hotKeyManager.EscapePressed += OnFeatureEscapePressed;
+        var hotKeyWarning = _featureWorkerPipeName is not null ? null : TryApplyInitialHotKeys(
             _hotKeyManager,
             _currentSettings);
         CaptureTimingDiagnostics.Mark(
             "hotkey-registration-complete",
             $"warning={(hotKeyWarning is null ? "none" : hotKeyWarning)}");
+        if (_useResidentHost)
+        {
+            StartResidentShell(e.Args, startInBackground,
+                dataMigrationResult.Warning ?? loadResult.Warning ?? startupWarning ?? hotKeyWarning);
+            return;
+        }
         _translationHttpClient = new HttpClient
         {
-            Timeout = TimeSpan.FromSeconds(30),
+            Timeout = Timeout.InfiniteTimeSpan,
         };
 
         // The settings window is not needed by the tray or capture paths. Its
@@ -256,7 +296,9 @@ public partial class App : System.Windows.Application, IDisposable
             _translationHttpClient);
         AnnotationToolPreferences.Configure(
             _currentSettings.AnnotationToolSettings,
-            settings => _mainWindow?.SaveAnnotationToolSettings(settings));
+            settings => PersistCapturePreference(
+                current => current with { AnnotationToolSettings = settings.ToArray() },
+                window => window.SaveAnnotationToolSettings(settings)));
         _captureHistoryService = new CaptureHistoryService();
         _captureHistoryService.ConfigureRetentionPolicy(
             _currentSettings.ScreenshotHistoryRetentionDays,
@@ -266,13 +308,25 @@ public partial class App : System.Windows.Application, IDisposable
             TranslatePinnedImageAsync,
             () => _ = Dispatcher.BeginInvoke(ShowMainWindow),
             () => _currentSettings,
-            colorText => _mainWindow?.SaveCustomStrokeColor(colorText),
-            colors => _mainWindow?.SaveCustomColorPalette(colors),
-            arrowStyle => _mainWindow?.SaveArrowStyle(arrowStyle),
-            arrowToolMode => _mainWindow?.SaveArrowToolMode(arrowToolMode),
-            shapeToolMode => _mainWindow?.SaveShapeToolMode(shapeToolMode),
+            colorText => PersistCapturePreference(
+                current => current with { CustomStrokeColor = colorText },
+                window => window.SaveCustomStrokeColor(colorText)),
+            colors => PersistCapturePreference(
+                current => current with { CustomColorPalette = colors.ToArray() },
+                window => window.SaveCustomColorPalette(colors)),
+            arrowStyle => PersistCapturePreference(
+                current => current with { ArrowStyle = arrowStyle },
+                window => window.SaveArrowStyle(arrowStyle)),
+            arrowToolMode => PersistCapturePreference(
+                current => current with { ArrowToolMode = arrowToolMode },
+                window => window.SaveArrowToolMode(arrowToolMode)),
+            shapeToolMode => PersistCapturePreference(
+                current => current with { ShapeToolMode = shapeToolMode },
+                window => window.SaveShapeToolMode(shapeToolMode)),
             tool => _mainWindow?.SaveLastAnnotationTool(tool),
-            CopyPinnedGroupImageToClipboardAndHistory);
+            CopyPinnedGroupImageToClipboardAndHistory,
+            RecognizePinnedImageAsync,
+            TranslatePinnedImageWithCancellationAsync);
         _pinnedImageManager.DisplayStateChanged +=
             OnPinnedImageDisplayStateChanged;
         // Persisted pin images are optional state recovery. Defer image decode
@@ -285,21 +339,55 @@ public partial class App : System.Windows.Application, IDisposable
             _translationHttpClient,
             message => _mainWindow?.ShowStatus(message),
             suspended => _hotKeyManager.SetMouseShortcutsSuspended(suspended),
-            preferences => _mainWindow?.SaveVideoRecordingPreferences(preferences),
-            preferences => _mainWindow?.SaveVideoRecordingAnnotationPreferences(
-                preferences),
-            arrowStyle => _mainWindow?.SaveArrowStyle(arrowStyle),
-            arrowToolMode => _mainWindow?.SaveArrowToolMode(arrowToolMode),
-            shapeToolMode => _mainWindow?.SaveShapeToolMode(shapeToolMode),
+            preferences => PersistCapturePreference(
+                current => current with
+                {
+                    VideoRecordingCodec = preferences.Codec,
+                    VideoRecordingFrameRate = preferences.FrameRate,
+                    RecordSystemAudio = preferences.RecordSystemAudio,
+                    RecordMicrophone = preferences.RecordMicrophone,
+                    MicrophoneDeviceId = preferences.MicrophoneDeviceId,
+                    CameraDeviceId = preferences.CameraDeviceId,
+                    ShowKeyboardInputInRecording = preferences.ShowKeyboardInput,
+                    ShowMouseInputInRecording = preferences.ShowMouseInput,
+                    ShowMouseTrailInRecording = preferences.ShowMouseTrail,
+                    ShowCameraInRecording = preferences.ShowCamera,
+                    RecordingOutputFormat = preferences.OutputFormat,
+                },
+                window => window.SaveVideoRecordingPreferences(preferences)),
+            preferences => PersistCapturePreference(
+                current => current with
+                {
+                    ShapeToolMode = preferences.ShapeToolMode,
+                    ArrowToolMode = preferences.ArrowToolMode,
+                    ArrowStyle = preferences.ArrowStyle,
+                    CustomStrokeColor = preferences.StrokeColor.Trim(),
+                    DefaultStrokeWidth = preferences.StrokeWidth,
+                },
+                window => window.SaveVideoRecordingAnnotationPreferences(preferences)),
+            arrowStyle => PersistCapturePreference(
+                current => current with { ArrowStyle = arrowStyle },
+                window => window.SaveArrowStyle(arrowStyle)),
+            arrowToolMode => PersistCapturePreference(
+                current => current with { ArrowToolMode = arrowToolMode },
+                window => window.SaveArrowToolMode(arrowToolMode)),
+            shapeToolMode => PersistCapturePreference(
+                current => current with { ShapeToolMode = shapeToolMode },
+                window => window.SaveShapeToolMode(shapeToolMode)),
             tool => _mainWindow?.SaveLastAnnotationTool(tool),
-            colorText => _mainWindow?.SaveCustomStrokeColor(colorText),
-            colors => _mainWindow?.SaveCustomColorPalette(colors),
+            colorText => PersistCapturePreference(
+                current => current with { CustomStrokeColor = colorText },
+                window => window.SaveCustomStrokeColor(colorText)),
+            colors => PersistCapturePreference(
+                current => current with { CustomColorPalette = colors.ToArray() },
+                window => window.SaveCustomColorPalette(colors)),
             (x, y) => _mainWindow?.SaveCaptureToolbarPosition(x, y),
             () => _ = Dispatcher.BeginInvoke(
                 () => ShowCaptureHistory(showVideo: true)),
-            () => _floatingCaptureWindow?.ShowRecordingAlreadyActiveFeedback(),
+            ShowRecordingAlreadyActiveFeedback,
             (kind, available, reason) => _mainWindow?.UpdateTranslationAvailabilityFromUse(
-                kind, available, reason));
+                kind, available, reason),
+            captureAspectRatioChanged: SaveCaptureAspectRatio);
         _regionCaptureCoordinator.CaptureStateChanged += OnCaptureStateChanged;
 
         var updateFailureRequested = e.Args.Any(argument =>
@@ -334,258 +422,118 @@ public partial class App : System.Windows.Application, IDisposable
                 AppMetadata.FormatUpdatedVersionStatus(updatedVersion);
         }
 
-        _trayIconService = new TrayIconService(_themeManager.ResolvedTheme);
-        _trayIconService.OpenSettingsRequested += OnOpenSettingsRequested;
-        _trayIconService.RegionCaptureRequested += OnRegionCaptureRequested;
-        _trayIconService.ScrollCaptureRequested += OnScrollCaptureRequested;
-        _trayIconService.VideoRecordingRequested += OnVideoRecordingRequested;
-        _trayIconService.HistoryRequested += OnHistoryRequested;
-        _trayIconService.HidePinnedImagesRequested += OnHidePinnedImagesRequested;
-        _trayIconService.ExitRequested += OnExitRequested;
-        UpdatePinnedImageTrayCommands();
-        _trayIconService.SetVisible(_currentSettings.ShowNotificationIcon);
-        CaptureTimingDiagnostics.Mark("startup-tray-ready");
-        // The floating button is optional chrome; create it during deferred
-        // startup so its HWND transition cannot hitch the launch cursor.
-
-        if (startInBackground)
+        if (_featureWorkerPipeName is null)
         {
-            _ = StartupFeedbackWindow.ShowAsync("已最小化启动");
-        }
+            _trayIconService = new TrayIconService(_themeManager.ResolvedTheme);
+            _trayIconService.OpenSettingsRequested += OnOpenSettingsRequested;
+            _trayIconService.RegionCaptureRequested += OnRegionCaptureRequested;
+            _trayIconService.ScrollCaptureRequested += OnScrollCaptureRequested;
+            _trayIconService.VideoRecordingRequested += OnVideoRecordingRequested;
+            _trayIconService.HistoryRequested += OnHistoryRequested;
+            _trayIconService.HidePinnedImagesRequested += OnHidePinnedImagesRequested;
+            _trayIconService.ExitRequested += OnExitRequested;
+            _trayIconService.RealtimeTranslationRequested += OnRealtimeTranslationRequested;
+            UpdatePinnedImageTrayCommands();
+            _trayIconService.SetVisible(_currentSettings.ShowNotificationIcon);
+            CaptureTimingDiagnostics.Mark("startup-tray-ready");
+            // The floating button is optional chrome; create it during deferred
+            // startup so its HWND transition cannot hitch the launch cursor.
 
-        // Showing the settings window at startup is controlled exclusively by
-        // the user's checkbox. Startup warnings and update failures are
-        // reported through the status area above and must not unexpectedly
-        // turn a tray/background launch into a settings window.
-        if (!startInBackground && _currentSettings.OpenSettingsOnStartup)
-        {
-            _ = Dispatcher.BeginInvoke(
-                System.Windows.Threading.DispatcherPriority.ApplicationIdle,
-                new Action(ShowMainWindow));
+            // Respect explicit background launches. An ordinary launch opens the
+            // settings only when requested or when an update failure needs action.
+            if (!startInBackground &&
+                (_currentSettings.OpenSettingsOnStartup || _pendingUpdateFailureStatus is not null))
+            {
+                _ = Dispatcher.BeginInvoke(
+                    System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                    new Action(ShowMainWindow));
+            }
+            else
+            {
+                // The unchecked startup option is also a background launch, even
+                // when the executable was opened without --background.
+                _ = StartupFeedbackWindow.ShowAsync("已最小化启动");
+            }
         }
-        else if (!startInBackground && _pendingUpdateFailureStatus is not null)
-        {
-            _ = Dispatcher.BeginInvoke(
-                System.Windows.Threading.DispatcherPriority.ApplicationIdle,
-                new Action(ShowMainWindow));
-        }
-
         // Do not force a full GC/workset trim during the first idle turn. It
         // suspends managed threads and can pause the desktop cursor exactly
         // when a low-end machine is still finishing its first paint. Capture
         // sessions keep their existing boundary trim after heavy work.
-        _ = Dispatcher.BeginInvoke(
-            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
-            new Action(PrewarmVideoRecordingAsync));
-
         _startupCompleted = true;
+        _idleEfficiency = new IdleEfficiencyController();
+        if (_featureWorkerPipeName is not null) StartFeatureWorker(_featureWorkerPipeName);
 
         // Keep startup responsive. These are best-effort warm-ups and must
         // never occupy the launch dispatcher or delay hotkey registration.
-        _ = BeginCaptureWarmupAfterStartupAsync();
-        _ = BeginDeferredStartupInfrastructureAsync();
+        if (_featureWorkerPipeName is null) _ = BeginDeferredStartupInfrastructureAsync();
     }
 
     private async Task BeginDeferredStartupInfrastructureAsync()
     {
-        await Task.Delay(TimeSpan.FromMilliseconds(250));
-        if (_isShuttingDown)
-        {
-            return;
-        }
-
-        _ = Dispatcher.BeginInvoke(
-            System.Windows.Threading.DispatcherPriority.Background,
-            new Action(() =>
-            {
-                if (!_isShuttingDown)
-                {
-                    try
-                    {
-                        _hotKeyManager?.StartInputHooks();
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        // The process may exit during the deferred startup window.
-                    }
-                }
-            }));
-
-        // Give the shell a longer quiet period before creating optional WPF
-        // chrome. On low-end machines the first desktop interaction often
-        // lands during this window; floating/pinned HWND creation must not
-        // compete with that input burst.
-        // Optional chrome is deliberately kept away from the launch/input
-        // window. Creating the floating HWND at 1.5s still caused a visible
-        // hitch on slower systems.
-        await Task.Delay(TimeSpan.FromMilliseconds(5000));
-        if (_isShuttingDown)
-        {
-            return;
-        }
-
-        _ = Dispatcher.BeginInvoke(
-            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
-            new Action(() =>
-            {
-                if (!_isShuttingDown)
-                {
-                    UpdateFloatingCaptureWindow();
-                }
-            }));
-
-        await Task.Delay(TimeSpan.FromMilliseconds(2500));
-        if (_isShuttingDown)
-        {
-            return;
-        }
-
-        _ = Dispatcher.BeginInvoke(
-            System.Windows.Threading.DispatcherPriority.ApplicationIdle,
-            new Action(() =>
-            {
-                if (!_isShuttingDown)
-                {
-                    _pinnedImageManager?.RestorePersisted();
-                }
-            }));
+        // RegisterHotKey is already active. Finish the optional first-paint
+        // surfaces before attaching UI-thread low-level hooks: otherwise a
+        // WPF constructor or image decode makes Windows wait for mouse input.
+        await System.Windows.Threading.Dispatcher.Yield(
+            System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        if (_isShuttingDown) return;
+        if (_featureWorkerPipeName is null) UpdateFloatingCaptureWindow();
+        await System.Windows.Threading.Dispatcher.Yield(
+            System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        if (_isShuttingDown) return;
+        _pinnedImageManager?.RestorePersisted();
+        await System.Windows.Threading.Dispatcher.Yield(
+            System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+        if (_isShuttingDown) return;
+        if (_featureWorkerPipeName is null) _hotKeyManager?.StartInputHooks();
+        _ = CleanupLegacyTranslationModelAfterStartupAsync();
+        // Capture windows, OCR models, audio devices and hardware encoders
+        // initialize on demand. Launching the tray app must not initialize
+        // every capture backend a few seconds later.
     }
 
-    private async Task BeginCaptureWarmupAfterStartupAsync()
+    private async Task CleanupLegacyTranslationModelAfterStartupAsync()
     {
-        // Do not construct a complete CaptureOverlayWindow during startup.
-        // Its XAML/resource tree and layout are UI-thread work (the diagnostic
-        // logs measured roughly 0.4-0.5 s), which steals pointer/compositor
-        // time a few seconds after launch. Only the cheap native/screen/OCR
-        // warm-ups remain, and they happen after the initial launch burst.
-        await Task.Delay(TimeSpan.FromMilliseconds(3500));
-        if (_isShuttingDown)
-        {
-            return;
-        }
-
-        CaptureTimingDiagnostics.Mark("startup-warmup-scheduled");
-        _ = Task.Run(() =>
-        {
-            CaptureTimingDiagnostics.Mark("startup-screen-warmup-start");
-            PrewarmScreenCaptureBackend();
-            PrewarmColorPickerSampleBackend();
-            CaptureTimingDiagnostics.Mark("startup-screen-warmup-end");
-        });
-
-        // WinForms HWND creation must remain on the WPF STA. Run it after the
-        // application is idle so it cannot add launch latency.
-        _ = Dispatcher.BeginInvoke(
-            System.Windows.Threading.DispatcherPriority.ContextIdle,
-            new Action(() =>
-            {
-                CaptureTimingDiagnostics.Mark("startup-native-warmup-start");
-                PrewarmCaptureWindows();
-                // Warm the WPF capture visual tree while the dispatcher is
-                // genuinely idle. The first shortcut then reuses parsed
-                // templates, brushes and control metadata instead of doing
-                // that work on the user's first mouse movement.
-                CaptureOverlayWindow.PrewarmForStartup();
-                CaptureTimingDiagnostics.Mark("startup-native-warmup-end");
-            }));
-
-        // PP-OCR model loading is optional and can be several seconds on a
-        // low-power CPU. Start it from the worker as soon as the launch burst
-        // is over; it never runs on the WPF dispatcher.
-        await Task.Delay(TimeSpan.FromMilliseconds(1200));
-        if (!_isShuttingDown)
-        {
-            _ = HighQualityOcrService.PrewarmAsync();
-        }
-
-    }
-
-    private static void PrewarmCaptureWindows()
-    {
-        // Keep one initialized native HWND set available for the next
-        // interactive session. Creating and disposing it here only warms JIT;
-        // retaining it removes the WinForms handle cost from the hotkey edge.
-        CaptureOverlayWindow.PrewarmNativeWindows();
-    }
-
-    private static void PrewarmScreenCaptureBackend()
-    {
-        // Touch the GDI capture paths with a tiny probe. Capturing the whole
-        // virtual desktop here can itself steal DWM time a few seconds after
-        // launch, which is exactly when users expect the pointer to remain
-        // responsive. The real full-frame capture remains on the interaction
-        // path where it is shown asynchronously behind the overlay.
+        using var cancellation = new CancellationTokenSource();
+        _modelCleanupCancellationSource = cancellation;
         try
         {
-            var screen = System.Windows.Forms.Screen.PrimaryScreen;
-            if (screen is null || screen.Bounds.Width < 2 || screen.Bounds.Height < 2)
+            // Migrating an existing install must not hash gigabytes during
+            // startup, on the dispatcher, or while a capture is active.
+            await Task.Delay(TimeSpan.FromSeconds(30), cancellation.Token);
+            while (_isCaptureInProgress && !_isShuttingDown)
             {
-                return;
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellation.Token);
             }
 
-            var probe = new ScreenRegion(screen.Bounds.X, screen.Bounds.Y, 2, 2);
-            using var snapshot = ScreenCaptureService.Capture(probe);
-            _ = snapshot.WarmPreview();
-            using var layeredSnapshot = ScreenCaptureService.CaptureIncludingLayeredWindows(probe);
-            _ = layeredSnapshot.WarmPreview();
+            if (!_isShuttingDown)
+            {
+                var released = await LocalLargeTranslationModelManager.Shared.CleanupLegacyModelAsync(
+                    cancellation.Token);
+                if (released == 0)
+                {
+                    await LocalLargeTranslationModelManager.LightweightShared.CleanupLegacyModelAsync(
+                        cancellation.Token);
+                }
+            }
         }
-        catch
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
-            // The normal capture path retains its existing fallback handling.
         }
-    }
-
-    private static void PrewarmColorPickerSampleBackend()
-    {
-        // Warm the first magnifier BitmapSource/JIT path away from the user's
-        // first pointer move without changing the existing sample algorithm.
-        try
+        finally
         {
-            using var bitmap = new System.Drawing.Bitmap(
-                25,
-                25,
-                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-            _ = CaptureOverlayWindow.PrewarmColorPickerSample(bitmap);
+            _modelCleanupCancellationSource = null;
         }
-        catch
-        {
-            // The interactive path retains its normal lazy initialization.
-        }
-    }
-
-    private async void PrewarmVideoRecordingAsync()
-    {
-        // Let startup paint and settle before loading capture drivers. This is
-        // deliberately best-effort and never changes the visible startup flow.
-        // Start the capture warm-up shortly after the dispatcher is ready so
-        // the first pin/capture action does not pay the graphics initialization
-        // cost. Keep a small delay to let the startup window paint first.
-        // Codec/device initialization can contend with the first screenshot
-        // gesture. Let the first interactive capture settle before doing this
-        // optional warm-up; video recording has its own async fallback.
-        await Task.Delay(TimeSpan.FromSeconds(5));
-        if (_isShuttingDown || _isCaptureInProgress)
-        {
-            return;
-        }
-
-        var recorderWarmUp = RegionVideoRecorder.WarmUpAsync(
-            _currentSettings.VideoRecordingCodec,
-            _currentSettings.VideoRecordingFrameRate,
-            _currentSettings.RecordSystemAudio,
-            _currentSettings.RecordMicrophone,
-            _currentSettings.MicrophoneDeviceId);
-        await recorderWarmUp;
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
-#if DEBUG
+#if DEBUG || SNAPCUT_CAPTURE_DIAGNOSTICS
         CaptureTimingDiagnostics.Mark(
             "app-exit",
             $"code={e.ApplicationExitCode} shuttingDown={_isShuttingDown} " +
             $"capture={_isCaptureInProgress}");
 #endif
+        _captureSettingsStore?.FlushPendingSave();
         Dispose();
         StartupDiagnostics.Flush();
         CaptureTimingDiagnostics.Flush();
@@ -697,11 +645,23 @@ public partial class App : System.Windows.Application, IDisposable
 
     public void Dispose()
     {
+        _residentStartupFeedback?.Dispose();
+        _residentStartupFeedback = null;
+        _realtimeTranslationWindow?.Close();
+        _featureHost?.Dispose();
+        _residentSelectionCancellation?.Cancel();
+        _residentSelectionWindow?.Dispose();
+        _featureWorker?.Dispose();
+        TranslationProfileHealth.Changed -= OnTranslationProfileHealthChanged;
+        _idleEfficiency?.Dispose();
+        _idleEfficiency = null;
+        _modelCleanupCancellationSource?.Cancel();
         _mainWindowFactory = null;
         DisposeFloatingCaptureWindow();
         if (_regionCaptureCoordinator is not null)
         {
             _regionCaptureCoordinator.CaptureStateChanged -= OnCaptureStateChanged;
+            _regionCaptureCoordinator.Dispose();
             _regionCaptureCoordinator = null;
         }
         DisposeTrayIconService();
@@ -722,6 +682,10 @@ public partial class App : System.Windows.Application, IDisposable
             _mainWindow.ExitRequested -= OnExitRequested;
             _mainWindow.UpdateInstallationStarted -= OnUpdateInstallationStarted;
             _mainWindow.TextTranslationRequested -= OnTextTranslationRequested;
+            _mainWindow.ImageQuestionRequested -= OnImageQuestionRequested;
+        _mainWindow.RealtimeTranslationRequested -= OnRealtimeTranslationRequested;
+            _mainWindow.HiddenIdle -= OnSettingsWindowHiddenIdle;
+            _mainWindow.Closed -= OnSettingsWindowClosed;
         }
 
         _singleInstanceCoordinator?.Dispose();
@@ -742,11 +706,14 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void OnHidePinnedImagesRequested(object? sender, EventArgs e)
     {
+        if (ForwardFeature("hide-pins")) return;
         _ = Dispatcher.BeginInvoke(() => _pinnedImageManager?.HideAll());
     }
 
     private void OnPinnedImageDisplayStateChanged(object? sender, EventArgs e)
     {
+        PublishFeatureState();
+        _hotKeyManager?.NotifyDesktopContentChanged();
         UpdatePinnedImageTrayCommands();
     }
 
@@ -764,11 +731,13 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void OnRegionCaptureRequested(object? sender, EventArgs e)
     {
+        _idleEfficiency?.Wake();
         _ = Dispatcher.BeginInvoke((Action)RequestRegionCapture);
     }
 
     private void OnScrollCaptureRequested(object? sender, EventArgs e)
     {
+        _idleEfficiency?.Wake();
         _ = Dispatcher.BeginInvoke(
             (Action)(() => RequestScrollCapture(pointerContinuation: null)));
     }
@@ -788,42 +757,83 @@ public partial class App : System.Windows.Application, IDisposable
         _ = Dispatcher.BeginInvoke(() => ShowTextTranslationWindow());
     }
 
+    private void OnTranslationProfileHealthChanged(TranslationProfileHealthUpdate update)
+    {
+        if (_isShuttingDown || Dispatcher.HasShutdownStarted) return;
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_isShuttingDown || TranslationProfileHealth.Latest(update.Profile) != update) return;
+            var profiles = _currentSettings.TranslationProfiles;
+            if (!profiles.Any(profile => TranslationProfileHealth.SameConnection(profile, update.Profile))) return;
+            _currentSettings = _currentSettings with
+            {
+                TranslationProfiles = profiles.Select(profile => TranslationProfileHealth.SameConnection(profile, update.Profile)
+                    ? profile with { LastAvailability = update.IsAvailable, LastAvailabilityReason = update.Reason }
+                    : profile).ToArray(),
+            };
+            _mainWindow?.ApplyTranslationProfileHealth(update);
+            _captureSettingsStore?.QueueSave(_currentSettings);
+        }));
+    }
+
     private void OnSettingsSaved(object? sender, SettingsSavedEventArgs e)
     {
+        var previous = _currentSettings;
         _currentSettings = e.Settings;
-        _captureHistoryService?.ConfigureRetentionPolicy(
+        UiLocalization.Apply(e.Settings.InterfaceLanguage);
+        RefreshRealtimeTranslationSettings(previous, e.Settings);
+        PublishFeatureSettings();
+        if (previous.AutoOcrAfterCapture != e.Settings.AutoOcrAfterCapture)
+        {
+            _pinnedImageManager?.RefreshAutomaticOcrSetting();
+            CaptureOverlayWindow.ApplyAutomaticOcrSetting(e.Settings.AutoOcrAfterCapture);
+        }
+        if (previous.TranslationTargetLanguage != e.Settings.TranslationTargetLanguage)
+            TranslationTargetPreferences.Publish(e.Settings.TranslationTargetLanguage);
+        var screenshotRetentionChanged = previous.HistoryLimit != e.Settings.HistoryLimit ||
+            previous.ScreenshotHistoryRetentionDays != e.Settings.ScreenshotHistoryRetentionDays;
+        var videoRetentionChanged = previous.VideoHistoryLimit != e.Settings.VideoHistoryLimit ||
+            previous.VideoHistoryRetentionDays != e.Settings.VideoHistoryRetentionDays ||
+            previous.VideoSaveDirectory != e.Settings.VideoSaveDirectory;
+        if (screenshotRetentionChanged) _captureHistoryService?.ConfigureRetentionPolicy(
             e.Settings.ScreenshotHistoryRetentionDays,
             e.Settings.HistoryLimit);
-        _captureHistoryWindow?.UpdateRetentionPolicy(
+        if (screenshotRetentionChanged || videoRetentionChanged) _captureHistoryWindow?.UpdateRetentionPolicy(
             e.Settings.ScreenshotHistoryRetentionDays,
             e.Settings.HistoryLimit,
             e.Settings.VideoHistoryRetentionDays,
             e.Settings.VideoHistoryLimit);
-        if (_captureHistoryWindow is not null)
+        if (_captureHistoryWindow is not null && (screenshotRetentionChanged || videoRetentionChanged))
         {
             BeginCaptureHistoryRestore();
         }
-        _ = Task.Run(() =>
+        if (screenshotRetentionChanged || videoRetentionChanged) _ = Task.Run(() =>
         {
-            CaptureHistoryService.PruneCacheDirectory(e.Settings.HistoryLimit);
-            CaptureHistoryService.PruneCacheDirectoryByAge(
-                e.Settings.ScreenshotHistoryRetentionDays);
-            VideoHistoryService.ApplyRetentionPolicy(
+            if (screenshotRetentionChanged)
+            {
+                CaptureHistoryService.PruneCacheDirectory(e.Settings.HistoryLimit);
+                CaptureHistoryService.PruneCacheDirectoryByAge(e.Settings.ScreenshotHistoryRetentionDays);
+            }
+            if (videoRetentionChanged) VideoHistoryService.ApplyRetentionPolicy(
                 e.Settings.VideoSaveDirectory,
                 e.Settings.VideoHistoryRetentionDays,
                 e.Settings.VideoHistoryLimit);
         });
-        _themeManager?.Apply(e.Settings.Theme);
-        _trayIconService?.SetVisible(e.Settings.ShowNotificationIcon);
-        _captureHistoryWindow?.UpdateDirectories(
+        if (previous.Theme != e.Settings.Theme) _themeManager?.Apply(e.Settings.Theme);
+        if (previous.ShowNotificationIcon != e.Settings.ShowNotificationIcon)
+            _trayIconService?.SetVisible(e.Settings.ShowNotificationIcon);
+        if (previous.SaveDirectory != e.Settings.SaveDirectory || previous.VideoSaveDirectory != e.Settings.VideoSaveDirectory)
+            _captureHistoryWindow?.UpdateDirectories(
             e.Settings.SaveDirectory,
             e.Settings.VideoSaveDirectory);
-        UpdateFloatingCaptureWindow();
+        if (previous.ShowFloatingCaptureButton != e.Settings.ShowFloatingCaptureButton)
+            UpdateFloatingCaptureWindow();
     }
 
     private async Task RestoreCaptureHistoryAsync(
         CaptureHistoryService historyService)
     {
+        using var featureActivity = FeatureActivity.Begin();
         try
         {
             var items = await Task.Run(() => historyService.LoadPersistedItems(
@@ -865,12 +875,14 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void OnThemeChanged(object? sender, AppTheme theme)
     {
-        _mainWindow?.ApplySettingsPalette(theme);
+        if (_mainWindow is { } settingsWindow)
+            settingsWindow.ApplySettingsPalette(theme);
         _trayIconService?.ApplyTheme(theme);
     }
 
     private void UpdateFloatingCaptureWindow()
     {
+        if (_featureWorkerPipeName is not null) return;
         if (!_currentSettings.ShowFloatingCaptureButton)
         {
             DisposeFloatingCaptureWindow();
@@ -1000,6 +1012,11 @@ public partial class App : System.Windows.Application, IDisposable
 
         _appliedCaptureStateNotificationVersion = notificationVersion;
         _isCaptureInProgress = isInProgress;
+        _residentCaptureReady = isInProgress && _featureWorker is not null
+            ? _featureWorker.PrepareResidentCaptureAsync() : Task.CompletedTask;
+        PublishFeatureState();
+        _idleEfficiency?.SetCaptureActive(isInProgress);
+        MemoryFootprint.SetInteractionActive(isInProgress);
         CaptureTimingDiagnostics.Mark(
             "capture-state-applied",
             $"inProgress={isInProgress} version={notificationVersion} " +
@@ -1056,10 +1073,10 @@ public partial class App : System.Windows.Application, IDisposable
                 {
                     // Hiding a WPF window synchronously here causes another
                     // z-order/DWM transition on the shortcut's first frame.
-                    // The capture overlay is already queued at Background,
-                    // so perform this secondary visibility change afterwards.
+                    // Queue before the overlay's input-priority startup so
+                    // its first desktop copy cannot include our floating UI.
                     _ = Dispatcher.BeginInvoke(
-                        System.Windows.Threading.DispatcherPriority.Background,
+                        System.Windows.Threading.DispatcherPriority.Input,
                         new Action(() =>
                         {
                             if (!_isShuttingDown &&
@@ -1142,6 +1159,8 @@ public partial class App : System.Windows.Application, IDisposable
 
     private async Task RequestPresetCaptureAsync()
     {
+        if (ForwardFeature("preset")) return;
+        using var featureActivity = FeatureActivity.Begin();
         try
         {
             var store = new PresetCaptureRegionStore();
@@ -1218,7 +1237,7 @@ public partial class App : System.Windows.Application, IDisposable
         using var image = await Task.Run(() => ScreenCaptureService.Capture(region));
         await ClipboardImageService.SetImageAsync(image.Preview);
         _ = _captureHistoryService.Add(image, Math.Max(1, settings.HistoryLimit));
-        await CaptureFeedbackWindow.ShowAsync(region);
+        await CaptureSuccessWindow.ShowAsync(region);
         _mainWindow?.ShowStatus("预设截图已完成，已复制到剪贴板并保存到截图历史。");
     }
 
@@ -1229,11 +1248,21 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void OnFloatingCloseRequested(object? sender, EventArgs e)
     {
-        _mainWindow?.SetFloatingCaptureButtonEnabled(false);
+        if (_featureHost?.ProcessId is not null)
+        {
+            ForwardFeature("hide-floating");
+            return;
+        }
+        PersistCapturePreference(
+            current => current with { ShowFloatingCaptureButton = false },
+            window => window.SetFloatingCaptureButtonEnabled(false));
+        DisposeFloatingCaptureWindow();
     }
 
     private async Task RequestFloatingCaptureAsync()
     {
+        if (ForwardFeature("repeat")) return;
+        using var featureActivity = FeatureActivity.Begin();
         try
         {
             if (_regionCaptureCoordinator is not null)
@@ -1250,6 +1279,8 @@ public partial class App : System.Windows.Application, IDisposable
 
     private async Task RequestAllScreensCaptureAsync()
     {
+        if (ForwardFeature("all-screens")) return;
+        using var featureActivity = FeatureActivity.Begin();
         try
         {
             if (_regionCaptureCoordinator is not null)
@@ -1266,6 +1297,8 @@ public partial class App : System.Windows.Application, IDisposable
     private async Task RequestVideoRecordingAsync(
         CapturePointerContinuation? pointerContinuation = null)
     {
+        if (ForwardHotKey(HotKeyAction.VideoRecording, null, pointerContinuation)) return;
+        using var featureActivity = FeatureActivity.Begin();
         try
         {
             if (_regionCaptureCoordinator is not null)
@@ -1282,6 +1315,14 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void OnHotKeyPressed(object? sender, HotKeyPressedEventArgs e)
     {
+        if (_featureHost is not null)
+        {
+            _ = SendFeatureAsync(FeatureMessage.ForHotKey(e) with
+            { TargetWindow = e.Action == HotKeyAction.RealtimeTranslation ? Text.Realtime.RealtimeWindowTarget.Foreground.ToInt64() : 0 });
+            return;
+        }
+        if (_waitingForResidentSelection) return;
+        _idleEfficiency?.Wake();
         StartupDiagnostics.LogHotKey($"HotKey pressed: action={e.Action}");
         CaptureTimingDiagnostics.BeginInputWindow($"hotkey action={e.Action}");
         CaptureTimingDiagnostics.Mark("hotkey-handler", $"action={e.Action}");
@@ -1334,39 +1375,15 @@ public partial class App : System.Windows.Application, IDisposable
         }
         else if (e.Action == HotKeyAction.VideoRecording)
         {
-            if (!TryClaimInteractiveHotKey(e.Action))
+            QueueHotKeyCapture(e, static (app, snapshot, continuation) =>
             {
-                return;
-            }
-
-            StartupDiagnostics.LogHotKey("Queueing VideoRecording");
-            // Keep the hotkey/message callback input-only. Starting the
-            // coordinator changes capture state and creates WPF/native
-            // windows, both of which can occupy the UI dispatcher for a
-            // frame on slower machines. Hand it off after the shortcut
-            // message has returned so mouse input remains responsive.
-            _ = Dispatcher.BeginInvoke(
-                System.Windows.Threading.DispatcherPriority.Input,
-                new Func<Task>(async () =>
-                {
-                    try
-                    {
-                        StartupDiagnostics.LogHotKey("VideoRecording delay started");
-                        await Task.Delay(HotKeyInputSettleDelay);
-                        if (_isCaptureInProgress)
-                        {
-                            return;
-                        }
-
-                        StartupDiagnostics.LogHotKey("VideoRecording requesting");
-                        await RequestVideoRecordingAsync(
-                            e.CapturePointerContinuation);
-                    }
-                    finally
-                    {
-                        Interlocked.Exchange(ref _interactiveHotKeyPending, 0);
-                    }
-                }));
+                snapshot?.Dispose();
+                // Release the pending-input slot after handing off selection.
+                // This task lives until the recording ends; awaiting it here
+                // blocked every subsequent screenshot hotkey for that duration.
+                // The coordinator separately guards selection and recording.
+                _ = app.RequestVideoRecordingAsync(continuation);
+            });
         }
         else if (e.Action == HotKeyAction.EndVideoRecording)
         {
@@ -1376,9 +1393,17 @@ public partial class App : System.Windows.Application, IDisposable
         {
             _ = Dispatcher.BeginInvoke(ShowMainWindow);
         }
+        else if (e.Action == HotKeyAction.RealtimeTranslation)
+        {
+            _ = ToggleRealtimeTranslationAsync(Text.Realtime.RealtimeWindowTarget.Foreground);
+        }
         else if (e.Action == HotKeyAction.TranslateSelectedText)
         {
             _ = TranslateSelectedTextAsync();
+        }
+        else if (e.Action == HotKeyAction.ImageQuestion)
+        {
+            _ = ShowEmptyImageQuestionAsync();
         }
     }
 
@@ -1397,30 +1422,71 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void ShowMainWindow()
     {
-        // Settings must own keyboard focus while shortcut fields are edited.
-        // A still-visible topmost capture overlay would otherwise receive
-        // standalone letters and create text annotations behind the settings
-        // window.
-        CaptureOverlayWindow.CloseActiveInteractiveSelectionForTransition();
-        EnsureMainWindow();
-        if (_mainWindow is null)
+        if (ForwardFeature("settings")) return;
+        _idleEfficiency?.Wake();
+        var inputPresentation = _hotKeyManager?.SuspendMouseForWindowPresentation();
+        try
         {
+            // Settings must own keyboard focus while shortcut fields are edited.
+            // A still-visible topmost capture overlay would otherwise receive
+            // standalone letters and create text annotations behind the settings
+            // window.
+            CaptureOverlayWindow.CloseActiveInteractiveSelectionForTransition();
+            EnsureMainWindow();
+            if (_mainWindow is null)
+            {
+                return;
+            }
+
+            if (_pendingUpdateFailureStatus is { } updateStatus)
+            {
+                _pendingUpdateFailureStatus = null;
+                _mainWindow.ShowUpdateFailureRetry(updateStatus, showWindow: false);
+            }
+
+            if (_pendingStartupStatus is { } startupStatus)
+            {
+                _pendingStartupStatus = null;
+                _mainWindow.ShowStatus(startupStatus);
+            }
+
+            _mainWindow.ShowFromTray();
+        }
+        finally
+        {
+            // Show() can return before first layout/render and activation
+            // callbacks finish. Restore the hook only after that work drains.
+            _ = Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle, new Action(() =>
+            {
+                inputPresentation?.Dispose();
+                FeatureStartupCompilation.Complete();
+            }));
+        }
+    }
+
+    private void SaveCaptureAspectRatio(CaptureAspectRatio ratio)
+    {
+        if (!Enum.IsDefined(ratio)) return;
+        PersistCapturePreference(
+            current => current with { CaptureAspectRatio = ratio },
+            window => window.SaveCaptureAspectRatio(ratio));
+    }
+
+    private void PersistCapturePreference(
+        Func<AppSettings, AppSettings> update,
+        Action<MainWindow> saveInSettingsWindow)
+    {
+        if (_mainWindow is { } window)
+        {
+            saveInSettingsWindow(window);
             return;
         }
-
-        if (_pendingUpdateFailureStatus is { } updateStatus)
-        {
-            _pendingUpdateFailureStatus = null;
-            _mainWindow.ShowUpdateFailureRetry(updateStatus, showWindow: false);
-        }
-
-        if (_pendingStartupStatus is { } startupStatus)
-        {
-            _pendingStartupStatus = null;
-            _mainWindow.ShowStatus(startupStatus);
-        }
-
-        _mainWindow.ShowFromTray();
+        // A tray-only session has no settings window. Update the shared state
+        // immediately for the next capture, and debounce disk I/O off the UI.
+        _currentSettings = update(_currentSettings);
+        TranslationTargetPreferences.Publish(_currentSettings.TranslationTargetLanguage);
+        _captureSettingsStore?.QueueSave(_currentSettings);
+        PublishFeatureSettings();
     }
 
     private void EnsureMainWindow()
@@ -1430,7 +1496,6 @@ public partial class App : System.Windows.Application, IDisposable
             return;
         }
 
-        _mainWindowFactory = null;
         using (CaptureTimingDiagnostics.Begin("main-window-constructor"))
         {
             _mainWindow = factory();
@@ -1446,8 +1511,48 @@ public partial class App : System.Windows.Application, IDisposable
         _mainWindow.ExitRequested += OnExitRequested;
         _mainWindow.UpdateInstallationStarted += OnUpdateInstallationStarted;
         _mainWindow.TextTranslationRequested += OnTextTranslationRequested;
+        _mainWindow.ImageQuestionRequested += OnImageQuestionRequested;
+        _mainWindow.RealtimeTranslationRequested += OnRealtimeTranslationRequested;
+        _mainWindow.HiddenIdle += OnSettingsWindowHiddenIdle;
+        _mainWindow.Closed += OnSettingsWindowClosed;
         _mainWindow.ConfigureTaskbarVisibility(_currentSettings.ShowTaskbarIcon);
+        _mainWindow.RestoreSection(_lastSettingsSection);
         CaptureTimingDiagnostics.Mark("main-window-created");
+    }
+
+    private void OnSettingsWindowHiddenIdle(object? sender, EventArgs e)
+    {
+        if (sender is not MainWindow window || !ReferenceEquals(window, _mainWindow)) return;
+        if (_isCaptureInProgress)
+        {
+            window.ScheduleIdleMemoryTrim();
+            return;
+        }
+        _lastSettingsSection = window.SelectedSection;
+        // Close only the retired settings UI. Tray services and the current
+        // settings snapshot remain available, and downloads keep their owner.
+        window.RequestExit();
+        MemoryFootprint.TrimAfterHeavyOperation();
+    }
+
+    private void OnSettingsWindowClosed(object? sender, EventArgs e)
+    {
+        if (sender is not MainWindow window || !ReferenceEquals(window, _mainWindow)) return;
+        window.SettingsSaved -= OnSettingsSaved;
+        window.ExitRequested -= OnExitRequested;
+        window.UpdateInstallationStarted -= OnUpdateInstallationStarted;
+        window.TextTranslationRequested -= OnTextTranslationRequested;
+        window.ImageQuestionRequested -= OnImageQuestionRequested;
+        window.RealtimeTranslationRequested -= OnRealtimeTranslationRequested;
+        window.HiddenIdle -= OnSettingsWindowHiddenIdle;
+        window.Closed -= OnSettingsWindowClosed;
+        _mainWindow = null;
+        if (ReferenceEquals(MainWindow, window)) MainWindow = null;
+        if (_featureWorker is not null)
+        {
+            _ = _featureWorker.SendAsync(new("section") { Section = _lastSettingsSection });
+            _featureWorker.ScheduleIdle();
+        }
     }
 
     private void RequestPrimaryWindowActivation()
@@ -1473,6 +1578,7 @@ public partial class App : System.Windows.Application, IDisposable
 
     private async Task TranslateSelectedTextAsync()
     {
+        using var featureActivity = FeatureActivity.Begin();
         try
         {
             var selectedText = await SelectedTextCaptureService
@@ -1495,21 +1601,29 @@ public partial class App : System.Windows.Application, IDisposable
         string? sourceText = null,
         bool translateImmediately = false)
     {
+        if (_featureHost is not null)
+        {
+            _ = SendFeatureAsync(new("command") { Command = "text", Text = sourceText, Flag = translateImmediately });
+            return;
+        }
         if (_textTranslationWindow is null)
         {
             _textTranslationWindow = new TextTranslationWindow(
                 () => _currentSettings,
+                languageTag => PersistCapturePreference(
+                    current => current with { TranslationTargetLanguage = languageTag.Trim() },
+                    window => window.SaveTranslationTargetLanguage(languageTag)),
                 languageTag =>
-                    _mainWindow?.SaveTranslationTargetLanguage(languageTag),
-                languageTag =>
-                    _mainWindow?.OpenTranslationModelSettings(languageTag));
+                {
+                    ShowMainWindow();
+                    _mainWindow?.OpenTranslationModelSettings(languageTag);
+                });
             _textTranslationWindow.Closed += OnTextTranslationWindowClosed;
-            _textTranslationWindow.Show();
+            WindowActivation.Show(_textTranslationWindow);
         }
         else
         {
-            _textTranslationWindow.Show();
-            _textTranslationWindow.Activate();
+            WindowActivation.Show(_textTranslationWindow);
         }
 
         if (!string.IsNullOrWhiteSpace(sourceText))
@@ -1536,6 +1650,7 @@ public partial class App : System.Windows.Application, IDisposable
 
     private void ShowCaptureHistory(bool showVideo)
     {
+        if (ForwardFeature(showVideo ? "video-history" : "history")) return;
         if (_captureHistoryService is null)
         {
             return;
@@ -1560,7 +1675,7 @@ public partial class App : System.Windows.Application, IDisposable
                 {
                     _captureHistoryWindow.ShowVideoHistory();
                 }
-                _captureHistoryWindow.Show();
+                WindowActivation.Show(_captureHistoryWindow);
                 return;
             }
 
@@ -1571,8 +1686,7 @@ public partial class App : System.Windows.Application, IDisposable
             {
                 _captureHistoryWindow.ShowVideoHistory();
             }
-            _captureHistoryWindow.Show();
-            _captureHistoryWindow.Activate();
+            WindowActivation.Show(_captureHistoryWindow);
         }
         catch (Exception exception)
         {
@@ -1646,6 +1760,8 @@ public partial class App : System.Windows.Application, IDisposable
         CapturePointerContinuation? pointerContinuation,
         bool deferInitialColorPickerActivation = false)
     {
+        if (ForwardHotKey(HotKeyAction.RegionCapture, initialScreenSnapshot, pointerContinuation)) return;
+        using var featureActivity = FeatureActivity.Begin();
         try
         {
             if (_regionCaptureCoordinator is not null)
@@ -1671,6 +1787,8 @@ public partial class App : System.Windows.Application, IDisposable
         CapturePointerContinuation? pointerContinuation,
         bool deferInitialColorPickerActivation = false)
     {
+        if (ForwardHotKey(HotKeyAction.RecognizeText, initialScreenSnapshot, pointerContinuation)) return;
+        using var featureActivity = FeatureActivity.Begin();
         try
         {
             if (_regionCaptureCoordinator is not null)
@@ -1696,6 +1814,8 @@ public partial class App : System.Windows.Application, IDisposable
         CapturePointerContinuation? pointerContinuation,
         bool deferInitialColorPickerActivation = false)
     {
+        if (ForwardHotKey(HotKeyAction.PinImage, initialScreenSnapshot, pointerContinuation)) return;
+        using var featureActivity = FeatureActivity.Begin();
         try
         {
             if (_regionCaptureCoordinator is not null)
@@ -1719,15 +1839,19 @@ public partial class App : System.Windows.Application, IDisposable
         }
     }
 
+    private Task<OcrRecognitionResult> RecognizePinnedImageAsync(CapturedImage image) =>
+        RecognizePinnedImageAsync(image, CancellationToken.None);
+
     private async Task<OcrRecognitionResult> RecognizePinnedImageAsync(
-        CapturedImage image)
+        CapturedImage image, CancellationToken cancellationToken)
     {
         try
         {
             return await OcrProviderFactory.RecognizeAsync(
                 image,
-                _currentSettings);
+                _currentSettings, cancellationToken);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception)
         {
             _mainWindow?.ShowStatus("钉图文字识别失败，请检查语言设置。");
@@ -1747,6 +1871,7 @@ public partial class App : System.Windows.Application, IDisposable
         CapturedImage image,
         int historyLimit)
     {
+        using var featureActivity = FeatureActivity.Begin();
         CaptureHistoryItem? historyItem = null;
         try
         {
@@ -1771,8 +1896,11 @@ public partial class App : System.Windows.Application, IDisposable
         }
     }
 
-    private async Task<TranslationSegmentsResult> TranslatePinnedImageAsync(
-        OcrRecognitionResult recognition)
+    private Task<TranslationSegmentsResult> TranslatePinnedImageAsync(OcrRecognitionResult recognition) =>
+        TranslatePinnedImageWithCancellationAsync(recognition, CancellationToken.None);
+
+    private async Task<TranslationSegmentsResult> TranslatePinnedImageWithCancellationAsync(
+        OcrRecognitionResult recognition, CancellationToken cancellationToken)
     {
         if (_translationHttpClient is null)
         {
@@ -1784,12 +1912,16 @@ public partial class App : System.Windows.Application, IDisposable
             var provider = TranslationProviderFactory.Create(
                 _currentSettings,
                 new DpapiTranslationCredentialStore(),
-                _translationHttpClient,
-                preferFastOffline: true);
+                _translationHttpClient);
             return await provider.TranslateSegmentsAsync(
                 recognition.Regions.Select(region => region.Text).ToArray(),
                 "auto",
-                _currentSettings.TranslationTargetLanguage);
+                _currentSettings.TranslationTargetLanguage,
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception)
         {
@@ -1802,6 +1934,8 @@ public partial class App : System.Windows.Application, IDisposable
     private async Task RequestScrollCaptureAsync(
         CapturePointerContinuation? pointerContinuation)
     {
+        if (ForwardHotKey(HotKeyAction.ScrollCapture, null, pointerContinuation)) return;
+        using var featureActivity = FeatureActivity.Begin();
         try
         {
             if (_regionCaptureCoordinator is not null)
@@ -1823,6 +1957,11 @@ public partial class App : System.Windows.Application, IDisposable
             return;
         }
 
+        if (_featureWorker is not null && !_retiringFeatureWorker)
+        {
+            _ = ExitFeatureAndResidentAsync();
+            return;
+        }
         _isShuttingDown = true;
         DisposeTrayIconService();
         _mainWindow?.RequestExit();
@@ -1843,6 +1982,7 @@ public partial class App : System.Windows.Application, IDisposable
         _trayIconService.HistoryRequested -= OnHistoryRequested;
         _trayIconService.HidePinnedImagesRequested -= OnHidePinnedImagesRequested;
         _trayIconService.ExitRequested -= OnExitRequested;
+        _trayIconService.RealtimeTranslationRequested -= OnRealtimeTranslationRequested;
         _trayIconService.Dispose();
         _trayIconService = null;
     }
@@ -1855,6 +1995,7 @@ public partial class App : System.Windows.Application, IDisposable
         }
 
         _hotKeyManager.HotKeyPressed -= OnHotKeyPressed;
+        _hotKeyManager.EscapePressed -= OnFeatureEscapePressed;
         _hotKeyManager.Dispose();
         _hotKeyManager = null;
     }
@@ -1965,6 +2106,7 @@ public partial class App : System.Windows.Application, IDisposable
     {
         try
         {
+            hotKeyManager.ConfigureMouseLongPress(settings.MouseLongPressMilliseconds, settings.MouseSideButtonsUseLongPress);
             var bindings = HotKeyConfiguration.CreateBindings(settings);
             var result = hotKeyManager.ApplyAvailable(bindings);
             return result.IsSuccess ? null : result.ErrorMessage;

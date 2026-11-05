@@ -1,127 +1,87 @@
+using System.Buffers;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 
 namespace Screenshot.App.Capture;
 
-/// <summary>
-/// Rejects captures taken before the target has painted a new viewport. Screen
-/// capture can run faster than DWM refresh; queueing those identical bitmaps
-/// wastes the matcher budget and eventually discards the overlap bridge.
-/// </summary>
-internal sealed class CapturedFrameGate
+/// <summary>Drop only identical captures; sparse new rows must reach the stitcher.</summary>
+internal sealed class CapturedFrameGate : IDisposable
 {
-    // The signature must be fine enough that a small scroll of sparse content
-    // (a chat log that is mostly background with a few text rows) still reads
-    // as changed. At 48x32 with the old thresholds a 30-row scroll of a sparse
-    // viewport was regularly classified stationary, which silently starved the
-    // stitcher of exactly the samples it needed.
-    private const int SignatureWidth = 96;
-    private const int SignatureHeight = 64;
-    private const double MaximumAverageDifference = 0.0035;
-    private const double MaximumChangedSampleRatio = 0.012;
-    private byte[]? _acceptedSignature;
-    private byte[]? _pendingSignature;
+    private byte[]? _acceptedPixels;
+    private byte[]? _pendingPixels;
+    private Size _acceptedSize;
+    private Size _pendingSize;
+    private ScrollCapturePosition? _acceptedPosition;
+    private ScrollCapturePosition? _pendingPosition;
 
     public bool HasChanged(Bitmap frame)
     {
         ArgumentNullException.ThrowIfNull(frame);
-        _pendingSignature = CreateSignature(frame);
-
-        if (_acceptedSignature is null)
+        var length = checked(frame.Width * frame.Height * 4);
+        if (_pendingPixels is null || _pendingPixels.Length < length)
         {
-            return true;
+            if (_pendingPixels is not null) ArrayPool<byte>.Shared.Return(_pendingPixels);
+            _pendingPixels = null;
+            _pendingPixels = ArrayPool<byte>.Shared.Rent(length);
         }
-
-        long totalDifference = 0;
-        var changedSamples = 0;
-        var sampleCount = _pendingSignature.Length / 3;
-
-        for (var index = 0; index < _pendingSignature.Length; index += 3)
+        var data = frame.LockBits(new Rectangle(Point.Empty, frame.Size),
+            ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
+        try
         {
-            var difference =
-                Math.Abs(_acceptedSignature[index] - _pendingSignature[index]) +
-                Math.Abs(_acceptedSignature[index + 1] - _pendingSignature[index + 1]) +
-                Math.Abs(_acceptedSignature[index + 2] - _pendingSignature[index + 2]);
-            totalDifference += difference;
-            if (difference > 30)
-            {
-                changedSamples++;
-            }
+            for (var y = 0; y < frame.Height; y++)
+                Marshal.Copy(IntPtr.Add(data.Scan0, y * data.Stride), _pendingPixels,
+                    y * frame.Width * 4, frame.Width * 4);
         }
-
-        var averageDifference = totalDifference / (sampleCount * 255d * 3d);
-        var changedRatio = changedSamples / (double)sampleCount;
-        return averageDifference > MaximumAverageDifference ||
-               changedRatio > MaximumChangedSampleRatio;
+        finally { frame.UnlockBits(data); }
+        _pendingSize = frame.Size;
+        _pendingPosition = ScrollCapturePosition.Read(frame);
+        return _acceptedPosition != _pendingPosition ||
+            _acceptedPixels is null || _acceptedSize != _pendingSize ||
+            !_pendingPixels.AsSpan(0, length).SequenceEqual(_acceptedPixels.AsSpan(0, length));
     }
 
     public void AcceptPending()
     {
-        if (_pendingSignature is not null)
+        if (_pendingSize.IsEmpty) return;
+        (_acceptedPixels, _pendingPixels) = (_pendingPixels, _acceptedPixels);
+        _acceptedSize = _pendingSize;
+        _acceptedPosition = _pendingPosition;
+        _pendingSize = Size.Empty;
+    }
+
+    internal bool ShouldRetainBlankMotion(bool hasPendingInput, int fixedTopRows, int fixedBottomRows)
+    {
+        if (!hasPendingInput || _pendingPixels is null || _pendingSize.IsEmpty) return false;
+        var top = Math.Clamp(fixedTopRows, 0, _pendingSize.Height);
+        var bottom = Math.Clamp(_pendingSize.Height - fixedBottomRows, top, _pendingSize.Height);
+        if (bottom <= top) return false;
+        var width = _pendingSize.Width;
+        var right = width - (width >= 80 ? Math.Clamp(width / 80, 10, 24) : 0);
+        var reference = top * width * 4;
+        for (var y = top; y < bottom; y++)
+        for (var x = 0; x < right; x++)
         {
-            _acceptedSignature = _pendingSignature;
-            _pendingSignature = null;
+            var p = (y * width + x) * 4;
+            var difference = Math.Abs(_pendingPixels[p] - _pendingPixels[reference]) +
+                Math.Abs(_pendingPixels[p + 1] - _pendingPixels[reference + 1]) +
+                Math.Abs(_pendingPixels[p + 2] - _pendingPixels[reference + 2]);
+            if (difference > 2) return false;
         }
+        return true;
     }
 
     public void Accept(Bitmap frame)
     {
-        ArgumentNullException.ThrowIfNull(frame);
-        _acceptedSignature = CreateSignature(frame);
-        _pendingSignature = null;
+        HasChanged(frame);
+        AcceptPending();
     }
 
-    private static byte[] CreateSignature(Bitmap frame)
+    public void Dispose()
     {
-        using var reduced = new Bitmap(
-            SignatureWidth,
-            SignatureHeight,
-            PixelFormat.Format32bppPArgb);
-        using (var graphics = Graphics.FromImage(reduced))
-        {
-            graphics.CompositingMode = CompositingMode.SourceCopy;
-            graphics.InterpolationMode = InterpolationMode.Low;
-            graphics.PixelOffsetMode = PixelOffsetMode.HighSpeed;
-            graphics.DrawImage(
-                frame,
-                new Rectangle(0, 0, SignatureWidth, SignatureHeight),
-                0,
-                0,
-                frame.Width,
-                frame.Height,
-                GraphicsUnit.Pixel);
-        }
-
-        var data = reduced.LockBits(
-            new Rectangle(0, 0, SignatureWidth, SignatureHeight),
-            ImageLockMode.ReadOnly,
-            PixelFormat.Format32bppPArgb);
-        try
-        {
-            var raw = new byte[Math.Abs(data.Stride) * SignatureHeight];
-            Marshal.Copy(data.Scan0, raw, 0, raw.Length);
-            var signature = new byte[SignatureWidth * SignatureHeight * 3];
-            var destination = 0;
-
-            for (var y = 0; y < SignatureHeight; y++)
-            {
-                var row = y * Math.Abs(data.Stride);
-                for (var x = 0; x < SignatureWidth; x++)
-                {
-                    var source = row + (x * 4);
-                    signature[destination++] = raw[source];
-                    signature[destination++] = raw[source + 1];
-                    signature[destination++] = raw[source + 2];
-                }
-            }
-
-            return signature;
-        }
-        finally
-        {
-            reduced.UnlockBits(data);
-        }
+        if (_acceptedPixels is not null) ArrayPool<byte>.Shared.Return(_acceptedPixels);
+        if (_pendingPixels is not null) ArrayPool<byte>.Shared.Return(_pendingPixels);
+        _acceptedPixels = _pendingPixels = null;
+        _acceptedSize = _pendingSize = Size.Empty;
     }
 }

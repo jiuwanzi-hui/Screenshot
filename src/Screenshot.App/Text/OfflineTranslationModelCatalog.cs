@@ -67,14 +67,12 @@ internal static class OfflineTranslationModelCatalog
             configuration,
             "(?m)^beam-size:\\s*\\d+\\s*$",
             $"beam-size: {beamSize}");
-        // The installed config.yml froze the conservative background thread
-        // count at download time. Translation is a user-blocking operation,
-        // so rewrite the thread budget at load time: use nearly every core
-        // while translating and let the engine idle-unload return them.
+        // Rewrite the thread budget at load time so configurations downloaded
+        // by older builds cannot make Bergamot saturate the whole machine.
         return System.Text.RegularExpressions.Regex.Replace(
             adjusted,
             "(?m)^cpu-threads:\\s*\\d+\\s*$",
-            $"cpu-threads: {HeavyWorkloadBudget.BurstCpuThreadCount}");
+            $"cpu-threads: {HeavyWorkloadBudget.TranslationCpuThreadCount}");
     }
 
     internal static string GetQualityDisplayName(OfflineTranslationQuality quality)

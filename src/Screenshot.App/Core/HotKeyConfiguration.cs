@@ -26,6 +26,8 @@ public static class HotKeyConfiguration
             bindings,
             HotKeyAction.TranslateSelectedText,
             settings.TextTranslationHotKey);
+        AddBinding(bindings, HotKeyAction.RealtimeTranslation, settings.RealtimeTranslationHotKey);
+        if (settings.EnableImageQuestion) AddBinding(bindings, HotKeyAction.ImageQuestion, settings.ImageQuestionHotKey);
         AddBinding(bindings, HotKeyAction.PinImage, settings.PinHotKey);
         AddBinding(bindings, HotKeyAction.OpenSettings, settings.OpenSettingsHotKey);
         return bindings;
@@ -115,6 +117,8 @@ public static class HotKeyConfiguration
             HotKeyAction.ScrollCapture => "长截图",
             HotKeyAction.RecognizeText => "翻译",
             HotKeyAction.TranslateSelectedText => "选中文字翻译",
+            HotKeyAction.RealtimeTranslation => "实时翻译",
+            HotKeyAction.ImageQuestion => "AI 问图",
             HotKeyAction.PinImage => "钉图",
             HotKeyAction.OpenSettings => "打开设置",
             _ => action.ToString(),

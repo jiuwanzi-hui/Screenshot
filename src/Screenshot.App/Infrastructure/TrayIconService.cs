@@ -1,7 +1,11 @@
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using System.Windows.Media.Imaging;
 using Screenshot.App.Core;
+using Screenshot.App.Presentation;
 
 namespace Screenshot.App.Infrastructure;
 
@@ -11,7 +15,13 @@ public sealed class TrayIconService : IDisposable
     private readonly ContextMenuStrip _contextMenu;
     private readonly ToolStripItem[] _menuItems;
     private readonly ToolStripMenuItem _hidePinnedImagesItem;
+    private Bitmap? _glassBackground;
+    private AppTheme? _appliedTheme;
+    private GlassTrayMenuWindow? _glassMenu;
     private bool _disposed;
+    private readonly TrayClickSequence _clicks = new();
+    private readonly Dictionary<ToolStripItem, string> _menuLabels = [];
+    private readonly System.Windows.Threading.DispatcherTimer _singleClickTimer = new();
 
     public TrayIconService(AppTheme theme = AppTheme.AuroraMist)
     {
@@ -26,6 +36,9 @@ public sealed class TrayIconService : IDisposable
 
         var openSettingsItem = new ToolStripMenuItem("打开设置");
         openSettingsItem.Click += OnOpenSettingsClicked;
+
+        var realtimeItem = new ToolStripMenuItem("实时翻译 / 停止");
+        realtimeItem.Click += (_, _) => RealtimeTranslationRequested?.Invoke(this, EventArgs.Empty);
 
         var historyItem = new ToolStripMenuItem("历史查看");
         historyItem.Click += OnHistoryClicked;
@@ -49,6 +62,7 @@ public sealed class TrayIconService : IDisposable
             regionCaptureItem,
             scrollCaptureItem,
             videoRecordingItem,
+            realtimeItem,
             historyItem,
             _hidePinnedImagesItem,
             openSettingsItem,
@@ -56,11 +70,13 @@ public sealed class TrayIconService : IDisposable
             exitItem,
         ];
         _contextMenu.Items.AddRange(_menuItems);
+        foreach (var item in _menuItems) _menuLabels[item] = item.Text ?? string.Empty;
+        UiLocalization.Changed += OnInterfaceLanguageChanged;
+        OnInterfaceLanguageChanged(null, EventArgs.Empty);
+        _contextMenu.Closed += OnContextMenuClosed;
         UpdatePinnedImageCommands(
             hasPinnedImages: false,
             hasHiddenPinnedImages: false);
-        ApplyTheme(theme);
-
         _notifyIcon = new NotifyIcon
         {
             ContextMenuStrip = _contextMenu,
@@ -68,7 +84,11 @@ public sealed class TrayIconService : IDisposable
             Text = AppMetadata.DisplayName,
             Visible = false,
         };
-        _notifyIcon.DoubleClick += OnTrayIconDoubleClick;
+        _singleClickTimer.Interval = TimeSpan.FromMilliseconds(SystemInformation.DoubleClickTime);
+        _singleClickTimer.Tick += OnSingleClickTimer;
+        _notifyIcon.MouseDoubleClick += OnTrayIconDoubleClick;
+        _notifyIcon.MouseUp += OnTrayMouseUp;
+        ApplyTheme(theme);
     }
 
     private static Icon LoadApplicationIcon()
@@ -101,6 +121,8 @@ public sealed class TrayIconService : IDisposable
 
     public event EventHandler? VideoRecordingRequested;
 
+    public event EventHandler? RealtimeTranslationRequested;
+
     public event EventHandler? HistoryRequested;
 
     public event EventHandler? HidePinnedImagesRequested;
@@ -122,11 +144,16 @@ public sealed class TrayIconService : IDisposable
     public void ApplyTheme(AppTheme theme)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_appliedTheme == theme) return;
+        _glassMenu?.Close();
+        _notifyIcon.ContextMenuStrip = theme == AppTheme.GlassMist ? null : _contextMenu;
         var colors = AppThemeManager.GetChromeColors(theme);
         var background = ColorTranslator.FromHtml(colors.Background);
         var foreground = ColorTranslator.FromHtml(colors.Foreground);
         var accentMuted = ColorTranslator.FromHtml(colors.Selection);
         var border = ColorTranslator.FromHtml(colors.Border);
+        var previousBackground = _glassBackground;
+        _glassBackground = null;
 
         _contextMenu.BackColor = background;
         _contextMenu.ForeColor = foreground;
@@ -134,7 +161,8 @@ public sealed class TrayIconService : IDisposable
             background,
             foreground,
             accentMuted,
-            border);
+            border,
+            GetGlassBackground);
         foreach (var item in _menuItems)
         {
             item.BackColor = background;
@@ -146,6 +174,41 @@ public sealed class TrayIconService : IDisposable
                 ? new Padding(4, 2, 4, 2)
                 : new Padding(0, 1, 0, 1);
         }
+        _appliedTheme = theme;
+        previousBackground?.Dispose();
+        _contextMenu.Invalidate();
+    }
+
+    private void OnContextMenuClosed(object? sender, ToolStripDropDownClosedEventArgs e)
+    {
+        _glassBackground?.Dispose();
+        _glassBackground = null;
+    }
+
+    private Bitmap? GetGlassBackground(Size size)
+    {
+        if (_disposed || _appliedTheme != AppTheme.GlassInk || size.Width <= 0 || size.Height <= 0) return null;
+        if (_glassBackground?.Size == size) return _glassBackground;
+        _glassBackground?.Dispose();
+        _glassBackground = null;
+        // The menu owns only its actual pixel-sized texture, while visible.
+        // Avoid three 1000px copies (WPF, managed transfer, GDI) at startup.
+        var visual = new System.Windows.Media.DrawingVisual();
+        using (var drawing = visual.RenderOpen())
+            drawing.DrawRectangle(LiquidGlassMaterial.CreateVectorBackground(true), null,
+                new System.Windows.Rect(0, 0, size.Width, size.Height));
+        var source = new RenderTargetBitmap(size.Width, size.Height, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+        source.Render(visual);
+        source.Freeze();
+        var stride = source.PixelWidth * 4;
+        var pixels = new byte[stride * source.PixelHeight];
+        source.CopyPixels(pixels, stride, 0);
+        var bitmap = new Bitmap(source.PixelWidth, source.PixelHeight, PixelFormat.Format32bppPArgb);
+        var data = bitmap.LockBits(new Rectangle(0, 0, bitmap.Width, bitmap.Height),
+            ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
+        try { Marshal.Copy(pixels, 0, data.Scan0, pixels.Length); }
+        finally { bitmap.UnlockBits(data); }
+        return _glassBackground = bitmap;
     }
 
     public void SetVisible(bool isVisible)
@@ -171,10 +234,18 @@ public sealed class TrayIconService : IDisposable
         }
 
         _disposed = true;
-        _notifyIcon.DoubleClick -= OnTrayIconDoubleClick;
+        _glassMenu?.Close();
+        _notifyIcon.MouseUp -= OnTrayMouseUp;
+        _notifyIcon.MouseDoubleClick -= OnTrayIconDoubleClick;
+        _singleClickTimer.Stop();
+        _singleClickTimer.Tick -= OnSingleClickTimer;
+        _clicks.Cancel();
+        UiLocalization.Changed -= OnInterfaceLanguageChanged;
         _notifyIcon.Visible = false;
         _notifyIcon.Dispose();
+        _contextMenu.Closed -= OnContextMenuClosed;
         _contextMenu.Dispose();
+        _glassBackground?.Dispose();
     }
 
     private void OnOpenSettingsClicked(object? sender, EventArgs e)
@@ -212,10 +283,52 @@ public sealed class TrayIconService : IDisposable
         ExitRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    private void OnTrayIconDoubleClick(object? sender, EventArgs e)
+    private void OnTrayIconDoubleClick(object? sender, MouseEventArgs e)
     {
+        if (e.Button != MouseButtons.Left || _disposed) return;
+        _singleClickTimer.Stop();
+        _clicks.DoubleClicked();
         OpenSettingsRequested?.Invoke(this, EventArgs.Empty);
     }
+
+    private void OnSingleClickTimer(object? sender, EventArgs e)
+    {
+        _singleClickTimer.Stop();
+        if (!_disposed && _clicks.CompleteSingleClick()) RegionCaptureRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnInterfaceLanguageChanged(object? sender, EventArgs e)
+    {
+        foreach (var (item, source) in _menuLabels) item.Text = UiLocalization.Get(source);
+        _glassMenu?.Close();
+    }
+
+    private void OnTrayMouseUp(object? sender, MouseEventArgs e)
+    {
+        if (_disposed) return;
+        if (e.Button == MouseButtons.Left)
+        {
+            if (_clicks.LeftReleased())
+            {
+                _singleClickTimer.Stop();
+                _singleClickTimer.Interval = TimeSpan.FromMilliseconds(SystemInformation.DoubleClickTime);
+                _singleClickTimer.Start();
+            }
+            return;
+        }
+        _singleClickTimer.Stop(); _clicks.Cancel();
+        if (e.Button != MouseButtons.Right || _appliedTheme != AppTheme.GlassMist || _disposed) return;
+        _glassMenu?.Close();
+        var menu = CreateGlassMenu();
+        _glassMenu = menu;
+        menu.Closed += (_, _) => { if (ReferenceEquals(_glassMenu, menu)) _glassMenu = null; };
+        menu.ShowAt(Cursor.Position);
+    }
+
+    internal GlassTrayMenuWindow CreateGlassMenu() => new(_menuItems.Where(item => item.Available)
+        .Select(item => item is ToolStripSeparator
+            ? new TrayMenuEntry(null, false, null)
+            : new TrayMenuEntry(item.Text, item.Enabled, item.PerformClick)));
 
     private sealed class TrayMenuColorTable : ProfessionalColorTable
     {
@@ -255,18 +368,21 @@ public sealed class TrayIconService : IDisposable
         private readonly Color _foreground;
         private readonly Color _selection;
         private readonly Color _border;
+        private readonly Func<Size, Bitmap?> _glassBackground;
 
         public TrayMenuRenderer(
             Color background,
             Color foreground,
             Color selection,
-            Color border)
+            Color border,
+            Func<Size, Bitmap?> glassBackground)
             : base(new TrayMenuColorTable(background, selection, border))
         {
             _background = background;
             _foreground = foreground;
             _selection = selection;
             _border = border;
+            _glassBackground = glassBackground;
         }
 
         public Color SelectionColor => _selection;
@@ -282,6 +398,16 @@ public sealed class TrayIconService : IDisposable
                 e.ToolStrip.ClientRectangle,
                 RoundedContextMenuStrip.CornerRadius);
             e.Graphics.FillPath(brush, path);
+            if (_glassBackground(e.ToolStrip.ClientSize) is { } background)
+            {
+                var state = e.Graphics.Save();
+                try
+                {
+                    e.Graphics.SetClip(path, CombineMode.Intersect);
+                    e.Graphics.DrawImage(background, e.ToolStrip.ClientRectangle);
+                }
+                finally { e.Graphics.Restore(state); }
+            }
         }
 
         protected override void OnRenderToolStripBorder(
@@ -327,22 +453,9 @@ public sealed class TrayIconService : IDisposable
     private sealed class RoundedContextMenuStrip : ContextMenuStrip
     {
         public const int CornerRadius = 8;
-        private const int MaximumMenuWidth = 128;
-
-        protected override void SetBoundsCore(
-            int x,
-            int y,
-            int width,
-            int height,
-            BoundsSpecified specified)
-        {
-            base.SetBoundsCore(
-                x,
-                y,
-                Math.Min(width, MaximumMenuWidth),
-                height,
-                specified);
-        }
+        // NotifyIcon positions the menu using its measured size. Changing that
+        // size in SetBoundsCore shifts its anchored edge away from the cursor,
+        // especially with larger fonts or mixed monitor DPI.
 
         protected override void OnHandleCreated(EventArgs e)
         {

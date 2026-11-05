@@ -35,4 +35,7 @@ public enum ScrollCapturePointerAction
 {
     Click,
     DoubleClick,
+    // A click made during motion remains a pause even if recovery changes
+    // state before the capture loop consumes the gesture.
+    Pause,
 }

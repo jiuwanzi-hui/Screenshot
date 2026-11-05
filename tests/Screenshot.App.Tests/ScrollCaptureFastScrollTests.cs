@@ -14,7 +14,7 @@ namespace Screenshot.App.Tests;
 /// large fraction of the viewport instead of the small continuous steps the
 /// other suites cover, and they feed deliberately poor wheel estimates.
 /// </remarks>
-public sealed class ScrollCaptureFastScrollTests
+public sealed class ScrollCaptureFastScrollTests(Xunit.Abstractions.ITestOutputHelper output)
 {
     private static readonly ScrollCaptureOptions FastOptions = new(
         MaximumFrames: 40,
@@ -47,6 +47,193 @@ public sealed class ScrollCaptureFastScrollTests
 
         Assert.NotNull(match);
         Assert.Equal(height - newRows, match.OverlapRows);
+    }
+
+    [Theory]
+    [InlineData(760, 520, 30)]
+    [InlineData(1268, 616, 180)]
+    [InlineData(1268, 616, null)]
+    public void ReturnFromDocumentBottomCrossesStartWithInaccurateWheelEstimates(
+        int width, int height, int? estimatedRows)
+    {
+        const int startTop = 2080; // Line 4880, with 4800 as the document origin.
+        const int endTop = 780;
+        const int documentHeight = 200 * 26; // Last line: 4999.
+        var bottomTop = documentHeight - height;
+        using var document = CreateNumberedCodeContent(width, documentHeight);
+        using var composer = new ScrollCaptureComposer();
+        var options = FastOptions with { MaximumFrames = 300 };
+        using (var initial = Crop(document, startTop, height))
+        {
+            Assert.True(composer.TryAddFrame(initial, options, out _));
+        }
+
+        var currentTop = startTop;
+        while (currentTop < bottomTop)
+        {
+            var nextTop = Math.Min(bottomTop, currentTop + 78);
+            using var frame = Crop(document, nextTop, height);
+            Assert.True(composer.TryAddFrame(frame, ScrollCaptureDirection.Down,
+                options, nextTop - currentTop, lockDirection: true, out _),
+                $"Down {currentTop}->{nextTop}: {composer.LastRejectReason}, logical={composer.CurrentFrameTop}");
+            currentTop = nextTop;
+        }
+
+        using (var bottom = Crop(document, bottomTop, height))
+        {
+            Assert.False(composer.TryAddFrame(bottom, ScrollCaptureDirection.Down,
+                options, 78, lockDirection: true, out _));
+            Assert.True(composer.TryMarkBoundaryReached(bottom, ScrollCaptureDirection.Down));
+        }
+
+        var stepIndex = 0;
+        var maximumFrameTime = TimeSpan.Zero;
+        int[] steps = [119, 41, 203, 73];
+        while (currentTop > endTop)
+        {
+            var nextTop = Math.Max(endTop, currentTop - steps[stepIndex++ % steps.Length]);
+            using var frame = Crop(document, nextTop, height);
+            var timer = Stopwatch.StartNew();
+            composer.TryAddFrame(frame, ScrollCaptureDirection.Up, options,
+                estimatedRows, lockDirection: estimatedRows is not null, out _);
+            maximumFrameTime = timer.Elapsed > maximumFrameTime ? timer.Elapsed : maximumFrameTime;
+            Assert.True(composer.CurrentFrameTop == nextTop - startTop,
+                $"Return {currentTop}->{nextTop}: logical={composer.CurrentFrameTop}, " +
+                $"expected={nextTop - startTop}, reject={composer.LastRejectReason}");
+            Assert.Equal(documentHeight - Math.Min(startTop, nextTop), composer.OutputHeight);
+            // Exercise the incremental preview cache before and after prepends.
+            using var preview = composer.ComposeLivePreview(width, documentHeight);
+            Assert.Equal(composer.OutputHeight, preview.Height);
+            Assert.Equal(document.GetPixel(120, Math.Min(startTop, nextTop) + 11),
+                preview.GetPixel(120, 11));
+            currentTop = nextTop;
+        }
+
+        using var result = composer.Compose();
+        using var expected = Crop(document, endTop, documentHeight - endTop);
+        using var finalPreview = composer.ComposeLivePreview(width, documentHeight);
+        AssertAllPixelsEqual(expected, result);
+        AssertAllPixelsEqual(expected, finalPreview);
+        Assert.True(maximumFrameTime < TimeSpan.FromMilliseconds(500),
+            $"Reverse frame took {maximumFrameTime.TotalMilliseconds:F1} ms.");
+        output.WriteLine($"{width}x{height}, estimate={estimatedRows}: max reverse frame " +
+            $"{maximumFrameTime.TotalMilliseconds:F1} ms; verified every output/preview pixel.");
+    }
+
+    private static void AssertAllPixelsEqual(Bitmap expected, Bitmap actual)
+    {
+        Assert.Equal(expected.Size, actual.Size);
+        var bounds = new Rectangle(0, 0, expected.Width, expected.Height);
+        var expectedData = expected.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
+        var actualData = actual.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
+        try
+        {
+            var expectedRow = new byte[expected.Width * 4];
+            var actualRow = new byte[actual.Width * 4];
+            for (var y = 0; y < expected.Height; y++)
+            {
+                System.Runtime.InteropServices.Marshal.Copy(
+                    IntPtr.Add(expectedData.Scan0, y * expectedData.Stride), expectedRow, 0, expectedRow.Length);
+                System.Runtime.InteropServices.Marshal.Copy(
+                    IntPtr.Add(actualData.Scan0, y * actualData.Stride), actualRow, 0, actualRow.Length);
+                Assert.True(expectedRow.AsSpan().SequenceEqual(actualRow), $"Pixel mismatch on row {y}.");
+            }
+        }
+        finally
+        {
+            expected.UnlockBits(expectedData);
+            actual.UnlockBits(actualData);
+        }
+    }
+
+    private static Bitmap CreateNumberedCodeContent(int width, int height)
+    {
+        var content = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
+        using var graphics = Graphics.FromImage(content);
+        graphics.Clear(Color.FromArgb(255, 30, 31, 34));
+        using var font = new Font("Consolas", 14, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var gutter = new SolidBrush(Color.FromArgb(255, 118, 124, 136));
+        using var code = new SolidBrush(Color.FromArgb(255, 169, 183, 198));
+        for (var line = 0; line * 26 < height; line++)
+        {
+            graphics.DrawString((4800 + line).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                font, gutter, 12, line * 26);
+            var text = line % 7 == 0 ? "    }" :
+                $"    let response_{line} = stream.send(packet_{line % 13}).await?;";
+            graphics.DrawString(text, font, code, 90, line * 26);
+        }
+        return content;
+    }
+
+    [Theory]
+    [InlineData(760, 520)]
+    [InlineData(1268, 616)]
+    public void ManualCaptureKeepsEveryLineAcrossRepeatedExpandingReversalsAndRepaints(int width, int height)
+    {
+        const int startTop = 2080;
+        const int documentHeight = 7000;
+        using var document = CreateNumberedCodeContent(width, documentHeight);
+        using var composer = ScrollCaptureComposer.CreateForManualCapture();
+        var options = ScrollCaptureOptions.Default with { MaximumFrames = 1000 };
+        var currentTop = startTop;
+        var minimumTop = startTop;
+        var maximumTop = startTop;
+        var sequence = 0;
+        var timings = new List<double>();
+
+        Bitmap Viewport(int top)
+        {
+            using var crop = Crop(document, top, height);
+            var frame = new Bitmap(crop); // Real decoders/captures need not use PArgb.
+            using var g = Graphics.FromImage(frame);
+            using var brush = new SolidBrush(Color.FromArgb(255, 50 + sequence % 50, 90, 150));
+            g.FillRectangle(brush, 220, height / 2, 48, 8); // caret/hover/repaint
+            g.FillRectangle(brush, width - 72, 0, 72, height); // independently moving minimap
+            return frame;
+        }
+
+        using (var first = Viewport(startTop)) Assert.True(composer.TryAddFrame(first, options, out _));
+        int[] steps = [8, 24, 51, 119, 203, 41];
+        foreach (var target in new[] { 3900, 900, 5300, 200, 5800, 0, documentHeight - height })
+        {
+            while (currentTop != target)
+            {
+                var direction = Math.Sign(target - currentTop);
+                var step = Math.Min(Math.Abs(target - currentTop), steps[sequence++ % steps.Length]);
+                var nextTop = currentTop + direction * step;
+                using var frame = Viewport(nextTop);
+                var timer = Stopwatch.StartNew();
+                composer.TryAddFrame(frame, direction > 0 ? ScrollCaptureDirection.Down : ScrollCaptureDirection.Up,
+                    options, sequence % 3 == 0 ? null : 30, lockDirection: true, out _);
+                timings.Add(timer.Elapsed.TotalMilliseconds);
+                minimumTop = Math.Min(minimumTop, nextTop);
+                maximumTop = Math.Max(maximumTop, nextTop);
+                Assert.True(composer.CurrentFrameTop == nextTop - startTop,
+                    $"Frame {sequence}, {currentTop}->{nextTop}: logical={composer.CurrentFrameTop}, " +
+                    $"reject={composer.LastRejectReason}");
+                Assert.Equal(maximumTop - minimumTop + height, composer.OutputHeight);
+                using var preview = composer.ComposeLivePreview(width, documentHeight);
+                Assert.Equal(composer.OutputHeight, preview.Height);
+                currentTop = nextTop;
+            }
+            // A pause/marker at an intermediate stop must not permanently
+            // prohibit expansion beyond this edge on a later return.
+            using var paused = Viewport(currentTop);
+            composer.TryMarkBoundaryReached(paused, ScrollCaptureDirection.Down);
+            composer.TryMarkBoundaryReached(paused, ScrollCaptureDirection.Up);
+        }
+
+        using var result = composer.Compose();
+        using var previewResult = composer.ComposeLivePreview(width, documentHeight);
+        using var expectedGutter = document.Clone(new Rectangle(0, 0, 200, documentHeight), PixelFormat.Format32bppPArgb);
+        using var resultGutter = result.Clone(new Rectangle(0, 0, 200, result.Height), PixelFormat.Format32bppPArgb);
+        using var previewGutter = previewResult.Clone(new Rectangle(0, 0, 200, previewResult.Height), PixelFormat.Format32bppPArgb);
+        AssertAllPixelsEqual(expectedGutter, resultGutter);
+        AssertAllPixelsEqual(expectedGutter, previewGutter);
+        timings.Sort();
+        var percentile95 = timings[(timings.Count - 1) * 95 / 100];
+        Assert.True(percentile95 < 100, $"P95 frame registration: {percentile95:F1} ms");
+        output.WriteLine($"{sequence} repainting frames, {width}x{height}: P95={percentile95:F1}ms, max={timings[^1]:F1}ms");
     }
 
     [Fact]

@@ -10,7 +10,8 @@
 #>
 [CmdletBinding()]
 param(
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [switch]$IncludeDesktopIntegrationTests
 )
 
 $ErrorActionPreference = 'Continue'
@@ -60,13 +61,34 @@ $buildExit = Invoke-Step 'build Release' @(
 
 $testExit = 0
 if (-not $SkipTests -and $buildExit -eq 0) {
-    $testExit = Invoke-Step 'test Release' @(
+    $testArguments = @(
         'test',
         'tests\Screenshot.App.Tests\Screenshot.App.Tests.csproj',
         '-c', 'Release',
         '--nologo',
         '--verbosity', 'minimal'
     )
+    if (-not $IncludeDesktopIntegrationTests) {
+        # Desktop integration tests are skipped by their custom attributes.
+        # Keep the environment clear even if the caller already opted in.
+        $previousDesktopTestSetting = $env:SNAPCUT_RUN_DESKTOP_TESTS
+        Remove-Item Env:SNAPCUT_RUN_DESKTOP_TESTS -ErrorAction SilentlyContinue
+    }
+    else {
+        $previousDesktopTestSetting = $env:SNAPCUT_RUN_DESKTOP_TESTS
+        $env:SNAPCUT_RUN_DESKTOP_TESTS = '1'
+    }
+    try {
+        $testExit = Invoke-Step 'test Release' $testArguments
+    }
+    finally {
+        if ($null -eq $previousDesktopTestSetting) {
+            Remove-Item Env:SNAPCUT_RUN_DESKTOP_TESTS -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:SNAPCUT_RUN_DESKTOP_TESTS = $previousDesktopTestSetting
+        }
+    }
 }
 
 Add-Section 'result'

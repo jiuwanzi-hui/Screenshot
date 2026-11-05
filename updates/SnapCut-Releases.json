@@ -1,4 +1,484 @@
-[{
+[
+  {
+    "tag_name": "v4.2.0",
+    "name": "SnapCut 4.2.0",
+    "body": "# SnapCut 4.2.0\n\n- 新增 AI 问图：截图、钉图编辑及设置均可进入，支持独立快捷键、最多五张图片、图片预览与删除，以及总结、提取文字、翻译等快捷提问。\n- 问图支持选择在线配置、具体模型与强度，流式显示回答及服务实际提供的思路内容；可继续输入、排队发送、停止和调整方向。支持兼容服务的图片生成／编辑，按模型用途执行配置测试。\n- OCR 和翻译在后台处理，期间可继续标注或切换其他软件；改善问图窗口的主题、图片栏收起、快捷键唤起和普通窗口层级。\n- 新增百度大模型文本翻译，与百度通用翻译分开配置；在线模型请求失败与恢复同步显示实际状态。\n- 改善 PP-OCRv6 的竖排与描边艺术字识别，修正裁切方向、识别输入填充和字符框映射；优化像素预处理与 CPU 调度，减少已识别竖列的重复处理。\n- “取”直接识别、复制文字并关闭截图；截图完成提示在屏幕中央显示约 0.8 秒，支持远程画面查看。进入 AI 问图仍执行截图完成流程，但不显示成功提示。\n- 修复设置页面在线 AI 配置区域的布局与显示问题，保留已有配置、用户数据及下载模型。\n\n## 下载与升级\n\n- 支持 Windows 10 / 11 x64，提供安装 EXE、便携 ZIP 和 7z。\n- 便携版完整解压后运行 `SnapCut.exe`；升级前退出旧版，备份并保留 `ScreenshotData` 和 `TranslationModels`。\n- 包含必需运行组件，OCR／翻译模型按需下载；不包含用户数据、密钥、模型权重、源码或诊断脚本。\n- AI 问图需要配置支持相应用途的在线模型；图片在发送时提交给所选服务。思路显示取决于接口实际返回内容。\n- 艺术字准确率及 OCR／翻译耗时受图片、硬件和模型影响，复杂海报仍可能识别错误或耗时较长，不保证所有图片在 1 秒内完成。\n\n从 4.0.0 起仅分发二进制，后续源码不再公开。平台自动生成的源码归档不包含本次版本源码，请下载安装包或便携包。\n",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v4.2.0",
+    "published_at": "2026-09-21T06:29:48.9968677Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "SnapCut-Setup-4.2.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.2.0/SnapCut-Setup-4.2.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-4.2.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.2.0/SnapCut-Portable-4.2.0-win-x64.zip"
+      },
+      {
+        "name": "SnapCut-Portable-4.2.0-win-x64.7z",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.2.0/SnapCut-Portable-4.2.0-win-x64.7z"
+      },
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.2.0/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.2.0/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Releases.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.2.0/SnapCut-Releases.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.2.0/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name": "v4.1.8",
+    "name": "SnapCut 4.1.8",
+    "body": "# SnapCut 4.1.8\n\n- 改善截图取色与框选的局部重绘、DPI 坐标处理，以及其他窗口争抢焦点时的输入接管，减少残影、边框缺失和截图就绪误判。\n- 改善高回报率鼠标下单张及组合钉图的拖动响应，合并移动输入并按显示帧更新位置。\n- 精简截图、录屏及钉图编辑工具栏的控件与展开流程，保留主题、悬停提示和操作手势。工具选项在底部展开，未选工具时不显示颜色与线宽；Shift 可切换子选项并同步图标。表情三行纵向滚动、线宽放右侧；翻译按钮直接执行，右键选择目标语言，不占用 F4。\n- 优化 PP-OCR Small 的解码及多行识别调度，改善艺术字与局部裁剪漏检；新增可选 Qwen3-VL 4B 视觉识别，按需下载模型，不替换已有识别方式。\n- 修复离线翻译的设备探测与加载问题，缓存硬件探测结果，按实际可用显存为轻量模型选择 GPU、混合或 CPU 路径。减少重复运行库准备，改善长正文调度，并在资源允许时重叠 OCR 与所选离线模型的加载。\n- 修复译文被挤成小字、段落错误合并，以及技术文本中路径、数字和占位内容引起的漏译／误判；显示包含识别与排版的总耗时，保留具体失败原因及已完成段落。\n- 修复调整录屏设置后重建录制器可能失败的问题，补齐启动、回退和运行错误的后台诊断，保留原始异常与实际日志路径。\n- 修复宽选区长截图中预览遮挡区域出现黑条的问题。自动模式改善按行滚动匹配、周边面板变化引起的定位失败、暂停响应和回退方向提示，限制无效往返；手动拼接算法和预览位置保持不变。\n\n说明：工具栏仍基于精简后的 WPF 实现，部分电脑空闲后的首次显示仍可能等待。OCR、翻译和视觉模型耗时取决于硬件与内容，不保证所有图片固定在 1 秒或 6 秒内完成；艺术字及不完整裁剪仍可能识别错误。自动长截图已通过代码图和周边变化回放验证，不同应用的实际滚动仍可能存在差异。\n\n本次发布 Windows x64 安装版、便携 ZIP 和 7z。保留用户配置与已下载模型；默认包不包含模型权重、诊断脚本、源码或输入追踪。此次发布仅上传 GitHub。\n",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v4.1.8",
+    "published_at": "2026-09-20T11:58:57.2823365Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "SnapCut-Setup-4.1.8-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.8/SnapCut-Setup-4.1.8-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-4.1.8-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.8/SnapCut-Portable-4.1.8-win-x64.zip"
+      },
+      {
+        "name": "SnapCut-Portable-4.1.8-win-x64.7z",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.8/SnapCut-Portable-4.1.8-win-x64.7z"
+      },
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.8/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.8/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Releases.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.8/SnapCut-Releases.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.8/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name": "v4.1.7",
+    "name": "SnapCut 4.1.7",
+    "body": "# SnapCut 4.1.7\n\n- 改用短时原生剪贴板写入，减少与语音转录等软件复制文字时的冲突，完善占用重试和资源释放。\n- PP-OCRv6 普通识别使用 Small 快速路径，艺术字、彩色文字和竖排漏检按需使用 Medium 增强；改善小选区及边缘文字处理，保留原始截图像素。已有模型继续保留，缺失组件可在“内容识别”设置中补齐。\n- 根据硬件能力分配 OCR 与离线翻译线程和并行资源，改善首次加载、连续识别和大段翻译的调度；修复包含英文路径的正文被误认为目标语言而跳过翻译的问题。\n- 改善设置打开时的输入响应、截图与录屏工具栏交接，以及空闲后取色窗口的显示一致性；保留高回报率鼠标的原生框选。\n- 修复高 DPI（含 175% 缩放）下连续钉图、再次截图导致图片逐渐模糊的问题。\n- 界面任务结束后释放后台 WPF 功能进程，降低空闲占用；安装版与便携版均不附带诊断脚本，不启用输入或截图追踪。安装覆盖会清理早期测试包附带的已知诊断脚本，保留配置、模型和用户数据。\n\n已知限制：部分电脑在空闲释放后首次显示工具栏仍有冷启动等待，本版没有通过长期保留整个界面进程来掩盖这一等待。艺术字识别效果仍受字体、背景、分辨率及裁剪完整性影响，不保证所有艺术字都能正确识别。\n\n本次仅发布 Windows x64。安装版与便携版支持程序内更新；保留 ZIP 兼容下载，并提供小于 100 MB 的 7z 国内镜像包。\n",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v4.1.7",
+    "published_at": "2026-09-19T09:17:16.0047023Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "SnapCut-Setup-4.1.7-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.7/SnapCut-Setup-4.1.7-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-4.1.7-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.7/SnapCut-Portable-4.1.7-win-x64.zip"
+      },
+      {
+        "name": "SnapCut-Portable-4.1.7-win-x64.7z",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.7/SnapCut-Portable-4.1.7-win-x64.7z"
+      },
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.7/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.7/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Releases.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.7/SnapCut-Releases.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.7/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name": "v4.1.5",
+    "name": "SnapCut 4.1.5",
+    "body": "# SnapCut 4.1.5\n\n- 修复普通截图在空闲内存回落后，首次拖动框选时短暂卡顿的问题，保留工具栏提前准备，改善冷启动响应。\n- 修复 4.1.2 回退到 4.1.0 时，新增工具栏配置导致整份设置恢复默认的问题。\n- 版本回退前自动备份原始设置，并生成兼容旧版本的配置；更新和回退统一使用当前版本的更新器，加强设置、凭据、历史记录和已下载模型的保留。\n- 卸载时选择保留用户数据，会同时保留已下载的 OCR 和翻译模型。\n",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v4.1.5",
+    "published_at": "2026-09-18T00:43:42Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "SnapCut-Setup-4.1.5-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.5/SnapCut-Setup-4.1.5-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-4.1.5-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.5/SnapCut-Portable-4.1.5-win-x64.zip"
+      },
+      {
+        "name": "SnapCut-Portable-4.1.5-win-x64.7z",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.5/SnapCut-Portable-4.1.5-win-x64.7z"
+      },
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.5/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.5/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Releases.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.5/SnapCut-Releases.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.5/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name": "v4.1.3",
+    "name": "SnapCut 4.1.3",
+    "body": "# SnapCut 4.1.3\n\n- 修复截图工具栏文字识别、翻译、提取文字、隐私打码和水印等按钮点击无反应的问题，改善文字图标与颜色面板的点击判断。\n- 修复“完成截图”快捷键无法设置单独字母的问题，支持 A–Z 单字母及键盘组合，修改后自动保存，重新打开设置后仍可继续修改。\n",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v4.1.3",
+    "published_at": "2026-09-17T22:41:26.153279+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "SnapCut-Setup-4.1.3-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.3/SnapCut-Setup-4.1.3-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-4.1.3-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.3/SnapCut-Portable-4.1.3-win-x64.zip"
+      },
+      {
+        "name": "SnapCut-Portable-4.1.3-win-x64.7z",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.3/SnapCut-Portable-4.1.3-win-x64.7z"
+      },
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.3/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.3/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Releases.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.3/SnapCut-Releases.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.3/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name": "v4.1.2",
+    "name": "SnapCut 4.1.2",
+    "body": "# SnapCut 4.1.2\n\n- 新增实时区域翻译：快捷键直接框选，持续识别并翻译区域中的外语，支持术语设置、增量更新和译文复用。\n- 改进动态网页、文档和游戏画面的译文显示，优化原文覆盖、背景取色和段落排版，精简状态提示；远程查看时保留选区边框与译文。\n- 完善中文、英文、法文、俄文、西班牙文和阿拉伯文界面切换，同步设置、工具栏提示、菜单和应用弹窗。\n- 增强复杂表格识别，改善合并单元格、缺少两侧边线、三线表的结构与文字识别，并补识别遗漏的单元格内容。\n- 工具栏快捷键支持 Ctrl、Alt、Shift 与数字组合，同步截图、钉图编辑和录屏标注。\n- 普通截图工具栏新增比例选择，选中后立即调整选区，自动记住并同步设置页及工具栏布局预览。\n- 文本标注新增有背景／无背景选项，背景随文字自动调整大小，选择持久化并同步普通截图、钉图、长图编辑和录屏标注。\n- 修复工具栏下拉箭头点击不灵敏、文本背景不显示的问题；提前准备工具栏，将自动识别移至首帧显示之后，改善框选完成后的响应。\n- 修复首次截图尺寸提示位置异常与松手闪屏，优化屏幕像素传递、窗口交接和任务结束后的资源释放。\n- 托盘单击进入截图、双击打开设置；修复实时翻译选区坐标及关闭后的资源回收，并保留采集期间已打开的设置页面。\n",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v4.1.2",
+    "published_at": "2026-09-17T20:20:28.923489+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "SnapCut-Setup-4.1.2-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.2/SnapCut-Setup-4.1.2-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-4.1.2-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.2/SnapCut-Portable-4.1.2-win-x64.zip"
+      },
+      {
+        "name": "SnapCut-Portable-4.1.2-win-x64.7z",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.2/SnapCut-Portable-4.1.2-win-x64.7z"
+      },
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.2/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.2/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Releases.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.2/SnapCut-Releases.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.2/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name": "v4.1.0",
+    "name": "SnapCut 4.1.0",
+    "body": "# SnapCut 4.1.0\n\n- 新增普通截图水印：支持自定义文字、截图时间、城市／地区、经纬度和手填地点，最多导入三张图片并选择一张作为水印图案。\n- 水印图案、文字、时间和地点可在预览中分别拖动、缩放与摆放；手填地点实时更新，设置样式跟随当前主题。\n- 普通截图工具栏新增水印按钮，支持一键添加、取消及截图自动添加；移动或调整选区时暂时隐藏水印，调整完成后重新显示。\n- 优化后台待机内存和资源回收，设置、截图、长图编辑、识别、翻译、钉图及录屏结束后及时释放对应资源。\n- 加快普通截图、钉图和录屏框选的启动响应，修复首次截图遮罩、边框显示异常及取色移动闪烁。\n- 修复中文输入法下按 C 无法复制颜色的问题；取色复制和最小化启动恢复居中的主题通知。\n- 改进中英文混合内容、短标题和专业词语的翻译判断，修复包含外语的选区被误判为无需翻译的问题。\n- 改进钉图原始像素保留、编辑交接、主题切换及窗口关闭后的资源释放。\n- 更新交流群二维码，并改进在线二维码刷新，避免继续显示旧图片。\n",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v4.1.0",
+    "published_at": "2026-09-16T16:44:09.6083489+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "SnapCut-Setup-4.1.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.0/SnapCut-Setup-4.1.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-4.1.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.0/SnapCut-Portable-4.1.0-win-x64.zip"
+      },
+      {
+        "name": "SnapCut-Portable-4.1.0-win-x64.7z",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.0/SnapCut-Portable-4.1.0-win-x64.7z"
+      },
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.0/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.0/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Releases.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.0/SnapCut-Releases.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.1.0/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name": "v4.0.6",
+    "name": "SnapCut 4.0.6",
+    "body": "# SnapCut 4.0.6\n\n## 更新内容\n\n- 恢复清透琉璃原有文字配色：透明区域、标题、导航和识别正文使用浅色字，按钮与输入框保留适合其底板的深色字，修复黑色桌面背景下黑字难以辨认的问题。\n- 优化主题切换：批量提交完整色板，合并设置窗口的重复刷新与保存，减少切换瞬间的界面卡顿；保留玻璃材质、选中动画和设置持久化。\n- 保留 4.0.5 的截图、OCR、翻译、录屏和双源自动更新修复。\n\n## 下载与升级\n\n- Windows 10 / 11 x64：安装版 `SnapCut-Setup-4.0.6-win-x64.exe`；便携版 `SnapCut-Portable-4.0.6-win-x64.zip` 或 `.7z`。\n- ZIP 和 7z 包含相同程序及完整依赖。Gitee 使用严格小于 100 MB 的 EXE 和 7z，GitHub 同时提供 ZIP。\n- 支持 GitHub / Gitee 双源在线更新，升级保留 `ScreenshotData` 和 `TranslationModels`。旧客户端若缺少 Gitee 发行附件检测或 7z 支持，可能需要先手动升级一次。\n- `SnapCut-Update.json`、`Screenshot-Update.json`、`SnapCut-Releases.json` 为更新所需附件，`SHA256SUMS.txt` 用于校验。\n\n本次仅分发 Windows 编译产物。源码和本地提交不推送远程；平台自动生成的源码归档关联历史公开提交，不包含本版私有源码。\n",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v4.0.6",
+    "published_at": "2026-09-15T12:14:40.082391+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "SnapCut-Setup-4.0.6-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.6/SnapCut-Setup-4.0.6-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-4.0.6-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.6/SnapCut-Portable-4.0.6-win-x64.zip"
+      },
+      {
+        "name": "SnapCut-Portable-4.0.6-win-x64.7z",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.6/SnapCut-Portable-4.0.6-win-x64.7z"
+      },
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.6/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.6/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Releases.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.6/SnapCut-Releases.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.6/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name": "v4.0.5",
+    "name": "SnapCut 4.0.5",
+    "body": "# SnapCut 4.0.5\n\n## 更新内容\n\n- 修复截图使任务栏被其他窗口覆盖的问题；截取网页悬浮提示时先保存当前画面，再进入框选。\n- 增加可选的框选后自动识别文字，普通截图和钉图可直接选择、复制文字；调整选区松手后合并识别，空白处保持拖动。\n- 改善深色背景彩色小字、短标题和小选区的 OCR 漏检，减少普通文字被误判为微信小程序码。\n- 钉图保留原始像素并按物理像素对齐；输出尺寸超过 100% 明确标为插值放大。\n- 改善短标题及专有名称的离线翻译，源语言不确定时交由所选多语言模型处理；轻量模型按可用显存选择 GPU 或 CPU，并显示加载及回退状态。\n- 在线模型实际请求失败和恢复后同步更新配置状态及原因；关闭新增翻译配置弹窗不再保存草稿。翻译配置和翻译优先顺序支持拖拽排序、落位动画及自动保存。\n- 修复设置窗口缩放时内容拉伸、表单对齐问题，减少主题切换、保存设置和复制文本时的界面阻塞。\n- 清透琉璃主题的界面文字统一使用黑色，修正透明区域自动改成白字的问题，保留玻璃材质和轻微文字边缘光影。\n- OCR 改为按需独立进程，连续操作短暂复用，空闲约 10 秒后退出；优化后台资源释放和效率模式，前台操作恢复正常调度。\n- 加固录屏首帧写入和编码兼容性；硬件编码失败时有限回退，记录实际失败条件以避免重复触发。\n- 修复长截图中细字与动态图同时出现时，动态图边缘过密干扰位移判断的问题，保留对重复头像、不同正文和上下返回的校验。\n- 修复 GitHub 不可达时的更新检测：Gitee 独立查询发行版及更新附件，支持安装版及 7z 便携版的下载校验、重试和覆盖恢复。\n\n## 下载与升级\n\n- Windows 10 / 11 x64：安装版 `SnapCut-Setup-4.0.5-win-x64.exe`；便携版 `SnapCut-Portable-4.0.5-win-x64.zip` 或 `.7z`。\n- ZIP 与 7z 包含相同程序及完整依赖；Gitee 使用小于 100 MB 的 EXE 和 7z。已包含 .NET、录屏和离线翻译推理组件，模型按需下载。\n- 4.0.5 支持 GitHub/Gitee 双源在线更新。较旧客户端如果无法检测 Gitee 发行附件，需要先手动升级一次，不能通过本次附件修复旧客户端自身的检测代码。\n- 升级保留 `ScreenshotData` 和 `TranslationModels`；请勿删除已有设置、历史及模型目录。\n- 自动更新附件：`SnapCut-Update.json`、`Screenshot-Update.json`、`SnapCut-Releases.json`；`SHA256SUMS.txt` 用于校验。\n\n## 说明\n\n离线模型对游戏、专业领域名称的译法仍可能与官方术语不同。运行占用和速度取决于模型、任务与硬件，本版不承诺所有机器空闲内存低于 20 MB。\n\n本次仅提供 Windows 编译产物，不包含用户数据、密钥和调试追踪文件。后续源码、提交及标签仅保存在本地。平台自动生成的源码归档关联历史公开提交，不包含本版私有源码，请下载安装包或便携包。\n",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v4.0.5",
+    "published_at": "2026-09-15T10:53:57.2567463+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.5/SnapCut-Setup-4.0.5-win-x64.exe",
+        "name": "SnapCut-Setup-4.0.5-win-x64.exe"
+      },
+      {
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.5/SnapCut-Portable-4.0.5-win-x64.zip",
+        "name": "SnapCut-Portable-4.0.5-win-x64.zip"
+      },
+      {
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.5/SnapCut-Portable-4.0.5-win-x64.7z",
+        "name": "SnapCut-Portable-4.0.5-win-x64.7z"
+      },
+      {
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.5/SnapCut-Update.json",
+        "name": "SnapCut-Update.json"
+      },
+      {
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.5/Screenshot-Update.json",
+        "name": "Screenshot-Update.json"
+      },
+      {
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.5/SnapCut-Releases.json",
+        "name": "SnapCut-Releases.json"
+      },
+      {
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.5/SHA256SUMS.txt",
+        "name": "SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name": "v4.0.2",
+    "name": "SnapCut 4.0.2",
+    "body": "# SnapCut 4.0.2\n\n## 更新内容\n\n- 加固休眠恢复和长时间闲置后的截图启动：修正屏幕像素透明度处理，确认冻结画面与输入就绪后显示遮罩；异常时有限回退并及时提示，避免重复采集叠加负载。\n- 改善录屏启动兼容性：等待采集与编码器确认后显示正在录制，启动失败可尝试一次兼容采集与软件编码；保留所选格式、分辨率、帧率及声音配置，移除因黑色画面自动结束录制的误判。\n- 优化 OCR 与离线翻译的硬件适配、首次加载、批量处理和任务结束后的资源释放；本地内存或显存不足时显示原因和处理指引。\n- 改善多语言互译、同语言段落跳过、段落完整性检查与失败补译，保留已完成译文；新增百度、有道官方公共翻译接口配置，使用用户自己的应用 ID 与密钥。\n- 翻译按钮增加目标语言下拉菜单，与设置和其他翻译入口同步；菜单、选中态和滚动条跟随主题，移入菜单边缘不再自动滚动。\n- 新增紧凑的双线双向箭头标注，箭头仅保留外侧半边，支持实心与空心样式；同步普通截图、钉图、长截图结果编辑和录屏工具栏。\n- 调整前六个主题配色，保持三浅色、三深色，雾紫主题采用柔和哑光效果；统一各主题的导航、页签和工具按钮切换动画。\n- 修复设置窗口最大化遮挡任务栏及内容过度拉伸的问题；截图、钉图与录屏框选边框统一跟随主题。\n- 改善钉图滚轮缩放流畅性，修复缩小时边缘出现白色尖角或条带；普通钉图和编组支持双击关闭，编辑状态保留原有双击操作。\n- 长截图结果编辑工具栏增加识别文字、复制文字、表格识别和翻译入口；改善慢速机器上的采集响应及预览恢复，保留已拼接结果。\n- 修复二维码识别圆点单击未复制的问题，避免选区拖动拦截识别结果点击。\n\n## 下载与升级\n\n- 支持 Windows 10 / 11 x64。\n- 安装版：`SnapCut-Setup-4.0.2-win-x64.exe`。\n- 便携版：`SnapCut-Portable-4.0.2-win-x64.zip`，完整解压后运行 `SnapCut.exe`。\n- Gitee 便携版：`SnapCut-Portable-4.0.2-win-x64.7z`，小于 100 MB，与 ZIP 包含相同程序和完整依赖；系统不支持时使用 7-Zip/NanaZip 解压。4.0.2 起内置解压器可通过 Gitee 7z 自动更新；旧版首次升级需 GitHub ZIP 或手动下载一次 Gitee 包。\n- 已包含 .NET、录屏依赖和离线翻译推理组件；OCR 与翻译模型按需下载。\n- 升级前退出旧版，备份并保留原有 `ScreenshotData`、`TranslationModels`，以继续使用设置、历史和已下载模型。\n- `SnapCut-Update.json`、`Screenshot-Update.json`、`SnapCut-Releases.json` 为自动更新元数据；`SHA256SUMS.txt` 为附件校验文件。\n- 公共翻译服务的可用额度与限额以各平台账户为准；实际识别和翻译耗时取决于硬件、模型、文本及网络。\n\n## 发行说明\n\n本次仅提供 Windows 安装版和便携版，以 Release 配置构建，不启用调试和输入追踪日志，不包含用户数据、密钥或模型缓存。\n\n从 4.0.0 起仅分发二进制，后续源码不再公开。GitHub 自动生成的 Source code 归档属于历史公开代码，不包含本次版本源码，请下载上述安装包或便携包。\n",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v4.0.2",
+    "published_at": "2026-09-13T10:04:09.0975358+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "SnapCut-Setup-4.0.2-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.2/SnapCut-Setup-4.0.2-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-4.0.2-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.2/SnapCut-Portable-4.0.2-win-x64.zip"
+      },
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.2/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.2/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Releases.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.2/SnapCut-Releases.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.2/SHA256SUMS.txt"
+      },
+      {
+        "name": "SnapCut-Portable-4.0.2-win-x64.7z",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.2/SnapCut-Portable-4.0.2-win-x64.7z"
+      }
+    ]
+  },
+  {
+    "tag_name": "v4.0.1",
+    "name": "SnapCut 4.0.1",
+    "body": "# SnapCut 4.0.1\n\n## 更新内容\n\n- 重做“清透琉璃”主题：窗口透出底层真实内容，采用中性玻璃、柔和飘带和边缘反光；改善按钮、选中态、路径输入框和文字的可读性。\n- 统一标题栏、应用弹窗、托盘菜单及截图工具栏的玻璃样式；导航、页签和工具按钮增加选中底框滑动过渡，长提示支持换行。\n- 修复从其他主题切换到玻璃主题后，需要再次截图才能刷新背景的问题。\n- 修复后台截图及右键菜单打开时的快捷键触发问题，改善菜单画面缓存和输入焦点交接；按住快捷键不会反复启动截图。\n- 修复截图初始化时只有遮罩、无法框选，以及松开 Alt 后放大镜不再跟随的问题；优化尺寸提示与工具栏的避让。\n- 优化钉图：默认直接显示图片，保留细边线与阴影；整图可拖动，进入编辑后锁定位置，常用识别、翻译、裁剪等操作集中在编辑工具栏。\n- 改善 OCR 结果窗口的文字对比度，去掉多余内框；扩展常见隐私信息识别，减少打码波及相邻文字的问题。\n- 改善长截图跨空白区域和上下往返时的衔接、边框显示及滚动闪烁问题；优化历史窗口从任务栏切回前台的表现。\n\n## 下载与升级\n\n- 支持 Windows 10 / 11 x64。\n- 安装版：`SnapCut-Setup-4.0.1-win-x64.exe`。\n- 便携版：`SnapCut-Portable-4.0.1-win-x64.zip`，完整解压后运行 `SnapCut.exe`。\n- 已包含 .NET、录屏依赖和离线翻译推理组件；OCR 与翻译模型按需下载。\n- 升级前退出旧版，备份并保留原有 `ScreenshotData`、`TranslationModels`，以继续使用设置、历史和已下载模型。\n- `SnapCut-Update.json`、`Screenshot-Update.json`、`SnapCut-Releases.json` 为自动更新元数据，`SHA256SUMS.txt` 为附件校验文件。\n\n## 发行说明\n\n本次 Windows 安装包与便携包按最新本地代码使用 Release 配置编译，不启用调试和输入追踪日志，不包含用户数据、密钥或模型缓存。\n\n从 4.0.0 起仅分发二进制安装版和便携版，后续源码不再公开。GitHub 自动生成的 Source code 归档属于历史公开代码，不包含本次版本源码，请下载上述安装包或便携包。\n",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v4.0.1",
+    "published_at": "2026-09-11T16:29:48.0881614+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "SnapCut-Setup-4.0.1-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.1/SnapCut-Setup-4.0.1-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-4.0.1-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.1/SnapCut-Portable-4.0.1-win-x64.zip"
+      },
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.1/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.1/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Releases.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.1/SnapCut-Releases.json"
+      },
+      {
+        "name": "SHA256SUMS.txt",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.1/SHA256SUMS.txt"
+      }
+    ]
+  },
+  {
+    "tag_name": "v4.0.0",
+    "name": "SnapCut 4.0.0",
+    "body": "# SnapCut 4.0.0\n\n## 更新内容\n\n- 重整设置页面与工具栏布局，统一图标、控件尺寸和菜单主题；增加自绘液态玻璃效果，改善小窗口适配和缩放时的响应。\n- 调整录屏工具栏：准备录制时仅显示录制控制，录制中支持切换系统声音、麦克风；更新收起动画和悬浮控制按钮。\n- 序号标注支持数字、字母和罗马数字，通过加减调整下一个序号，选择后立即生效；修复序号设置弹层松手即关闭的问题。\n- 修复在线翻译配置编辑、重命名后接口地址和模型被重置的问题；改进真实翻译测试、分段完整性检查及失败原因提示，保留已成功翻译的段落。\n- 保留 TranslateGemma 4B，新增可选的 Hy-MT2 1.8B 轻量离线模型；优化 CPU 推理线程、加载超时和闲置资源释放。模型需要在设置中单独下载。\n- 改进多语言 OCR 的分栏处理，减少相邻新闻栏文字混合导致的翻译问题。\n- 优化手动长截图的后台处理与预览刷新；修复上下反向滚动、漏帧后预览停止更新的问题，跟踪丢失时显示恢复提示。\n\n## 下载与升级\n\n- Windows 10 / 11 x64：安装版 `SnapCut-Setup-4.0.0-win-x64.exe`；便携版 `SnapCut-Portable-4.0.0-win-x64.zip`。\n- 已包含 .NET 和录制所需运行组件，以及离线翻译运行程序；OCR、翻译模型按需下载。\n- 升级前退出旧版。便携版请完整解压至可写目录，再运行 `SnapCut.exe`；保留原有 `ScreenshotData` 和 `TranslationModels` 可继续使用设置、历史与已下载模型，建议先备份。\n- `SnapCut-Update.json`、`Screenshot-Update.json` 和 `SnapCut-Releases.json` 为更新元数据；`SHA256SUMS.txt` 提供附件校验值。\n\n## 发行说明\n\n本次安装包与便携包由最新本地工作区源码以 Release 配置编译，不包含调试或输入追踪日志。\n\n从 4.0.0 起仅分发安装版和便携版，后续源码不再公开。发行标签关联已有历史公开提交；平台自动生成的源码归档不包含 4.0.0 源码，请下载安装包或便携包。\n\n低配置电脑的实际速度受硬件、模型和页面内容影响，本次优化不代表所有设备均已实机验证。\n",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v4.0.0",
+    "published_at": "2026-09-07T18:29:58.8420788+08:00",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.0/SnapCut-Update.json",
+        "name": "SnapCut-Update.json"
+      },
+      {
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.0/Screenshot-Update.json",
+        "name": "Screenshot-Update.json"
+      },
+      {
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.0/SnapCut-Setup-4.0.0-win-x64.exe",
+        "name": "SnapCut-Setup-4.0.0-win-x64.exe"
+      },
+      {
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.0.0/SnapCut-Portable-4.0.0-win-x64.zip",
+        "name": "SnapCut-Portable-4.0.0-win-x64.zip"
+      }
+    ]
+  },
+  {
+    "tag_name": "v3.8.1",
+    "name": "SnapCut 3.8.1",
+    "body": "- 优化钉图画面缩放：缩放期间采用轻量采样并暂时隐藏密集棋盘底色，连续滚轮操作结束后自动恢复高清显示，减少卡顿和底纹闪烁。\n- 普通钉图、钉图编组及编辑模式保持缩放中心和编辑流程一致。\n- 更新交流联系页的交流群二维码资源。",
+    "html_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v3.8.1",
+    "published_at": "2026-09-04T11:42:43Z",
+    "draft": false,
+    "prerelease": false,
+    "assets": [
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.1/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Portable-3.8.1-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.1/SnapCut-Portable-3.8.1-win-x64.zip"
+      },
+      {
+        "name": "SnapCut-Setup-3.8.1-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.1/SnapCut-Setup-3.8.1-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.1/SnapCut-Update.json"
+      }
+    ]
+  },
+  {
     "tag_name": "v3.8.0",
     "name": "SnapCut 3.8.0",
     "body": "- 优化截图、钉图和录屏快捷键的首帧输入路径，覆盖层先响应鼠标，减少低性能设备上的瞬时停顿和取色放大镜延迟。\n- 统一选区、拖动、缩放和取色跟随的高频刷新调度，改善截图框选与钉图移动的连续性。\n- PP-OCRv6 使用受控线程预算、较小输入尺寸和按需预热，缩短本地识别等待；Release 构建不启用输入追踪调试日志。",
@@ -7,12 +487,25 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.0/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.0/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-3.8.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.0/SnapCut-Setup-3.8.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-3.8.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.0/SnapCut-Portable-3.8.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.0/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.0/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-3.8.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.0/SnapCut-Setup-3.8.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-3.8.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.8.0/SnapCut-Portable-3.8.0-win-x64.zip"
+      }
     ]
-  }, {
+  },
+  {
     "tag_name": "v3.7.9",
     "name": "SnapCut 3.7.9",
     "body": "- 修复高回报率鼠标移动时按快捷键进入截图的首帧卡顿：截图窗口先以非激活方式显示，桌面帧在后台获取并在首帧完成后接管鼠标。\n- 移除进入时默认十字光标和首帧大图同步绑定，减少光标切换、窗口合成对输入的阻塞。\n- Release 构建不启用输入时序调试日志。",
@@ -21,12 +514,25 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.9/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.9/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-3.7.9-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.9/SnapCut-Setup-3.7.9-win-x64.exe" },
-      { "name": "SnapCut-Portable-3.7.9-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.9/SnapCut-Portable-3.7.9-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.9/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.9/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-3.7.9-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.9/SnapCut-Setup-3.7.9-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-3.7.9-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.9/SnapCut-Portable-3.7.9-win-x64.zip"
+      }
     ]
-  }, {
+  },
+  {
     "tag_name": "v3.7.8",
     "name": "SnapCut 3.7.8",
     "body": "- 增加最多五个预设截图区域：支持编号悬浮面板、区域高亮、左键直接截图、右键编辑、Delete 删除和一键清空。\n- 预览区域改为高透明度、主题适配并支持面板外点击关闭；区域设置支持右键逐步返回和完成保存。\n- 延续截图、钉图和录屏框选的原生更新、首次快捷键预热、遮罩同步和标注编辑修复；Release 构建不启用输入时序调试日志。",
@@ -35,10 +541,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.8/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.8/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-3.7.8-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.8/SnapCut-Setup-3.7.8-win-x64.exe" },
-      { "name": "SnapCut-Portable-3.7.8-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.8/SnapCut-Portable-3.7.8-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.8/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.8/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-3.7.8-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.8/SnapCut-Setup-3.7.8-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-3.7.8-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.8/SnapCut-Portable-3.7.8-win-x64.zip"
+      }
     ]
   },
   {
@@ -50,10 +568,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.5/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.5/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-3.7.5-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.5/SnapCut-Setup-3.7.5-win-x64.exe" },
-      { "name": "SnapCut-Portable-3.7.5-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.5/SnapCut-Portable-3.7.5-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.5/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.5/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-3.7.5-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.5/SnapCut-Setup-3.7.5-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-3.7.5-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.5/SnapCut-Portable-3.7.5-win-x64.zip"
+      }
     ]
   },
   {
@@ -65,10 +595,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.0/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.0/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-3.7.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.0/SnapCut-Setup-3.7.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-3.7.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.0/SnapCut-Portable-3.7.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.0/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.0/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-3.7.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.0/SnapCut-Setup-3.7.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-3.7.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.7.0/SnapCut-Portable-3.7.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -80,10 +622,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.1/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.1/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-3.6.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.1/SnapCut-Setup-3.6.1-win-x64.exe" },
-      { "name": "SnapCut-Portable-3.6.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.1/SnapCut-Portable-3.6.1-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.1/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.1/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-3.6.1-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.1/SnapCut-Setup-3.6.1-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-3.6.1-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.1/SnapCut-Portable-3.6.1-win-x64.zip"
+      }
     ]
   },
   {
@@ -95,10 +649,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.0/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.0/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-3.6.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.0/SnapCut-Setup-3.6.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-3.6.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.0/SnapCut-Portable-3.6.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.0/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.0/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-3.6.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.0/SnapCut-Setup-3.6.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-3.6.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.6.0/SnapCut-Portable-3.6.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -110,10 +676,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.5.0/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.5.0/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-3.5.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.5.0/SnapCut-Setup-3.5.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-3.5.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.5.0/SnapCut-Portable-3.5.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.5.0/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.5.0/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-3.5.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.5.0/SnapCut-Setup-3.5.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-3.5.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.5.0/SnapCut-Portable-3.5.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -125,10 +703,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.2/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.2/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-3.4.2-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.2/SnapCut-Setup-3.4.2-win-x64.exe" },
-      { "name": "SnapCut-Portable-3.4.2-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.2/SnapCut-Portable-3.4.2-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.2/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.2/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-3.4.2-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.2/SnapCut-Setup-3.4.2-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-3.4.2-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.2/SnapCut-Portable-3.4.2-win-x64.zip"
+      }
     ]
   },
   {
@@ -140,10 +730,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.1/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.1/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-3.4.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.1/SnapCut-Setup-3.4.1-win-x64.exe" },
-      { "name": "SnapCut-Portable-3.4.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.1/SnapCut-Portable-3.4.1-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.1/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.1/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-3.4.1-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.1/SnapCut-Setup-3.4.1-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-3.4.1-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.1/SnapCut-Portable-3.4.1-win-x64.zip"
+      }
     ]
   },
   {
@@ -155,10 +757,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.0/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.0/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-3.4.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.0/SnapCut-Setup-3.4.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-3.4.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.0/SnapCut-Portable-3.4.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.0/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.0/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-3.4.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.0/SnapCut-Setup-3.4.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-3.4.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.4.0/SnapCut-Portable-3.4.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -170,10 +784,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.3.0/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.3.0/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-3.3.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.3.0/SnapCut-Setup-3.3.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-3.3.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.3.0/SnapCut-Portable-3.3.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.3.0/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.3.0/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-3.3.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.3.0/SnapCut-Setup-3.3.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-3.3.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.3.0/SnapCut-Portable-3.3.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -185,10 +811,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.2.0/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.2.0/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-3.2.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.2.0/SnapCut-Setup-3.2.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-3.2.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.2.0/SnapCut-Portable-3.2.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.2.0/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.2.0/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-3.2.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.2.0/SnapCut-Setup-3.2.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-3.2.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.2.0/SnapCut-Portable-3.2.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -200,10 +838,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.1.0/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.1.0/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-3.1.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.1.0/SnapCut-Setup-3.1.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-3.1.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.1.0/SnapCut-Portable-3.1.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.1.0/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.1.0/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-3.1.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.1.0/SnapCut-Setup-3.1.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-3.1.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.1.0/SnapCut-Portable-3.1.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -215,10 +865,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.0.0/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.0.0/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-3.0.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.0.0/SnapCut-Setup-3.0.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-3.0.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.0.0/SnapCut-Portable-3.0.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.0.0/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.0.0/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-3.0.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.0.0/SnapCut-Setup-3.0.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-3.0.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v3.0.0/SnapCut-Portable-3.0.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -230,10 +892,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.2/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.2/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-2.9.2-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.2/SnapCut-Setup-2.9.2-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.9.2-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.2/SnapCut-Portable-2.9.2-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.2/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.2/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.9.2-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.2/SnapCut-Setup-2.9.2-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.9.2-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.2/SnapCut-Portable-2.9.2-win-x64.zip"
+      }
     ]
   },
   {
@@ -245,10 +919,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.1/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.1/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-2.9.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.1/SnapCut-Setup-2.9.1-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.9.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.1/SnapCut-Portable-2.9.1-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.1/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.1/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.9.1-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.1/SnapCut-Setup-2.9.1-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.9.1-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.1/SnapCut-Portable-2.9.1-win-x64.zip"
+      }
     ]
   },
   {
@@ -260,10 +946,22 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.0/SnapCut-Update.json" },
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.0/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-2.9.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.0/SnapCut-Setup-2.9.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.9.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.0/SnapCut-Portable-2.9.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.0/SnapCut-Update.json"
+      },
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.0/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.9.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.0/SnapCut-Setup-2.9.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.9.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.9.0/SnapCut-Portable-2.9.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -275,9 +973,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.2/SnapCut-Update.json" },
-      { "name": "SnapCut-Setup-2.8.2-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.2/SnapCut-Setup-2.8.2-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.8.2-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.2/SnapCut-Portable-2.8.2-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.2/SnapCut-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.8.2-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.2/SnapCut-Setup-2.8.2-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.8.2-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.2/SnapCut-Portable-2.8.2-win-x64.zip"
+      }
     ]
   },
   {
@@ -289,9 +996,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.1/SnapCut-Update.json" },
-      { "name": "SnapCut-Setup-2.8.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.1/SnapCut-Setup-2.8.1-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.8.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.1/SnapCut-Portable-2.8.1-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.1/SnapCut-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.8.1-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.1/SnapCut-Setup-2.8.1-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.8.1-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.1/SnapCut-Portable-2.8.1-win-x64.zip"
+      }
     ]
   },
   {
@@ -303,9 +1019,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.0/SnapCut-Update.json" },
-      { "name": "SnapCut-Setup-2.8.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.0/SnapCut-Setup-2.8.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.8.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.0/SnapCut-Portable-2.8.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.0/SnapCut-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.8.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.0/SnapCut-Setup-2.8.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.8.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.8.0/SnapCut-Portable-2.8.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -317,9 +1042,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.7.1/SnapCut-Update.json" },
-      { "name": "SnapCut-Setup-2.7.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.7.1/SnapCut-Setup-2.7.1-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.7.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.7.1/SnapCut-Portable-2.7.1-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.7.1/SnapCut-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.7.1-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.7.1/SnapCut-Setup-2.7.1-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.7.1-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.7.1/SnapCut-Portable-2.7.1-win-x64.zip"
+      }
     ]
   },
   {
@@ -331,9 +1065,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.7.0/SnapCut-Update.json" },
-      { "name": "SnapCut-Setup-2.7.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.7.0/SnapCut-Setup-2.7.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.7.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.7.0/SnapCut-Portable-2.7.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.7.0/SnapCut-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.7.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.7.0/SnapCut-Setup-2.7.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.7.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.7.0/SnapCut-Portable-2.7.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -345,9 +1088,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.1/SnapCut-Update.json" },
-      { "name": "SnapCut-Setup-2.6.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.1/SnapCut-Setup-2.6.1-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.6.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.1/SnapCut-Portable-2.6.1-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.1/SnapCut-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.6.1-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.1/SnapCut-Setup-2.6.1-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.6.1-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.1/SnapCut-Portable-2.6.1-win-x64.zip"
+      }
     ]
   },
   {
@@ -359,9 +1111,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.0/SnapCut-Update.json" },
-      { "name": "SnapCut-Setup-2.6.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.0/SnapCut-Setup-2.6.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.6.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.0/SnapCut-Portable-2.6.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.0/SnapCut-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.6.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.0/SnapCut-Setup-2.6.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.6.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.6.0/SnapCut-Portable-2.6.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -373,9 +1134,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.1/SnapCut-Update.json" },
-      { "name": "SnapCut-Setup-2.5.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.1/SnapCut-Setup-2.5.1-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.5.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.1/SnapCut-Portable-2.5.1-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.1/SnapCut-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.5.1-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.1/SnapCut-Setup-2.5.1-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.5.1-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.1/SnapCut-Portable-2.5.1-win-x64.zip"
+      }
     ]
   },
   {
@@ -387,9 +1157,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.0/SnapCut-Update.json" },
-      { "name": "SnapCut-Setup-2.5.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.0/SnapCut-Setup-2.5.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.5.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.0/SnapCut-Portable-2.5.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.0/SnapCut-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.5.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.0/SnapCut-Setup-2.5.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.5.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.5.0/SnapCut-Portable-2.5.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -401,9 +1180,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.4.0/SnapCut-Update.json" },
-      { "name": "SnapCut-Setup-2.4.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.4.0/SnapCut-Setup-2.4.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.4.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.4.0/SnapCut-Portable-2.4.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.4.0/SnapCut-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.4.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.4.0/SnapCut-Setup-2.4.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.4.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.4.0/SnapCut-Portable-2.4.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -415,9 +1203,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.1/SnapCut-Update.json" },
-      { "name": "SnapCut-Setup-2.3.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.1/SnapCut-Setup-2.3.1-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.3.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.1/SnapCut-Portable-2.3.1-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.1/SnapCut-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.3.1-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.1/SnapCut-Setup-2.3.1-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.3.1-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.1/SnapCut-Portable-2.3.1-win-x64.zip"
+      }
     ]
   },
   {
@@ -429,9 +1226,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "SnapCut-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.0/SnapCut-Update.json" },
-      { "name": "SnapCut-Setup-2.3.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.0/SnapCut-Setup-2.3.0-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.3.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.0/SnapCut-Portable-2.3.0-win-x64.zip" }
+      {
+        "name": "SnapCut-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.0/SnapCut-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.3.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.0/SnapCut-Setup-2.3.0-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.3.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.3.0/SnapCut-Portable-2.3.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -443,9 +1249,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.2/Screenshot-Update.json" },
-      { "name": "SnapCut-Setup-2.2.2-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.2/SnapCut-Setup-2.2.2-win-x64.exe" },
-      { "name": "SnapCut-Portable-2.2.2-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.2/SnapCut-Portable-2.2.2-win-x64.zip" }
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.2/Screenshot-Update.json"
+      },
+      {
+        "name": "SnapCut-Setup-2.2.2-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.2/SnapCut-Setup-2.2.2-win-x64.exe"
+      },
+      {
+        "name": "SnapCut-Portable-2.2.2-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.2/SnapCut-Portable-2.2.2-win-x64.zip"
+      }
     ]
   },
   {
@@ -457,9 +1272,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.1/Screenshot-Update.json" },
-      { "name": "Screenshot-Setup-2.2.1-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.1/Screenshot-Setup-2.2.1-win-x64.exe" },
-      { "name": "Screenshot-Portable-2.2.1-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.1/Screenshot-Portable-2.2.1-win-x64.zip" }
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.1/Screenshot-Update.json"
+      },
+      {
+        "name": "Screenshot-Setup-2.2.1-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.1/Screenshot-Setup-2.2.1-win-x64.exe"
+      },
+      {
+        "name": "Screenshot-Portable-2.2.1-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.1/Screenshot-Portable-2.2.1-win-x64.zip"
+      }
     ]
   },
   {
@@ -471,9 +1295,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.0/Screenshot-Update.json" },
-      { "name": "Screenshot-Setup-2.2.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.0/Screenshot-Setup-2.2.0-win-x64.exe" },
-      { "name": "Screenshot-Portable-2.2.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.0/Screenshot-Portable-2.2.0-win-x64.zip" }
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.0/Screenshot-Update.json"
+      },
+      {
+        "name": "Screenshot-Setup-2.2.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.0/Screenshot-Setup-2.2.0-win-x64.exe"
+      },
+      {
+        "name": "Screenshot-Portable-2.2.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.2.0/Screenshot-Portable-2.2.0-win-x64.zip"
+      }
     ]
   },
   {
@@ -485,9 +1318,18 @@
     "draft": false,
     "prerelease": false,
     "assets": [
-      { "name": "Screenshot-Update.json", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.1.0/Screenshot-Update.json" },
-      { "name": "Screenshot-Setup-2.1.0-win-x64.exe", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.1.0/Screenshot-Setup-2.1.0-win-x64.exe" },
-      { "name": "Screenshot-Portable-2.1.0-win-x64.zip", "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.1.0/Screenshot-Portable-2.1.0-win-x64.zip" }
+      {
+        "name": "Screenshot-Update.json",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.1.0/Screenshot-Update.json"
+      },
+      {
+        "name": "Screenshot-Setup-2.1.0-win-x64.exe",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.1.0/Screenshot-Setup-2.1.0-win-x64.exe"
+      },
+      {
+        "name": "Screenshot-Portable-2.1.0-win-x64.zip",
+        "browser_download_url": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v2.1.0/Screenshot-Portable-2.1.0-win-x64.zip"
+      }
     ]
   }
 ]

@@ -11,8 +11,187 @@ using Screenshot.App.Text;
 
 namespace Screenshot.App.Tests;
 
-public sealed class ImmediateSettingsTests : IDisposable
+public sealed partial class ImmediateSettingsTests : IDisposable
 {
+    [Theory]
+    [InlineData(AppTheme.GlassInk)]
+    [InlineData(AppTheme.GlassMist)]
+    [InlineData(AppTheme.AuroraMist)]
+    public void ResizingSettingsImmediatelyReflowsAndKeepsOcrControlsAligned(AppTheme theme)
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotkeys = new GlobalHotKeyManager();
+            var window = new MainWindow(CreateSettings() with { Theme = theme },
+                new SettingsStore(Path.Combine(_testDirectory, "resize-ocr.json")),
+                new FakeStartupRegistrationService(), hotkeys, new FakeTranslationCredentialStore());
+            try
+            {
+                AppThemeManager.ApplySettingsPalette(window.Resources, theme);
+                ((ListBox)window.FindName("SettingsNavigation")).SelectedIndex = 2;
+                var root = Assert.IsType<Border>(window.Content);
+                root.Background = (Brush)window.FindResource("AppWindowBackgroundBrush");
+                var page = (ScrollViewer)window.FindName("OcrSettingsPanel");
+                var editor = (ComboBox)window.FindName("OcrEngineComboBox");
+                var checkbox = (CheckBox)window.FindName("AutoOcrAfterCaptureCheckBox");
+                var label = Assert.IsType<TextBlock>(((Grid)checkbox.Parent).Children[0]);
+                Assert.Same(window.FindResource("AppTextPrimaryBrush"), label.Foreground);
+                foreach (var size in new[] { new Size(980, 720), new Size(840, 700), new Size(620, 500),
+                    new Size(480, 560), new Size(1180, 760), new Size(900, 440) })
+                {
+                    root.Measure(size); root.Arrange(new Rect(size)); root.UpdateLayout();
+                    Assert.Equal(size.Width < 860 ? 1 : 0, Grid.GetRow(editor));
+                    Assert.Equal(Grid.GetRow(editor), Grid.GetRow(checkbox));
+                    var editorBounds = editor.TransformToAncestor(root).TransformBounds(new Rect(editor.RenderSize));
+                    var toggleBounds = checkbox.TransformToAncestor(root).TransformBounds(new Rect(checkbox.RenderSize));
+                    Assert.Equal(240, editorBounds.Width, 2);
+                    Assert.Equal(editorBounds.Right, toggleBounds.Right, 2);
+                    var track = Assert.IsType<Border>(checkbox.Template.FindName("SwitchTrack", checkbox));
+                    var trackBounds = track.TransformToAncestor(root).TransformBounds(new Rect(track.RenderSize));
+                    Assert.Equal(48, trackBounds.Width, 2);
+                    Assert.Equal(25, trackBounds.Height, 2);
+                    Assert.True(page.ScrollableWidth < 1);
+                    if (Environment.GetEnvironmentVariable("SNAPCUT_TEST_RENDER_DIR") is { Length: > 0 } directory &&
+                        size.Width is 980 or 620 or 480)
+                    {
+                        Directory.CreateDirectory(directory);
+                        var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)size.Width, (int)size.Height, 96, 96, PixelFormats.Pbgra32);
+                        bitmap.Render(root);
+                        var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                        encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+                        using var output = File.Create(Path.Combine(directory, FormattableString.Invariant($"settings-{theme}-{size.Width}.png")));
+                        encoder.Save(output);
+                    }
+                }
+            }
+            finally { window.RequestExit(); }
+        });
+    }
+
+    [Fact]
+    public void AutomaticOcrSwitchLivesInRecognitionSettingsAndPersistsItsClick()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var store = new SettingsStore(Path.Combine(_testDirectory, "automatic-ocr.json"));
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotkeys = new GlobalHotKeyManager();
+            var window = new MainWindow(CreateSettings(), store, new FakeStartupRegistrationService(), hotkeys,
+                new FakeTranslationCredentialStore());
+            try
+            {
+                AppThemeManager.ApplySettingsPalette(window.Resources, AppTheme.GlassInk);
+                var checkbox = Assert.IsType<CheckBox>(window.FindName("AutoOcrAfterCaptureCheckBox"));
+                var panel = Assert.IsType<ScrollViewer>(window.FindName("OcrSettingsPanel"));
+                panel.Visibility = Visibility.Visible;
+                panel.Background = (Brush)window.FindResource("AppWindowBackgroundBrush");
+                panel.Measure(new Size(744, 720));
+                panel.Arrange(new Rect(0, 0, 744, 720));
+                panel.UpdateLayout();
+                Assert.True(panel.IsAncestorOf(checkbox));
+                Assert.False(checkbox.IsChecked);
+                Assert.Same(window.FindResource("SettingsSwitch"), checkbox.Style);
+                if (Environment.GetEnvironmentVariable("SNAPCUT_TEST_RENDER_DIR") is { Length: > 0 } renderDirectory)
+                {
+                    Directory.CreateDirectory(renderDirectory);
+                    var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap(744, 720, 96, 96, PixelFormats.Pbgra32);
+                    bitmap.Render(panel);
+                    var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                    encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
+                    using var output = File.Create(Path.Combine(renderDirectory, "automatic-ocr-settings.png"));
+                    encoder.Save(output);
+                }
+                typeof(System.Windows.Controls.Primitives.ToggleButton).GetMethod("OnClick",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(checkbox, null);
+                Assert.True(((SettingsViewModel)window.DataContext).AutoOcrAfterCapture);
+                typeof(MainWindow).GetMethod("ApplySettingsImmediately", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(window, [null]);
+                Assert.True(store.Load().Settings.AutoOcrAfterCapture);
+            }
+            finally { window.RequestExit(); }
+        });
+    }
+
+    [DesktopFact]
+    public void EditingSecondOnlineProfileOpensAndNameOnlySavePreservesBothConnections()
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var path = Path.Combine(_testDirectory, "profiles.json");
+        WpfTestHost.Invoke(() =>
+        {
+            var settings = CreateSettings() with
+            {
+                TranslationProvider = "Zhipu", TranslationEndpoint = "https://open.bigmodel.cn/api/paas/v4",
+                TranslationModel = "glm-4-flash",
+                TranslationProfiles =
+                [new AiTranslationProfile { Id = "first", Name = "第一条", Provider = "Zhipu", Endpoint = "https://open.bigmodel.cn/api/paas/v4", Model = "glm-4-flash", IsEnabled = true },
+                 new AiTranslationProfile { Id = "second", Name = "第二条", Provider = "OpenAICompatible", Endpoint = "https://example.test/v1", Model = "gpt-5.6-luna", IsEnabled = true }],
+            };
+            using var hotkeys = new GlobalHotKeyManager();
+            var store = new SettingsStore(path);
+            var window = new MainWindow(settings, store, new FakeStartupRegistrationService(), hotkeys,
+                new FakeTranslationCredentialStore());
+            try
+            {
+                window.ShowActivated = false;
+                window.Show();
+                ((ListBox)window.FindName("SettingsNavigation")).SelectedIndex = 3;
+                window.UpdateLayout();
+                var viewModel = (SettingsViewModel)window.DataContext;
+                var second = viewModel.TranslationProfiles.Single(p => p.Id == "second");
+                for (var attempt = 0; attempt < 2; attempt++)
+                {
+                    window.UpdateLayout();
+                    var button = VisualChildren(window).OfType<Button>().Single(b =>
+                        Equals(b.Content, "编辑") && b.DataContext is AiTranslationProfileItem p && p.Id == "second");
+                    Assert.True(button.IsEnabled);
+                    Exception? failure = null;
+                    var opened = false;
+                    window.Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        var editor = window.OwnedWindows.OfType<TranslationProfileEditorWindow>().SingleOrDefault();
+                        try
+                        {
+                            Assert.NotNull(editor);
+                            opened = true;
+                            Assert.Equal("https://example.test/v1", ((TextBox)editor.FindName("EndpointBox")).Text);
+                            Assert.Equal("gpt-5.6-luna", ((ComboBox)editor.FindName("ModelBox")).Text);
+                            ((TextBox)editor.FindName("NameBox")).Text = "只改名称";
+                            VisualChildren(editor).OfType<Button>().Single(b => Equals(b.Content, "保存"))
+                                .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                            Assert.False(editor.IsVisible, "Saving should close the modal editor.");
+                        }
+                        catch (Exception exception) { failure = exception; if (editor is not null) editor.Close(); }
+                    }), System.Windows.Threading.DispatcherPriority.Background);
+                    button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                    window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                    Assert.Null(failure);
+                    Assert.True(opened);
+                    Assert.Equal("https://example.test/v1", second.Endpoint);
+                    Assert.Equal("gpt-5.6-luna", second.Model);
+                    Assert.Equal("glm-4-flash", viewModel.TranslationProfiles[0].Model);
+                }
+                var saved = store.Load().Settings;
+                Assert.Equal("只改名称", saved.TranslationProfiles.Single(p => p.Id == "second").Name);
+                Assert.Equal("gpt-5.6-luna", saved.TranslationProfiles.Single(p => p.Id == "second").Model);
+            }
+            finally { window.RequestExit(); }
+        });
+    }
+
+    private static IEnumerable<DependencyObject> VisualChildren(DependencyObject root)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            yield return child;
+            foreach (var nested in VisualChildren(child)) yield return nested;
+        }
+    }
+    private static readonly string[] UniformComboNames = ["OcrEngineComboBox", "OcrLanguageComboBox", "TranslationTargetLanguageComboBox"];
+    private static readonly double[] ResponsiveWidths = [980, 600, 480, 980];
+    private static readonly string[] UpdateResponsiveActions = ["CheckForUpdatesButton", "SelectedReleaseStateText"];
+    private static readonly string[] TranslationResponsiveActions = ["OpenOfflineTextTranslationButton", "AddOnlineTranslationProfileButton"];
     private static readonly string[] RefreshedTranslationModels =
         ["model-a", "model-b"];
     private static readonly object?[] TranslationModelRefreshArguments =
@@ -52,12 +231,187 @@ public sealed class ImmediateSettingsTests : IDisposable
                 Assert.Equal("历史记录", GetGroupTitle(
                     window,
                     "GeneralHistoryGroup"));
+                var chrome = System.Windows.Shell.WindowChrome.GetWindowChrome(window);
+                Assert.NotNull(chrome);
+                Assert.Equal(46, chrome.CaptionHeight);
+                foreach (var name in UniformComboNames)
+                {
+                    var combo = Assert.IsType<ComboBox>(window.FindName(name));
+                    Assert.Equal(240, combo.Width);
+                    Assert.Equal(36, combo.Height);
+                }
+                var hotKey = Assert.IsType<HotKeyCaptureBox>(window.FindName("RegionCaptureHotKeyBox"));
+                Assert.Equal(240, hotKey.Width);
+                Assert.Equal(36, hotKey.Height);
             }
             finally
             {
                 window.RequestExit();
             }
         });
+    }
+
+    [DesktopFact]
+    public void NarrowSettingsStackLabelsWithoutChangingControlWidths()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeys = new GlobalHotKeyManager();
+            var window = new MainWindow(CreateSettings(),
+                new SettingsStore(Path.Combine(_testDirectory, "narrow-settings.json")),
+                new FakeStartupRegistrationService(), hotKeys, new FakeTranslationCredentialStore());
+            try
+            {
+                window.ShowActivated = false;
+                window.Show();
+                var target = Assert.IsType<System.Windows.Interop.HwndTarget>(
+                    PresentationSource.FromVisual(window).CompositionTarget);
+                Assert.Equal(WpfRenderingCompatibility.GetCurrentSessionRenderMode(), target.RenderMode);
+                foreach (var width in ResponsiveWidths)
+                {
+                    window.Width = width;
+                    window.Height = 600;
+                    window.Measure(new Size(width, 600));
+                    window.Arrange(new Rect(0, 0, width, 600));
+                    window.UpdateLayout();
+                    window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                    Assert.Equal(width, window.ActualWidth);
+                    var editor = Assert.IsType<ComboBox>(window.FindName("OcrEngineComboBox"));
+                    var row = Assert.IsType<Grid>(editor.Parent);
+                    Assert.Equal(width < 860 ? 1 : 0, Grid.GetRow(editor));
+                    Assert.Equal(240, editor.Width);
+                    var navigation = Assert.IsType<ListBox>(window.FindName("SettingsNavigation"));
+                    var entry = Assert.IsType<ListBoxItem>(navigation.Items[0]);
+                    Assert.Equal("常规设置", entry.ToolTip);
+                    Assert.True(window.MinWidth <= 480);
+                    Assert.True(window.MinHeight <= 360);
+                }
+            }
+            finally { window.RequestExit(); }
+        });
+    }
+
+    [DesktopTheory]
+    [InlineData(AppTheme.GlassInk)]
+    [InlineData(AppTheme.ForestNight)]
+    public void UpdateAndTranslationActionsStayInsideNarrowViewport(AppTheme theme)
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeys = new GlobalHotKeyManager();
+            var window = new MainWindow(CreateSettings() with { Theme = theme },
+                new SettingsStore(Path.Combine(_testDirectory, "responsive-actions.json")),
+                new FakeStartupRegistrationService(), hotKeys, new FakeTranslationCredentialStore());
+            try
+            {
+                window.ShowActivated = false;
+                window.Show();
+                ((FrameworkElement)window.FindName("GeneralSettingsPanel")).Visibility = Visibility.Collapsed;
+                var update = (ScrollViewer)window.FindName("UpdateSettingsPanel");
+                var translation = (ScrollViewer)window.FindName("TranslationSettingsPanel");
+                var releaseTitle = (TextBlock)window.FindName("SelectedReleaseTitleText");
+                var releaseState = (TextBlock)window.FindName("SelectedReleaseStateText");
+                releaseTitle.Text = "v3.8.0 · SnapCut 3.8.0";
+                releaseState.Text = "可回退";
+                for (DependencyObject? parent = releaseState; parent is not null && parent != update; parent = VisualTreeHelper.GetParent(parent))
+                    if (parent is FrameworkElement element) element.Visibility = Visibility.Visible;
+                foreach (var width in ResponsiveWidths)
+                {
+                    window.Width = width;
+                    window.Height = 720;
+                    foreach (var (page, names) in new[]
+                    {
+                        (update, UpdateResponsiveActions),
+                        (translation, TranslationResponsiveActions),
+                    })
+                    {
+                        update.Visibility = page == update ? Visibility.Visible : Visibility.Collapsed;
+                        translation.Visibility = page == translation ? Visibility.Visible : Visibility.Collapsed;
+                        window.UpdateLayout();
+                        window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                        Assert.True(page.ScrollableWidth < 1);
+                        foreach (var name in names)
+                        {
+                            var action = (FrameworkElement)window.FindName(name);
+                            var rect = action.TransformToAncestor(page).TransformBounds(new Rect(action.RenderSize));
+                            Assert.True(rect.Left >= -1 && rect.Right <= page.ActualWidth + 1,
+                                $"{name} at {width}: {rect}, page {page.ActualWidth}");
+                        }
+                    }
+                }
+            }
+            finally { window.RequestExit(); }
+        });
+    }
+
+    [DesktopTheory]
+    [InlineData(AppTheme.GlassMist)]
+    [InlineData(AppTheme.GlassInk)]
+    public void ToolbarSettingsWrapShortcutsAndKeepIconsCentered(AppTheme theme)
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeys = new GlobalHotKeyManager();
+            var window = new MainWindow(CreateSettings() with { Theme = theme },
+                new SettingsStore(Path.Combine(_testDirectory, "toolbar-layout.json")),
+                new FakeStartupRegistrationService(), hotKeys, new FakeTranslationCredentialStore());
+            try
+            {
+                AppThemeManager.ApplySettingsPalette(window.Resources, theme);
+                window.ShowActivated = false;
+                window.Show();
+                typeof(MainWindow).GetMethod("ShowGeneralCategory", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(window, [1]);
+                var page = Assert.IsType<ScrollViewer>(window.FindName("GeneralSettingsPanel"));
+                foreach (var width in ResponsiveWidths)
+                {
+                    window.Width = width;
+                    window.Height = 720;
+                    window.UpdateLayout();
+                    window.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+                    Assert.True(page.ScrollableWidth < 1);
+                    var icons = Descendants(page).OfType<ToolbarFeatureIcon>().ToArray();
+                    Assert.Equal(8, icons.Length);
+                    var shortcutBoxes = Descendants(page).OfType<HotKeyCaptureBox>().ToArray();
+                    Assert.Equal(8, shortcutBoxes.Length);
+                    foreach (var box in shortcutBoxes)
+                    {
+                        box.Text = string.Empty;
+                        box.GetBindingExpression(TextBox.TextProperty)!.UpdateSource();
+                        Assert.True(box.Background.Opacity > 0);
+                        Assert.True(box.BorderBrush.Opacity > 0);
+                        if (box.BorderBrush is SolidColorBrush solid) Assert.True(solid.Color.A > 0);
+                        Assert.True(box.BorderThickness.Left >= 1);
+                    }
+                    foreach (var icon in icons)
+                    {
+                        var viewbox = Assert.IsType<Viewbox>(VisualTreeHelper.GetParent(
+                            VisualTreeHelper.GetParent(icon)));
+                        var border = Assert.IsType<Border>(viewbox.Parent);
+                        var origin = viewbox.TranslatePoint(new Point(), border);
+                        Assert.Equal(18, viewbox.ActualWidth);
+                        Assert.Equal(18, viewbox.ActualHeight);
+                        Assert.InRange(Math.Abs(origin.X + 9 - border.ActualWidth / 2), 0, .5);
+                        Assert.InRange(Math.Abs(origin.Y + 9 - border.ActualHeight / 2), 0, .5);
+                        var location = border.TranslatePoint(new Point(), page);
+                        Assert.InRange(location.X, 0, page.ActualWidth - border.ActualWidth);
+                    }
+                    if (width <= 600)
+                        Assert.True(icons.Select(icon => Math.Round(icon.TranslatePoint(new Point(), page).Y)).Distinct().Count() > 1);
+                }
+            }
+            finally { window.RequestExit(); }
+        });
+    }
+
+    private static IEnumerable<DependencyObject> Descendants(DependencyObject parent)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            yield return child;
+            foreach (var descendant in Descendants(child)) yield return descendant;
+        }
     }
 
     [Fact]
@@ -506,6 +860,50 @@ public sealed class ImmediateSettingsTests : IDisposable
         Assert.Equal("离线模型尚未下载", offline.AvailabilityReason);
     }
 
+    [Theory]
+    [InlineData(RecognitionResultPresentationMode.Popup)]
+    [InlineData(RecognitionResultPresentationMode.Overlay)]
+    public void RecognitionPresentationHasAnInitialSelectionAndChangesWithOneClick(
+        RecognitionResultPresentationMode initial)
+    {
+        Directory.CreateDirectory(_testDirectory);
+        var store = new SettingsStore(Path.Combine(_testDirectory, "presentation.json"));
+        var settings = CreateSettings() with { RecognitionResultPresentation = initial };
+        WpfTestHost.Invoke(() =>
+        {
+            using var hotKeys = new GlobalHotKeyManager();
+            MainWindow Create(AppSettings saved) => new(saved, store,
+                new FakeStartupRegistrationService(), hotKeys, new FakeTranslationCredentialStore());
+            var window = Create(settings);
+            var expected = initial == RecognitionResultPresentationMode.Popup
+                ? RecognitionResultPresentationMode.Overlay : RecognitionResultPresentationMode.Popup;
+            try
+            {
+                var popup = Assert.IsType<RadioButton>(window.FindName("RecognitionPopupChoice"));
+                var overlay = Assert.IsType<RadioButton>(window.FindName("RecognitionOverlayChoice"));
+                Assert.Equal(initial == RecognitionResultPresentationMode.Popup, popup.IsChecked);
+                Assert.Equal(initial == RecognitionResultPresentationMode.Overlay, overlay.IsChecked);
+                var target = expected == RecognitionResultPresentationMode.Popup ? popup : overlay;
+                // Invoke the real ToggleButton click pipeline once (no desktop input).
+                typeof(System.Windows.Controls.Primitives.ToggleButton).GetMethod("OnClick",
+                    BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(target, null);
+                Assert.Equal(expected, Assert.IsType<SettingsViewModel>(window.DataContext).RecognitionResultPresentation);
+                Assert.Equal(expected == RecognitionResultPresentationMode.Popup, popup.IsChecked);
+                Assert.Equal(expected == RecognitionResultPresentationMode.Overlay, overlay.IsChecked);
+                typeof(MainWindow).GetMethod("ApplySettingsImmediately", BindingFlags.Instance | BindingFlags.NonPublic)!
+                    .Invoke(window, [null]);
+            }
+            finally { window.RequestExit(); }
+            var restored = Create(store.Load().Settings);
+            try
+            {
+                Assert.True(Assert.IsType<RadioButton>(restored.FindName(expected == RecognitionResultPresentationMode.Popup
+                    ? "RecognitionPopupChoice" : "RecognitionOverlayChoice")).IsChecked);
+            }
+            finally { restored.RequestExit(); }
+        });
+    }
+
     [Fact]
     public void TranslationProfileAvailabilitySurvivesProfileReorderingAndSave()
     {
@@ -927,7 +1325,7 @@ public sealed class ImmediateSettingsTests : IDisposable
         Assert.Equal(TranslationMode.Automatic, settings.TranslationMode);
         Assert.True(settings.SendTextToOnlineTranslation);
         Assert.Equal(
-            [TranslationProviderKind.Offline, TranslationProviderKind.Online],
+            [TranslationProviderKind.Offline, TranslationProviderKind.Online, TranslationProviderKind.Public],
             settings.TranslationProviderPriority);
     }
 
@@ -971,11 +1369,10 @@ public sealed class ImmediateSettingsTests : IDisposable
             var lightTheme = Assert.IsType<RadioButton>(
                 window.FindName("AuroraMistThemeOption"));
             lightTheme.IsChecked = true;
-            var background = Assert.IsType<LinearGradientBrush>(
-                window.Resources["AppWindowBackgroundBrush"]);
-            Assert.Equal(
-                Color.FromRgb(0xF7, 0xF8, 0xFB),
-                background.GradientStops[0].Color);
+            var background = Assert.IsType<DrawingBrush>(window.Resources["AppWindowBackgroundBrush"]);
+            Assert.True(background.IsFrozen);
+            Assert.Equal((Color)ColorConverter.ConvertFromString(AppThemeManager.GetChromeColors(AppTheme.AuroraMist).Foreground),
+                ((SolidColorBrush)window.Resources["AppControlForegroundBrush"]).Color);
             Assert.Null(window.FindName("CustomAccentButton"));
             Assert.NotNull(window.FindName("NeonDeepThemeOption"));
 

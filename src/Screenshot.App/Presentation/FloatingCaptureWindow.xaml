@@ -57,7 +57,7 @@
                     <ControlTemplate TargetType="ContextMenu">
                         <Border Margin="5"
                                 Padding="4"
-                                Background="{DynamicResource AppPanelBackgroundBrush}"
+                                Background="{DynamicResource AppFloatingSurfaceBrush}"
                                 BorderBrush="{DynamicResource AppBorderBrush}"
                                 BorderThickness="1"
                                 CornerRadius="8">
@@ -178,7 +178,7 @@
                StaysOpen="True">
             <Border Margin="4"
                     Padding="2"
-                    Background="{DynamicResource AppPanelBackgroundBrush}"
+                    Background="{DynamicResource AppFloatingSurfaceBrush}"
                     BorderBrush="{DynamicResource AppBorderBrush}"
                     BorderThickness="1"
                     CornerRadius="6"

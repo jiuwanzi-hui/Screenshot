@@ -1,11 +1,30 @@
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using Screenshot.App.Infrastructure;
 
 namespace Screenshot.App.Capture;
 
 internal sealed class NativeSelectionMaskWindow : Form
 {
+    // Keep this invariant from the first HWND through WinForms style refreshes.
+    protected override bool ShowWithoutActivation => true;
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var parameters = base.CreateParams;
+            parameters.ExStyle |= 0x080000A0; // NOACTIVATE | TOOLWINDOW | TRANSPARENT
+            return parameters;
+        }
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        OverlayShellBehavior.Apply(Handle);
+    }
+
     private const int ExtendedWindowStyleIndex = -20;
     private const long ExtendedStyleTransparent = 0x00000020L;
     private const long ExtendedStyleToolWindow = 0x00000080L;
@@ -14,7 +33,7 @@ internal sealed class NativeSelectionMaskWindow : Form
     private const uint DoNotActivate = 0x0010;
     private const uint DoNotChangeOwnerZOrder = 0x0200;
     private const uint NoRedraw = 0x0008;
-    private const int ShowNormal = 5;
+    private const int ShowNoActivateCommand = 8;
     private const int HideCommand = 0;
     private bool _disposed;
     private readonly object _updateLock = new();
@@ -22,6 +41,45 @@ internal sealed class NativeSelectionMaskWindow : Form
     // but the mask must not inherit the accent color.
     private static readonly Color NeutralMaskColor = Color.Black;
     private Rectangle[] _excludedRegions = [];
+    private Rectangle _positionedSurface;
+    private IntPtr _positionedBelow;
+    private bool _hasPosition;
+    private bool _hasRegion;
+    private Rectangle _lastHole;
+    private Rectangle _regionSurface;
+    private Rectangle[] _lastExclusions = [];
+    private IntPtr _presentationCover;
+    private IntPtr _coverPreviousOwner;
+
+    // During a cold editor handoff the resident's opaque DIB remains above
+    // this mask. Dimming that already-masked DIB would cause a dark flash.
+    internal void SetPresentationCover(IntPtr cover)
+    {
+        if (_presentationCover == cover) return;
+        if (_presentationCover != IntPtr.Zero && IsWindow(_presentationCover) &&
+            GetWindowLongPtr(_presentationCover, OwnerIndex) == Handle)
+            _ = SetWindowLongPtr(_presentationCover, OwnerIndex, _coverPreviousOwner);
+        _presentationCover = IntPtr.Zero;
+        if (cover == IntPtr.Zero || _disposed || !IsWindow(cover)) return;
+        // A sibling order can be changed by USER32 while raising the owner
+        // group. Ownership enforces cover > mask > editor throughout first
+        // layout, including native raises that precede WINDOWPOSCHANGING.
+        _coverPreviousOwner = SetWindowLongPtr(cover, OwnerIndex, Handle);
+        if (GetWindowLongPtr(cover, OwnerIndex) == Handle) _presentationCover = cover;
+    }
+
+    internal void CompleteCoveredPresentation(IntPtr belowWindow)
+    {
+        SetPresentationCover(IntPtr.Zero);
+        _positionedBelow = belowWindow;
+    }
+
+    internal void PrepareCoveredPresentation()
+    {
+        if (_disposed || !IsHandleCreated) return;
+        _ = InvalidateRect(Handle, IntPtr.Zero, true);
+        _ = UpdateWindow(Handle);
+    }
 
     public NativeSelectionMaskWindow()
     {
@@ -70,9 +128,7 @@ internal sealed class NativeSelectionMaskWindow : Form
     {
         lock (_updateLock)
         {
-            _excludedRegions = excluded
-                .Where(region => region.Width > 0 && region.Height > 0)
-                .ToArray();
+            _excludedRegions = excluded as Rectangle[] ?? excluded.ToArray();
             UpdateCore(surface, selection, show: true, belowWindow);
         }
     }
@@ -94,20 +150,16 @@ internal sealed class NativeSelectionMaskWindow : Form
                 new Rectangle(selection.X - surface.X, selection.Y - surface.Y,
                     selection.Width, selection.Height),
                 new Rectangle(0, 0, surface.Width, surface.Height));
-            hole = Rectangle.Intersect(
-                hole,
-                new Rectangle(0, 0, surface.Width, surface.Height));
-            var region = CreateRectRgn(0, 0, 0, 0);
+            var regionChanged = !_hasRegion || _regionSurface != surface ||
+                _lastHole != hole || !_excludedRegions.AsSpan().SequenceEqual(_lastExclusions);
+            // The mask has constant black pixels. Repeated visibility/toolbar
+            // refreshes of identical geometry must not repaint the desktop.
+            var region = regionChanged ? CreateRectRgn(0, 0, surface.Width, surface.Height) : IntPtr.Zero;
+            if (regionChanged && region == IntPtr.Zero) throw new System.ComponentModel.Win32Exception();
             try
             {
-                AddRegion(region, new Rectangle(0, 0, surface.Width, Math.Max(0, hole.Top)));
-                AddRegion(region, new Rectangle(0, hole.Bottom, surface.Width,
-                    Math.Max(0, surface.Height - hole.Bottom)));
-                AddRegion(region, new Rectangle(0, hole.Top, Math.Max(0, hole.Left),
-                    Math.Max(0, hole.Height)));
-                AddRegion(region, new Rectangle(hole.Right, hole.Top,
-                    Math.Max(0, surface.Width - hole.Right), Math.Max(0, hole.Height)));
-                foreach (var excluded in _excludedRegions)
+                if (regionChanged) SubtractRegion(region, hole);
+                foreach (var excluded in regionChanged ? _excludedRegions : Array.Empty<Rectangle>())
                 {
                     var exclusion = Rectangle.Intersect(
                         new Rectangle(excluded.X - surface.X, excluded.Y - surface.Y,
@@ -139,19 +191,43 @@ internal sealed class NativeSelectionMaskWindow : Form
                         }
                     }
                 }
-                var insertAfter = belowWindow == IntPtr.Zero
+                if (_presentationCover != IntPtr.Zero && !IsWindow(_presentationCover))
+                    _presentationCover = IntPtr.Zero;
+                var insertAfter = _presentationCover != IntPtr.Zero ? _presentationCover : belowWindow == IntPtr.Zero
                     ? new IntPtr(TopmostWindow)
                     : belowWindow;
-                var flags = belowWindow == IntPtr.Zero
+                var flags = belowWindow == IntPtr.Zero || _presentationCover != IntPtr.Zero
                     ? DoNotActivate | DoNotChangeOwnerZOrder | NoRedraw
                     : DoNotActivate | NoRedraw;
-                _ = SetWindowPos(Handle, insertAfter, surface.X, surface.Y,
-                    surface.Width, surface.Height, flags);
-                _ = SetWindowRgn(Handle, region, true);
-                region = IntPtr.Zero;
-                if (show)
+                if (!_hasPosition || _positionedSurface != surface || _positionedBelow != insertAfter)
                 {
-                    _ = ShowWindow(Handle, ShowNormal);
+                    _ = SetWindowPos(Handle, insertAfter, surface.X, surface.Y,
+                        surface.Width, surface.Height, flags);
+                    _positionedSurface = surface;
+                    _positionedBelow = insertAfter;
+                    _hasPosition = true;
+                }
+                if (regionChanged && SetWindowRgn(Handle, region, true) != 0)
+                {
+                    region = IntPtr.Zero; // USER32 owns a successfully applied region.
+                    _lastHole = hole;
+                    _regionSurface = surface;
+                    if (!_excludedRegions.AsSpan().SequenceEqual(_lastExclusions))
+                        _lastExclusions = (Rectangle[])_excludedRegions.Clone();
+                    _hasRegion = true;
+                }
+                if (show && !IsWindowVisible(Handle))
+                {
+                    // SW_SHOW explicitly activates even a no-activate tool
+                    // window, dismissing the shell menu before frame handoff.
+                    // Showing a topmost HWND with ShowWindow can raise it
+                    // above the resident cover even after SetWindowPos. Commit
+                    // visibility and the required sibling order together.
+                    if (_presentationCover != IntPtr.Zero)
+                        _ = SetWindowPos(Handle, insertAfter, 0, 0, 0, 0,
+                            DoNotActivate | DoNotChangeOwnerZOrder | 0x0001 | 0x0002 | 0x0040);
+                    else
+                        _ = ShowWindow(Handle, ShowNoActivateCommand);
                 }
             }
             finally
@@ -184,6 +260,7 @@ internal sealed class NativeSelectionMaskWindow : Form
         // Keep the mask in the overlay's owned topmost window group. WPF
         // ContextMenu popups can otherwise reorder topmost windows and leave
         // the mask behind the overlay until the next selection update.
+        _hasPosition = false;
         _ = SetWindowLongPtr(Handle, OwnerIndex, owner);
     }
 
@@ -194,6 +271,7 @@ internal sealed class NativeSelectionMaskWindow : Form
             return;
         }
 
+        _hasPosition = false;
         _ = SetWindowPos(
             Handle,
             sibling,
@@ -204,8 +282,26 @@ internal sealed class NativeSelectionMaskWindow : Form
             DoNotActivate);
     }
 
+    public void RefreshPresentation()
+    {
+        lock (_updateLock)
+        {
+            if (_disposed || !IsHandleCreated || !_hasPosition || !_hasRegion ||
+                !IsWindowVisible(Handle)) return;
+
+            // An owner activation/layout pass may cover the mask even though
+            // its cached bounds and cutouts did not change. Repair this only
+            // at the editor handoff; live pointer/scroll updates keep reusing
+            // the existing region and never invalidate the whole surface.
+            _ = SetWindowPos(Handle, _positionedBelow, 0, 0, 0, 0,
+                DoNotActivate | DoNotChangeOwnerZOrder | 0x0001 | 0x0002);
+            _ = InvalidateRect(Handle, IntPtr.Zero, true);
+        }
+    }
+
     public void HideMask()
     {
+        _hasPosition = false;
         if (!_disposed && IsHandleCreated)
         {
             _ = ShowWindow(Handle, HideCommand);
@@ -226,13 +322,14 @@ internal sealed class NativeSelectionMaskWindow : Form
     {
         if (disposing)
         {
+            SetPresentationCover(IntPtr.Zero);
             HideMask();
             _disposed = true;
         }
         base.Dispose(disposing);
     }
 
-    private static void AddRegion(IntPtr destination, Rectangle rectangle)
+    private static void SubtractRegion(IntPtr destination, Rectangle rectangle)
     {
         if (rectangle.Width <= 0 || rectangle.Height <= 0)
         {
@@ -242,7 +339,7 @@ internal sealed class NativeSelectionMaskWindow : Form
             rectangle.Right, rectangle.Bottom);
         try
         {
-            _ = CombineRgn(destination, destination, source, 2);
+            _ = CombineRgn(destination, destination, source, 4);
         }
         finally
         {
@@ -253,8 +350,11 @@ internal sealed class NativeSelectionMaskWindow : Form
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter,
         int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll")] private static extern bool IsWindow(IntPtr window);
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr window, int command);
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr window);
     [DllImport("user32.dll")]
     private static extern int SetWindowRgn(IntPtr window, IntPtr region, bool redraw);
     [DllImport("user32.dll")]

@@ -613,19 +613,25 @@ public sealed class ImageEditorCanvasTests
     {
         WpfTestHost.Invoke(() =>
         {
+            var preferences = AnnotationToolPreferences.Snapshot();
             using var bitmap = new Bitmap(80, 60, PixelFormat.Format32bppPArgb);
             using var image = new CapturedImage((Bitmap)bitmap.Clone());
             var editor = new ImageEditorCanvas();
-            editor.Initialize(image, displayWidth: 80, displayHeight: 60);
-            var startText = typeof(ImageEditorCanvas).GetMethod(
-                "StartTextInput",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.NotNull(startText);
-            startText.Invoke(editor, [new WpfPoint(8, 8)]);
+            try
+            {
+                AnnotationToolPreferences.Configure([], null);
+                editor.Initialize(image, displayWidth: 80, displayHeight: 60);
+                var startText = typeof(ImageEditorCanvas).GetMethod(
+                    "StartTextInput",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.NotNull(startText);
+                startText.Invoke(editor, [new WpfPoint(8, 8)]);
 
-            var input = Assert.Single(editor.Children.OfType<WpfTextBox>());
-            Assert.Same(WpfBrushes.Transparent, input.Background);
-            Assert.Equal(new System.Windows.Thickness(1), input.BorderThickness);
+                var input = Assert.Single(editor.Children.OfType<WpfTextBox>());
+                Assert.Same(WpfBrushes.Transparent, input.Background);
+                Assert.Equal(new System.Windows.Thickness(1), input.BorderThickness);
+            }
+            finally { editor.Reset(); AnnotationToolPreferences.Configure(preferences, null); }
         });
     }
 

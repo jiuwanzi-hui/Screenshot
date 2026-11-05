@@ -4,6 +4,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using Screenshot.App.Capture;
+using Screenshot.App.Presentation;
 using WpfButton = System.Windows.Controls.Button;
 using WpfColor = System.Windows.Media.Color;
 using WpfColorConverter = System.Windows.Media.ColorConverter;
@@ -47,7 +48,7 @@ public partial class SharedColorPickerControl : System.Windows.Controls.UserCont
     {
         for (var element = source as DependencyObject;
              element is not null;
-             element = VisualTreeHelper.GetParent(element))
+             element = InputElementTree.GetParent(element))
         {
             if (element is WpfButton { Tag: int index } &&
                 RecentColorsPanel.IsAncestorOf(element))

@@ -381,8 +381,9 @@ public partial class CaptureHistoryWindow : Window, IDisposable
                 return;
             }
 
-            var session = await VideoPreviewSession.CreateAsync(item.FilePath)
-                .WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(8));
+            await using var session = await VideoPreviewSession.CreateAsync(item.FilePath, timeout.Token);
             await Dispatcher.InvokeAsync(
                 () => item.SetMediaMetadata(
                     session.Duration,
@@ -390,8 +391,8 @@ public partial class CaptureHistoryWindow : Window, IDisposable
                     session.PixelHeight));
             metadataPublished = true;
 
-            var bytes = await session.GetFrameAsync(TimeSpan.Zero, 320)
-                .WaitAsync(TimeSpan.FromSeconds(8), cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(8));
+            var bytes = await session.GetFrameAsync(TimeSpan.Zero, 320, timeout.Token);
             cancellationToken.ThrowIfCancellationRequested();
             var thumbnail = CreateThumbnailBitmap(bytes);
             await Dispatcher.InvokeAsync(() => item.Thumbnail = thumbnail);

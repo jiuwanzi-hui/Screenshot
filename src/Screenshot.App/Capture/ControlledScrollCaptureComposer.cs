@@ -12,11 +12,13 @@ namespace Screenshot.App.Capture;
 /// </summary>
 internal sealed class ControlledScrollCaptureComposer : IDisposable
 {
-    private readonly AutomaticScrollCaptureComposerCore _downward = new(
-        detectStationaryLeadingRows: false);
+    private AutomaticScrollCaptureComposerCore _downward = CreateContentComposer();
     private readonly Queue<int> _recentDownwardExpansionRows = new(3);
     private readonly Queue<int> _recentUpwardExpansionRows = new(3);
     private AutomaticScrollCaptureComposerCore? _upward;
+    private Bitmap? _fixedRegionReference;
+    private ManualScrollFrame? _fixedRegionSample;
+    private ScrollCaptureFixedRegions? _fixedRegions;
     private int _initialFrameHeight;
     private bool _initialized;
     private bool _disposed;
@@ -31,7 +33,9 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
 
     public int OutputWidth => _downward.OutputWidth;
 
-    internal int FixedBottomRows => _downward.FixedBottomRows;
+    internal int FixedTopRows => _fixedRegions?.TopRows ?? 0;
+
+    internal int FixedBottomRows => _fixedRegions?.BottomRows ?? 0;
 
     internal int GetTravelFromInitial(
         ScrollCaptureDirection returnDirection)
@@ -42,9 +46,11 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
             : Math.Max(0, -(_upward?.CurrentFrameTop ?? 0));
     }
 
-    public int OutputHeight => _downward.OutputHeight +
+    private int ContentHeight => _downward.OutputHeight +
         Math.Max(0, (_upward?.OutputHeight ?? SharedInitialHeight) -
             SharedInitialHeight);
+
+    public int OutputHeight => ContentHeight + (_fixedRegions?.TotalRows ?? 0);
 
     public bool IsUpwardExtensionStarted => _upward is not null;
 
@@ -75,6 +81,8 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
         }
 
         _ = _downward.TryAddFrame(initialFrame, options, out _);
+        _fixedRegionReference = (Bitmap)initialFrame.Clone();
+        _fixedRegionReference.Tag = initialFrame.Tag;
         _initialFrameHeight = initialFrame.Height;
         _initialized = true;
         CopyDiagnosticsFrom(_downward);
@@ -88,6 +96,10 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
         bool tolerateQuantizedExpectation = false)
     {
         EnsureInitialized();
+        if (!HasExpectedFrameSize(frame)) return false;
+        DetectFixedRegions(frame, options);
+        using var content = _fixedRegions?.CropContent(frame);
+        frame = content ?? frame;
         var preferredRows = GetPreferredExpectedRows(
             expectedRows,
             _recentDownwardExpansionRows);
@@ -102,7 +114,7 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
             out var overlapMatch,
             programmaticExpectedRows: expectedRows,
             tolerateQuantizedExpectation: tolerateQuantizedExpectation);
-        if (added && _downward.LastFrameMovementRows is > 0)
+        if (added && _downward.LastFrameMovementRows is > 0 && ScrollCapturePosition.Read(frame) is null)
         {
             RememberExpansionRows(
                 _recentDownwardExpansionRows,
@@ -110,10 +122,11 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
             _downward.RefreshBoundaryViewport(
                 frame,
                 ScrollCaptureDirection.Down,
-                GetFixedBottomExclusion(frame.Height),
+                _fixedRegions is null ? GetFixedBottomExclusion(frame.Height) : 0,
                 _downward.LastFrameMovementRows);
         }
         CopyDiagnosticsFrom(_downward, overlapMatch);
+        if (added) ReleaseFixedRegionReference();
         return added;
     }
 
@@ -135,10 +148,9 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
             return;
         }
 
-        _upward = new AutomaticScrollCaptureComposerCore(
-            detectStationaryLeadingRows: false,
-            fixedBottomRows: _downward.FixedBottomRows);
-        _ = _upward.TryAddFrame(initialFrame, options, out _);
+        _upward = CreateContentComposer(verifiedContentTracking: _fixedRegions is not null);
+        using var content = _fixedRegions?.CropContent(initialFrame);
+        _ = _upward.TryAddFrame(content ?? initialFrame, options, out _);
         CopyDiagnosticsFrom(_upward);
     }
 
@@ -155,6 +167,10 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
             throw new InvalidOperationException("尚未开始向上扩展。");
         }
 
+        if (!HasExpectedFrameSize(frame)) return false;
+        DetectFixedRegions(frame, options);
+        using var content = _fixedRegions?.CropContent(frame);
+        frame = content ?? frame;
         var preferredRows = GetPreferredExpectedRows(
             expectedRows,
             _recentUpwardExpansionRows);
@@ -169,7 +185,7 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
             out var overlapMatch,
             programmaticExpectedRows: expectedRows,
             tolerateQuantizedExpectation: tolerateQuantizedExpectation);
-        if (added && _upward.LastFrameMovementRows is > 0)
+        if (added && _upward.LastFrameMovementRows is > 0 && ScrollCapturePosition.Read(frame) is null)
         {
             RememberExpansionRows(
                 _recentUpwardExpansionRows,
@@ -177,14 +193,24 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
             _upward.RefreshBoundaryViewport(
                 frame,
                 ScrollCaptureDirection.Up,
-                GetFixedBottomExclusion(frame.Height),
+                _fixedRegions is null ? GetFixedBottomExclusion(frame.Height) : 0,
                 _upward.LastFrameMovementRows);
         }
         CopyDiagnosticsFrom(_upward, overlapMatch);
+        if (added) ReleaseFixedRegionReference();
         return added;
     }
 
     public Bitmap Compose()
+    {
+        var content = ComposeContent();
+        if (_fixedRegions is null) return content;
+        using (content)
+            return _fixedRegions.Render(content, new Rectangle(0, 0, content.Width, content.Height),
+                ContentHeight, OutputWidth, OutputHeight);
+    }
+
+    private Bitmap ComposeContent()
     {
         EnsureInitialized();
         using var downward = _downward.Compose();
@@ -209,27 +235,44 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
 
     public Bitmap ComposeLivePreview(int maximumWidth, int maximumHeight)
     {
+        var content = ComposeContentLivePreview(maximumWidth, maximumHeight);
+        if (_fixedRegions is null) return content;
+        using (content)
+            return _fixedRegions.Render(content, new Rectangle(0, 0, content.Width, content.Height),
+                ContentHeight, maximumWidth, maximumHeight);
+    }
+
+    private Bitmap ComposeContentLivePreview(int maximumWidth, int maximumHeight)
+    {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumWidth);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumHeight);
 
-        using var composite = Compose();
+        EnsureInitialized();
         var scale = Math.Min(
             1d,
             Math.Min(
-                maximumWidth / (double)composite.Width,
-                maximumHeight / (double)composite.Height));
-        var width = Math.Max(1, (int)Math.Round(composite.Width * scale));
-        var height = Math.Max(1, (int)Math.Round(composite.Height * scale));
+                maximumWidth / (double)OutputWidth,
+                maximumHeight / (double)ContentHeight));
+        var width = Math.Max(1, (int)Math.Round(OutputWidth * scale));
+        var height = Math.Max(1, (int)Math.Round(ContentHeight * scale));
+        // Both legs already maintain small incremental preview strips. Composing
+        // the full-resolution image here copied hundreds of MB on every update.
+        var downwardTop = _upward is null ? 0 :
+            (int)Math.Round((_upward.OutputHeight - SharedInitialHeight) * scale);
+        var downwardHeight = Math.Max(1, height - downwardTop);
+        using var downward = _downward.ComposeLivePreview(width, downwardHeight);
         var preview = new Bitmap(width, height, PixelFormat.Format32bppPArgb);
         using var graphics = Graphics.FromImage(preview);
         graphics.CompositingMode = CompositingMode.SourceCopy;
         graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
         graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-        graphics.DrawImage(
-            composite,
-            new Rectangle(0, 0, width, height),
-            new Rectangle(0, 0, composite.Width, composite.Height),
-            GraphicsUnit.Pixel);
+        if (_upward is not null)
+        {
+            var upwardHeight = Math.Max(1, (int)Math.Round(_upward.OutputHeight * scale));
+            using var upward = _upward.ComposeLivePreview(width, upwardHeight);
+            graphics.DrawImage(upward, new Rectangle(0, 0, width, upwardHeight));
+        }
+        graphics.DrawImage(downward, new Rectangle(0, downwardTop, width, downwardHeight));
         return preview;
     }
 
@@ -243,6 +286,53 @@ internal sealed class ControlledScrollCaptureComposer : IDisposable
         _disposed = true;
         _upward?.Dispose();
         _downward.Dispose();
+        ReleaseFixedRegionReference();
+        _fixedRegions?.Dispose();
+    }
+
+    private static AutomaticScrollCaptureComposerCore CreateContentComposer(bool verifiedContentTracking = false) =>
+        new(detectStationaryLeadingRows: false, fixedBottomRows: 0, detectFixedBottomRows: false,
+            verifiedContentTracking: verifiedContentTracking);
+
+    private bool HasExpectedFrameSize(Bitmap frame)
+    {
+        if (frame.Width == OutputWidth && frame.Height == _initialFrameHeight) return true;
+        LastFrameMovementRows = null;
+        LastOverlapRows = null;
+        LastOverlapConfidence = null;
+        LastHorizontalOffset = null;
+        LastRejectReason = "size-mismatch";
+        return false;
+    }
+
+    private void DetectFixedRegions(Bitmap frame, ScrollCaptureOptions options)
+    {
+        // Only the initial interval can change its crop. Once motion has been
+        // committed, never reinterpret old document coordinates or drop rows.
+        if (_fixedRegionReference is null || _fixedRegions is not null) return;
+        _fixedRegionSample ??= new ManualScrollFrame(_fixedRegionReference);
+        using var sample = new ManualScrollFrame(frame);
+        if (_fixedRegionSample.FindFixedRegions(sample, options.MinimumOverlapRows) is not { } rows) return;
+        _fixedRegions = new ScrollCaptureFixedRegions(_fixedRegionReference, rows.Top, rows.Bottom);
+        using var initial = _fixedRegions.CropContent(_fixedRegionReference);
+        _downward.Dispose();
+        _downward = CreateContentComposer(verifiedContentTracking: true);
+        _ = _downward.TryAddFrame(initial, options, out _);
+        if (_upward is not null)
+        {
+            _upward.Dispose();
+            _upward = CreateContentComposer(verifiedContentTracking: true);
+            _ = _upward.TryAddFrame(initial, options, out _);
+        }
+        ReleaseFixedRegionReference();
+    }
+
+    private void ReleaseFixedRegionReference()
+    {
+        _fixedRegionReference?.Dispose();
+        _fixedRegionReference = null;
+        _fixedRegionSample?.Dispose();
+        _fixedRegionSample = null;
     }
 
     private void EnsureInitialized()

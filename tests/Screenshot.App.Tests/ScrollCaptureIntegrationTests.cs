@@ -11,7 +11,7 @@ namespace Screenshot.App.Tests;
 [Collection(GlobalInputTestGroup.Name)]
 public sealed class ScrollCaptureIntegrationTests
 {
-    [Fact]
+    [DesktopFact]
     public async Task PhysicalWheelCreatesAndPreservesInputHoleOverUnderlyingWindow()
     {
         Window? window = null;
@@ -135,7 +135,7 @@ public sealed class ScrollCaptureIntegrationTests
         }
     }
 
-    [Fact]
+    [DesktopFact]
     public async Task PreviewRemainsVisibleWhileOverlayIsTemporarilyHiddenAndRestored()
     {
         ScrollCaptureSelection? selection = null;
@@ -183,7 +183,7 @@ public sealed class ScrollCaptureIntegrationTests
         }
     }
 
-    [Fact]
+    [DesktopFact]
     public async Task CapturesAndStitchesUserControlledScrolling()
     {
         Window? window = null;
@@ -461,7 +461,7 @@ public sealed class ScrollCaptureIntegrationTests
         }
     }
 
-    [Fact]
+    [DesktopFact]
     public async Task ContinuousControlledInputDoesNotPauseOrTearWhileCapturing()
     {
         Window? window = null;
@@ -619,7 +619,7 @@ public sealed class ScrollCaptureIntegrationTests
         }
     }
 
-    [Fact]
+    [DesktopFact]
     public async Task ControlledCaptureProducesContinuousCompositeAfterPause()
     {
         Window? window = null;
@@ -745,6 +745,16 @@ public sealed class ScrollCaptureIntegrationTests
             Assert.True(pointerActions.Writer.TryWrite(
                 ScrollCapturePointerAction.Click));
             await paused.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var pausedOffset = offset;
+            Assert.True(pointerActions.Writer.TryWrite(ScrollCapturePointerAction.Click));
+            var resumeDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(8);
+            while (DateTime.UtcNow < resumeDeadline)
+            {
+                WpfTestHost.Invoke(() => offset = controlledScrollViewer.VerticalOffset);
+                if (offset >= pausedOffset + 160) break;
+                await Task.Delay(50);
+            }
+            Assert.True(offset >= pausedOffset + 160, "Continue did not resume scrolling.");
             completionRequested.TrySetResult();
             pointerActions.Writer.TryComplete();
 
@@ -769,7 +779,7 @@ public sealed class ScrollCaptureIntegrationTests
         }
     }
 
-    [Fact]
+    [DesktopFact]
     public async Task ControlledCaptureReturnsToStartAndPrependsUpwardFrames()
     {
         Window? window = null;

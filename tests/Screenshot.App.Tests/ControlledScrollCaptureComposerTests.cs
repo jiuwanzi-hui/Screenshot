@@ -44,6 +44,11 @@ public sealed class ControlledScrollCaptureComposerTests
         Assert.Equal(document.GetPixel(91, 239), result.GetPixel(91, 239));
         Assert.Equal(document.GetPixel(47, 240), result.GetPixel(47, 240));
         Assert.Equal(document.GetPixel(132, 619), result.GetPixel(132, 619));
+        using var preview = composer.ComposeLivePreview(180, 720);
+        Assert.Equal(result.Size, preview.Size);
+        Assert.Equal(result.GetPixel(25, 0), preview.GetPixel(25, 0));
+        Assert.Equal(result.GetPixel(47, 240), preview.GetPixel(47, 240));
+        Assert.Equal(result.GetPixel(132, 619), preview.GetPixel(132, 619));
     }
 
     [Fact]
@@ -603,7 +608,7 @@ public sealed class ControlledScrollCaptureComposerTests
     }
 
     [Fact]
-    public void FixedBottomChromeIsExcludedFromBothControlledDirections()
+    public void FixedBottomChromeIsRetainedOnceAfterBothControlledDirections()
     {
         const int width = 180;
         const int frameHeight = 160;
@@ -645,13 +650,8 @@ public sealed class ControlledScrollCaptureComposerTests
         }
 
         using var result = composer.Compose();
-        using var expected = document.Clone(
-            new Rectangle(
-                0,
-                40,
-                width,
-                (200 + scrollableHeight) - 40),
-            PixelFormat.Format32bppPArgb);
+        using var expected = CreateFrameWithFixedBottomChrome(
+            document, 40, (200 + scrollableHeight) - 40 + fixedBottomRows, fixedBottomRows);
         AssertPixelsEqual(expected, result, expected.Height);
     }
 

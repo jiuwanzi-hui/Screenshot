@@ -2,7 +2,6 @@
 using System.Drawing.Imaging;
 using System.Drawing.Drawing2D;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using PixelFormat = System.Drawing.Imaging.PixelFormat;
@@ -20,10 +19,17 @@ public sealed class CapturedImage : IDisposable
         ArgumentNullException.ThrowIfNull(bitmap);
 
         Bitmap = bitmap;
+        PixelWidth = bitmap.Width;
+        PixelHeight = bitmap.Height;
         SourceRegion = sourceRegion;
     }
 
     public Bitmap Bitmap { get; }
+
+    // Immutable metadata stays safe to read while a background worker locks
+    // the GDI bitmap for sampling. Even Bitmap.Width calls into native GDI+.
+    public int PixelWidth { get; }
+    public int PixelHeight { get; }
 
     /// <summary>
     /// Creates the WPF copy only when a UI or clipboard operation actually
@@ -36,6 +42,7 @@ public sealed class CapturedImage : IDisposable
         {
             lock (_previewSync)
             {
+                ObjectDisposedException.ThrowIf(_disposed, this);
                 return _preview ??= ToBitmapSource(Bitmap);
             }
         }
@@ -90,7 +97,8 @@ public sealed class CapturedImage : IDisposable
         var source = bitmap;
 
         if (bitmap.PixelFormat != PixelFormat.Format32bppPArgb &&
-            bitmap.PixelFormat != PixelFormat.Format32bppArgb)
+            bitmap.PixelFormat != PixelFormat.Format32bppArgb &&
+            bitmap.PixelFormat != PixelFormat.Format32bppRgb)
         {
             converted = new Bitmap(
                 bitmap.Width,
@@ -112,11 +120,12 @@ public sealed class CapturedImage : IDisposable
             try
             {
                 var bytes = data.Stride * source.Height;
-                var pixels = new byte[bytes];
-                Marshal.Copy(data.Scan0, pixels, 0, bytes);
-                var pixelFormat = source.PixelFormat == PixelFormat.Format32bppPArgb
-                    ? PixelFormats.Pbgra32
-                    : PixelFormats.Bgra32;
+                var pixelFormat = source.PixelFormat switch
+                {
+                    PixelFormat.Format32bppRgb => PixelFormats.Bgr32,
+                    PixelFormat.Format32bppPArgb => PixelFormats.Pbgra32,
+                    _ => PixelFormats.Bgra32,
+                };
                 var bitmapSource = BitmapSource.Create(
                     source.Width,
                     source.Height,
@@ -124,7 +133,8 @@ public sealed class CapturedImage : IDisposable
                     dpiY: 96,
                     pixelFormat,
                     palette: null,
-                    pixels,
+                    data.Scan0,
+                    bytes,
                     data.Stride);
                 bitmapSource.Freeze();
                 return bitmapSource;
@@ -150,6 +160,7 @@ public sealed class CapturedImage : IDisposable
             }
 
             _disposed = true;
+            _preview = null;
             Bitmap.Dispose();
         }
     }

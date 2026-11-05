@@ -24,6 +24,8 @@ internal enum RecordingAnnotationTool
     Number,
     Text,
     Mosaic,
+    DoubleArrow,
+    HollowDoubleArrow,
 }
 
 public partial class RecordingAnnotationOverlayWindow : Window
@@ -74,6 +76,7 @@ public partial class RecordingAnnotationOverlayWindow : Window
     internal event EventHandler? AnnotationSelectionChanged;
 
     internal bool HasSelectedAnnotation => DrawingCanvas.HasSelectedAnnotation;
+    internal ImageEditorCanvas AnnotationCanvas => DrawingCanvas;
 
     internal WpfColor CurrentSelectedColor => DrawingCanvas.CurrentSelectedColor;
 
@@ -173,6 +176,7 @@ public partial class RecordingAnnotationOverlayWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         var handle = new WindowInteropHelper(this).Handle;
+        OverlayShellBehavior.Apply(handle);
         _windowSource = HwndSource.FromHwnd(handle);
         _windowSource?.AddHook(OnWindowMessage);
         var style = NativeMethods.GetWindowLongPtr(
@@ -285,6 +289,8 @@ public partial class RecordingAnnotationOverlayWindow : Window
     private static EditorTool ToEditorTool(RecordingAnnotationTool tool) => tool switch
     {
         RecordingAnnotationTool.Ellipse => EditorTool.Ellipse,
+        RecordingAnnotationTool.DoubleArrow => EditorTool.DoubleArrow,
+        RecordingAnnotationTool.HollowDoubleArrow => EditorTool.HollowDoubleArrow,
         RecordingAnnotationTool.Arrow => EditorTool.Arrow,
         RecordingAnnotationTool.CurvedArrow => EditorTool.CurvedArrow,
         RecordingAnnotationTool.Emoji => EditorTool.Emoji,

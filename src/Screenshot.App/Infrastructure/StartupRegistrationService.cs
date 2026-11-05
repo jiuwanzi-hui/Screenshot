@@ -32,36 +32,39 @@ public sealed class StartupRegistrationService : IStartupRegistrationService
     {
         try
         {
-            dynamic service = ConnectTaskScheduler();
-            dynamic folder = service.GetFolder("\\");
-            dynamic task = folder.GetTask(_taskName);
-            if (!(bool)task.Enabled)
+            using var com = new ComDispatchScope();
+            var service = ConnectTaskScheduler(com);
+            var folder = com.Call(service, "GetFolder", "\\");
+            var task = com.Call(folder, "GetTask", _taskName);
+            if (!(bool)com.Get(task, "Enabled"))
             {
                 return false;
             }
 
-            dynamic actions = task.Definition.Actions;
-            if ((int)actions.Count < 1)
+            var definition = com.Get(task, "Definition");
+            var actions = com.Get(definition, "Actions");
+            if ((int)com.Get(actions, "Count") < 1)
             {
                 return false;
             }
 
-            dynamic action = actions[1];
-            if ((int)action.Type != TaskActionExec)
+            var action = com.Get(actions, "Item", 1);
+            if ((int)com.Get(action, "Type") != TaskActionExec)
             {
                 return false;
             }
 
-            dynamic triggers = task.Definition.Triggers;
+            var triggers = com.Get(definition, "Triggers");
+            using var identity = WindowsIdentity.GetCurrent();
             var hasCurrentUserLogonTrigger = false;
-            for (var index = 1; index <= (int)triggers.Count; index++)
+            for (var index = 1; index <= (int)com.Get(triggers, "Count"); index++)
             {
-                dynamic trigger = triggers[index];
-                if ((int)trigger.Type == TaskTriggerLogon &&
-                    (string.IsNullOrWhiteSpace((string?)trigger.UserId) ||
+                var trigger = com.Get(triggers, "Item", index);
+                if ((int)com.Get(trigger, "Type") == TaskTriggerLogon &&
+                    (string.IsNullOrWhiteSpace((string?)com.Get(trigger, "UserId")) ||
                      string.Equals(
-                         (string)trigger.UserId,
-                         WindowsIdentity.GetCurrent().Name,
+                         (string)com.Get(trigger, "UserId"),
+                         identity.Name,
                          StringComparison.OrdinalIgnoreCase)))
                 {
                     hasCurrentUserLogonTrigger = true;
@@ -77,8 +80,8 @@ public sealed class StartupRegistrationService : IStartupRegistrationService
             return CommandsEqual(
                 _commandFactory(),
                 BuildCommand(
-                    (string)action.Path,
-                    (string?)action.Arguments ?? string.Empty));
+                    (string)com.Get(action, "Path"),
+                    (string?)com.Get(action, "Arguments") ?? string.Empty));
         }
         catch (COMException)
         {
@@ -118,25 +121,25 @@ public sealed class StartupRegistrationService : IStartupRegistrationService
         var userSid = identity.User?.Value ??
             throw new InvalidOperationException("无法确定当前用户。");
 
-        dynamic service = ConnectTaskScheduler();
-        dynamic folder = service.GetFolder("\\");
-        dynamic definition = service.NewTask(0);
-        definition.RegistrationInfo.Description =
-            $"SnapCut 登录后后台启动 ({userName})";
-        definition.Principal.UserId = userSid;
-        definition.Principal.LogonType = TaskLogonInteractiveToken;
-        definition.Principal.RunLevel = 0;
-        definition.Settings.DisallowStartIfOnBatteries = false;
-        definition.Settings.StopIfGoingOnBatteries = false;
-        definition.Settings.StartWhenAvailable = true;
-
-        dynamic trigger = definition.Triggers.Create(TaskTriggerLogon);
-        trigger.UserId = userName;
-
-        dynamic action = definition.Actions.Create(TaskActionExec);
-        action.Path = path;
-        action.Arguments = arguments;
-        folder.RegisterTaskDefinition(
+        using var com = new ComDispatchScope();
+        var service = ConnectTaskScheduler(com);
+        var folder = com.Call(service, "GetFolder", "\\");
+        var definition = com.Call(service, "NewTask", 0);
+        com.Set(com.Get(definition, "RegistrationInfo"), "Description", $"SnapCut 登录后后台启动 ({userName})");
+        var principal = com.Get(definition, "Principal");
+        com.Set(principal, "UserId", userSid);
+        com.Set(principal, "LogonType", TaskLogonInteractiveToken);
+        com.Set(principal, "RunLevel", 0);
+        var settings = com.Get(definition, "Settings");
+        com.Set(settings, "DisallowStartIfOnBatteries", false);
+        com.Set(settings, "StopIfGoingOnBatteries", false);
+        com.Set(settings, "StartWhenAvailable", true);
+        var trigger = com.Call(com.Get(definition, "Triggers"), "Create", TaskTriggerLogon);
+        com.Set(trigger, "UserId", userName);
+        var action = com.Call(com.Get(definition, "Actions"), "Create", TaskActionExec);
+        com.Set(action, "Path", path);
+        com.Set(action, "Arguments", arguments);
+        com.Call(folder, "RegisterTaskDefinition",
             _taskName,
             definition,
             TaskCreateOrUpdate,
@@ -150,9 +153,10 @@ public sealed class StartupRegistrationService : IStartupRegistrationService
     {
         try
         {
-            dynamic service = ConnectTaskScheduler();
-            dynamic folder = service.GetFolder("\\");
-            folder.DeleteTask(_taskName, 0);
+            using var com = new ComDispatchScope();
+            var service = ConnectTaskScheduler(com);
+            var folder = com.Call(service, "GetFolder", "\\");
+            com.Call(folder, "DeleteTask", _taskName, 0);
         }
         catch (COMException)
         {
@@ -165,7 +169,7 @@ public sealed class StartupRegistrationService : IStartupRegistrationService
         }
     }
 
-    private static object ConnectTaskScheduler()
+    private static object ConnectTaskScheduler(ComDispatchScope com)
     {
         var schedulerType = Type.GetTypeFromProgID("Schedule.Service")
             ?? throw new InvalidOperationException(
@@ -173,7 +177,8 @@ public sealed class StartupRegistrationService : IStartupRegistrationService
         var service = Activator.CreateInstance(schedulerType)
             ?? throw new InvalidOperationException(
                 "无法创建任务计划程序服务对象。");
-        ((dynamic)service).Connect();
+        com.Track(service);
+        com.Call(service, "Connect", Type.Missing, Type.Missing, Type.Missing, Type.Missing);
         return service;
     }
 

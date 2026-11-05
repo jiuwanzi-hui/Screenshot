@@ -15,14 +15,36 @@ internal static partial class TranslationPresentationLayout
             return regions;
         }
 
-        return regions.Select(region => TightenToWordBounds(region, words)).ToArray();
+        return OcrColumnLayout.SplitJoinedColumns(regions, words)
+            .Select(region => TightenToWordBounds(region, words)).ToArray();
     }
 
     public static IReadOnlyList<OcrTextRegion> GroupParagraphs(
         IReadOnlyList<OcrTextRegion> regions)
     {
         ArgumentNullException.ThrowIfNull(regions);
-        var ordered = regions
+        var lines = new List<OcrTextRegion>();
+        foreach (var region in regions.Where(region => !string.IsNullOrWhiteSpace(region.Text))
+                     .Select(WithEstimatedFontSize).OrderBy(region => region.Y).ThenBy(region => region.X))
+        {
+            // Inline code and bold text have slightly different tops/heights.
+            // Join from either side, transitively, then order by X. Sorting only
+            // by Y left fragments behind and later merged unrelated paragraphs.
+            var current = region;
+            int inline;
+            while ((inline = lines.FindLastIndex(previous =>
+                       CanJoinInline(previous, current) || CanJoinInline(current, previous))) >= 0)
+            {
+                var previous = lines[inline];
+                current = MergeGroup(new[] { previous, current }.OrderBy(item => item.X).ToArray()) with
+                {
+                    EstimatedFontSize = Math.Max(previous.EstimatedFontSize, current.EstimatedFontSize),
+                };
+                lines.RemoveAt(inline);
+            }
+            lines.Add(current);
+        }
+        var ordered = lines
             .Where(region => !string.IsNullOrWhiteSpace(region.Text))
             .Select(WithEstimatedFontSize)
             .OrderBy(region => region.Y)
@@ -36,13 +58,16 @@ internal static partial class TranslationPresentationLayout
         var groups = new List<List<OcrTextRegion>>();
         foreach (var region in ordered)
         {
-            if (groups.Count == 0 || !CanJoin(groups[^1], region))
+            // A sidebar can occur between two body lines in screen Y order.
+            // Find the nearest compatible paragraph in the same column.
+            var group = groups.LastOrDefault(candidate => CanJoin(candidate, region));
+            if (group is null)
             {
                 groups.Add([region]);
             }
             else
             {
-                groups[^1].Add(region);
+                group.Add(region);
             }
         }
 
@@ -177,7 +202,8 @@ internal static partial class TranslationPresentationLayout
             word.Text.Count(char.IsLetter));
         var horizontalGap = second.X - (first.X + first.Width);
         var typicalHeight = Math.Max(first.Height, second.Height);
-        var looksLikeSymbol = firstLetters == 0;
+        var looksLikeSymbol = firstLetters == 0 && (!firstText.Any(char.IsDigit) ||
+            firstText.Length == 1 && first.Width >= first.Height * 0.95);
         var looksLikeSingleGlyphIcon = firstLetters == 1 &&
                                        firstText.Length <= 2 &&
                                        first.Width >= first.Height * 0.55;
@@ -222,21 +248,48 @@ internal static partial class TranslationPresentationLayout
         var previousBottom = previous.Y + previous.Height;
         var verticalGap = next.Y - previousBottom;
         var typicalHeight = Math.Max(previous.Height, next.Height);
+        var lineSize = Math.Min(previous.EstimatedFontSize, next.EstimatedFontSize);
         var previousCenter = previous.Y + (previous.Height / 2);
         var nextCenter = next.Y + (next.Height / 2);
         var centerDistance = nextCenter - previousCenter;
         var heightRatio = Math.Max(previous.Height, next.Height) /
                           Math.Max(1, Math.Min(previous.Height, next.Height));
-        var sameHanScript = ContainsHan(previous.Text) == ContainsHan(next.Text);
         var leftAligned = Math.Abs(next.X - first.X) <=
-                          Math.Max(20, typicalHeight * 2.0);
-        var isFollowingLine = centerDistance >= -(typicalHeight * 0.25) &&
+                          Math.Max(12, lineSize * 1.2);
+        var horizontalOverlap = Math.Min(previous.X + previous.Width, next.X + next.Width) -
+                                Math.Max(previous.X, next.X);
+        var compatibleScript = ContainsHan(previous.Text) == ContainsHan(next.Text) ||
+            previous.Text.Any(char.IsAsciiLetter) && next.Text.Any(char.IsAsciiLetter) ||
+            previous.Text.Any(character => character is >= '\u3040' and <= '\u30ff') ||
+            next.Text.Any(character => character is >= '\u3040' and <= '\u30ff');
+        var isFollowingLine = centerDistance >= Math.Min(previous.Height, next.Height) * 0.35 &&
                               centerDistance <= typicalHeight * 1.8;
+        var paragraphBreak = verticalGap > lineSize * 0.35 &&
+            previous.Text.TrimEnd().EndsWith('.') && char.IsUpper(next.Text.TrimStart()[0]);
         return isFollowingLine &&
-               verticalGap <= Math.Min(previous.Height, next.Height) * 1.1 &&
+               !paragraphBreak &&
+               verticalGap <= lineSize * 0.7 &&
+               horizontalOverlap >= Math.Min(previous.Width, next.Width) * 0.6 &&
                leftAligned &&
-               sameHanScript &&
+               // Names followed by vote/reputation counts are separate labels.
+               next.Text.Any(char.IsLetter) &&
+               compatibleScript &&
                heightRatio <= 1.6;
+    }
+
+    private static bool CanJoinInline(OcrTextRegion left, OcrTextRegion right)
+    {
+        var gap = right.X - (left.X + left.Width);
+        var overlap = Math.Min(left.Y + left.Height, right.Y + right.Height) - Math.Max(left.Y, right.Y);
+        var fontSize = Math.Min(left.EstimatedFontSize, right.EstimatedFontSize);
+        // CJK does not normally need a full glyph of space between fragments.
+        // That much whitespace is often the gutter between adjacent columns.
+        var maxGap = ContainsHan(left.Text) || ContainsHan(right.Text) ||
+                     left.Text.Concat(right.Text).Any(character => character is >= '\u3040' and <= '\u30ff')
+            ? Math.Max(4, fontSize * 0.45) : Math.Max(10, fontSize);
+        return left.Text.Count(char.IsLetter) >= 2 && right.Text.Count(char.IsLetter) >= 2 &&
+            gap >= -2 && gap <= maxGap &&
+            overlap >= Math.Min(left.Height, right.Height) * 0.7;
     }
 
     private static bool ContainsHan(string text) =>

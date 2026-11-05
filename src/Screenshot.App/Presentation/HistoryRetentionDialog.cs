@@ -186,7 +186,7 @@ internal sealed class HistoryRetentionDialog : Window
 
     private void ShowValidationMessage(string message, WpfTextBox target)
     {
-        System.Windows.MessageBox.Show(
+        Screenshot.App.Presentation.LocalizedMessageBox.Show(
             this,
             message,
             Title,

@@ -10,6 +10,7 @@ using Screenshot.App.Core;
 using Screenshot.App.Editor;
 using Screenshot.App.Infrastructure;
 using Screenshot.App.Presentation;
+using Screenshot.App.Text;
 using WpfButton = System.Windows.Controls.Button;
 using WpfColor = System.Windows.Media.Color;
 using WpfColorConverter = System.Windows.Media.ColorConverter;
@@ -32,7 +33,6 @@ public partial class PinnedImageEditorToolbarWindow : Window
 {
     private const double VisibleAttachmentGapDip = 2;
     private const double ToolbarOuterMarginDip = 6;
-    private const double SinglePinShellInsetDip = 12;
     // The active tool belongs to this editor session. The persisted shape and
     // arrow variants are restored separately when a new toolbar is created.
     private EditorTool _lastTool = EditorTool.Rectangle;
@@ -69,6 +69,13 @@ public partial class PinnedImageEditorToolbarWindow : Window
     private bool _isClosing;
     private bool _isInitializing = true;
     private bool _colorOptionsAvailable = true;
+    private bool _hasSelectedTool;
+    private readonly Action _detachOwnerVariantShortcut;
+    private string _translationAction = "识别并翻译图片文字";
+    private string? _translationHint;
+    private ImageQuestionSideWindow? _imageQuestionSide;
+    private readonly bool _imageQuestionEnabled;
+    internal event EventHandler? ImageQuestionRequested;
 
     public PinnedImageEditorToolbarWindow(
         Window attachedWindow,
@@ -82,6 +89,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
     {
         ArgumentNullException.ThrowIfNull(attachedWindow);
         _attachedWindow = attachedWindow;
+        _imageQuestionEnabled = settings?.EnableImageQuestion ?? true;
         _customStrokeColorChanged = customStrokeColorChanged;
         _customColorPaletteChanged = customColorPaletteChanged;
         _arrowStyleChanged = arrowStyleChanged;
@@ -89,6 +97,22 @@ public partial class PinnedImageEditorToolbarWindow : Window
         _shapeToolModeChanged = shapeToolModeChanged;
         _lastAnnotationToolChanged = lastAnnotationToolChanged;
         InitializeComponent();
+        AdjustmentLine.WidthSource = EditTools;
+        AdjustmentLine.ReservedWidthSource = TranslationProgressText;
+        AnnotationVariantButton.Configure(DoubleArrowToolButton, EditorTool.DoubleArrow, SelectVariantTool, inlineOptions: true);
+        AnnotationVariantButton.Configure(LineToolButton, EditorTool.Line, SelectVariantTool, inlineOptions: true);
+        AnnotationVariantButton.Configure(MosaicToolButton, EditorTool.Mosaic, SelectVariantTool, inlineOptions: true);
+        NumberAnnotationOptions.Configure(NumberToolButton, GetAnnotationCanvas, inlineOptions: true);
+        TextAnnotationOptions.Configure(TextToolButton, GetAnnotationCanvas, inlineOptions: true);
+        ToolAdjustments.OptionsChanged += UpdateEmojiPaletteVisibility;
+        ToolbarVariantShortcut.Attach(this, () => _hasSelectedTool ? ToolAdjustments : null);
+        _detachOwnerVariantShortcut = ToolbarVariantShortcut.Attach(attachedWindow,
+            () => IsVisible && _mode == PinnedImageToolbarMode.Edit && _hasSelectedTool ? ToolAdjustments : null);
+        TranslationTargetPreferences.Changed += OnTranslationTargetChanged;
+        UpdateTranslationToolTip();
+        SizeChanged += OnToolbarSizeChanged;
+
+        if (Content is FrameworkElement surface) UiTransitions.PrepareWindow(this, surface);
         var toolbarScale = Math.Clamp(
             double.IsFinite(settings?.ToolbarScalePercent ?? 100)
                 ? (settings?.ToolbarScalePercent ?? 100) / 100d
@@ -101,7 +125,6 @@ public partial class PinnedImageEditorToolbarWindow : Window
         _toolbarDragHint = new ToolbarDragHintBehavior(
             ToolbarSurface,
             ToolbarSurface);
-        PopulateEmojiPalette();
         ApplyPreferences(settings);
         _toolbarFeatureShortcuts = settings?.CaptureToolbarFeatureShortcuts ??
             new Dictionary<CaptureToolbarFeature, string>();
@@ -111,6 +134,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
             settings?.CaptureToolbarRows ?? CaptureToolbarRowCount.One);
         ApplyThemedContextMenu(ShapeToolButton.ContextMenu);
         ApplyThemedContextMenu(ArrowToolButton.ContextMenu);
+        ApplyThemedContextMenu(OpacityButton.ContextMenu);
         _isInitializing = false;
         Owner = attachedWindow;
         _attachedWindow.LocationChanged += OnAttachedWindowBoundsChanged;
@@ -128,17 +152,10 @@ public partial class PinnedImageEditorToolbarWindow : Window
 
     private void OnFeatureShortcutPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        if (Keyboard.Modifiers != ModifierKeys.None || Keyboard.FocusedElement is System.Windows.Controls.TextBox)
-            return;
-        var key = e.Key == Key.System ? e.SystemKey : e.Key;
-        var shortcut = key >= Key.D0 && key <= Key.D9 ? key.ToString()[1..] :
-            key >= Key.NumPad0 && key <= Key.NumPad9
-                ? ((int)key - (int)Key.NumPad0).ToString(CultureInfo.InvariantCulture)
-                : string.Empty;
-        var match = _toolbarFeatureShortcuts.FirstOrDefault(pair =>
-            string.Equals(pair.Value, shortcut, StringComparison.OrdinalIgnoreCase));
-        if (match.Equals(default(KeyValuePair<CaptureToolbarFeature, string>))) return;
-        var tool = match.Key switch
+        if (Keyboard.FocusedElement is System.Windows.Controls.TextBox) return;
+        var key = e.Key switch { Key.System => e.SystemKey, Key.ImeProcessed => e.ImeProcessedKey, _ => e.Key };
+        if (!CaptureToolbarShortcut.TryFind(_toolbarFeatureShortcuts, key, Keyboard.Modifiers, out var feature)) return;
+        var tool = feature switch
         {
             CaptureToolbarFeature.Shape => _shapeToolMode == ShapeToolMode.Ellipse
                 ? EditorTool.Ellipse
@@ -150,7 +167,9 @@ public partial class PinnedImageEditorToolbarWindow : Window
             CaptureToolbarFeature.Number => EditorTool.Number,
             CaptureToolbarFeature.Brush => EditorTool.Brush,
             CaptureToolbarFeature.Text => EditorTool.Text,
-            CaptureToolbarFeature.Mosaic => EditorTool.Mosaic,
+            CaptureToolbarFeature.Mosaic => AnnotationToolPreferences.GetVariant(EditorTool.Mosaic),
+            CaptureToolbarFeature.DoubleArrow => AnnotationToolPreferences.GetVariant(EditorTool.DoubleArrow),
+            CaptureToolbarFeature.Line => AnnotationToolPreferences.GetVariant(EditorTool.Line),
             _ => (EditorTool?)null,
         };
         if (tool is { } selected)
@@ -162,7 +181,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
             e.Handled = true;
             return;
         }
-        var action = match.Key switch
+        var action = feature switch
         {
             CaptureToolbarFeature.Save => SaveButton,
             CaptureToolbarFeature.TextRecognition => OcrButton,
@@ -212,30 +231,96 @@ public partial class PinnedImageEditorToolbarWindow : Window
     internal bool HasCustomPosition => _hasCustomPosition;
 
     internal WpfColor SelectedColor => _selectedColor;
+    internal double SelectedStrokeWidth => StrokeWidthSlider.Value;
 
     internal IReadOnlyList<int> CustomColorPalette => _customColorPalette;
 
+    internal void SetTranslationActionState(bool enabled, string action, string? hint)
+    {
+        TranslateActionButton.IsEnabled = enabled;
+        _translationAction = action;
+        _translationHint = hint;
+        UpdateTranslationToolTip();
+    }
+
+    internal void SetTranslationProgress(string message)
+    {
+        TranslationProgressText.Text = string.Join(" ", message.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        TranslationProgressText.ToolTip = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, MaxWidth = 520 };
+        TranslationProgressText.Visibility = string.IsNullOrWhiteSpace(message) ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void OnOpacityClick(object sender, RoutedEventArgs e)
+    {
+        var menu = OpacityButton.ContextMenu;
+        foreach (var item in menu.Items.OfType<MenuItem>())
+        {
+            item.IsChecked = Equals(item.Tag,
+                Math.Round(_attachedWindow.Opacity * 100).ToString(CultureInfo.InvariantCulture));
+        }
+        menu.PlacementTarget = OpacityButton;
+        menu.Placement = PlacementMode.Bottom;
+        menu.IsOpen = true;
+        e.Handled = true;
+    }
+
+    private void OnOpacityOptionClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string value } &&
+            int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var percent))
+        {
+            _attachedWindow.Opacity = Math.Clamp(percent / 100d, .2, 1);
+        }
+        e.Handled = true;
+    }
+
     internal void ShowEdit()
+    {
+        PrepareEdit();
+        ShowAttached();
+        if (_imageQuestionEnabled)
+        {
+            _imageQuestionSide ??= new ImageQuestionSideWindow(_attachedWindow,
+                () => ImageQuestionRequested?.Invoke(this, EventArgs.Empty));
+            if (_attachedWindow.IsVisible) _imageQuestionSide.Show();
+        }
+        ColorSelected?.Invoke(_selectedColor);
+        StrokeWidthChanged?.Invoke(_lastStrokeWidth);
+        ArrowStyleSelected?.Invoke(_arrowStyle);
+    }
+
+    internal void PrepareEdit()
     {
         _mode = PinnedImageToolbarMode.Edit;
         EditPanel.Visibility = Visibility.Visible;
         CropPanel.Visibility = Visibility.Collapsed;
-        // Each editor session starts from the shape button. The selected shape
-        // variant is a preference, while the last active tool is not.
-        _lastTool = _shapeToolMode == ShapeToolMode.Ellipse
-            ? EditorTool.Ellipse
-            : EditorTool.Rectangle;
-        SelectToolButton(_lastTool);
-        ApplySelectedToolPreferences();
+        _hasSelectedTool = false;
+        foreach (var button in ToolButtons()) button.IsChecked = false;
+        GetAnnotationCanvas()?.SetAnnotationCreationEnabled(false);
         UpdateEmojiPaletteVisibility();
         UpdateShapeButtonPresentation();
         UpdateArrowButtonPresentation();
         UpdateArrowMenuState();
-        ShowAttached();
-        ToolSelected?.Invoke(_lastTool);
-        ColorSelected?.Invoke(_selectedColor);
-        StrokeWidthChanged?.Invoke(_lastStrokeWidth);
-        ArrowStyleSelected?.Invoke(_arrowStyle);
+    }
+
+    private ImageEditorCanvas? GetAnnotationCanvas() => _attachedWindow switch
+    {
+        PinnedImageWindow pin => pin.AnnotationCanvas,
+        PinnedImageGroupWindow group => group.AnnotationCanvas,
+        _ => null,
+    };
+
+    private IEnumerable<WpfRadioButton> ToolButtons() =>
+        EditToolsRow1.Children.OfType<WpfRadioButton>().Concat(EditToolsRow2.Children.OfType<WpfRadioButton>());
+
+    private void OnTranslationTargetChanged(object? sender, EventArgs e) => UpdateTranslationToolTip();
+
+    private void UpdateTranslationToolTip()
+    {
+        var language = TranslationTargetPreferences.Language ?? "zh-Hans";
+        var name = TranslationLanguageCatalog.Languages.FirstOrDefault(item => item.Tag == language)?.DisplayName ?? language;
+        var action = string.IsNullOrWhiteSpace(_translationHint) ? _translationAction : $"{_translationAction}：{_translationHint}";
+        TranslateActionButton.ToolTip = $"{UiLocalization.Get(action)} · {UiLocalization.Get("目标语言")}：{name}\n{UiLocalization.Get("右键选择目标语言")}";
     }
 
     internal void SetStrokeWidthFromCanvas(double width)
@@ -257,7 +342,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
         _lastStrokeWidth = value;
         if (StrokeWidthText is not null)
         {
-            StrokeWidthText.Text = $"{value:0.#} px";
+            UpdateStrokeWidthText(value);
         }
     }
 
@@ -371,11 +456,16 @@ public partial class PinnedImageEditorToolbarWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        if (!_isInitializing)
+        _imageQuestionSide?.Close();
+        _imageQuestionSide = null;
+        if (!_isInitializing && _hasSelectedTool)
         {
             _lastAnnotationToolChanged?.Invoke(ToAnnotationToolMode(_lastTool));
         }
         _toolbarDragHint.Detach();
+        _detachOwnerVariantShortcut();
+        TranslationTargetPreferences.Changed -= OnTranslationTargetChanged;
+        SizeChanged -= OnToolbarSizeChanged;
         FinishToolbarSurfaceDrag();
         _isClosing = true;
         Loaded -= OnLoaded;
@@ -402,6 +492,18 @@ public partial class PinnedImageEditorToolbarWindow : Window
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         PositionAttached();
+    }
+
+    private void OnToolbarSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        // Expanding an options row keeps the current anchor. Only constrain it
+        // to the monitor, rather than choosing another side of the pinned image.
+        if (!IsVisible || !MonitorGeometryService.TryGetWindowBounds(this, out var bounds)) return;
+        var area = MonitorGeometryService.GetWorkArea(GetOwnerBounds());
+        var x = Math.Clamp(bounds.X, area.Left, Math.Max(area.Left, area.Right - bounds.Width));
+        var y = Math.Clamp(bounds.Y, area.Top, Math.Max(area.Top, area.Bottom - bounds.Height));
+        if (x != bounds.X || y != bounds.Y) _ = MonitorGeometryService.TryMoveWindow(this, x, y);
+        if (_hasCustomPosition) RememberCustomOffset(x, y, bounds.Size);
     }
 
     private void OnAttachedWindowBoundsChanged(object? sender, EventArgs e)
@@ -487,9 +589,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
 
     private int GetAttachmentOffsetPixels(MonitorDpiScale dpi)
     {
-        var ownerInset = _attachedWindow is PinnedImageWindow
-            ? SinglePinShellInsetDip
-            : 0;
+        var ownerInset = _attachedWindow is PinnedImageWindow ? PinnedImageWindow.ShadowMarginDip : 0;
         return (int)Math.Round(
             (VisibleAttachmentGapDip - ToolbarOuterMarginDip - ownerInset) *
             Math.Max(dpi.X, dpi.Y));
@@ -505,7 +605,9 @@ public partial class PinnedImageEditorToolbarWindow : Window
             EditorTool.Number => NumberToolButton,
             EditorTool.Brush => BrushToolButton,
             EditorTool.Text => TextToolButton,
-            EditorTool.Mosaic => MosaicToolButton,
+            EditorTool.Mosaic or EditorTool.RectangleMosaic => MosaicToolButton,
+            EditorTool.DoubleArrow or EditorTool.HollowDoubleArrow => DoubleArrowToolButton,
+            EditorTool.Line or EditorTool.WavyLine => LineToolButton,
             _ => ShapeToolButton,
         };
         if (tool is EditorTool.Rectangle or EditorTool.Ellipse)
@@ -533,8 +635,21 @@ public partial class PinnedImageEditorToolbarWindow : Window
             UpdateArrowButtonPresentation(tool);
             UpdateArrowMenuState(tool);
         }
+        if (tool is EditorTool.DoubleArrow or EditorTool.HollowDoubleArrow or EditorTool.Line or EditorTool.WavyLine or EditorTool.Mosaic or EditorTool.RectangleMosaic)
+            AnnotationVariantButton.Update(button, tool);
         button.IsChecked = true;
         UpdateEmojiPaletteVisibility();
+    }
+
+    private void SelectVariantTool(EditorTool tool)
+    {
+        var button = tool is EditorTool.DoubleArrow or EditorTool.HollowDoubleArrow
+            ? DoubleArrowToolButton : tool is EditorTool.Line or EditorTool.WavyLine
+            ? LineToolButton : MosaicToolButton;
+        var alreadyChecked = button.IsChecked == true;
+        button.IsChecked = true;
+        if (alreadyChecked)
+            OnToolChecked(button, new RoutedEventArgs());
     }
 
     private void OnToolChecked(object sender, RoutedEventArgs e)
@@ -547,6 +662,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
         if (sender is WpfRadioButton { Tag: string toolName } &&
             Enum.TryParse<EditorTool>(toolName, out var tool))
         {
+            _hasSelectedTool = true;
+            GetAnnotationCanvas()?.SetAnnotationCreationEnabled(true);
             var selected = sender == ShapeToolButton &&
                 _lastTool is EditorTool.Rectangle or EditorTool.Ellipse
                 ? _lastTool
@@ -581,19 +698,25 @@ public partial class PinnedImageEditorToolbarWindow : Window
             return;
         }
 
-        EmojiPalette.Visibility = _lastTool == EditorTool.Emoji
+        var showEmoji = _hasSelectedTool && _lastTool == EditorTool.Emoji;
+        if (showEmoji && EmojiPalettePanel.Children.Count == 0) PopulateEmojiPalette();
+        EmojiPalette.Visibility = showEmoji
             ? Visibility.Visible
             : Visibility.Collapsed;
-        ColorOptions.Visibility = !_colorOptionsAvailable
+        ColorOptions.Visibility = !_colorOptionsAvailable || !_hasSelectedTool
             ? Visibility.Collapsed
             : Visibility.Visible;
-        var colorVisibility = _lastTool == EditorTool.Emoji
+        var colorVisibility = _lastTool is EditorTool.Emoji or EditorTool.Mosaic or EditorTool.RectangleMosaic
             ? Visibility.Collapsed
             : Visibility.Visible;
         RedColorButton.Visibility = colorVisibility;
         CyanColorButton.Visibility = colorVisibility;
         DarkColorButton.Visibility = colorVisibility;
         CustomColorButton.Visibility = colorVisibility;
+        if (colorVisibility == Visibility.Collapsed) AnnotationColorSwatch.ClosePickers(this);
+        if (_hasSelectedTool && !showEmoji && ToolButtons().FirstOrDefault(button => button.IsChecked == true) is { } selected)
+            ToolAdjustments.Show(selected, GetAnnotationCanvas, number: selected == NumberToolButton);
+        else ToolAdjustments.Clear();
     }
 
     private void PopulateEmojiPalette()
@@ -639,6 +762,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
             ToolSelected?.Invoke(EditorTool.Emoji);
         }
         EmojiSelected?.Invoke(emoji);
+        EmojiToolIcon.Sticker = emoji;
     }
 
     private void OnColorClick(object sender, RoutedEventArgs e)
@@ -647,15 +771,10 @@ public partial class PinnedImageEditorToolbarWindow : Window
             WpfColorConverter.ConvertFromString(colorText) is WpfColor color)
         {
             _selectedColor = color;
-            _customColor = color;
             _persistedTools.Add(_lastTool);
             AnnotationToolPreferences.SetColor(_lastTool, color);
-            var brush = new SolidColorBrush(color);
-            brush.Freeze();
-            CustomColorButton.Background = brush;
-            UpdateSelectedColorButton(CustomColorButton);
+            UpdateSelectedColorButton((WpfButton)sender);
             ColorSelected?.Invoke(color);
-            _customStrokeColorChanged?.Invoke(FormatColor(color));
         }
     }
 
@@ -691,10 +810,12 @@ public partial class PinnedImageEditorToolbarWindow : Window
         var dpi = MonitorGeometryService.GetDpiScale(ownerBounds);
         var gap = (int)Math.Round(8 * Math.Max(dpi.X, dpi.Y));
         var x = (int)Math.Round(buttonPoint.X);
-        var y = (int)Math.Round(buttonPoint.Y) - pickerBounds.Height - gap;
-        if (y < workArea.Top)
+        var toolbarBottom = MonitorGeometryService.TryGetWindowBounds(this, out var toolbarBounds)
+            ? toolbarBounds.Bottom : buttonPoint.Y + CustomColorButton.ActualHeight * dpi.Y;
+        var y = (int)Math.Round(toolbarBottom) + gap;
+        if (y + pickerBounds.Height > workArea.Bottom)
         {
-            y = (int)Math.Round(buttonPoint.Y + CustomColorButton.ActualHeight * dpi.Y) + gap;
+            y = (int)Math.Round(buttonPoint.Y) - pickerBounds.Height - gap;
         }
         x = Math.Clamp(
             x,
@@ -721,6 +842,19 @@ public partial class PinnedImageEditorToolbarWindow : Window
         _customStrokeColorChanged?.Invoke(FormatColor(color));
     }
 
+    private void UpdateStrokeWidthText(double width)
+    {
+        var pixels = _lastTool switch
+        {
+            EditorTool.RectangleMosaic => Math.Clamp((int)Math.Round(width * 1.5), 4, 18),
+            EditorTool.Mosaic => Math.Max(8, width * 4),
+            _ => width,
+        };
+        StrokeWidthText.Text = $"{pixels:0.#} px";
+        StrokeWidthSlider.ToolTip = _lastTool == EditorTool.RectangleMosaic
+            ? "马赛克颗粒大小" : "线条/笔刷粗细";
+    }
+
     private void OnStrokeWidthChanged(
         object sender,
         RoutedPropertyChangedEventArgs<double> e)
@@ -737,7 +871,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
         }
         if (StrokeWidthText is not null)
         {
-            StrokeWidthText.Text = $"{e.NewValue:0.#} px";
+            UpdateStrokeWidthText(e.NewValue);
         }
         StrokeWidthChanged?.Invoke(e.NewValue);
     }
@@ -868,14 +1002,6 @@ public partial class PinnedImageEditorToolbarWindow : Window
         }
     }
 
-    private void OnShapeMenuArrowMouseDown(object sender, MouseButtonEventArgs e)
-    {
-        RectangleShapeMenuItem.IsChecked = _shapeToolMode == ShapeToolMode.Rectangle;
-        EllipseShapeMenuItem.IsChecked = _shapeToolMode == ShapeToolMode.Ellipse;
-        OpenContextMenu(ShapeToolButton);
-        e.Handled = true;
-    }
-
     private void OnShapeMenuItemClick(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { Tag: string toolName } ||
@@ -896,13 +1022,6 @@ public partial class PinnedImageEditorToolbarWindow : Window
         SelectToolButton(tool);
         ApplySelectedToolPreferences();
         ToolSelected?.Invoke(tool);
-    }
-
-    private void OnArrowMenuArrowMouseDown(object sender, MouseButtonEventArgs e)
-    {
-        UpdateArrowMenuState();
-        OpenContextMenu(ArrowToolButton);
-        e.Handled = true;
     }
 
     private void OnArrowVariantMenuItemClick(object sender, RoutedEventArgs e)
@@ -988,6 +1107,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
     private void UpdateShapeButtonPresentation()
     {
         var isEllipse = _shapeToolMode == ShapeToolMode.Ellipse;
+        RectangleShapeMenuItem.IsChecked = !isEllipse;
+        EllipseShapeMenuItem.IsChecked = isEllipse;
         ShapeToolButton.Tag = isEllipse
             ? EditorTool.Ellipse.ToString()
             : EditorTool.Rectangle.ToString();
@@ -996,18 +1117,6 @@ public partial class PinnedImageEditorToolbarWindow : Window
         ShapeToolButton.ToolTip = isEllipse
             ? "矩形/椭圆（当前：椭圆）"
             : "矩形/椭圆（当前：矩形）";
-    }
-
-    private static void OpenContextMenu(FrameworkElement target)
-    {
-        if (target.ContextMenu is not { } menu)
-        {
-            return;
-        }
-
-        menu.PlacementTarget = target;
-        menu.Placement = PlacementMode.Bottom;
-        menu.IsOpen = true;
     }
 
     private static class NativeMethods
@@ -1097,7 +1206,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
 
         if (StrokeWidthText is not null)
         {
-            StrokeWidthText.Text = $"{_lastStrokeWidth:0.#} px";
+            UpdateStrokeWidthText(_lastStrokeWidth);
         }
 
         if (CustomColorButton is not null)
@@ -1127,7 +1236,12 @@ public partial class PinnedImageEditorToolbarWindow : Window
             AnnotationToolMode.Emoji => EditorTool.Emoji,
             AnnotationToolMode.Number => EditorTool.Number,
             AnnotationToolMode.Brush => EditorTool.Brush,
-            AnnotationToolMode.Mosaic => EditorTool.Mosaic,
+            AnnotationToolMode.Mosaic => AnnotationToolPreferences.GetVariant(EditorTool.Mosaic),
+            AnnotationToolMode.RectangleMosaic => EditorTool.RectangleMosaic,
+            AnnotationToolMode.DoubleArrow => AnnotationToolPreferences.GetVariant(EditorTool.DoubleArrow),
+            AnnotationToolMode.Line => AnnotationToolPreferences.GetVariant(EditorTool.Line),
+            AnnotationToolMode.HollowDoubleArrow => EditorTool.HollowDoubleArrow,
+            AnnotationToolMode.WavyLine => EditorTool.WavyLine,
             AnnotationToolMode.Text => EditorTool.Text,
             _ => EditorTool.Rectangle,
         };
@@ -1142,6 +1256,11 @@ public partial class PinnedImageEditorToolbarWindow : Window
             EditorTool.Number => AnnotationToolMode.Number,
             EditorTool.Brush => AnnotationToolMode.Brush,
             EditorTool.Mosaic => AnnotationToolMode.Mosaic,
+            EditorTool.RectangleMosaic => AnnotationToolMode.RectangleMosaic,
+            EditorTool.DoubleArrow => AnnotationToolMode.DoubleArrow,
+            EditorTool.Line => AnnotationToolMode.Line,
+            EditorTool.HollowDoubleArrow => AnnotationToolMode.HollowDoubleArrow,
+            EditorTool.WavyLine => AnnotationToolMode.WavyLine,
             EditorTool.Text => AnnotationToolMode.Text,
             _ => AnnotationToolMode.Rectangle,
         };
@@ -1157,6 +1276,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
         SetVisibility(ArrowToolButton, CaptureToolbarFeature.Arrow);
         SetVisibility(EmojiToolButton, CaptureToolbarFeature.Emoji);
         SetVisibility(NumberToolButton, CaptureToolbarFeature.Number);
+        SetVisibility(DoubleArrowToolButton, CaptureToolbarFeature.DoubleArrow);
+        SetVisibility(LineToolButton, CaptureToolbarFeature.Line);
         SetVisibility(BrushToolButton, CaptureToolbarFeature.Brush);
         SetVisibility(TextToolButton, CaptureToolbarFeature.Text);
         SetVisibility(MosaicToolButton, CaptureToolbarFeature.Mosaic);
@@ -1174,6 +1295,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
             (ArrowToolButton, EditorTool.Arrow),
             (EmojiToolButton, EditorTool.Emoji),
             (NumberToolButton, EditorTool.Number),
+            (DoubleArrowToolButton, EditorTool.DoubleArrow),
+            (LineToolButton, EditorTool.Line),
             (BrushToolButton, EditorTool.Brush),
             (TextToolButton, EditorTool.Text),
             (MosaicToolButton, EditorTool.Mosaic),
@@ -1183,7 +1306,11 @@ public partial class PinnedImageEditorToolbarWindow : Window
             !editorButtons.Any(item =>
                 (item.Tool == _lastTool ||
                  (item.Tool == EditorTool.Arrow &&
-                  _lastTool == EditorTool.CurvedArrow)) &&
+                  _lastTool == EditorTool.CurvedArrow) ||
+                 (item.Tool == EditorTool.Rectangle && _lastTool == EditorTool.Ellipse) ||
+                 (item.Tool == EditorTool.DoubleArrow && _lastTool == EditorTool.HollowDoubleArrow) ||
+                 (item.Tool == EditorTool.Line && _lastTool == EditorTool.WavyLine) ||
+                 (item.Tool == EditorTool.Mosaic && _lastTool == EditorTool.RectangleMosaic)) &&
                 IsElementVisible(item.Button)))
         {
             _lastTool = selected.Tool;
@@ -1213,6 +1340,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
             [CaptureToolbarFeature.Arrow] = [ArrowToolButton],
             [CaptureToolbarFeature.Emoji] = [EmojiToolButton],
             [CaptureToolbarFeature.Number] = [NumberToolButton],
+            [CaptureToolbarFeature.DoubleArrow] = [DoubleArrowToolButton],
+            [CaptureToolbarFeature.Line] = [LineToolButton],
             [CaptureToolbarFeature.Brush] = [BrushToolButton],
             [CaptureToolbarFeature.Text] = [TextToolButton],
             [CaptureToolbarFeature.Mosaic] = [MosaicToolButton],
@@ -1224,7 +1353,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
             [CaptureToolbarFeature.PrivacyRedaction] = [PrivacyButton],
             [CaptureToolbarFeature.UndoRedo] = [UndoButton],
         };
-        var order = (configuredOrder ?? Enum.GetValues<CaptureToolbarFeature>())
+        var order = (configuredOrder ?? AppSettings.DefaultCaptureToolbarFeatureOrder())
             .Where(Enum.IsDefined)
             .Distinct()
             .ToList();
@@ -1242,6 +1371,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
             CaptureToolbarFeature.Arrow,
             CaptureToolbarFeature.Emoji,
             CaptureToolbarFeature.Number,
+            CaptureToolbarFeature.DoubleArrow,
+            CaptureToolbarFeature.Line,
             CaptureToolbarFeature.Brush,
             CaptureToolbarFeature.Text,
             CaptureToolbarFeature.Mosaic,
@@ -1260,6 +1391,7 @@ public partial class PinnedImageEditorToolbarWindow : Window
         tokens.Add(ToolActionSeparator);
         AddFeatures(actionFeatures);
         tokens.Add(ActionHistorySeparator);
+        tokens.Add(OpacityButton);
         tokens.Add(CropToolButton);
         AddFeatures(new HashSet<CaptureToolbarFeature>
         {
@@ -1372,6 +1504,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
             ArrowToolButton,
             EmojiToolButton,
             NumberToolButton,
+            DoubleArrowToolButton,
+            LineToolButton,
             BrushToolButton,
             TextToolButton,
             MosaicToolButton,
@@ -1417,20 +1551,8 @@ public partial class PinnedImageEditorToolbarWindow : Window
 
     private void UpdateSelectedColorButton(WpfButton selectedButton)
     {
-        foreach (var button in new[]
-                 {
-                     RedColorButton,
-                     CyanColorButton,
-                     DarkColorButton,
-                     CustomColorButton,
-                 })
-        {
-            button.BorderBrush = new SolidColorBrush(
-                WpfColor.FromArgb(0x8A, 0xE1, 0xD8, 0xD0));
-            button.BorderThickness = new Thickness(1);
-        }
-        selectedButton.BorderBrush = System.Windows.Media.Brushes.White;
-        selectedButton.BorderThickness = new Thickness(2);
+        AnnotationColorSwatch.Update(_selectedColor,
+            CustomColorButton, RedColorButton, CyanColorButton, DarkColorButton);
     }
 
     private static int[] NormalizeCustomColorPalette(IEnumerable<int>? colors) =>

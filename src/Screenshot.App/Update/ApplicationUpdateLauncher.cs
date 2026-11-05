@@ -2,12 +2,14 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Globalization;
+using System.Reflection.PortableExecutable;
 using Screenshot.App.Core;
 
 namespace Screenshot.App.Update;
 
 public static class ApplicationUpdateLauncher
 {
+    internal const string RunnerFileName = "SnapCut.UpdateRunner.exe";
     public static void Launch(
         ApplicationUpdateInfo update,
         string downloadedPackagePath)
@@ -17,14 +19,14 @@ public static class ApplicationUpdateLauncher
 
         if (AppMetadata.IsInstalled)
         {
-            LaunchInstaller(downloadedPackagePath);
+            LaunchPortableRunner(update, downloadedPackagePath, installer: true);
             return;
         }
 
         LaunchPortableRunner(update, downloadedPackagePath);
     }
 
-    internal static ProcessStartInfo CreateInstallerStartInfo(string installerPath)
+    internal static ProcessStartInfo CreateInstallerStartInfo(string installerPath, bool restartAfterInstallation = true)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -35,25 +37,15 @@ public static class ApplicationUpdateLauncher
         startInfo.ArgumentList.Add("/SUPPRESSMSGBOXES");
         startInfo.ArgumentList.Add("/NORESTART");
         startInfo.ArgumentList.Add("/CLOSEAPPLICATIONS");
-        startInfo.ArgumentList.Add("/UPDATE=1");
+        startInfo.ArgumentList.Add(restartAfterInstallation ? "/UPDATE=1" : "/UPDATE=0");
         startInfo.ArgumentList.Add($"/UPDATEPACKAGE={installerPath}");
         return startInfo;
     }
 
-    private static void LaunchInstaller(string installerPath)
-    {
-        if (!File.Exists(installerPath))
-        {
-            throw new FileNotFoundException("下载的安装程序不存在。", installerPath);
-        }
-
-        _ = Process.Start(CreateInstallerStartInfo(installerPath)) ??
-            throw new InvalidOperationException("无法启动更新安装程序。");
-    }
-
     private static void LaunchPortableRunner(
         ApplicationUpdateInfo update,
-        string packagePath)
+        string packagePath,
+        bool installer = false)
     {
         if (!File.Exists(packagePath))
         {
@@ -61,25 +53,16 @@ public static class ApplicationUpdateLauncher
         }
 
         Directory.CreateDirectory(AppMetadata.UpdatesDirectoryPath);
-        var runnerPath = Path.Combine(
-            AppMetadata.UpdatesDirectoryPath,
-            $"SnapCut.UpdateRunner-{Guid.NewGuid():N}.exe");
+        var runnerDirectory = Path.Combine(AppMetadata.UpdatesDirectoryPath, $"runner-{Guid.NewGuid():N}");
+        // Do not match Inno's CloseApplicationsFilter=SnapCut.exe: the helper
+        // must stay alive while its child installer replaces the application.
+        var runnerPath = Path.Combine(runnerDirectory, RunnerFileName);
         try
         {
-            using (var archive = ZipFile.OpenRead(packagePath))
-            {
-                var executable = archive.Entries.SingleOrDefault(entry =>
-                    string.Equals(
-                        entry.FullName.Replace('\\', '/'),
-                        "SnapCut.exe",
-                        StringComparison.OrdinalIgnoreCase));
-                if (executable is null || executable.Length <= 0)
-                {
-                    throw new InvalidDataException("免安装更新包中缺少 SnapCut.exe。");
-                }
-
-                executable.ExtractToFile(runnerPath, overwrite: true);
-            }
+            // Always use the running version's updater. Extracting the target
+            // EXE here also downgrades data protection and archive support.
+            StageRunner(Environment.ProcessPath ?? throw new InvalidOperationException("无法确定程序路径。"),
+                runnerPath, frameworkDependent: !string.IsNullOrEmpty(typeof(ApplicationUpdateLauncher).Assembly.Location));
 
             var processPath = Environment.ProcessPath ??
                 throw new InvalidOperationException("无法确定当前程序路径。");
@@ -87,8 +70,9 @@ public static class ApplicationUpdateLauncher
             {
                 FileName = runnerPath,
                 UseShellExecute = true,
+                WorkingDirectory = AppContext.BaseDirectory,
             };
-            startInfo.ArgumentList.Add(PortableUpdateRunner.UpdateArgument);
+            startInfo.ArgumentList.Add(installer ? PortableUpdateRunner.InstallerUpdateArgument : PortableUpdateRunner.UpdateArgument);
             startInfo.ArgumentList.Add(packagePath);
             startInfo.ArgumentList.Add(AppContext.BaseDirectory);
             startInfo.ArgumentList.Add(Environment.ProcessId.ToString(
@@ -102,13 +86,33 @@ public static class ApplicationUpdateLauncher
         {
             try
             {
-                File.Delete(runnerPath);
+                Directory.Delete(runnerDirectory, recursive: true);
             }
             catch
             {
             }
 
             throw;
+        }
+    }
+
+    internal static void StageRunner(string executablePath, string runnerPath, bool frameworkDependent)
+    {
+        var source = Path.GetDirectoryName(executablePath)!;
+        var destination = Path.GetDirectoryName(runnerPath)!;
+        Directory.CreateDirectory(destination);
+        File.Copy(executablePath, runnerPath);
+        if (!frameworkDependent) return; // Published single-file packages carry their managed dependencies.
+        foreach (var path in Directory.EnumerateFiles(source, "*.dll"))
+        {
+            using var stream = File.OpenRead(path);
+            using var pe = new PEReader(stream);
+            if (pe.HasMetadata) File.Copy(path, Path.Combine(destination, Path.GetFileName(path)));
+        }
+        foreach (var suffix in new[] { ".deps.json", ".runtimeconfig.json" })
+        {
+            var path = Path.ChangeExtension(executablePath, suffix);
+            File.Copy(path, Path.Combine(destination, Path.GetFileName(path)));
         }
     }
 }

@@ -7,14 +7,16 @@ using System.Text;
 
 namespace Screenshot.App.Text;
 
-public static class TableRecognitionService
+public static partial class TableRecognitionService
 {
     public static ContentRecognitionResult BuildTsv(
         OcrRecognitionResult ocr,
         Bitmap? sourceImage = null,
-        IReadOnlyList<OcrWordRegion>? supplementaryWords = null)
+        IReadOnlyList<OcrWordRegion>? supplementaryWords = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(ocr);
+        cancellationToken.ThrowIfCancellationRequested();
         if (!ocr.IsSuccess)
         {
             return ContentRecognitionResult.Failure(
@@ -32,6 +34,7 @@ public static class TableRecognitionService
                 sourceImage,
                 words,
                 supplementaryWords ?? [],
+                cancellationToken,
                 out var gridResult))
         {
             return gridResult;
@@ -175,6 +178,7 @@ public static class TableRecognitionService
         Bitmap bitmap,
         IReadOnlyList<OcrWordRegion> words,
         IReadOnlyList<OcrWordRegion> supplementaryWords,
+        CancellationToken cancellationToken,
         out ContentRecognitionResult result)
     {
         result = null!;
@@ -183,18 +187,8 @@ public static class TableRecognitionService
             return false;
         }
 
-        using var pixels = BitmapPixelBuffer.Create(bitmap);
-        var verticalLines = FindGridLines(pixels, vertical: true);
-        var horizontalLines = FindGridLines(pixels, vertical: false);
-        RemoveTextStrokeLines(verticalLines, horizontalLines, words);
-        FilterGridIntersections(pixels, verticalLines, horizontalLines);
-        AddInferredLeadingBoundary(verticalLines, words, vertical: true);
-        AddInferredLeadingBoundary(horizontalLines, words, vertical: false);
-        AddInferredRegularDetailBoundaries(
-            pixels,
-            verticalLines,
-            horizontalLines,
-            words);
+        using var pixels = BitmapPixelBuffer.Create(bitmap, cancellationToken);
+        FindGridAxes(pixels, words, out var verticalLines, out var horizontalLines);
         if (verticalLines.Count < 3 || horizontalLines.Count < 3)
         {
             return false;
@@ -207,59 +201,8 @@ public static class TableRecognitionService
             return false;
         }
 
-        var unions = new CellUnion(rowCount * columnCount);
-        var verticalSeparators = new bool[rowCount, columnCount + 1];
-        var horizontalSeparators = new bool[rowCount + 1, columnCount];
-        for (var row = 0; row < rowCount; row++)
-        {
-            for (var column = 1; column < columnCount; column++)
-            {
-                verticalSeparators[row, column] = HasVerticalSeparator(
-                    pixels,
-                    verticalLines[column].Position,
-                    horizontalLines[row].Position,
-                    horizontalLines[row + 1].Position,
-                    words);
-            }
-        }
-        for (var row = 1; row < rowCount; row++)
-        {
-            for (var column = 0; column < columnCount; column++)
-            {
-                horizontalSeparators[row, column] = HasHorizontalSeparator(
-                    pixels,
-                    horizontalLines[row].Position,
-                    verticalLines[column].Position,
-                    verticalLines[column + 1].Position,
-                    words);
-            }
-        }
-
-        for (var row = 0; row < rowCount; row++)
-        {
-            for (var column = 0; column < columnCount; column++)
-            {
-                var cellIndex = (row * columnCount) + column;
-                if (column + 1 < columnCount &&
-                    !verticalSeparators[row, column + 1])
-                {
-                    unions.Union(cellIndex, cellIndex + 1);
-                }
-
-                if (row + 1 < rowCount &&
-                    !horizontalSeparators[row + 1, column])
-                {
-                    unions.Union(cellIndex, cellIndex + columnCount);
-                }
-            }
-        }
-
-        var components = Enumerable.Range(0, rowCount * columnCount)
-            .GroupBy(unions.Find)
-            .SelectMany(group => SplitIntoRectangles(
-                group,
-                rowCount,
-                columnCount))
+        var rectangles = BuildCellRectangles(pixels, verticalLines, horizontalLines, words);
+        var components = rectangles
             .Select(rectangle => CreateGridCell(
                 rectangle,
                 columnCount,
@@ -533,74 +476,10 @@ public static class TableRecognitionService
                compact.All(character => char.IsDigit(character) || character == '月');
     }
 
-    private static List<int[]> SplitIntoRectangles(
-        IEnumerable<int> memberIndexes,
-        int rowCount,
-        int columnCount)
-    {
-        var remaining = memberIndexes.ToHashSet();
-        var rectangles = new List<int[]>();
-        while (remaining.Count > 0)
-        {
-            var start = remaining.Min();
-            var startRow = start / columnCount;
-            var startColumn = start % columnCount;
-            var maximumWidth = 0;
-            while (startColumn + maximumWidth < columnCount &&
-                   remaining.Contains(start + maximumWidth))
-            {
-                maximumWidth++;
-            }
-
-            var bestWidth = 1;
-            var bestHeight = 1;
-            var bestArea = 1;
-            for (var width = 1; width <= maximumWidth; width++)
-            {
-                var height = 0;
-                while (startRow + height < rowCount &&
-                       Enumerable.Range(0, width).All(offset =>
-                           remaining.Contains(
-                               ((startRow + height) * columnCount) +
-                               startColumn + offset)))
-                {
-                    height++;
-                }
-
-                var area = width * height;
-                if (area > bestArea ||
-                    area == bestArea && width > bestWidth)
-                {
-                    bestArea = area;
-                    bestWidth = width;
-                    bestHeight = height;
-                }
-            }
-
-            var rectangle = new List<int>(bestArea);
-            for (var rowOffset = 0; rowOffset < bestHeight; rowOffset++)
-            {
-                for (var columnOffset = 0;
-                     columnOffset < bestWidth;
-                     columnOffset++)
-                {
-                    var index = ((startRow + rowOffset) * columnCount) +
-                                startColumn + columnOffset;
-                    if (remaining.Remove(index))
-                    {
-                        rectangle.Add(index);
-                    }
-                }
-            }
-            rectangles.Add(rectangle.ToArray());
-        }
-
-        return rectangles;
-    }
-
     private static List<AxisLine> FindGridLines(
         BitmapPixelBuffer pixels,
-        bool vertical)
+        bool vertical,
+        int minimumContinuousHits)
     {
         const int edgeThreshold = 14;
         var axisLength = vertical ? pixels.Width : pixels.Height;
@@ -608,11 +487,9 @@ public static class TableRecognitionService
         var scores = new List<AxisLine>();
         var sampleCount = Math.Max(1, (sampleLength - 2) / 2);
         var minimumHits = Math.Max(8, (int)Math.Ceiling(sampleCount * 0.12));
-        var minimumContinuousHits = Math.Max(
-            6,
-            (int)Math.Ceiling(sampleCount * 0.05));
         for (var axis = 1; axis < axisLength - 1; axis++)
         {
+            if ((axis & 31) == 0) pixels.CancellationToken.ThrowIfCancellationRequested();
             var hits = 0;
             var continuousHits = 0;
             var longestContinuousRun = 0;
@@ -642,8 +519,8 @@ public static class TableRecognitionService
                 }
             }
 
-            if (hits >= minimumHits &&
-                longestContinuousRun >= minimumContinuousHits)
+            if (longestContinuousRun >= minimumContinuousHits &&
+                (hits >= minimumHits || longestContinuousRun >= 12))
             {
                 scores.Add(new AxisLine(
                     axis,
@@ -689,8 +566,8 @@ public static class TableRecognitionService
                 }
             }
 
-            if (hits >= minimumHits &&
-                longestContinuousRun >= minimumContinuousHits)
+            if (longestContinuousRun >= minimumContinuousHits &&
+                (hits >= minimumHits || longestContinuousRun >= 12))
             {
                 scores.Add(new AxisLine(
                     atEnd ? axisLength - 1 : 0,
@@ -826,46 +703,6 @@ public static class TableRecognitionService
         }
         covered += end - start + 1;
         return covered >= runLength * 0.65;
-    }
-
-    private static void AddInferredLeadingBoundary(
-        List<AxisLine> lines,
-        IReadOnlyList<OcrWordRegion> words,
-        bool vertical)
-    {
-        if (lines.Count < 3 || lines[0].Position <= 3)
-        {
-            return;
-        }
-
-        var gaps = lines
-            .Zip(lines.Skip(1), (left, right) => right.Position - left.Position)
-            .Where(gap => gap >= 7)
-            .Order()
-            .ToArray();
-        if (gaps.Length == 0)
-        {
-            return;
-        }
-
-        var typicalGap = gaps[gaps.Length / 2];
-        var firstPosition = lines[0].Position;
-        if (firstPosition > Math.Max(200, typicalGap * 2.5))
-        {
-            return;
-        }
-
-        var hasLeadingContent = words.Any(word =>
-        {
-            var center = vertical
-                ? word.X + (word.Width / 2)
-                : word.Y + (word.Height / 2);
-            return center >= 0 && center < firstPosition - 2;
-        });
-        if (hasLeadingContent)
-        {
-            lines.Insert(0, new AxisLine(0, int.MaxValue, 0, 0));
-        }
     }
 
     private static void AddInferredRegularDetailBoundaries(
@@ -1076,16 +913,19 @@ public static class TableRecognitionService
             return;
         }
 
-        verticalLines.RemoveAll(vertical =>
-            horizontalLines.Count(horizontal => IsGridIntersection(
-                pixels,
-                vertical.Position,
-                horizontal.Position)) < 2);
-        horizontalLines.RemoveAll(horizontal =>
-            verticalLines.Count(vertical => IsGridIntersection(
-                pixels,
-                vertical.Position,
-                horizontal.Position)) < 2);
+        verticalLines.RemoveAll(vertical => !vertical.Inferred &&
+            horizontalLines.Count(horizontal => Intersects(vertical, horizontal)) < 2);
+        horizontalLines.RemoveAll(horizontal => !horizontal.Inferred &&
+            verticalLines.Count(vertical => Intersects(vertical, horizontal)) < 2);
+
+        bool Intersects(AxisLine vertical, AxisLine horizontal)
+        {
+            if (vertical.Inferred)
+                return vertical.Position >= horizontal.RunStart - 3 && vertical.Position <= horizontal.RunEnd + 3;
+            if (horizontal.Inferred)
+                return horizontal.Position >= vertical.RunStart - 3 && horizontal.Position <= vertical.RunEnd + 3;
+            return IsGridIntersection(pixels, vertical.Position, horizontal.Position);
+        }
     }
 
     private static bool IsGridIntersection(
@@ -1260,7 +1100,11 @@ public static class TableRecognitionService
             return centerX >= left && centerX <= right &&
                    centerY >= top && centerY <= bottom;
         }).ToArray();
-        var text = ResolveCellText(cellWords, supplementaryCellWords);
+        var primaryForCell = supplementaryCellWords.Any(word => word.IsTableCellText)
+            ? cellWords.Where(word => word.X >= left - 3 && word.X + word.Width <= right + 3 &&
+                word.Y >= top - 3 && word.Y + word.Height <= bottom + 3).ToArray()
+            : cellWords;
+        var text = ResolveCellText(primaryForCell, supplementaryCellWords);
         text = NormalizeNarrowCellText(
             text,
             right - left,
@@ -1286,7 +1130,7 @@ public static class TableRecognitionService
             horizontalAlignment);
     }
 
-    private static string JoinCellLines(IReadOnlyList<OcrWordRegion> words)
+    internal static string JoinCellLines(IReadOnlyList<OcrWordRegion> words)
     {
         if (words.Count == 0)
         {
@@ -1308,6 +1152,14 @@ public static class TableRecognitionService
         IReadOnlyList<OcrWordRegion> supplementaryWords)
     {
         var primary = JoinCellLines(primaryWords);
+        var isolated = supplementaryWords.Where(word => word.IsTableCellText).ToArray();
+        if (isolated.Length > 0)
+        {
+            var isolatedText = JoinCellLines(isolated);
+            if (CompactCellText(isolatedText).Length >= CompactCellText(primary).Length * 0.7)
+                return isolatedText;
+        }
+        if (string.IsNullOrWhiteSpace(primary)) return JoinCellLines(supplementaryWords);
         if (supplementaryWords.Count == 0)
         {
             return primary;
@@ -1527,17 +1379,7 @@ public static class TableRecognitionService
             IReadOnlyList<OcrWordRegion> words)
     {
         using var pixels = BitmapPixelBuffer.Create(bitmap);
-        var verticalLines = FindGridLines(pixels, vertical: true);
-        var horizontalLines = FindGridLines(pixels, vertical: false);
-        RemoveTextStrokeLines(verticalLines, horizontalLines, words);
-        FilterGridIntersections(pixels, verticalLines, horizontalLines);
-        AddInferredLeadingBoundary(verticalLines, words, vertical: true);
-        AddInferredLeadingBoundary(horizontalLines, words, vertical: false);
-        AddInferredRegularDetailBoundaries(
-            pixels,
-            verticalLines,
-            horizontalLines,
-            words);
+        FindGridAxes(pixels, words, out var verticalLines, out var horizontalLines);
         return (
             verticalLines.Select(line => line.Position).ToArray(),
             horizontalLines.Select(line => line.Position).ToArray());
@@ -2029,7 +1871,8 @@ public static class TableRecognitionService
         int Position,
         int Score,
         int RunStart,
-        int RunEnd);
+        int RunEnd,
+        bool Inferred = false);
 
     private sealed record GridCell(
         int Row,
@@ -2039,36 +1882,6 @@ public static class TableRecognitionService
         string Text,
         Color Background,
         string HorizontalAlignment);
-
-    private sealed class CellUnion
-    {
-        private readonly int[] _parents;
-
-        public CellUnion(int count)
-        {
-            _parents = Enumerable.Range(0, count).ToArray();
-        }
-
-        public int Find(int value)
-        {
-            while (_parents[value] != value)
-            {
-                _parents[value] = _parents[_parents[value]];
-                value = _parents[value];
-            }
-            return value;
-        }
-
-        public void Union(int first, int second)
-        {
-            var firstRoot = Find(first);
-            var secondRoot = Find(second);
-            if (firstRoot != secondRoot)
-            {
-                _parents[secondRoot] = firstRoot;
-            }
-        }
-    }
 
     private sealed class BitmapPixelBuffer : IDisposable
     {
@@ -2087,8 +1900,11 @@ public static class TableRecognitionService
 
         public int Height => _bitmap.Height;
 
-        public static BitmapPixelBuffer Create(Bitmap source)
+        public CancellationToken CancellationToken { get; private init; }
+
+        public static BitmapPixelBuffer Create(Bitmap source, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var bitmap = source.Clone(
                 new Rectangle(0, 0, source.Width, source.Height),
                 PixelFormat.Format32bppArgb);
@@ -2101,7 +1917,7 @@ public static class TableRecognitionService
                 var byteCount = Math.Abs(data.Stride) * bitmap.Height;
                 var pixels = new byte[byteCount];
                 Marshal.Copy(data.Scan0, pixels, 0, byteCount);
-                return new BitmapPixelBuffer(bitmap, pixels, data.Stride);
+                return new BitmapPixelBuffer(bitmap, pixels, data.Stride) { CancellationToken = cancellationToken };
             }
             catch
             {

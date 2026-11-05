@@ -19,7 +19,6 @@ public sealed class EmojiStickerImage : System.Windows.Controls.Image
         UseLayoutRounding = true;
         RenderOptions.SetBitmapScalingMode(this, BitmapScalingMode.HighQuality);
         SizeChanged += (_, _) => RefreshSource();
-        RefreshSource();
     }
 
     public string Sticker
@@ -36,8 +35,16 @@ public sealed class EmojiStickerImage : System.Windows.Controls.Image
             eventArgs.NewValue is string sticker &&
             !string.IsNullOrWhiteSpace(sticker))
         {
-            image.RefreshSource();
+            // Hidden recording tools/palettes must not initialize the native
+            // color-font renderer while the first toolbar is being created.
+            image.InvalidateMeasure();
         }
+    }
+
+    protected override System.Windows.Size MeasureOverride(System.Windows.Size constraint)
+    {
+        RefreshSource();
+        return base.MeasureOverride(constraint);
     }
 
     /// <summary>

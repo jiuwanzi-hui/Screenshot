@@ -1,4 +1,5 @@
 using System.IO;
+using System.Diagnostics;
 using System.Text;
 using System.Threading.Channels;
 
@@ -12,7 +13,7 @@ public static class StartupDiagnostics
     private static readonly object LogLock = new();
     private static readonly string LogFilePath = Path.Combine(
         AppMetadata.DiagnosticsDirectoryPath,
-        "startup-diagnostics.log");
+        $"startup-diagnostics-{Environment.ProcessId}.log");
     private const long MaxLogSizeBytes = 5 * 1024 * 1024; // 5MB
     private static readonly Channel<string> Queue =
         Channel.CreateBounded<string>(new BoundedChannelOptions(4096)
@@ -23,39 +24,45 @@ public static class StartupDiagnostics
         });
     private static int _writerStarted;
     private static Task? _writerTask;
-    private static bool IsEnabled
-    {
-        get
-        {
-            if (!string.IsNullOrWhiteSpace(
-                    Environment.GetEnvironmentVariable("SNAPCUT_CAPTURE_DIAGNOSTICS")))
-            {
-                return true;
-            }
+#if DEBUG || SNAPCUT_CAPTURE_DIAGNOSTICS
+    private static readonly bool IsEnabled = IsDiagnosticsEnabled();
+#else
+    private static bool IsEnabled => false;
+#endif
 
-            try
-            {
-                return File.Exists(Path.Combine(
-                    AppMetadata.DiagnosticsDirectoryPath,
-                    "capture-timing.enabled"));
-            }
-            catch
-            {
-                return false;
-            }
+    private static bool IsDiagnosticsEnabled()
+    {
+        if (!string.IsNullOrWhiteSpace(
+                Environment.GetEnvironmentVariable("SNAPCUT_CAPTURE_DIAGNOSTICS")))
+        {
+            return true;
+        }
+
+        try
+        {
+            return File.Exists(Path.Combine(
+                AppMetadata.DiagnosticsDirectoryPath,
+                "capture-timing.enabled"));
+        }
+        catch
+        {
+            return false;
         }
     }
 
+    [Conditional("DEBUG"), Conditional("SNAPCUT_CAPTURE_DIAGNOSTICS")]
     public static void LogElevation(string message)
     {
         Log($"[ELEVATION] {message}");
     }
 
+    [Conditional("DEBUG"), Conditional("SNAPCUT_CAPTURE_DIAGNOSTICS")]
     public static void LogHotKey(string message)
     {
         Log($"[HOTKEY] {message}");
     }
 
+    [Conditional("DEBUG"), Conditional("SNAPCUT_CAPTURE_DIAGNOSTICS")]
     public static void LogWindowCreation(string message)
     {
         Log($"[WINDOW] {message}");
@@ -82,6 +89,7 @@ public static class StartupDiagnostics
         }
     }
 
+    [Conditional("DEBUG"), Conditional("SNAPCUT_CAPTURE_DIAGNOSTICS")]
     public static void ClearOldLogs()
     {
         try
@@ -149,6 +157,7 @@ public static class StartupDiagnostics
         });
     }
 
+    [Conditional("DEBUG"), Conditional("SNAPCUT_CAPTURE_DIAGNOSTICS")]
     public static void Flush()
     {
         if (!IsEnabled || Volatile.Read(ref _writerStarted) == 0)

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>Screenshot.OcrRuntime</AssemblyName>
+    <RootNamespace>RapidOcrNet</RootNamespace>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <NoWarn>$(NoWarn);CS8618</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Clipper2" Version="2.0.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.27.0" />
+    <PackageReference Include="SkiaSharp" Version="3.119.1" />
+    <InternalsVisibleTo Include="Screenshot.App.Tests" />
+  </ItemGroup>
+</Project>

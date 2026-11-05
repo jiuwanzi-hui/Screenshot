@@ -28,6 +28,12 @@ public static class TranslationProviderFactory
             string.Empty,
             "可填写任何 OpenAI Chat Completions 兼容服务",
             string.Empty),
+        new(BaiduTranslationProvider.ProviderId, "百度（公共翻译）", BaiduTranslationProvider.Endpoint,
+            "官方通用文本翻译：https://fanyi-api.baidu.com/", "Standard"),
+        new(BaiduTranslationProvider.LargeModelProviderId, "百度（大模型文本翻译）", BaiduTranslationProvider.LargeModelEndpoint,
+            "官方大模型文本翻译：https://fanyi-api.baidu.com/product/13", "llm"),
+        new(YoudaoTranslationProvider.ProviderId, "有道智云（公共翻译）", YoudaoTranslationProvider.Endpoint,
+            "官方批量文本翻译：https://ai.youdao.com/", "NMT"),
         new(
             "OpenAI",
             "OpenAI",
@@ -173,19 +179,18 @@ public static class TranslationProviderFactory
                     preferFastOffline
                         ? OfflineTranslationQuality.Fast
                         : settings.OfflineTranslationQuality);
-                if (settings.OfflineTranslationEngine ==
-                    OfflineTranslationEngine.QwenLargeModel)
+                if (settings.OfflineTranslationEngine is
+                    OfflineTranslationEngine.QwenLargeModel or OfflineTranslationEngine.HunyuanLightweight)
                 {
-                    // Bergamot is a purpose-built translation engine and is
-                    // both faster and more deterministic for installed
-                    // language pairs. Qwen remains available when a pair is
-                    // missing or Bergamot cannot translate the input.
+                    // Start with the selected model. Only failed paragraphs
+                    // can use an installed local repair route, with attribution.
+                    // A missing selected model still shows its download entry.
                     return
                     [
-                        bergamot,
                         new LocalLargeModelTranslationProvider(
-                            localLargeModelManager ??
-                            LocalLargeTranslationModelManager.Shared),
+                            settings.OfflineTranslationEngine == OfflineTranslationEngine.HunyuanLightweight
+                                ? LocalLargeTranslationModelManager.LightweightShared
+                                : localLargeModelManager ?? LocalLargeTranslationModelManager.Shared, bergamot),
                     ];
                 }
 
@@ -193,9 +198,10 @@ public static class TranslationProviderFactory
             }
 
             var profiles = (settings.TranslationProfiles ?? [])
-                .Where(profile => profile.IsEnabled)
+                .Where(profile => profile.IsEnabled && OnlineModelCapabilities.CanTranslate(profile) && IsPublicProvider(profile.Provider) == (provider == TranslationProviderKind.Public))
                 .ToArray();
-            if (profiles.Length == 0)
+            if (profiles.Length == 0 && provider == TranslationProviderKind.Public) return [];
+            if (profiles.Length == 0 && !(settings.TranslationProfiles ?? []).Any(profile => !IsPublicProvider(profile.Provider)))
             {
                 var providerId = ResolveProviderId(settings.TranslationProvider);
                 return
@@ -212,11 +218,7 @@ public static class TranslationProviderFactory
                 .Select(profile =>
                 {
                     var providerId = ResolveProviderId(profile.Provider);
-                    return (ITranslationProvider)new OpenAiCompatibleTranslationProvider(
-                        profile.Endpoint,
-                        profile.Model,
-                        credentialStore.GetApiKey(profile.Id, providerId),
-                        httpClient);
+                    return CreateOnlineProvider(profile, credentialStore.GetApiKey(profile.Id, providerId), httpClient);
                 })
                 .ToArray();
         }
@@ -226,4 +228,22 @@ public static class TranslationProviderFactory
                 .SelectMany(CreateProviders)
                 .ToArray());
     }
+
+    internal static ITranslationProvider CreateOnlineProvider(AiTranslationProfile profile, string? apiKey, HttpClient client) =>
+        ResolveProviderId(profile.Provider) switch
+        {
+            YoudaoTranslationProvider.ProviderId => new YoudaoTranslationProvider(profile.AppId, apiKey, client),
+            BaiduTranslationProvider.ProviderId => new BaiduTranslationProvider(profile.AppId, apiKey, client, profile.Model == "Advanced"),
+            BaiduTranslationProvider.LargeModelProviderId => new BaiduTranslationProvider(profile.AppId, apiKey, client)
+            {
+                UseLargeModel = true,
+                AvailabilityObserver = TranslationProfileHealth.Observe(profile, apiKey),
+            },
+            _ => new OpenAiCompatibleTranslationProvider(profile.Endpoint, profile.Model, apiKey, client)
+            {
+                AvailabilityObserver = TranslationProfileHealth.Observe(profile, apiKey),
+            },
+        };
+
+    public static bool IsPublicProvider(string? id) => id is YoudaoTranslationProvider.ProviderId or BaiduTranslationProvider.ProviderId or BaiduTranslationProvider.LargeModelProviderId;
 }

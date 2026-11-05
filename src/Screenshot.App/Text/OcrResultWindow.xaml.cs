@@ -7,14 +7,16 @@ using Screenshot.App.Infrastructure;
 
 namespace Screenshot.App.Text;
 
-public partial class OcrResultWindow : Window
+public partial class OcrResultWindow : Window, IDisposable
 {
     private readonly Func<AppSettings> _settingsProvider;
     private readonly ITranslationCredentialStore _credentialStore;
     private readonly HttpClient _httpClient;
     private readonly bool _ocrSucceeded;
+    private readonly CancellationTokenSource _lifetime = new();
     private bool _isTranslating;
     private bool _hasAutoTranslated;
+    private bool _closed;
     private string? _cachedTranslationSource;
     private string? _cachedTranslationText;
 
@@ -34,10 +36,11 @@ public partial class OcrResultWindow : Window
         _httpClient = httpClient;
 
         InitializeComponent();
+        Screenshot.App.Presentation.WindowShell.Attach(this);
         WindowPlacementService.Track(this, WindowPlacementKeys.OcrResult);
         ResultTextBox.Text = result.Text;
         StatusText.Text = result.IsSuccess
-            ? "识别完成"
+            ? result.Notice ?? "识别完成"
             : result.ErrorMessage ?? "文字识别失败。";
         _ocrSucceeded = result.IsSuccess;
         // Keep the first layout pass off-screen from the compositor. This
@@ -49,6 +52,31 @@ public partial class OcrResultWindow : Window
         Top = (SystemParameters.WorkArea.Height - Height) / 2 +
               SystemParameters.WorkArea.Top;
         Loaded += OnLoaded;
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        Dispose();
+        base.OnClosed(e);
+        Core.MemoryFootprint.TrimAfterHeavyOperation();
+    }
+
+    public void Dispose()
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        _closed = true;
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+        Loaded -= OnLoaded;
+        ResultTextBox.Clear();
+        TranslationTextBox.Clear();
+        _cachedTranslationSource = null;
+        _cachedTranslationText = null;
+        GC.SuppressFinalize(this);
     }
 
     public OcrResultWindow(
@@ -125,6 +153,10 @@ public partial class OcrResultWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Loaded -= OnLoaded;
+        if (_closed)
+        {
+            return;
+        }
         UpdateLayout();
         Opacity = 1;
 
@@ -146,9 +178,11 @@ public partial class OcrResultWindow : Window
         await TranslateAsync();
     }
 
-    private async Task TranslateAsync()
+    private Task TranslateAsync() => _closed ? Task.CompletedTask : TranslateAsyncCore(_lifetime.Token);
+
+    private async Task TranslateAsyncCore(CancellationToken cancellationToken)
     {
-        if (_isTranslating)
+        if (_closed || _isTranslating)
         {
             return;
         }
@@ -179,14 +213,20 @@ public partial class OcrResultWindow : Window
             var result = await provider.TranslateAsync(
                 sourceText,
                 "auto",
-                settings.TranslationTargetLanguage);
+                settings.TranslationTargetLanguage,
+                cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_closed)
+            {
+                return;
+            }
 
             if (result.IsSuccess)
             {
                 _cachedTranslationSource = sourceText;
                 _cachedTranslationText = result.Text;
                 TranslationTextBox.Text = result.Text;
-                StatusText.Text = "翻译完成。";
+                StatusText.Text = result.Notice ?? "翻译完成。";
                 TranslateButton.Content = "显示译文";
                 TranslateButton.ToolTip = "直接显示本次识别结果的缓存译文";
             }
@@ -195,10 +235,16 @@ public partial class OcrResultWindow : Window
                 StatusText.Text = result.ErrorMessage ?? "翻译失败。";
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _closed)
+        {
+        }
         finally
         {
             _isTranslating = false;
-            TranslateButton.IsEnabled = true;
+            if (!_closed)
+            {
+                TranslateButton.IsEnabled = true;
+            }
         }
     }
 }

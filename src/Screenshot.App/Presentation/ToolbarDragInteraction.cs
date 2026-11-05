@@ -13,7 +13,7 @@ internal static class ToolbarDragInteraction
     {
         for (var current = source;
              current is not null;
-             current = GetParent(current))
+             current = InputElementTree.GetParent(current))
         {
             if (ReferenceEquals(current, toolbarRoot))
             {
@@ -28,15 +28,5 @@ internal static class ToolbarDragInteraction
         }
 
         return false;
-    }
-
-    private static DependencyObject? GetParent(DependencyObject current)
-    {
-        if (current is FrameworkContentElement contentElement)
-        {
-            return contentElement.Parent;
-        }
-
-        return System.Windows.Media.VisualTreeHelper.GetParent(current);
     }
 }

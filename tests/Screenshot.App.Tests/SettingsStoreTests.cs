@@ -20,6 +20,22 @@ public sealed class SettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void DeferredChangesAreImmediatelyReadableAndFinalValueIsPersisted()
+    {
+        var store = new SettingsStore(_settingsPath);
+        var original = AppSettings.CreateDefault();
+        store.Save(original);
+        store.QueueSave(original with { LaunchAtStartup = true });
+        Assert.True(store.Load().Settings.LaunchAtStartup);
+        store.QueueSave(original with { LaunchAtStartup = false, ShowFloatingCaptureButton = false });
+        store.FlushPendingSave();
+        var reopened = new SettingsStore(_settingsPath).Load();
+        Assert.Null(reopened.Warning);
+        Assert.False(reopened.Settings.LaunchAtStartup);
+        Assert.False(reopened.Settings.ShowFloatingCaptureButton);
+    }
+
+    [Fact]
     public void SavesAndLoadsSettings()
     {
         var store = new SettingsStore(_settingsPath);
@@ -211,7 +227,7 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(
             FloatingCaptureClickBehavior.ShowSelection,
             loadResult.Settings.FloatingCaptureClickBehavior);
-        Assert.Equal(15, loadResult.Settings.SettingsVersion);
+        Assert.Equal(19, loadResult.Settings.SettingsVersion);
         Assert.Equal(
             Enum.GetValues<CaptureToolbarFeature>(),
             loadResult.Settings.VisibleCaptureToolbarFeatures);
@@ -286,7 +302,7 @@ public sealed class SettingsStoreTests : IDisposable
             ],
         }).Normalize();
 
-        Assert.Equal(15, normalized.SettingsVersion);
+        Assert.Equal(19, normalized.SettingsVersion);
         Assert.Equal(
             [
                 CaptureToolbarFeature.TextRecognition,
@@ -295,6 +311,10 @@ public sealed class SettingsStoreTests : IDisposable
                 CaptureToolbarFeature.Number,
                 CaptureToolbarFeature.PrivacyRedaction,
                 CaptureToolbarFeature.CopyTable,
+                CaptureToolbarFeature.Line,
+                CaptureToolbarFeature.DoubleArrow,
+                CaptureToolbarFeature.Watermark,
+                CaptureToolbarFeature.AspectRatio,
             ],
             normalized.VisibleCaptureToolbarFeatures);
     }
@@ -313,6 +333,10 @@ public sealed class SettingsStoreTests : IDisposable
                 CaptureToolbarFeature.Save,
                 CaptureToolbarFeature.Number,
                 CaptureToolbarFeature.PrivacyRedaction,
+                CaptureToolbarFeature.Line,
+                CaptureToolbarFeature.DoubleArrow,
+                CaptureToolbarFeature.Watermark,
+                CaptureToolbarFeature.AspectRatio,
             ],
             normalized.VisibleCaptureToolbarFeatures);
     }
@@ -326,12 +350,16 @@ public sealed class SettingsStoreTests : IDisposable
             VisibleCaptureToolbarFeatures = [CaptureToolbarFeature.Save],
         }).Normalize();
 
-        Assert.Equal(15, upgraded.SettingsVersion);
+        Assert.Equal(19, upgraded.SettingsVersion);
         Assert.Equal(
             [
                 CaptureToolbarFeature.Save,
                 CaptureToolbarFeature.Number,
                 CaptureToolbarFeature.PrivacyRedaction,
+                CaptureToolbarFeature.Line,
+                CaptureToolbarFeature.DoubleArrow,
+                CaptureToolbarFeature.Watermark,
+                CaptureToolbarFeature.AspectRatio,
             ],
             upgraded.VisibleCaptureToolbarFeatures);
 
@@ -356,7 +384,7 @@ public sealed class SettingsStoreTests : IDisposable
         }).Normalize();
 
         Assert.Equal(AnnotationToolMode.CurvedArrow, migrated.LastAnnotationTool);
-        Assert.Equal(15, migrated.SettingsVersion);
+        Assert.Equal(19, migrated.SettingsVersion);
     }
 
     [Fact]

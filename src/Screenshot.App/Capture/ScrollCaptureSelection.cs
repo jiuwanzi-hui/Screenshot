@@ -1,8 +1,8 @@
 namespace Screenshot.App.Capture;
 
 /// <summary>
-/// Keeps the selected scroll-capture area visible while allowing pointer input to
-/// continue to the target window.
+/// Keeps the selected scroll-capture area visible while its input monitor
+/// routes scrolling to the target and reserves clicks for capture controls.
 /// </summary>
 public sealed class ScrollCaptureSelection : IDisposable
 {
@@ -25,6 +25,10 @@ public sealed class ScrollCaptureSelection : IDisposable
     public ScreenRegion CaptureRegion => _captureRegion;
 
     internal System.Windows.Window OverlayWindow => _overlay;
+
+    internal bool SupportsContextCapture => _overlay.IsScrollCaptureContextAvailable;
+    internal IReadOnlyList<IntPtr> CaptureWindowHandles => _overlay.ScrollCaptureWindowHandles;
+    internal IReadOnlyList<ScreenRegion> BorderRegions => _overlay.ScrollCaptureBorderRegions;
 
     internal void UpdateCaptureRegion(ScreenRegion captureRegion)
     {
@@ -80,6 +84,8 @@ public sealed class ScrollCaptureSelection : IDisposable
             return;
         }
 
+        CaptureRegionChanged = null;
+        CancelRequested = null;
         _overlay.CloseScrollCaptureSelection();
     }
 }

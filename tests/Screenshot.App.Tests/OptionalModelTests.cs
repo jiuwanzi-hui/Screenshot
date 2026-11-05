@@ -54,8 +54,10 @@ public sealed class OptionalModelTests : IDisposable
     [InlineData(4, 2)]
     [InlineData(8, 2)]
     [InlineData(12, 4)]
-    [InlineData(16, 4)]
-    [InlineData(24, 4)]
+    [InlineData(16, 6)]
+    [InlineData(24, 8)]
+    [InlineData(32, 12)]
+    [InlineData(64, 12)]
     public void OcrCpuBudgetStaysBoundedForForegroundRecognition(
         int logicalProcessorCount,
         int expectedThreadCount)
@@ -89,69 +91,21 @@ public sealed class OptionalModelTests : IDisposable
         var status = manager.GetStatus();
 
         Assert.False(status.IsInstalled);
-        Assert.Equal(32_257_432, status.DownloadSize);
+        Assert.Equal(171_006_870, status.DownloadSize); // Small + Medium; shared orientation model/dictionary once.
         Assert.Equal(status.DownloadSize, status.InstalledSize);
     }
 
     [Fact]
     public void ReportsLargeTranslationModelAndRuntimeDownloadSize()
     {
-        using var manager = new LocalLargeTranslationModelManager(_testDirectory);
+        using var manager = new LocalLargeTranslationModelManager(_testDirectory,
+            bundledPackagesDirectory: Path.Combine(_testDirectory, "no-bundle"));
 
         var status = manager.GetStatus();
 
         Assert.False(status.IsInstalled);
-        Assert.Equal(1_004_395_773, status.DownloadSize);
+        Assert.Equal(2_524_005_408, status.DownloadSize);
         Assert.True(status.InstalledSize > status.DownloadSize);
-    }
-
-    [Theory]
-    [InlineData("[\"你好\",\"世界\"]", 2, true)]
-    [InlineData("startup output\n[\"你好\"]\n", 1, true)]
-    [InlineData("[\"只有一项\"]", 2, false)]
-    [InlineData("not json", 1, false)]
-    public void ParsesOnlyCompleteLargeModelTranslationArrays(
-        string output,
-        int expectedCount,
-        bool expectedSuccess)
-    {
-        var success = LocalLargeModelTranslationProvider.TryParseTranslations(
-            output,
-            expectedCount,
-            out var translations);
-
-        Assert.Equal(expectedSuccess, success);
-        Assert.Equal(expectedSuccess ? expectedCount : 0, translations.Count);
-    }
-
-    [Fact]
-    public void UsesTheLastValidTranslationArrayAfterTheEchoedPrompt()
-    {
-        const string output =
-            "Segments: [\"bandwidth sharing application\"]\n" +
-            "[\"带宽共享应用\"]\n" +
-            "[ Prompt: 200 t/s | Generation: 40 t/s ]";
-
-        var success = LocalLargeModelTranslationProvider.TryParseTranslations(
-            output,
-            expectedCount: 1,
-            out var translations);
-
-        Assert.True(success);
-        Assert.Equal(["带宽共享应用"], translations);
-    }
-
-    [Fact]
-    public void ExpandsLargeModelOutputBudgetForLongerText()
-    {
-        var shortLimit = LocalLargeModelTranslationProvider
-            .CalculateOutputTokenLimit(["short"]);
-        var longLimit = LocalLargeModelTranslationProvider
-            .CalculateOutputTokenLimit([new string('a', 600)]);
-
-        Assert.Equal(512, shortLimit);
-        Assert.True(longLimit > shortLimit);
-        Assert.InRange(longLimit, 512, 1024);
     }
 
     [Fact]

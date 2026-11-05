@@ -349,6 +349,8 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
         string glyph,
         double size)
     {
+        if (feature == CaptureToolbarFeature.AspectRatio)
+            return new ToolbarFeatureIcon { Feature = CaptureToolbarFeature.AspectRatio, Width = size, Height = size };
         if (feature == CaptureToolbarFeature.Emoji)
         {
             return new EmojiStickerImage
@@ -362,36 +364,14 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
         }
 
         if (feature == CaptureToolbarFeature.Number)
-        {
-            var numberText = new TextBlock
-            {
-                Text = "1",
-                FontSize = 12,
-                FontWeight = FontWeights.Bold,
-                HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
-                VerticalAlignment = System.Windows.VerticalAlignment.Center,
-            };
-            numberText.SetResourceReference(
-                TextBlock.ForegroundProperty,
-                "EditorToolbarButtonBackgroundBrush");
-
-            var numberBorder = new Border
-            {
-                Width = size - 1,
-                Height = size - 1,
-                CornerRadius = new CornerRadius((size - 1) / 2),
-                Child = numberText,
-            };
-            numberBorder.SetResourceReference(
-                BackgroundProperty,
-                "EditorToolbarIconBrush");
-            return numberBorder;
-        }
+            return AnnotationToolIcons.Create(AnnotationToolIcons.Number);
+        if (feature == CaptureToolbarFeature.Text)
+            return TextAnnotationOptions.CreateIcon();
 
         if (feature is CaptureToolbarFeature.TextRecognition or
             CaptureToolbarFeature.CopyRecognizedText or
             CaptureToolbarFeature.Translation or
-            CaptureToolbarFeature.PrivacyRedaction)
+            CaptureToolbarFeature.PrivacyRedaction or CaptureToolbarFeature.Watermark)
         {
             var textIcon = new TextBlock
             {
@@ -411,6 +391,7 @@ public partial class CaptureToolbarLayoutEditor : System.Windows.Controls.UserCo
         var resourceKey = feature switch
         {
             CaptureToolbarFeature.Shape => "RectangleIconGeometry",
+            CaptureToolbarFeature.DoubleArrow => "DoubleArrowIconGeometry",
             CaptureToolbarFeature.Arrow => "ArrowIconGeometry",
             CaptureToolbarFeature.Brush => "PenIconGeometry",
             CaptureToolbarFeature.Text => "TextIconGeometry",

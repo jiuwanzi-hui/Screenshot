@@ -5,9 +5,9 @@ using System.Runtime.InteropServices;
 
 namespace Screenshot.App.Capture;
 
-// Automatic click-scroll only. Keep this implementation isolated from the
-// manual wheel pipeline so tuning manual stitching cannot change automation.
-internal sealed class AutomaticScrollCaptureComposerCore : IDisposable
+// Automatic click-scroll orchestration is independent of the manual pipeline.
+// Cropped fixed-bar content shares the spatial pixel-registration primitive.
+internal sealed partial class AutomaticScrollCaptureComposerCore : IDisposable
 {
     private const int MaximumViewportHistory = 128;
     private const int MaximumRecentViewports = 4;
@@ -59,6 +59,8 @@ internal sealed class AutomaticScrollCaptureComposerCore : IDisposable
     private const int MinimumDetectedFixedBottomRows = 8;
     private const int MaximumDetectedFixedBottomRows = 96;
     private readonly bool _detectStationaryLeadingRows;
+    private readonly bool _detectFixedBottomRows;
+    private readonly bool _verifiedContentTracking;
     private readonly LinkedList<Bitmap> _segments = [];
     private readonly Dictionary<ulong, int> _segmentAnchorHashCounts = [];
     private readonly LinkedList<ViewportAnchor> _viewportHistory = [];
@@ -169,10 +171,14 @@ internal sealed class AutomaticScrollCaptureComposerCore : IDisposable
 
     internal AutomaticScrollCaptureComposerCore(
         bool detectStationaryLeadingRows,
-        int fixedBottomRows)
+        int fixedBottomRows,
+        bool detectFixedBottomRows = true,
+        bool verifiedContentTracking = false)
     {
         _detectStationaryLeadingRows = detectStationaryLeadingRows;
         _fixedBottomRows = Math.Max(0, fixedBottomRows);
+        _detectFixedBottomRows = detectFixedBottomRows;
+        _verifiedContentTracking = verifiedContentTracking;
     }
 
     internal int CurrentFrameTop => _currentFrameTop;
@@ -382,6 +388,7 @@ internal sealed class AutomaticScrollCaptureComposerCore : IDisposable
                 _segments.AddLast(initialSegment);
                 AddSegmentAnchorHashes(initialSegment);
                 _currentFrame = initialCurrentFrame;
+                _contextOrigin = ScrollCapturePosition.Read(frame);
                 _currentFrameTop = 0;
                 _capturedContentTop = 0;
                 _capturedContentBottom = frame.Height;
@@ -418,6 +425,19 @@ internal sealed class AutomaticScrollCaptureComposerCore : IDisposable
             overlapMatch = null;
             return false;
         }
+
+        // Once fixed bars have been separated, register the actual content
+        // using distributed text/image anchors. A changing sticker or a flat
+        // new strip must not be interpreted by whole-frame/duplicate heuristics.
+        if (_contextOrigin is not null && ScrollCapturePosition.Read(frame) is not null)
+            return TryAddContextFrame(frame, direction, options, expectedNewRows, out overlapMatch);
+        if (_verifiedContentTracking)
+            return TryAddVerifiedContentFrame(frame, direction, options,
+                expectedNewRows, maximumAcceptedNewRows, out overlapMatch) == true;
+
+        if (TryAddVerifiedContentFrame(frame, direction, options, expectedNewRows,
+                maximumAcceptedNewRows, out overlapMatch, exactOnly: true) is { } exactAdded)
+            return exactAdded;
 
         var fingerprint = AutomaticViewportFingerprint.Create(frame);
 
@@ -834,7 +854,7 @@ internal sealed class AutomaticScrollCaptureComposerCore : IDisposable
             return false;
         }
 
-        if (_fixedBottomRows == 0 &&
+        if (_detectFixedBottomRows && _fixedBottomRows == 0 &&
             _segments.Count == 1 &&
             !candidate.IsBridged &&
             candidate.ReferenceTopOverride is null)
@@ -901,6 +921,20 @@ internal sealed class AutomaticScrollCaptureComposerCore : IDisposable
             return false;
         }
 
+        return CommitAlignedFrame(frame, candidate, nextFrameTop, nextFrameBottom,
+            options, expectedNewRows, candidateContinuesReturnWalk,
+            wasStationaryAtCapturedBoundary, fingerprint, out overlapMatch);
+    }
+
+    private bool CommitAlignedFrame(Bitmap frame, AlignmentCandidate candidate,
+        int nextFrameTop, int nextFrameBottom, ScrollCaptureOptions options,
+        int? expectedNewRows, bool candidateContinuesReturnWalk,
+        bool wasStationaryAtCapturedBoundary, AutomaticViewportFingerprint fingerprint,
+        out ImageOverlapMatch? overlapMatch, bool verified = false)
+    {
+        var direction = candidate.Direction;
+        var newRows = frame.Height - candidate.Match.OverlapRows;
+        overlapMatch = candidate.Match;
         Bitmap? nextCurrentFrame = null;
         Bitmap? newSegment = null;
         Bitmap? nextBoundaryFrame = null;
@@ -926,7 +960,7 @@ internal sealed class AutomaticScrollCaptureComposerCore : IDisposable
                         segmentSourceBottom - segmentSourceTop,
                         candidate.Match.HorizontalOffset);
 
-                    if (IsAlreadyCapturedSegment(newSegment))
+                    if (!verified && IsAlreadyCapturedSegment(newSegment))
                     {
                         // The strip hashes as content that is already in the
                         // output, so it is not added again — but the anchor
@@ -995,7 +1029,7 @@ internal sealed class AutomaticScrollCaptureComposerCore : IDisposable
                     // the initial-position seam. Absolute duplicate protection
                     // below still rejects a genuinely repeated boundary strip.
 
-                    if (candidateContinuesReturnWalk &&
+                    if (!verified && candidateContinuesReturnWalk &&
                         IsBoundarySegmentAlreadyPresent(
                             newSegment,
                             ScrollCaptureDirection.Up))
@@ -1018,7 +1052,7 @@ internal sealed class AutomaticScrollCaptureComposerCore : IDisposable
                         return false;
                     }
 
-                    if (wasStationaryAtCapturedBoundary &&
+                    if (!verified && wasStationaryAtCapturedBoundary &&
                         candidate.Direction == ScrollCaptureDirection.Up &&
                         _currentFrameTop == _capturedContentTop &&
                         IsBoundarySegmentAlreadyPresent(
@@ -1044,7 +1078,7 @@ internal sealed class AutomaticScrollCaptureComposerCore : IDisposable
                         return false;
                     }
 
-                    if (IsAlreadyCapturedSegment(newSegment))
+                    if (!verified && IsAlreadyCapturedSegment(newSegment))
                     {
                         // Same as the downward branch: skip the duplicate
                         // strip but keep the anchor tracking the viewport so
@@ -1083,7 +1117,7 @@ internal sealed class AutomaticScrollCaptureComposerCore : IDisposable
                 }
             }
 
-            _currentFrame.Dispose();
+            _currentFrame!.Dispose();
             _currentFrame = nextCurrentFrame;
             nextCurrentFrame = null;
             _currentFrameTop = nextFrameTop;
@@ -2177,6 +2211,7 @@ internal sealed class AutomaticScrollCaptureComposerCore : IDisposable
 
         _recentViewports.Clear();
         _currentFrame?.Dispose();
+        _verifiedCurrent?.Dispose();
         _currentFrame = null;
         _topBoundaryFrame?.Dispose();
         _topBoundaryFrame = null;
@@ -2644,7 +2679,21 @@ internal sealed class AutomaticScrollCaptureComposerCore : IDisposable
                     ScrollCaptureDirection.Up
                         ? _topBoundaryFrame
                         : _bottomBoundaryFrame;
-                var oppositeMatch = boundaryFrame is null
+                // TryCreateWheelBoundaryCrossingCandidate already verified
+                // this frame against the absolute boundary immediately before
+                // entering TryResolveBoundaryExpansion. Re-running a full
+                // opposite-direction global match here made every fast
+                // over-boundary reversal pay two extra image scans before the
+                // preview could advance. Keep the ambiguity probe for weak or
+                // non-wheel re-anchors, but trust a decisive wheel-vouched
+                // boundary match whose predicted displacement is explicit.
+                var skipOppositeBoundaryProbe =
+                    wheelPredictsCrossing &&
+                    wheelExpectedRows is not null &&
+                    candidate.Match.Confidence >=
+                        ExactWheelBoundaryMinimumConfidence;
+                var oppositeMatch = skipOppositeBoundaryProbe ||
+                                     boundaryFrame is null
                     ? null
                     : candidate.Direction == ScrollCaptureDirection.Up
                         ? AutomaticImageOverlapMatcher.FindVerticalOverlap(
@@ -3329,9 +3378,9 @@ internal sealed class AutomaticScrollCaptureComposerCore : IDisposable
         // situation that produces marginal false peaks on repetitive content,
         // so a reconnect must be clearly stronger than the bare acceptance
         // threshold.
-        var minimumReanchorConfidence = Math.Max(
+        var minimumReanchorConfidence = Math.Min(1d, Math.Max(
             options.MinimumOverlapConfidence + 0.02,
-            0.965);
+            0.965));
 
         foreach (var (reference, referenceTop) in probes)
         {

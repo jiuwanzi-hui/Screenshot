@@ -4,10 +4,6 @@ using System.Windows;
 using System.Windows.Interop;
 using Screenshot.App.Infrastructure;
 using DrawingRectangle = System.Drawing.Rectangle;
-using DrawingColor = System.Drawing.Color;
-using WpfColor = System.Windows.Media.Color;
-using WpfBrush = System.Windows.Media.Brush;
-using WpfSolidColorBrush = System.Windows.Media.SolidColorBrush;
 
 namespace Screenshot.App.Capture;
 
@@ -52,12 +48,7 @@ public partial class RecordingRegionFrameWindow : Window
         Top = _windowRegion.Y / dpi.Y;
         InitializeComponent();
         _nativeFrame = new NativeSelectionFrameWindow();
-        if (TryGetAccentColors(out var accentStart, out var accentEnd))
-        {
-            _nativeFrame.SetBorderColors(
-                DrawingColor.FromArgb(accentStart.R, accentStart.G, accentStart.B),
-                DrawingColor.FromArgb(accentEnd.R, accentEnd.G, accentEnd.B));
-        }
+        SelectionFrameTheme.Attach(this, _nativeFrame);
         FrameBorder.Opacity = 0;
         Opacity = 0;
         SourceInitialized += OnSourceInitialized;
@@ -140,33 +131,6 @@ public partial class RecordingRegionFrameWindow : Window
             _windowRegion.Y,
             _windowRegion.Width,
             _windowRegion.Height));
-    }
-
-    private bool TryGetAccentColors(out WpfColor start, out WpfColor end)
-    {
-        start = WpfColor.FromRgb(91, 141, 239);
-        end = start;
-        if (TryFindResource("AppAccentBrush") is not WpfBrush brush)
-        {
-            return false;
-        }
-
-        if (brush is WpfSolidColorBrush solid)
-        {
-            start = solid.Color;
-            end = solid.Color;
-            return true;
-        }
-
-        if (brush is System.Windows.Media.GradientBrush gradient &&
-            gradient.GradientStops.Count > 0)
-        {
-            start = gradient.GradientStops[0].Color;
-            end = gradient.GradientStops[^1].Color;
-            return true;
-        }
-
-        return false;
     }
 
     private static class NativeMethods

@@ -1,0 +1,51 @@
+<Window x:Class="Screenshot.App.Text.ImageQuestionWindow"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ Title="AI 问图" Width="760" Height="800" MinWidth="440" MinHeight="620" FontFamily="Microsoft YaHei UI"
+ ShowInTaskbar="True" AllowDrop="True" PreviewDragOver="OnImageDragOver" PreviewDrop="OnImageDrop"
+ WindowStartupLocation="CenterScreen" Background="{DynamicResource AppPanelBackgroundBrush}" Foreground="{DynamicResource AppTextPrimaryBrush}">
+ <Grid Margin="18">
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <Grid Margin="0,0,0,10">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="1.1*"/><ColumnDefinition Width="1.5*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="98"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <ComboBox x:Name="ModelPicker" DisplayMemberPath="Name" Height="32" Padding="6,2" Margin="0,0,6,0" ToolTip="使用设置中已启用的在线 AI 配置，请选择支持图片输入的模型" SelectionChanged="OnModelChanged"/>
+    <ComboBox x:Name="SpecificModelBox" Grid.Column="1" IsEditable="True" Height="32" Padding="6,2" DropDownOpened="OnSpecificModelDropDownOpened" ToolTip="选择该配置下的具体模型，或手动输入；仅用于本次对话"/>
+    <Button x:Name="FetchChatModelsButton" Grid.Column="2" Content="刷新" Height="32" Click="OnFetchChatModelsClick" Padding="7,3" Margin="6,0" ToolTip="获取该配置的模型列表"/>
+    <ComboBox x:Name="StrengthBox" Grid.Column="3" Height="32" Padding="5,2" SelectedValuePath="Tag" SelectedIndex="0" ToolTip="聊天模型为推理强度；图片模型为生成质量。模型不支持时选择默认。">
+     <ComboBoxItem Tag="auto" Content="强度：默认"/><ComboBoxItem Tag="low" Content="低"/><ComboBoxItem Tag="medium" Content="中"/><ComboBoxItem Tag="high" Content="高"/><ComboBoxItem Tag="xhigh" Content="很高"/><ComboBoxItem Tag="max" Content="最高"/>
+    </ComboBox>
+   <Button x:Name="ReturnButton" Grid.Column="4" Content="返回钉图" Height="32" Padding="7,3" Margin="6,0,0,0" Click="OnReturnClick"/>
+  </Grid>
+  <Border Grid.Row="1" BorderThickness="1" CornerRadius="10" BorderBrush="{DynamicResource AppBorderBrush}" Padding="8" Margin="0,0,0,10">
+   <StackPanel>
+    <DockPanel><Button DockPanel.Dock="Right" Content="添加图片" Click="OnAddImagesClick" Padding="8,3"/>
+     <Button x:Name="ToggleImagesButton" HorizontalAlignment="Left" Padding="8,3" Click="OnToggleImagesClick" ToolTip="展开或收起本轮图片">
+      <StackPanel Orientation="Horizontal"><TextBlock x:Name="ImageDetails"/><TextBlock x:Name="ImagesToggleLabel" Text="收起 ▴" Margin="12,0,0,0"/></StackPanel>
+     </Button>
+    </DockPanel>
+    <StackPanel x:Name="AttachmentBody">
+    <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="0,6,0,4"><StackPanel x:Name="AttachmentsPanel" Orientation="Horizontal"/></ScrollViewer>
+    <TextBlock Text="拖入图片可添加，点击放大 · 发送时提交当前图片；删除后，后续请求不再发送该图。" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource AppTextSecondaryBrush}"/>
+    </StackPanel>
+   </StackPanel>
+  </Border>
+  <ScrollViewer x:Name="ConversationScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,10">
+   <StackPanel x:Name="Conversation"><TextBlock x:Name="WelcomeText" Text="想让 AI 对图片做什么？点击下方建议直接发送，或输入要求。" TextWrapping="Wrap" Margin="4,10" Foreground="{DynamicResource AppTextSecondaryBrush}"/></StackPanel>
+  </ScrollViewer>
+  <StackPanel Grid.Row="3">
+   <WrapPanel Margin="0,0,0,4">
+    <Button Content="总结图片" Tag="请帮我总结这些图片的主要内容。" Click="OnSuggestionClick" Padding="10,5" Margin="0,0,8,4"/>
+    <Button Content="提取文字" Tag="请完整提取图片中的文字，保留段落和顺序，看不清的地方请标明。" Click="OnSuggestionClick" Padding="10,5" Margin="0,0,8,4"/>
+    <Button Content="翻译图片" Tag="请翻译这些图片中的文字，并保留原有段落结构。" Click="OnSuggestionClick" Padding="10,5" Margin="0,0,8,4"/>
+   </WrapPanel>
+   <TextBox x:Name="PromptBox" MinHeight="70" MaxHeight="120" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Padding="10" MaxLength="20000" PreviewKeyDown="OnPromptKeyDown" ToolTip="Ctrl+Enter 发送，Enter 换行；处理中发送会加入队列"/>
+  </StackPanel>
+  <Grid Grid.Row="4" Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <TextBlock x:Name="StatusText" Text="Ctrl+Enter 发送 · Enter 换行" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="11" Foreground="{DynamicResource AppTextSecondaryBrush}"/>
+   <StackPanel Grid.Column="1" Orientation="Horizontal">
+    <Button x:Name="ResumeButton" Content="继续队列" Visibility="Collapsed" Padding="10,6" Margin="0,0,6,0" Click="OnResumeClick"/>
+    <Button x:Name="StopButton" Content="停止" Visibility="Collapsed" Padding="12,6" Margin="0,0,6,0" Click="OnStopClick"/>
+    <Button x:Name="SendButton" Content="发送" Padding="16,6" Click="OnSendClick"/>
+   </StackPanel>
+  </Grid>
+ </Grid>
+</Window>

@@ -72,6 +72,7 @@ internal sealed class WindowPlacementStore
     {
         lock (_sync)
         {
+            _file = Load(_path);
             if (_file.Windows.TryGetValue(key, out var stored) &&
                 stored.HasValidBounds)
             {
@@ -93,8 +94,7 @@ internal sealed class WindowPlacementStore
 
         lock (_sync)
         {
-            _file.Windows[key] = placement;
-            return TryWriteFile();
+            return UpdateFile(() => _file.Windows[key] = placement);
         }
     }
 
@@ -107,13 +107,29 @@ internal sealed class WindowPlacementStore
 
         lock (_sync)
         {
-            if (!_file.Windows.Remove(key))
-            {
-                return true;
-            }
+            return UpdateFile(() => _file.Windows.Remove(key));
+        }
+    }
 
+    private bool UpdateFile(Action change)
+    {
+        // The resident floating button and feature windows share placements.
+        // Merge under a per-file cross-process lock; a stale snapshot must not
+        // erase positions saved by the other process.
+        var identity = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            Encoding.UTF8.GetBytes(Path.GetFullPath(_path).ToUpperInvariant())));
+        using var mutex = new Mutex(false, $@"Local\SnapCut.Placement.{identity}");
+        var acquired = false;
+        try
+        {
+            try { acquired = mutex.WaitOne(TimeSpan.FromMilliseconds(100)); }
+            catch (AbandonedMutexException) { acquired = true; }
+            if (!acquired) return false;
+            _file = Load(_path);
+            change();
             return TryWriteFile();
         }
+        finally { if (acquired) mutex.ReleaseMutex(); }
     }
 
     private static WindowPlacementFile Load(string path)

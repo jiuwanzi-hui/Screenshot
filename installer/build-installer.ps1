@@ -1,15 +1,31 @@
 param(
-    [string]$Version = "3.8.1",
+    [string]$Version = "4.2.0",
     [switch]$SkipTrackedManifestUpdate,
-    [switch]$EnableCaptureDiagnostics
+    [switch]$EnableCaptureDiagnostics,
+    [string]$OutputDirectory,
+    [switch]$EnableInputDiagnostics,
+    [switch]$LocalTest
 )
 
 $ErrorActionPreference = "Stop"
+if (($EnableCaptureDiagnostics -or $EnableInputDiagnostics) -and -not $LocalTest) {
+    throw 'Diagnostic builds are local tests only; use -LocalTest and never publish their manifests.'
+}
+if ($LocalTest) { $SkipTrackedManifestUpdate = $true }
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $appProject = Join-Path $repositoryRoot "src\Screenshot.App\Screenshot.App.csproj"
-$publishDirectory = Join-Path $repositoryRoot "artifacts\publish\win-x64"
-$installerOutputDirectory = Join-Path $PSScriptRoot "dist"
+$publishDirectory = Join-Path $repositoryRoot ("artifacts\publish\" + [Guid]::NewGuid().ToString('N') + "\win-x64")
+$installerOutputDirectory = if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    Join-Path $PSScriptRoot "dist"
+} else {
+    [IO.Path]::GetFullPath($OutputDirectory)
+}
 $setupScript = Join-Path $PSScriptRoot "Screenshot.iss"
+# Every packaging session must preserve Gitee-only detection and verified updates.
+# This suite uses fake HTTP and isolated files; it never installs on the desktop.
+dotnet test (Join-Path $repositoryRoot 'tests\Screenshot.App.Tests\Screenshot.App.Tests.csproj') `
+    -c Release --nologo --filter 'FullyQualifiedName~ApplicationUpdateServiceTests|FullyQualifiedName~UpdateRecoveryTests|FullyQualifiedName~PortableUpdateArchiveTests|FullyQualifiedName~RollbackSettingsTests|FullyQualifiedName~UpdateArtifactValidationTests|FullyQualifiedName~UpdateButtonIsReadyWhileReleaseHistoryIsStillPending'
+if ($LASTEXITCODE -ne 0) { throw 'Update regression checks failed; packaging stopped.' }
 $innoCompilerCandidates = @(
     (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe"),
     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
@@ -23,23 +39,18 @@ if (-not $innoCompiler) {
     throw "Inno Setup 6 was not found. Install JRSoftware.InnoSetup first."
 }
 
-foreach ($directory in @($publishDirectory, $installerOutputDirectory)) {
-    $resolvedParent = [IO.Path]::GetFullPath((Split-Path -Parent $directory))
-    $resolvedDirectory = [IO.Path]::GetFullPath($directory)
-    if (-not $resolvedDirectory.StartsWith($resolvedParent, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to clean an unexpected directory: $resolvedDirectory"
-    }
+# A fresh staging directory prevents stale/private files from entering a release.
+# Keep previous delivery packages; a build must never clear the whole dist folder.
+New-Item -ItemType Directory -Path $publishDirectory, $installerOutputDirectory -Force | Out-Null
 
-    if (Test-Path -LiteralPath $resolvedDirectory) {
-        Remove-Item -LiteralPath $resolvedDirectory -Recurse -Force
-    }
-}
-
+$runtimeArchive = & (Join-Path $PSScriptRoot 'prepare-translation-runtime.ps1')
 $publishDefineConstants = "TRACE"
+$informationalVersion = if ($LocalTest) { "$Version-localtest" } else { $Version }
 if ($EnableCaptureDiagnostics) {
     # MSBuild treats semicolons as list separators even when passed through
     # PowerShell's native argument binder. Escape them for dotnet publish.
-    $publishDefineConstants += "%3BSNAPCUT_CAPTURE_DIAGNOSTICS%3BSNAPCUT_INPUT_DIAGNOSTICS"
+    $publishDefineConstants += "%3BSNAPCUT_CAPTURE_DIAGNOSTICS"
+    if ($EnableInputDiagnostics) { $publishDefineConstants += "%3BSNAPCUT_INPUT_DIAGNOSTICS" }
 }
 
 dotnet publish $appProject `
@@ -52,11 +63,31 @@ dotnet publish $appProject `
     -p:DebugType=None `
     -p:DebugSymbols=false `
     -p:Version=$Version `
+    -p:InformationalVersion=$informationalVersion `
     -o $publishDirectory `
     --nologo
 
 if ($LASTEXITCODE -ne 0) {
     throw "Screenshot publish failed."
+}
+
+# Local test deliveries have their own prerelease history. Do not change the
+# tracked public history or advertise an unpublished build as a stable release.
+if ($LocalTest) {
+    $publishedHistoryPath = Join-Path $publishDirectory 'SnapCut-Releases.json'
+    $publicHistory = Get-Content -LiteralPath $publishedHistoryPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $testAssetNames = @("SnapCut-Setup-$Version-win-x64.exe", "SnapCut-Portable-$Version-win-x64.zip",
+        "SnapCut-Portable-$Version-win-x64.7z", 'SnapCut-Update.json', 'Screenshot-Update.json', 'SnapCut-Releases.json')
+    $testRelease = [ordered]@{
+        tag_name = "v$Version"
+        name = "SnapCut $Version local test"
+        body = 'Local test build only. Not published; reserved download URLs are not live.'
+        draft = $false
+        prerelease = $true
+        assets = @($testAssetNames | ForEach-Object { [ordered]@{ name = $_ } })
+    }
+    @($testRelease) + @($publicHistory | Where-Object { $_.tag_name -ne "v$Version" }) |
+        ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $publishedHistoryPath -Encoding UTF8
 }
 
 foreach ($linkerFileName in @(
@@ -137,7 +168,10 @@ $requiredPublishFiles = @(
     "ScreenRecorderLib.dll",
     "LICENSE.txt",
     "THIRD-PARTY-NOTICES.txt",
-    "SnapCut-Releases.json"
+    "SnapCut-Releases.json",
+    "Licenses\Hy-MT2-1.8B.txt",
+    "Licenses\Qwen3-VL-4B.txt",
+    "Licenses\RapidOcrNet.txt"
 ) + $visualCppRuntimeFileNames
 foreach ($requiredFileName in $requiredPublishFiles) {
     $requiredFilePath = Join-Path $publishDirectory $requiredFileName
@@ -147,16 +181,23 @@ foreach ($requiredFileName in $requiredPublishFiles) {
     }
 }
 
-if ($EnableCaptureDiagnostics) {
-    $diagnosticsDirectory = Join-Path $publishDirectory "ScreenshotData\Diagnostics"
-    New-Item -ItemType Directory -Path $diagnosticsDirectory -Force | Out-Null
-    Set-Content `
-        -LiteralPath (Join-Path $diagnosticsDirectory "capture-timing.enabled") `
-        -Value "enabled" `
-        -Encoding ASCII
+$publishedRuntime = Join-Path $publishDirectory ("OfflinePackages\" + [IO.Path]::GetFileName($runtimeArchive))
+if (-not (Test-Path -LiteralPath $publishedRuntime) -or
+    (Get-FileHash -LiteralPath $publishedRuntime).Hash -ne (Get-FileHash -LiteralPath $runtimeArchive).Hash) {
+    throw 'The Windows package is missing its verified offline translation runtime.'
 }
 
-& $innoCompiler "/DAppVersion=$Version" $setupScript
+# Diagnostic collectors remain developer tools, never package payload. Apply
+# the same allowlist to local tests so trace flags cannot ship scripts/markers.
+$allowedFiles = @($requiredPublishFiles) + @("OfflinePackages\" + [IO.Path]::GetFileName($runtimeArchive))
+foreach ($publishedFile in Get-ChildItem -LiteralPath $publishDirectory -File -Recurse) {
+    $relativeName = $publishedFile.FullName.Substring($publishDirectory.Length + 1)
+    if ($relativeName -notin $allowedFiles) {
+        throw "Unexpected file in binary release: $relativeName"
+    }
+}
+
+& $innoCompiler "/DAppVersion=$Version" "/DPublishDir=$publishDirectory" "/O$installerOutputDirectory" $setupScript
 if ($LASTEXITCODE -ne 0) {
     throw "Installer compilation failed."
 }
@@ -181,6 +222,12 @@ if (-not (Test-Path -LiteralPath $portablePath)) {
     throw "Portable package was not generated: $portablePath"
 }
 
+# Keep standard ZIP for older automatic updaters. New clients select the
+# smaller 7z from an additive manifest field and extract it internally.
+$giteePortablePath = Join-Path $installerOutputDirectory "SnapCut-Portable-$Version-win-x64.7z"
+& (Join-Path $PSScriptRoot 'build-portable-7z.ps1') `
+    -PublishDirectory $publishDirectory -DestinationPath $giteePortablePath
+
 $manifestPath = Join-Path $installerOutputDirectory "SnapCut-Update.json"
 $legacyManifestPath = Join-Path $installerOutputDirectory "Screenshot-Update.json"
 $trackedManifestDirectory = Join-Path $repositoryRoot "updates"
@@ -188,11 +235,15 @@ $trackedManifestPath = Join-Path $trackedManifestDirectory "SnapCut-Update.json"
 $trackedLegacyManifestPath = Join-Path $trackedManifestDirectory "Screenshot-Update.json"
 $installerFile = Get-Item -LiteralPath $installerPath
 $portableFile = Get-Item -LiteralPath $portablePath
-$githubReleaseBaseUrl = "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download"
+$giteePortableFile = Get-Item -LiteralPath $giteePortablePath
+if ($installerFile.Length -ge 100000000) {
+    throw 'The Gitee installer must be smaller than 100,000,000 bytes.'
+}
+$githubReleaseBaseUrl = "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v$Version"
 $giteeReleaseBaseUrl = "https://gitee.com/wwangyunhui/screenshot/releases/download/v$Version"
 $manifest = [ordered]@{
     version = $Version
-    releasePage = "https://github.com/jiuwanzi-hui/Screenshot/releases/latest"
+    releasePage = "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v$Version"
     installer = [ordered]@{
         fileName = $installerFile.Name
         githubUrl = "$githubReleaseBaseUrl/$($installerFile.Name)"
@@ -207,7 +258,15 @@ $manifest = [ordered]@{
         size = $portableFile.Length
         sha256 = (Get-FileHash -LiteralPath $portableFile.FullName -Algorithm SHA256).Hash
     }
+    portable7z = [ordered]@{
+        fileName = $giteePortableFile.Name
+        githubUrl = "$githubReleaseBaseUrl/$($giteePortableFile.Name)"
+        giteeUrl = "$giteeReleaseBaseUrl/$($giteePortableFile.Name)"
+        size = $giteePortableFile.Length
+        sha256 = (Get-FileHash -LiteralPath $giteePortableFile.FullName -Algorithm SHA256).Hash
+    }
 }
+if ($LocalTest) { $manifest['prerelease'] = $true }
 $manifest |
     ConvertTo-Json -Depth 4 |
     Set-Content -LiteralPath $manifestPath -Encoding UTF8
@@ -218,6 +277,9 @@ New-Item -ItemType Directory -Path $trackedManifestDirectory -Force | Out-Null
 # since 2.1.0 accept both brands, so only one copy of each large package needs
 # to be uploaded to a release.
 Copy-Item -LiteralPath $manifestPath -Destination $legacyManifestPath -Force
+$releaseHistoryPath = Join-Path $installerOutputDirectory 'SnapCut-Releases.json'
+Copy-Item -LiteralPath (Join-Path $publishDirectory 'SnapCut-Releases.json') -Destination $releaseHistoryPath -Force
+& (Join-Path $PSScriptRoot 'verify-update-artifacts.ps1') -Version $Version -Directory $installerOutputDirectory -LocalTest:$LocalTest
 if (-not $SkipTrackedManifestUpdate) {
     Copy-Item -LiteralPath $manifestPath -Destination $trackedManifestPath -Force
     Copy-Item -LiteralPath $legacyManifestPath `
@@ -228,8 +290,10 @@ if (-not $SkipTrackedManifestUpdate) {
 $outputs = @(
     $installerPath
     $portablePath
+    $giteePortablePath
     $manifestPath
     $legacyManifestPath
+    $releaseHistoryPath
 )
 if (-not $SkipTrackedManifestUpdate) {
     $outputs += $trackedManifestPath, $trackedLegacyManifestPath

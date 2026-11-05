@@ -14,6 +14,8 @@ internal static class AnnotationToolPreferences
     private static readonly object SyncRoot = new();
     private static readonly Dictionary<EditorTool, WpfColor> Colors = [];
     private static readonly Dictionary<EditorTool, double> Widths = [];
+    private static readonly Dictionary<EditorTool, EditorTool> Variants = [];
+    private static bool _textBackground;
     private static Action<AnnotationToolSetting[]>? _persistenceRequested;
 
     public static void Configure(
@@ -24,6 +26,8 @@ internal static class AnnotationToolPreferences
         {
             Colors.Clear();
             Widths.Clear();
+            Variants.Clear();
+            _textBackground = false;
             foreach (var setting in settings ?? [])
             {
                 if (!Enum.TryParse<EditorTool>(setting.Tool, true, out var tool) ||
@@ -39,6 +43,12 @@ internal static class AnnotationToolPreferences
                     Colors[tool] = color;
                 }
                 Widths[tool] = Math.Clamp(setting.StrokeWidth, 1, 24);
+                if (tool == EditorTool.Text) _textBackground = setting.TextBackground;
+                if (Enum.TryParse<EditorTool>(setting.Variant, out var variant) &&
+                    IsVariant(tool, variant))
+                {
+                    Variants[tool] = variant;
+                }
             }
 
             _persistenceRequested = persistenceRequested;
@@ -50,13 +60,16 @@ internal static class AnnotationToolPreferences
         lock (SyncRoot)
         {
             return Enum.GetValues<EditorTool>()
-                .Where(tool => Colors.ContainsKey(tool) || Widths.ContainsKey(tool))
+                .Where(tool => Colors.ContainsKey(tool) || Widths.ContainsKey(tool) || Variants.ContainsKey(tool) ||
+                    (tool == EditorTool.Text && _textBackground))
                 .Select(tool => new AnnotationToolSetting(
                     tool.ToString(),
                     Colors.TryGetValue(tool, out var color)
                         ? color.ToString(CultureInfo.InvariantCulture)
                         : string.Empty,
-                    Widths.TryGetValue(tool, out var width) ? width : 3))
+                    Widths.TryGetValue(tool, out var width) ? width : 3,
+                    Variants.TryGetValue(tool, out var variant) ? variant.ToString() : null,
+                    tool == EditorTool.Text && _textBackground))
                 .ToArray();
         }
     }
@@ -68,6 +81,57 @@ internal static class AnnotationToolPreferences
             return Colors.TryGetValue(tool, out var color) ? color : fallback;
         }
     }
+
+    internal static bool TextBackground
+    {
+        get { lock (SyncRoot) return _textBackground; }
+    }
+
+    internal static void SetTextBackground(bool enabled, double? fallbackTextWidth = null)
+    {
+        Action<AnnotationToolSetting[]>? persistence;
+        lock (SyncRoot)
+        {
+            if (_textBackground == enabled) return;
+            _textBackground = enabled;
+            if (!Widths.ContainsKey(EditorTool.Text) && fallbackTextWidth is { } width && double.IsFinite(width))
+                Widths[EditorTool.Text] = Math.Clamp(width, 1, 24);
+            persistence = _persistenceRequested;
+        }
+        persistence?.Invoke(Snapshot());
+    }
+
+    public static EditorTool GetVariant(EditorTool tool)
+    {
+        lock (SyncRoot)
+        {
+            return Variants.GetValueOrDefault(tool, tool);
+        }
+    }
+
+    public static void SetVariant(EditorTool tool, EditorTool variant)
+    {
+        if (!IsVariant(tool, variant))
+            throw new ArgumentOutOfRangeException(nameof(variant));
+
+        Action<AnnotationToolSetting[]>? persistence;
+        lock (SyncRoot)
+        {
+            if (Variants.TryGetValue(tool, out var current) && current == variant)
+                return;
+            Variants[tool] = variant;
+            persistence = _persistenceRequested;
+        }
+        persistence?.Invoke(Snapshot());
+    }
+
+    private static bool IsVariant(EditorTool tool, EditorTool variant) => tool switch
+    {
+        EditorTool.Mosaic => variant is EditorTool.Mosaic or EditorTool.RectangleMosaic,
+        EditorTool.DoubleArrow => variant is EditorTool.DoubleArrow or EditorTool.HollowDoubleArrow,
+        EditorTool.Line => variant is EditorTool.Line or EditorTool.WavyLine,
+        _ => false,
+    };
 
     public static double GetWidth(EditorTool tool, double fallback)
     {

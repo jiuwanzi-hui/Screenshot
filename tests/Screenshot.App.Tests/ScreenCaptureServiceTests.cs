@@ -6,7 +6,7 @@ namespace Screenshot.App.Tests;
 
 public sealed class ScreenCaptureServiceTests
 {
-    [Fact]
+    [DesktopFact]
     public void CapturesAPixelFromTheVirtualDesktop()
     {
         var virtualDesktop = VirtualScreen.GetBounds();
@@ -24,7 +24,7 @@ public sealed class ScreenCaptureServiceTests
         Assert.Equal(region, clone.SourceRegion);
     }
 
-    [Fact]
+    [DesktopFact]
     public void CapturesTheCurrentVirtualDesktopAtItsWindowsLayoutSize()
     {
         var virtualDesktop = VirtualScreen.GetBounds();

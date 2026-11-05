@@ -1,5 +1,9 @@
 #ifndef AppVersion
-  #define AppVersion "3.8.1"
+  #define AppVersion "4.2.0"
+#endif
+
+#ifndef PublishDir
+  #define PublishDir "..\artifacts\publish\win-x64"
 #endif
 
 #define AppName "SnapCut"
@@ -47,20 +51,23 @@ Name: "chinesesimp"; MessagesFile: "compiler:Default.isl,ChineseSimplified.isl"
 Name: "desktopicon"; Description: "在桌面创建快捷方式"; GroupDescription: "附加选项："; Flags: unchecked
 
 [Files]
-Source: "..\artifacts\publish\win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#PublishDir}\*"; DestDir: "{app}"; Excludes: "ScreenshotData\*,TranslationModels\*"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "installed.marker"; DestDir: "{app}"; Flags: ignoreversion
 
 [InstallDelete]
+; Remove only the known helper scripts shipped in earlier local test packages.
+; User data and diagnostic logs are not part of this cleanup.
+Type: files; Name: "{app}\Start-ToolbarDiagnosis.cmd"
+Type: files; Name: "{app}\Start-ToolbarDiagnosis-Software.cmd"
+Type: files; Name: "{app}\Start-ToolbarDiagnosis-Hardware.cmd"
+Type: files; Name: "{app}\Start-ToolbarDiagnosis.ps1"
+Type: files; Name: "{app}\Export-ToolbarDiagnosis.ps1"
 ; 从旧版本 (Screenshot.exe) 升级时清理旧名产物，避免新旧两份程序并存。
 Type: files; Name: "{app}\Screenshot.exe"
 Type: files; Name: "{app}\Screenshot.dll"
 Type: files; Name: "{app}\Screenshot.pdb"
 Type: files; Name: "{app}\Screenshot.deps.json"
 Type: files; Name: "{app}\Screenshot.runtimeconfig.json"
-
-[UninstallDelete]
-; Offline language packs are downloaded application assets rather than user data.
-Type: filesandordirs; Name: "{app}\TranslationModels"
 
 [Dirs]
 Name: "{app}\ScreenshotData"; Permissions: users-modify
@@ -119,8 +126,8 @@ begin
   begin
     DeleteUserData := MsgBox(
       '是否同时删除 Screenshot 的用户数据？' + #13#10 + #13#10 +
-      '包括设置、历史、诊断文件，以及默认 ScreenshotData 目录内保存的截图。' + #13#10 +
-      '选择“否”只会保留 ScreenshotData，其他程序文件和快捷方式仍会全部卸载。',
+      '包括设置、历史、已下载的识别和翻译模型，以及默认 ScreenshotData 目录内保存的截图。' + #13#10 +
+      '选择“否”会保留 ScreenshotData 和 TranslationModels，程序文件和快捷方式仍会卸载。',
       mbConfirmation,
       MB_YESNO or MB_DEFBUTTON2) = IDYES;
   end;
@@ -128,6 +135,7 @@ begin
   if DeleteUserData then
   begin
     DelTree(ExpandConstant('{app}\ScreenshotData'), True, True, True);
+    DelTree(ExpandConstant('{app}\TranslationModels'), True, True, True);
     DelTree(ExpandConstant('{localappdata}\Screenshot'), True, True, True);
   end;
 end;

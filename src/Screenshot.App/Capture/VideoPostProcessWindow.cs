@@ -8,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using Screenshot.App.Presentation;
 using WpfButton = System.Windows.Controls.Button;
 using WpfImage = System.Windows.Controls.Image;
 using WpfMouseEventArgs = System.Windows.Input.MouseEventArgs;
@@ -16,6 +17,8 @@ using WpfProgressBar = System.Windows.Controls.ProgressBar;
 
 namespace Screenshot.App.Capture;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001",
+    Justification = "Closed cancels and asynchronously releases the preview session and cancellation source.")]
 internal sealed class VideoPostProcessWindow : Window
 {
     private readonly string _inputPath;
@@ -29,7 +32,7 @@ internal sealed class VideoPostProcessWindow : Window
     private readonly WpfImage _previewFrame = new();
     private readonly WpfButton _previewPlayButton = new();
     private readonly WpfProgressBar _progress = new();
-    private readonly StackPanel _actionPanel = new();
+    private readonly UniformGrid _actionPanel = new() { Rows = 1 };
     private readonly ScrollViewer _timelineScrollViewer = new();
     private readonly Grid _timelineLayers = new();
     private readonly Canvas _timelineFramesCanvas = new();
@@ -75,19 +78,25 @@ internal sealed class VideoPostProcessWindow : Window
     private bool _isExtractedFramePlayback;
     private int _timelineRenderGeneration;
     private bool _updatingTimelineZoom;
+    private readonly CancellationTokenSource _lifetime = new();
+    private readonly CancellationToken _lifetimeToken;
 
     public VideoPostProcessWindow(string inputPath)
     {
         _inputPath = inputPath;
+        _lifetimeToken = _lifetime.Token;
         Title = "录屏裁剪与动图导出";
         Width = 920;
-        Height = 820;
+        Height = 860;
         MinWidth = 720;
-        MinHeight = 620;
+        MinHeight = 700;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         ShowInTaskbar = true;
-        SetResourceReference(BackgroundProperty, "AppBackgroundBrush");
-        Content = BuildContent();
+        SetResourceReference(BackgroundProperty, "AppWindowBackgroundBrush");
+        var surface = BuildContent();
+        Content = surface;
+        WindowShell.Attach(this, "录屏裁剪与动图导出");
+        UiTransitions.PrepareWindow(this, surface);
         _previewTimer.Tick += OnPreviewTimerTick;
         _scrubTimer.Tick += OnScrubTimerTick;
         _timelineZoomTimer.Tick += OnTimelineZoomTimerTick;
@@ -99,47 +108,56 @@ internal sealed class VideoPostProcessWindow : Window
 
     private Grid BuildContent()
     {
-        var root = new Grid { Margin = new Thickness(22) };
-        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var root = new Grid { Margin = new Thickness(18) };
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         var title = new TextBlock
         {
-            Text = "裁掉开头和结尾，或导出动图",
-            FontSize = 21,
+            Text = "录屏裁剪与动图导出",
+            FontSize = 18,
             FontWeight = FontWeights.SemiBold,
         };
         title.SetResourceReference(TextBlock.ForegroundProperty,
             "AppTextPrimaryBrush");
-        root.Children.Add(title);
+        var heading = new DockPanel { Margin = new Thickness(0, 0, 0, 12) };
+        heading.Children.Add(title);
+        root.Children.Add(heading);
 
         var file = new TextBlock
         {
             Text = Path.GetFileName(_inputPath),
-            Margin = new Thickness(0, 7, 0, 20),
+            ToolTip = _inputPath,
+            Margin = new Thickness(18, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            TextAlignment = TextAlignment.Right,
             TextTrimming = TextTrimming.CharacterEllipsis,
         };
         file.SetResourceReference(TextBlock.ForegroundProperty,
             "AppTextSecondaryBrush");
-        Grid.SetRow(file, 1);
-        root.Children.Add(file);
+        heading.Children.Add(file);
 
-        var controls = new StackPanel
-        {
-            Margin = new Thickness(0, 0, 8, 0),
-        };
-        controls.Children.Add(CreatePreviewPanel());
-        controls.Children.Add(CreateTimelinePanel());
+        var previewCard = EditorCard(CreatePreviewPanel());
+        previewCard.Padding = new Thickness(0);
+        Grid.SetRow(previewCard, 1);
+        root.Children.Add(previewCard);
+        var timelineCard = EditorCard(CreateTimelinePanel());
+        Grid.SetRow(timelineCard, 2);
+        root.Children.Add(timelineCard);
         ConfigureRangeSlider(_startSlider);
         ConfigureRangeSlider(_endSlider);
         _rangeText.FontFamily = new System.Windows.Media.FontFamily("Consolas");
         _rangeText.FontSize = 14;
-        _rangeText.Margin = new Thickness(0, 0, 0, 16);
+        _rangeText.Margin = new Thickness(0);
         _rangeText.SetResourceReference(TextBlock.ForegroundProperty,
             "AppTextPrimaryBrush");
-        controls.Children.Add(_rangeText);
+        var rangeCard = EditorCard(_rangeText);
+        Grid.SetRow(rangeCard, 3);
+        root.Children.Add(rangeCard);
         _startSlider.ValueChanged += OnRangeChanged;
         _endSlider.ValueChanged += OnRangeChanged;
         _startSlider.PreviewMouseLeftButtonDown += OnSliderMouseLeftButtonDown;
@@ -149,46 +167,60 @@ internal sealed class VideoPostProcessWindow : Window
         _startSlider.LostMouseCapture += OnSliderLostMouseCapture;
         _endSlider.LostMouseCapture += OnSliderLostMouseCapture;
         _progress.Height = 5;
-        _progress.Margin = new Thickness(0, 18, 0, 8);
+        _progress.Margin = new Thickness(0, 0, 0, 8);
         _progress.Visibility = Visibility.Collapsed;
+        var controls = new StackPanel();
         controls.Children.Add(_progress);
         _statusText.Text = "正在读取视频信息...";
         _statusText.TextWrapping = TextWrapping.Wrap;
         _statusText.SetResourceReference(TextBlock.ForegroundProperty,
             "AppTextSecondaryBrush");
         controls.Children.Add(_statusText);
-        var scrollViewer = new ScrollViewer
-        {
-            Content = controls,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            PanningMode = PanningMode.VerticalOnly,
-        };
-        Grid.SetRow(scrollViewer, 2);
-        root.Children.Add(scrollViewer);
+        Grid.SetRow(controls, 4);
+        root.Children.Add(controls);
 
-        _actionPanel.Margin = new Thickness(0, 20, 0, 0);
+        _actionPanel.Margin = new Thickness(0, 14, 0, 0);
         _actionPanel.HorizontalAlignment =
-            System.Windows.HorizontalAlignment.Right;
-        _actionPanel.Orientation = WpfOrientation.Horizontal;
+            System.Windows.HorizontalAlignment.Stretch;
         _actionPanel.Children.Add(CreateButton("打开文件夹", OnOpenFolderClick));
-        _actionPanel.Children.Add(CreateButton("保存裁剪 MP4", OnTrimClick));
+        var saveButton = CreateButton("保存裁剪 MP4", OnTrimClick);
+        saveButton.SetResourceReference(BackgroundProperty, "AppAccentMutedBrush");
+        saveButton.SetResourceReference(BorderBrushProperty, "SelectionBorderBrush");
+        _actionPanel.Children.Add(saveButton);
         _actionPanel.Children.Add(CreateButton("导出 GIF", OnGifClick));
         _actionPanel.Children.Add(CreateButton("导出 WebP", OnWebpClick));
-        Grid.SetRow(_actionPanel, 3);
+        foreach (WpfButton button in _actionPanel.Children)
+        {
+            button.Height = 48;
+            button.FontSize = 15;
+            button.Padding = new Thickness(18, 8, 18, 8);
+        }
+        Grid.SetRow(_actionPanel, 5);
         root.Children.Add(_actionPanel);
         return root;
     }
 
-    private StackPanel CreatePreviewPanel()
+    private static Border EditorCard(FrameworkElement content)
     {
-        var panel = new StackPanel
+        content.Margin = new Thickness(0);
+        var card = new Border
         {
-            Margin = new Thickness(0, 0, 0, 18),
+            Child = content, Padding = new Thickness(0),
+            BorderThickness = new Thickness(0),
+            Margin = new Thickness(0, 0, 0, 16),
         };
+        card.Background = System.Windows.Media.Brushes.Transparent;
+        return card;
+    }
+
+    private Grid CreatePreviewPanel()
+    {
+        var panel = new Grid();
+        panel.RowDefinitions.Add(new RowDefinition());
+        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var frame = new Border
         {
-            Height = 318,
+            MinHeight = 72,
             Background = System.Windows.Media.Brushes.Black,
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(6),
@@ -243,6 +275,7 @@ internal sealed class VideoPostProcessWindow : Window
         _previewPlayButton.IsEnabled = false;
         Grid.SetColumn(_previewPlayButton, 1);
         footer.Children.Add(_previewPlayButton);
+        Grid.SetRow(footer, 1);
         panel.Children.Add(footer);
         return panel;
     }
@@ -457,8 +490,15 @@ internal sealed class VideoPostProcessWindow : Window
         Loaded -= OnLoaded;
         try
         {
+            if (_closed) return;
             _preview.Source = new Uri(_inputPath, UriKind.Absolute);
-            _framePreviewSession = await VideoPreviewSession.CreateAsync(_inputPath);
+            var session = await VideoPreviewSession.CreateAsync(_inputPath, _lifetimeToken);
+            if (_closed)
+            {
+                await session.DisposeAsync();
+                return;
+            }
+            _framePreviewSession = session;
             _duration = _framePreviewSession.Duration;
             _previewPlayButton.IsEnabled = true;
             _updatingRange = true;
@@ -477,8 +517,10 @@ internal sealed class VideoPostProcessWindow : Window
             SeekPreview(_startSlider.Value, "起点");
             _statusText.Text = "GIF/WebP 会按时长自动控制帧率和尺寸。";
         }
+        catch (OperationCanceledException) when (_closed) { }
         catch (Exception exception)
         {
+            if (_closed) return;
             _statusText.Text = $"无法读取视频：{exception.Message}";
             SetActionsEnabled(false);
         }
@@ -761,7 +803,7 @@ internal sealed class VideoPostProcessWindow : Window
                 var position = TimeSpan.FromTicks(
                     _duration.Ticks * ((index * 2L) + 1) /
                     (frameCount * 2L));
-                var bytes = await session.GetFrameAsync(position, 192);
+                var bytes = await session.GetFrameAsync(position, 192, _lifetimeToken);
                 if (_closed || generation != _timelineRenderGeneration)
                 {
                     return;
@@ -813,7 +855,7 @@ internal sealed class VideoPostProcessWindow : Window
         }
         catch (Exception exception)
         {
-            if (generation == _timelineRenderGeneration)
+            if (!_closed && generation == _timelineRenderGeneration)
             {
                 _timelineStatusText.Text =
                     $"无法生成时间轴：{exception.Message}";
@@ -1087,7 +1129,7 @@ internal sealed class VideoPostProcessWindow : Window
                 {
                     var bytes = await session.GetFrameAsync(
                         position,
-                        thumbnailWidth);
+                        thumbnailWidth, _lifetimeToken);
                     if (_closed)
                     {
                         return;
@@ -1108,6 +1150,7 @@ internal sealed class VideoPostProcessWindow : Window
                 }
                 catch (Exception exception)
                 {
+                    if (_closed) return;
                     _previewStatusText.Text =
                         $"无法提取预览帧：{exception.Message}";
                     return;
@@ -1156,12 +1199,12 @@ internal sealed class VideoPostProcessWindow : Window
 
     private async void OnTrimClick(object sender, RoutedEventArgs e)
     {
-        await RunAsync(async progress =>
+        var start = TimeSpan.FromSeconds(_startSlider.Value);
+        var end = TimeSpan.FromSeconds(_endSlider.Value);
+        await RunAsync(async (progress, token) =>
             await VideoPostProcessingService.TrimMp4Async(
                 _inputPath,
-                TimeSpan.FromSeconds(_startSlider.Value),
-                TimeSpan.FromSeconds(_endSlider.Value),
-                progress));
+                start, end, progress, token));
     }
 
     private async void OnGifClick(object sender, RoutedEventArgs e)
@@ -1174,16 +1217,18 @@ internal sealed class VideoPostProcessWindow : Window
         await ExportAsync(AnimatedImageFormat.WebP);
     }
 
-    private Task ExportAsync(AnimatedImageFormat format) => RunAsync(
-        async progress => await VideoPostProcessingService.ExportAnimatedImageAsync(
-            _inputPath,
-            TimeSpan.FromSeconds(_startSlider.Value),
-            TimeSpan.FromSeconds(_endSlider.Value),
-            format,
-            progress));
-
-    private async Task RunAsync(Func<IProgress<double>, Task<string>> operation)
+    private Task ExportAsync(AnimatedImageFormat format)
     {
+        var start = TimeSpan.FromSeconds(_startSlider.Value);
+        var end = TimeSpan.FromSeconds(_endSlider.Value);
+        return RunAsync((progress, token) => VideoPostProcessingService.ExportAnimatedImageAsync(
+            _inputPath, start, end, format, progress, token));
+    }
+
+    private async Task RunAsync(Func<IProgress<double>, CancellationToken, Task<string>> operation)
+    {
+        using var featureActivity = Infrastructure.FeatureActivity.Begin();
+        if (_closed) return;
         if (_isPreviewPlaying)
         {
             PausePreview();
@@ -1195,25 +1240,32 @@ internal sealed class VideoPostProcessWindow : Window
         try
         {
             var progress = new Progress<double>(value =>
-                _progress.Value = Math.Clamp(value, 0, 1) * 100);
-            var output = await operation(progress);
+            {
+                if (!_closed) _progress.Value = Math.Clamp(value, 0, 1) * 100;
+            });
+            var output = await Task.Run(() => operation(progress, _lifetimeToken), _lifetimeToken);
+            if (_closed) return;
             try
             {
                 await ClipboardFileService.SetFileAsync(output);
+                if (_closed) return;
                 _statusText.Text = $"已生成并复制：{output}";
             }
             catch
             {
+                if (_closed) return;
                 _statusText.Text = $"已生成：{output}（复制到剪贴板失败）";
             }
         }
+        catch (OperationCanceledException) when (_closed) { }
         catch (Exception exception)
         {
-            _statusText.Text = $"处理失败：{exception.Message}";
+            if (!_closed) _statusText.Text = $"处理失败：{exception.Message}";
         }
         finally
         {
-            SetActionsEnabled(true);
+            if (!_closed) SetActionsEnabled(true);
+            Core.MemoryFootprint.TrimAfterHeavyOperation();
         }
     }
 
@@ -1235,6 +1287,17 @@ internal sealed class VideoPostProcessWindow : Window
     private void OnClosed(object? sender, EventArgs e)
     {
         _closed = true;
+        Loaded -= OnLoaded;
+        var session = _framePreviewSession;
+        var releaseActivity = Infrastructure.FeatureActivity.Begin();
+        _ = Task.Run(async () =>
+        {
+            using (releaseActivity) await ReleasePreviewAsync(session).ConfigureAwait(false);
+        });
+        _framePreviewSession = null;
+        _frameRequestPending = false;
+        _previewFrame.Source = null;
+        _timelineFramesCanvas.Children.Clear();
         _timelineRenderGeneration++;
         _previewTimer.Stop();
         _scrubTimer.Stop();
@@ -1253,5 +1316,32 @@ internal sealed class VideoPostProcessWindow : Window
         _timelineStartHandle.DragDelta -= OnTimelineStartHandleDragDelta;
         _timelineEndHandle.DragDelta -= OnTimelineEndHandleDragDelta;
         _preview.Close();
+        _preview.Source = null;
+        Core.MemoryFootprint.TrimAfterHeavyOperation();
+    }
+
+    private async Task ReleasePreviewAsync(VideoPreviewSession? session)
+    {
+        try
+        {
+            await _lifetime.CancelAsync().ConfigureAwait(false);
+            if (session is not null) await session.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                Directory.CreateDirectory(Core.AppMetadata.DiagnosticsDirectoryPath);
+                await File.WriteAllTextAsync(Path.Combine(Core.AppMetadata.DiagnosticsDirectoryPath,
+                    "video-preview-release-error.log"), exception.ToString()).ConfigureAwait(false);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        finally
+        {
+            _lifetime.Dispose();
+            Core.MemoryFootprint.TrimAfterHeavyOperation();
+        }
     }
 }

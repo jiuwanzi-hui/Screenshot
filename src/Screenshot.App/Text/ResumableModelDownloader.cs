@@ -19,15 +19,18 @@ internal sealed record DownloadableModelFile(
 public sealed record ModelDownloadProgress(
     long DownloadedBytes,
     long TotalBytes,
-    string CurrentFileName);
+    string CurrentFileName,
+    string? StatusMessage = null);
 
-internal sealed class ResumableModelDownloader
+internal sealed partial class ResumableModelDownloader
 {
-    private const int MaximumAttempts = 12;
+    private const int MaximumAttempts = 2;
     private const long ProgressByteInterval = 4L * 1024 * 1024;
     private static readonly TimeSpan ProgressTimeInterval =
         TimeSpan.FromMilliseconds(250);
     private readonly HttpClient _httpClient;
+    private readonly TimeSpan _connectionTimeout;
+    private readonly TimeSpan _readIdleTimeout;
 
     private sealed class ModelHashMismatchException(string downloadUrl)
         : IOException("下载文件的完整性校验失败。")
@@ -35,10 +38,13 @@ internal sealed class ResumableModelDownloader
         public string DownloadUrl { get; } = downloadUrl;
     }
 
-    public ResumableModelDownloader(HttpClient httpClient)
+    public ResumableModelDownloader(HttpClient httpClient, TimeSpan? connectionTimeout = null,
+        TimeSpan? readIdleTimeout = null)
     {
         _httpClient = httpClient ??
             throw new ArgumentNullException(nameof(httpClient));
+        _connectionTimeout = connectionTimeout ?? TimeSpan.FromSeconds(8);
+        _readIdleTimeout = readIdleTimeout ?? TimeSpan.FromSeconds(15);
     }
 
     public async Task DownloadAsync(
@@ -51,16 +57,16 @@ internal sealed class ResumableModelDownloader
         Directory.CreateDirectory(installationDirectory);
         var root = Path.GetFullPath(installationDirectory)
             .TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        var completedBytes = files
-            .Where(file => IsFileComplete(root, file))
-            .Sum(file => file.Size);
+        var completedBytes = 0L;
         var totalBytes = files.Sum(file => file.Size);
 
         foreach (var file in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (IsFileComplete(root, file))
+            if (IsFileComplete(root, file) && await HasExpectedHashAsync(
+                    ResolveInside(root, file.FileName), file.Sha256, cancellationToken).ConfigureAwait(false))
             {
+                completedBytes += file.Size;
                 progress?.Report(new ModelDownloadProgress(
                     completedBytes,
                     totalBytes,
@@ -71,10 +77,28 @@ internal sealed class ResumableModelDownloader
             var destinationPath = ResolveInside(root, file.FileName);
             var partialPath = destinationPath + ".part";
             Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            if (File.Exists(partialPath) && new FileInfo(partialPath).Length == file.Size)
+            {
+                if (await HasExpectedHashAsync(partialPath, file.Sha256, cancellationToken).ConfigureAwait(false))
+                {
+                    File.Move(partialPath, destinationPath, overwrite: true);
+                    completedBytes += file.Size;
+                    progress?.Report(new(completedBytes, totalBytes, file.DisplayName));
+                    continue;
+                }
+                File.Delete(partialPath);
+            }
+            if (file.DownloadUrls.Count == 0) throw new IOException($"{file.DisplayName} 没有可用下载地址，请导入本地文件。");
             Exception? lastError = null;
             var rejectedSources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            for (var attempt = 1; attempt <= MaximumAttempts; attempt++)
+            var attempts = Math.Max(1, file.DownloadUrls.Count) * MaximumAttempts;
+            var sourceCursor = 0;
+            for (var attempt = 1; attempt <= attempts; attempt++)
             {
+                if (rejectedSources.Count == file.DownloadUrls.Count) break;
+                string downloadUrl;
+                do { downloadUrl = file.DownloadUrls[sourceCursor++ % file.DownloadUrls.Count]; }
+                while (rejectedSources.Contains(downloadUrl));
                 try
                 {
                     var source = await DownloadOneAsync(
@@ -83,8 +107,8 @@ internal sealed class ResumableModelDownloader
                         completedBytes,
                         totalBytes,
                         progress,
-                        attempt - 1,
-                        cancellationToken);
+                        downloadUrl,
+                        cancellationToken).ConfigureAwait(false);
                     progress?.Report(new ModelDownloadProgress(
                         completedBytes + file.Size,
                         totalBytes,
@@ -92,7 +116,7 @@ internal sealed class ResumableModelDownloader
                     if (!await HasExpectedHashAsync(
                             partialPath,
                             file.Sha256,
-                            cancellationToken))
+                            cancellationToken).ConfigureAwait(false))
                     {
                         File.Delete(partialPath);
                         throw new ModelHashMismatchException(source);
@@ -122,12 +146,15 @@ internal sealed class ResumableModelDownloader
                             break;
                         }
                     }
-                    if (attempt < MaximumAttempts)
+                    progress?.Report(new ModelDownloadProgress(completedBytes +
+                        (File.Exists(partialPath) ? new FileInfo(partialPath).Length : 0), totalBytes,
+                        file.DisplayName, "当前下载源不可用，正在切换备用源；已保留断点"));
+                    if (attempt < attempts && attempt % file.DownloadUrls.Count == 0)
                     {
                         await Task.Delay(
                             TimeSpan.FromMilliseconds(
                                 Math.Min(5_000, 500 * attempt)),
-                            cancellationToken);
+                            cancellationToken).ConfigureAwait(false);
                     }
                 }
             }
@@ -144,7 +171,7 @@ internal sealed class ResumableModelDownloader
                 }
                 throw new IOException(
                     $"{file.DisplayName} 下载失败：{GetUsefulErrorMessage(lastError)}" +
-                    "。已保留断点文件供下次继续。",
+                    "。已保留断点文件供下次继续，也可以使用“导入本地文件”。",
                     lastError);
             }
         }
@@ -156,7 +183,7 @@ internal sealed class ResumableModelDownloader
         long completedBytes,
         long totalBytes,
         IProgress<ModelDownloadProgress>? progress,
-        int sourceOffset,
+        string downloadUrl,
         CancellationToken cancellationToken)
     {
         var existingLength = File.Exists(partialPath)
@@ -174,7 +201,7 @@ internal sealed class ResumableModelDownloader
                 completedBytes + file.Size,
                 totalBytes,
                 file.DisplayName));
-            return partialPath;
+            return downloadUrl;
         }
 
         if (existingLength > 0)
@@ -185,13 +212,10 @@ internal sealed class ResumableModelDownloader
                 file.DisplayName));
         }
 
-        Exception? lastError = null;
-        for (var sourceIndex = 0; sourceIndex < file.DownloadUrls.Count; sourceIndex++)
-        {
-            var downloadUrl = file.DownloadUrls[
-                (sourceOffset + sourceIndex) % file.DownloadUrls.Count];
             try
             {
+                progress?.Report(new ModelDownloadProgress(completedBytes + existingLength, totalBytes,
+                    file.DisplayName, $"正在连接 {new Uri(downloadUrl).Host}"));
                 using var request = new HttpRequestMessage(
                     HttpMethod.Get,
                     downloadUrl);
@@ -205,10 +229,13 @@ internal sealed class ResumableModelDownloader
                         null);
                 }
 
+                using var connection = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                connection.CancelAfter(_connectionTimeout);
                 using var response = await _httpClient.SendAsync(
                     request,
                     HttpCompletionOption.ResponseHeadersRead,
-                    cancellationToken);
+                    connection.Token).ConfigureAwait(false);
+                connection.CancelAfter(Timeout.InfiniteTimeSpan);
                 if (!response.IsSuccessStatusCode)
                 {
                     throw new HttpRequestException(
@@ -220,6 +247,9 @@ internal sealed class ResumableModelDownloader
                 var append = existingLength > 0 &&
                              response.StatusCode == HttpStatusCode.PartialContent;
                 var contentRange = response.Content.Headers.ContentRange;
+                if (response.StatusCode == HttpStatusCode.PartialContent &&
+                    (contentRange?.From != existingLength || contentRange?.To != file.Size - 1))
+                    throw new IOException("下载源返回了错误的分段范围。");
                 if (contentRange?.Length is { } totalLength &&
                     totalLength != file.Size)
                 {
@@ -244,7 +274,7 @@ internal sealed class ResumableModelDownloader
                 }
 
                 await using var source = await response.Content
-                    .ReadAsStreamAsync(cancellationToken);
+                    .ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
                 await using var destination = new FileStream(
                     partialPath,
                     append ? FileMode.Append : FileMode.Create,
@@ -255,22 +285,26 @@ internal sealed class ResumableModelDownloader
                 var buffer = ArrayPool<byte>.Shared.Rent(1024 * 1024);
                 try
                 {
+                    using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                     var downloaded = existingLength;
                     var lastReportedBytes = existingLength;
                     var lastReportedTime = Stopwatch.GetTimestamp();
                     while (true)
                     {
+                        readTimeout.CancelAfter(_readIdleTimeout);
                         var read = await source.ReadAsync(
                             buffer.AsMemory(0, buffer.Length),
-                            cancellationToken);
+                            readTimeout.Token).ConfigureAwait(false);
+                        readTimeout.CancelAfter(Timeout.InfiniteTimeSpan);
                         if (read == 0)
                         {
                             break;
                         }
 
+                        if (downloaded + read > file.Size) throw new IOException("下载文件超过预期大小，已停止写入。");
                         await destination.WriteAsync(
                             buffer.AsMemory(0, read),
-                            cancellationToken);
+                            cancellationToken).ConfigureAwait(false);
                         downloaded += read;
                         var shouldReport = downloaded >= file.Size ||
                                            downloaded - lastReportedBytes >=
@@ -283,7 +317,7 @@ internal sealed class ResumableModelDownloader
                             progress?.Report(new ModelDownloadProgress(
                                 completedBytes + Math.Min(downloaded, file.Size),
                                 totalBytes,
-                                file.DisplayName));
+                                file.DisplayName, $"下载源：{new Uri(downloadUrl).Host}"));
                             lastReportedBytes = downloaded;
                             lastReportedTime = Stopwatch.GetTimestamp();
                         }
@@ -293,6 +327,7 @@ internal sealed class ResumableModelDownloader
                 {
                     ArrayPool<byte>.Shared.Return(buffer);
                 }
+                await destination.FlushAsync(cancellationToken).ConfigureAwait(false);
 
                 if (new FileInfo(partialPath).Length != file.Size)
                 {
@@ -306,7 +341,6 @@ internal sealed class ResumableModelDownloader
                 exception is HttpRequestException or IOException or
                     OperationCanceledException)
             {
-                lastError = exception;
                 if (cancellationToken.IsCancellationRequested)
                 {
                     throw;
@@ -328,12 +362,10 @@ internal sealed class ResumableModelDownloader
                 {
                     return downloadUrl;
                 }
+                if (exception is OperationCanceledException)
+                    throw new IOException("下载源连接或传输等待超时。", exception);
+                throw;
             }
-        }
-
-        throw new IOException(
-            $"{file.DisplayName} 的所有下载地址均不可用。",
-            lastError);
     }
 
     private static string GetUsefulErrorMessage(Exception exception)
@@ -369,7 +401,7 @@ internal sealed class ResumableModelDownloader
             FileShare.Read,
             1024 * 1024,
             FileOptions.Asynchronous | FileOptions.SequentialScan);
-        var hash = await SHA256.HashDataAsync(stream, cancellationToken);
+        var hash = await SHA256.HashDataAsync(stream, cancellationToken).ConfigureAwait(false);
         return Convert.ToHexString(hash).Equals(
             expectedSha256,
             StringComparison.OrdinalIgnoreCase);
@@ -377,6 +409,7 @@ internal sealed class ResumableModelDownloader
 
     private static string ResolveInside(string root, string relativePath)
     {
+        root = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var path = Path.GetFullPath(Path.Combine(root, relativePath));
         if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase))
         {

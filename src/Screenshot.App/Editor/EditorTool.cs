@@ -11,4 +11,9 @@ public enum EditorTool
     Brush,
     Mosaic,
     Text,
+    Line,
+    WavyLine,
+    RectangleMosaic,
+    DoubleArrow,
+    HollowDoubleArrow,
 }

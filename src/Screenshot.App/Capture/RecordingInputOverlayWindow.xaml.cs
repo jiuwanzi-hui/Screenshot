@@ -13,6 +13,8 @@ using WinForms = System.Windows.Forms;
 
 namespace Screenshot.App.Capture;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001",
+    Justification = "The pointer frame subscription is disposed by OnClosed.")]
 public partial class RecordingInputOverlayWindow : Window
 {
     private const int ExtendedWindowStyleIndex = -20;
@@ -30,8 +32,7 @@ public partial class RecordingInputOverlayWindow : Window
     private static readonly TimeSpan TrailLifetime = TimeSpan.FromMilliseconds(320);
 
     private readonly DispatcherTimer _clearTimer;
-    private readonly DispatcherTimer _trailTimer;
-    private readonly DispatcherTimer _mousePositionTimer;
+    private readonly PointerFramePump _pointerFrames;
     private readonly DrawingRectangle _windowBounds;
     private readonly MonitorDpiScale _dpi;
     private readonly Queue<TrailSegment> _trailSegments = [];
@@ -60,18 +61,7 @@ public partial class RecordingInputOverlayWindow : Window
             Interval = TimeSpan.FromMilliseconds(850),
         };
         _clearTimer.Tick += OnClearTimerTick;
-        var interactionFrameInterval =
-            DisplayRefreshRateService.GetInteractionFrameInterval(recordingBounds);
-        _trailTimer = new DispatcherTimer
-        {
-            Interval = interactionFrameInterval,
-        };
-        _trailTimer.Tick += OnTrailTimerTick;
-        _mousePositionTimer = new DispatcherTimer
-        {
-            Interval = interactionFrameInterval,
-        };
-        _mousePositionTimer.Tick += OnMousePositionTimerTick;
+        _pointerFrames = new PointerFramePump(PresentPointerFrame);
         SourceInitialized += OnSourceInitialized;
     }
 
@@ -109,13 +99,13 @@ public partial class RecordingInputOverlayWindow : Window
         _isPaused = isPaused;
         if (isPaused)
         {
-            _mousePositionTimer.Stop();
+            _pointerFrames.Stop();
             ClearInput();
             ClearMouseTrail();
         }
         else if (_showMouseTrail)
         {
-            _mousePositionTimer.Start();
+            _pointerFrames.Start();
         }
     }
 
@@ -124,11 +114,11 @@ public partial class RecordingInputOverlayWindow : Window
         _showMouseTrail = isEnabled;
         if (isEnabled && !_isPaused)
         {
-            _mousePositionTimer.Start();
+            _pointerFrames.Start();
         }
         else
         {
-            _mousePositionTimer.Stop();
+            _pointerFrames.Stop();
             ClearMouseTrail();
         }
     }
@@ -202,7 +192,7 @@ public partial class RecordingInputOverlayWindow : Window
             RemoveOldestTrailSegment();
         }
         UpdateTrailOpacity();
-        _trailTimer.Start();
+        _pointerFrames.Start();
     }
 
     protected override void OnClosed(EventArgs e)
@@ -212,10 +202,7 @@ public partial class RecordingInputOverlayWindow : Window
         _windowSource = null;
         _clearTimer.Stop();
         _clearTimer.Tick -= OnClearTimerTick;
-        _trailTimer.Stop();
-        _trailTimer.Tick -= OnTrailTimerTick;
-        _mousePositionTimer.Stop();
-        _mousePositionTimer.Tick -= OnMousePositionTimerTick;
+        _pointerFrames.Dispose();
         _trailSegments.Clear();
         base.OnClosed(e);
     }
@@ -223,6 +210,7 @@ public partial class RecordingInputOverlayWindow : Window
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
         var handle = new WindowInteropHelper(this).Handle;
+        OverlayShellBehavior.Apply(handle);
         _windowSource = HwndSource.FromHwnd(handle);
         _windowSource?.AddHook(OnWindowMessage);
         var extendedStyle = NativeMethods.GetWindowLongPtr(
@@ -270,8 +258,13 @@ public partial class RecordingInputOverlayWindow : Window
         ClearInput();
     }
 
-    private void OnTrailTimerTick(object? sender, EventArgs e)
+    private void PresentPointerFrame()
     {
+        if (_showMouseTrail && !_isPaused)
+        {
+            var cursor = WinForms.Cursor.Position;
+            ShowMousePosition(cursor.X, cursor.Y);
+        }
         var now = DateTime.UtcNow;
         while (_trailSegments.TryPeek(out var item) &&
                now - item.Timestamp >= TrailLifetime)
@@ -281,16 +274,10 @@ public partial class RecordingInputOverlayWindow : Window
 
         UpdateTrailOpacity();
 
-        if (_trailSegments.Count == 0)
+        if (_trailSegments.Count == 0 && (!_showMouseTrail || _isPaused))
         {
             ClearMouseTrail();
         }
-    }
-
-    private void OnMousePositionTimerTick(object? sender, EventArgs e)
-    {
-        var cursor = WinForms.Cursor.Position;
-        ShowMousePosition(cursor.X, cursor.Y);
     }
 
     private void ClearInput()
@@ -304,7 +291,7 @@ public partial class RecordingInputOverlayWindow : Window
 
     private void ClearMouseTrail()
     {
-        _trailTimer.Stop();
+        if (!_showMouseTrail || _isPaused) _pointerFrames.Stop();
         _trailSegments.Clear();
         MouseTrailCanvas.Children.Clear();
         _lastTrailPoint = null;

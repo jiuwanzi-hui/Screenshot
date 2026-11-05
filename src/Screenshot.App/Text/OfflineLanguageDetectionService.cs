@@ -24,10 +24,11 @@ internal interface IOfflineLanguageDetector
 internal sealed class Cld3OfflineLanguageDetector : IOfflineLanguageDetector
 {
     private const int MaximumDetectionBytes = 4096;
-    private static readonly Lazy<CLD3Detector> Detector = new(
-        () => new CLD3Detector(0, MaximumDetectionBytes),
-        LazyThreadSafetyMode.ExecutionAndPublication);
     private static readonly object DetectorLock = new();
+    private static readonly System.Threading.Timer IdleTimer = Core.BackgroundTimer.Create(static _ => ReleaseIdleDetector());
+    private static CLD3Detector? _detector;
+    private static long _lastUse;
+    private static readonly TimeSpan IdleTimeout = TimeSpan.FromSeconds(10);
 
     static Cld3OfflineLanguageDetector()
     {
@@ -40,6 +41,7 @@ internal sealed class Cld3OfflineLanguageDetector : IOfflineLanguageDetector
 
     public OfflineLanguageDetectionResult Detect(string text)
     {
+        text = Realtime.RealtimeTranslationContext.RestoreSourceText(text);
         if (string.IsNullOrWhiteSpace(text))
         {
             return OfflineLanguageDetectionResult.Failure("没有可检测语言的文字。");
@@ -58,7 +60,9 @@ internal sealed class Cld3OfflineLanguageDetector : IOfflineLanguageDetector
 
             lock (DetectorLock)
             {
-                var prediction = Detector.Value.PredictLanguage(text.Trim());
+                _lastUse = Environment.TickCount64;
+                IdleTimer.Change(IdleTimeout, Timeout.InfiniteTimeSpan);
+                var prediction = (_detector ??= new CLD3Detector(0, MaximumDetectionBytes)).PredictLanguage(text.Trim());
                 if (prediction is null ||
                     string.IsNullOrWhiteSpace(prediction.Language))
                 {
@@ -94,6 +98,22 @@ internal sealed class Cld3OfflineLanguageDetector : IOfflineLanguageDetector
         {
             return OfflineLanguageDetectionResult.Failure(
                 "无法加载本地语言检测器，请重新安装或使用完整的免安装包。");
+        }
+    }
+
+    private static void ReleaseIdleDetector()
+    {
+        lock (DetectorLock)
+        {
+            if (_detector is null) return;
+            var remaining = IdleTimeout - TimeSpan.FromMilliseconds(Environment.TickCount64 - _lastUse);
+            if (remaining > TimeSpan.Zero)
+            {
+                IdleTimer.Change(remaining, Timeout.InfiniteTimeSpan);
+                return;
+            }
+            _detector.Dispose();
+            _detector = null;
         }
     }
 

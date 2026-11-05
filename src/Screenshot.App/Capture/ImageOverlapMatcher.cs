@@ -409,38 +409,58 @@ public static class ImageOverlapMatcher
             preferredNewRows,
             minimumNewRows,
             maximumNewRows);
-        var candidates = new List<OverlapCandidate>();
-
-        foreach (var probeNewRows in denseProbeRows)
+        // Dense probes are independent read-only scores over the same two
+        // pixel buffers. Run them concurrently so a fast reverse fling does
+        // not make the single matcher core the bottleneck. The result array
+        // keeps the final candidate ordering deterministic, while reserving
+        // one logical processor for the capture/UI threads.
+        var denseResults = new OverlapCandidate?[denseProbeRows.Length];
+        var frameHeight = previousFrame.Height;
+        var frameWidth = previousFrame.Width;
+        var parallelOptions = new ParallelOptions
         {
-            // Dense ranking must include horizontal micro-search. A 1px DWM /
-            // compositor drift otherwise scores near-zero at the true vertical
-            // displacement and the stitch latches onto a weaker wrong peak.
-            // Ranking pass uses moderate samples; RefineAroundCandidate re-scores
-            // the winner with denser sampling. Horizontal micro-search stays on
-            // so 1px drift cannot zero out the true vertical peak during ranking.
-            var denseComparison = ScoreWithHorizontalMicroSearch(
-                previousPixels,
-                currentPixels,
-                probeNewRows,
-                ignoredLeft,
-                comparisonRight,
-                ignoredBottom,
-                minimumOverlapRows,
-                topOffsets,
-                targetRowSamples: previousFrame.Height >= 360 ? 64 : 80,
-                targetColumnSamples: previousFrame.Width >= 300 ? 48 : 36,
-                minimumTexture: MinimumReliableTexture);
-
-            if (denseComparison is { } denseMetrics &&
-                denseMetrics.Confidence >= minimumConfidence)
+            MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 2),
+        };
+        Parallel.For(
+            0,
+            denseProbeRows.Length,
+            parallelOptions,
+            index =>
             {
-                candidates.Add(new OverlapCandidate(
+                var probeNewRows = denseProbeRows[index];
+                // Dense ranking must include horizontal micro-search. A 1px DWM /
+                // compositor drift otherwise scores near-zero at the true vertical
+                // displacement and the stitch latches onto a weaker wrong peak.
+                // Ranking pass uses moderate samples; RefineAroundCandidate re-scores
+                // the winner with denser sampling. Horizontal micro-search stays on
+                // so 1px drift cannot zero out the true vertical peak during ranking.
+                var denseComparison = ScoreWithHorizontalMicroSearch(
+                    previousPixels,
+                    currentPixels,
                     probeNewRows,
-                    denseMetrics.Confidence,
-                    denseMetrics.HorizontalOffset));
-            }
-        }
+                    ignoredLeft,
+                    comparisonRight,
+                    ignoredBottom,
+                    minimumOverlapRows,
+                    topOffsets,
+                    targetRowSamples: frameHeight >= 360 ? 64 : 80,
+                    targetColumnSamples: frameWidth >= 300 ? 48 : 36,
+                    minimumTexture: MinimumReliableTexture);
+
+                if (denseComparison is { } denseMetrics &&
+                    denseMetrics.Confidence >= minimumConfidence)
+                {
+                    denseResults[index] = new OverlapCandidate(
+                        probeNewRows,
+                        denseMetrics.Confidence,
+                        denseMetrics.HorizontalOffset);
+                }
+            });
+
+        var candidates = denseResults
+            .Where(candidate => candidate is not null)
+            .Select(candidate => candidate!)
+            .ToList();
 
         if (candidates.Count == 0)
         {

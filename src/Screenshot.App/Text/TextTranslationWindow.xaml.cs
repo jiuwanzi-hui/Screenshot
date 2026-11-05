@@ -16,6 +16,7 @@ public partial class TextTranslationWindow : Window, IDisposable
     private CancellationTokenSource? _translationCancellation;
     private long _translationVersion;
     private bool _isInitialized;
+    private bool _closed;
 
     public TextTranslationWindow(
         Func<AppSettings> settingsProvider,
@@ -27,6 +28,7 @@ public partial class TextTranslationWindow : Window, IDisposable
         _targetLanguageChanged = targetLanguageChanged;
         _installModelRequested = installModelRequested;
         InitializeComponent();
+        Screenshot.App.Presentation.WindowShell.Attach(this);
         WindowPlacementService.Track(this, WindowPlacementKeys.TextTranslation);
 
         SourceLanguageComboBox.ItemsSource = new[]
@@ -35,7 +37,7 @@ public partial class TextTranslationWindow : Window, IDisposable
         }.Concat(TranslationLanguageCatalog.Languages.Select(language =>
             new LanguageOption(language.Tag, language.DisplayName)));
         TargetLanguageComboBox.ItemsSource =
-            TranslationLanguageCatalog.OfflineTargetLanguages.Select(language =>
+            TranslationLanguageCatalog.Languages.Select(language =>
                 new LanguageOption(language.Tag, language.DisplayName));
         SourceLanguageComboBox.SelectedValue = "auto";
         TargetLanguageComboBox.SelectedValue =
@@ -45,7 +47,21 @@ public partial class TextTranslationWindow : Window, IDisposable
             TargetLanguageComboBox.SelectedValue = "zh-Hans";
         }
 
+        TranslationTargetPreferences.Changed += OnSharedTargetChanged;
         _isInitialized = true;
+        RefreshModelRequirement();
+    }
+
+    private void OnSharedTargetChanged(object? sender, EventArgs e)
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        if (TranslationTargetPreferences.Language is { } language &&
+            TargetLanguageComboBox.SelectedValue as string != language)
+            TargetLanguageComboBox.SelectedValue = language;
     }
 
     public void SetSourceText(string text, bool translateImmediately)
@@ -63,13 +79,26 @@ public partial class TextTranslationWindow : Window, IDisposable
     {
         Dispose();
         base.OnClosed(e);
+        Core.MemoryFootprint.TrimAfterHeavyOperation();
     }
 
     public void Dispose()
     {
+        if (_closed)
+        {
+            return;
+        }
+
+        _closed = true;
+        Interlocked.Increment(ref _translationVersion);
+        TranslationTargetPreferences.Changed -= OnSharedTargetChanged;
         _translationCancellation?.Cancel();
         _translationCancellation?.Dispose();
         _translationCancellation = null;
+        SourceTextBox.Clear();
+        ResultTextBox.Clear();
+        SourceLanguageComboBox.ItemsSource = null;
+        TargetLanguageComboBox.ItemsSource = null;
         GC.SuppressFinalize(this);
     }
 
@@ -82,7 +111,7 @@ public partial class TextTranslationWindow : Window, IDisposable
         object sender,
         TextChangedEventArgs e)
     {
-        if (!_isInitialized)
+        if (_closed || !_isInitialized)
         {
             return;
         }
@@ -94,7 +123,7 @@ public partial class TextTranslationWindow : Window, IDisposable
         object sender,
         SelectionChangedEventArgs e)
     {
-        if (!_isInitialized)
+        if (_closed || !_isInitialized)
         {
             return;
         }
@@ -108,14 +137,34 @@ public partial class TextTranslationWindow : Window, IDisposable
 
         if (string.IsNullOrWhiteSpace(SourceTextBox.Text))
         {
+            RefreshModelRequirement();
             return;
         }
 
         _ = BeginTranslationAsync(delayBeforeTranslation: true);
     }
 
+    private void RefreshModelRequirement()
+    {
+        var engine = _settingsProvider().OfflineTranslationEngine;
+        var manager = engine == OfflineTranslationEngine.HunyuanLightweight
+            ? LocalLargeTranslationModelManager.LightweightShared : LocalLargeTranslationModelManager.Shared;
+        if (engine != OfflineTranslationEngine.Mozilla && !manager.GetStatus().IsInstalled)
+        {
+            StatusText.Text = $"需要下载 {manager.DisplayName} 多语言模型（模型约 {manager.ModelDownloadSize / 1073741824d:0.00} GiB）。多种语言共用一份，下载后离线运行。";
+            InstallModelButton.Visibility = Visibility.Visible;
+            CopyButton.Visibility = Visibility.Collapsed;
+        }
+    }
+
     private async Task BeginTranslationAsync(bool delayBeforeTranslation)
     {
+        if (_closed)
+        {
+            return;
+        }
+
+        TranslationActivity.IsActive = false;
         var sourceText = SourceTextBox.Text.Trim();
         var version = Interlocked.Increment(ref _translationVersion);
         _translationCancellation?.Cancel();
@@ -151,32 +200,50 @@ public partial class TextTranslationWindow : Window, IDisposable
         long version,
         CancellationToken cancellationToken)
     {
+        if (_closed)
+        {
+            return;
+        }
+
         TranslateButton.IsEnabled = false;
         ResultTextBox.Clear();
         InstallModelButton.Visibility = Visibility.Collapsed;
         CopyButton.Visibility = Visibility.Visible;
+        TranslationActivity.IsActive = true;
+        StatusText.ToolTip = null;
         StatusText.Text = "正在使用本机离线模型翻译…";
+        InstallModelButton.Content = "下载所需离线模型";
+        using var progress = TranslationProgress.Begin(message =>
+        {
+            if (_closed || version != Volatile.Read(ref _translationVersion) || cancellationToken.IsCancellationRequested) return;
+            StatusText.Text = message;
+            StatusText.ToolTip = message;
+            if (message.Contains("设置", StringComparison.Ordinal))
+            {
+                InstallModelButton.Content = "打开翻译设置";
+                InstallModelButton.Visibility = Visibility.Visible;
+            }
+        });
         try
         {
             var settings = _settingsProvider();
             var bergamot = new OfflineTranslationProvider(
                 OfflineTranslationModelManager.Shared,
                 settings.OfflineTranslationQuality);
-            ITranslationProvider provider = settings.OfflineTranslationEngine ==
-                OfflineTranslationEngine.QwenLargeModel
-                ? new OrderedTranslationProvider(
-                    [
-                        bergamot,
-                        new LocalLargeModelTranslationProvider(
-                            LocalLargeTranslationModelManager.Shared),
-                    ])
-                : bergamot;
+            ITranslationProvider provider = settings.OfflineTranslationEngine switch
+            {
+                OfflineTranslationEngine.HunyuanLightweight => new LocalLargeModelTranslationProvider(
+                    LocalLargeTranslationModelManager.LightweightShared, bergamot),
+                OfflineTranslationEngine.QwenLargeModel => new LocalLargeModelTranslationProvider(
+                    LocalLargeTranslationModelManager.Shared, bergamot),
+                _ => bergamot,
+            };
             var result = await provider.TranslateAsync(
                 sourceText,
                 SourceLanguageComboBox.SelectedValue as string ?? "auto",
                 TargetLanguageComboBox.SelectedValue as string ?? "zh-Hans",
                 cancellationToken);
-            if (version != Volatile.Read(ref _translationVersion) ||
+            if (_closed || version != Volatile.Read(ref _translationVersion) ||
                 cancellationToken.IsCancellationRequested)
             {
                 return;
@@ -186,10 +253,12 @@ public partial class TextTranslationWindow : Window, IDisposable
             {
                 ResultTextBox.Clear();
                 StatusText.Text = result.ErrorMessage ?? "离线翻译失败。";
+                StatusText.ToolTip = StatusText.Text;
                 if ((result.ErrorMessage ?? string.Empty).Contains(
-                        "目标语言包",
-                        StringComparison.Ordinal))
+                        "下载",
+                        StringComparison.Ordinal) || result.ErrorMessage?.Contains("设置", StringComparison.Ordinal) == true)
                 {
+                    if (result.ErrorMessage?.Contains("设置", StringComparison.Ordinal) == true) InstallModelButton.Content = "打开翻译设置";
                     InstallModelButton.Visibility = Visibility.Visible;
                     CopyButton.Visibility = Visibility.Collapsed;
                 }
@@ -220,6 +289,7 @@ public partial class TextTranslationWindow : Window, IDisposable
 
             ResultTextBox.Text = result.Text;
             StatusText.Text = "离线翻译完成。";
+            StatusText.ToolTip = result.Notice;
         }
         catch (OperationCanceledException)
         {
@@ -228,16 +298,17 @@ public partial class TextTranslationWindow : Window, IDisposable
         }
         catch (Exception exception)
         {
-            if (version == Volatile.Read(ref _translationVersion))
+            if (!_closed && version == Volatile.Read(ref _translationVersion))
             {
                 StatusText.Text = $"离线翻译失败：{exception.Message}";
             }
         }
         finally
         {
-            if (version == Volatile.Read(ref _translationVersion))
+            if (!_closed && version == Volatile.Read(ref _translationVersion))
             {
                 TranslateButton.IsEnabled = true;
+                TranslationActivity.IsActive = false;
             }
         }
     }

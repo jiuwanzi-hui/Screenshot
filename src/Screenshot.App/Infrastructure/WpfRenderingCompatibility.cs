@@ -6,6 +6,8 @@ namespace Screenshot.App.Infrastructure;
 
 internal static class WpfRenderingCompatibility
 {
+    private const string SoftwareRenderingArgument = "--software-rendering";
+    private const string HardwareRenderingArgument = "--hardware-rendering";
     private const int DisplayDeviceAttachedToDesktop = 0x00000001;
     private const int DisplayDeviceMirroringDriver = 0x00000008;
     private const int DisplayDeviceDisconnect = 0x02000000;
@@ -25,23 +27,23 @@ internal static class WpfRenderingCompatibility
 
     public static void ConfigureForCurrentSession()
     {
+        RenderOptions.ProcessRenderMode = GetCurrentSessionRenderMode();
+        Capture.CaptureTimingDiagnostics.Mark("wpf-rendering-mode",
+            $"mode={RenderOptions.ProcessRenderMode}");
+    }
+
+    internal static RenderMode GetCurrentSessionRenderMode()
+    {
         var arguments = Environment.GetCommandLineArgs();
-        if (arguments.Any(argument => string.Equals(
-                argument,
-                "--software-rendering",
-                StringComparison.OrdinalIgnoreCase)))
+        var explicitArgument = GetExplicitRenderingArgument(arguments);
+        if (explicitArgument == SoftwareRenderingArgument)
         {
-            RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
-            return;
+            return RenderMode.SoftwareOnly;
         }
 
-        if (arguments.Any(argument => string.Equals(
-                argument,
-                "--hardware-rendering",
-                StringComparison.OrdinalIgnoreCase)))
+        if (explicitArgument == HardwareRenderingArgument)
         {
-            RenderOptions.ProcessRenderMode = RenderMode.Default;
-            return;
+            return RenderMode.Default;
         }
 
         // RenderCapability is the authoritative result for the active WPF
@@ -49,7 +51,7 @@ internal static class WpfRenderingCompatibility
         // adapter to provide the hardware render path when the dGPU is not the
         // display adapter. Fall back to the adapter-name compatibility check
         // only when WPF reports Tier 0.
-        RenderOptions.ProcessRenderMode =
+        return
             (RenderCapability.Tier >> 16) > 0
                 ? RenderMode.Default
                 : GetCompatibleRenderMode(
@@ -61,19 +63,13 @@ internal static class WpfRenderingCompatibility
         IEnumerable<DisplayAdapterDescriptor> adapters,
         IEnumerable<string>? commandLineArguments = null)
     {
-        var arguments = commandLineArguments ?? [];
-        if (arguments.Any(argument => string.Equals(
-                argument,
-                "--software-rendering",
-                StringComparison.OrdinalIgnoreCase)))
+        var explicitArgument = GetExplicitRenderingArgument(commandLineArguments ?? []);
+        if (explicitArgument == SoftwareRenderingArgument)
         {
             return RenderMode.SoftwareOnly;
         }
 
-        if (arguments.Any(argument => string.Equals(
-                argument,
-                "--hardware-rendering",
-                StringComparison.OrdinalIgnoreCase)))
+        if (explicitArgument == HardwareRenderingArgument)
         {
             return RenderMode.Default;
         }
@@ -87,6 +83,21 @@ internal static class WpfRenderingCompatibility
         return adapters.Any(IsPhysicalDesktopAdapter)
             ? RenderMode.Default
             : RenderMode.SoftwareOnly;
+    }
+
+    internal static string? GetExplicitRenderingArgument(IEnumerable<string> arguments)
+    {
+        var hardwareRequested = false;
+        foreach (var argument in arguments)
+        {
+            // Preserve the existing software override precedence regardless
+            // of argument order, and forward only this UI rendering choice.
+            if (string.Equals(argument, SoftwareRenderingArgument, StringComparison.OrdinalIgnoreCase))
+                return SoftwareRenderingArgument;
+            if (string.Equals(argument, HardwareRenderingArgument, StringComparison.OrdinalIgnoreCase))
+                hardwareRequested = true;
+        }
+        return hardwareRequested ? HardwareRenderingArgument : null;
     }
 
     private static bool IsPhysicalDesktopAdapter(

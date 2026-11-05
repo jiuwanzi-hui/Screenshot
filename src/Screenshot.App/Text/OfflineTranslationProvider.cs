@@ -13,11 +13,8 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
     private static readonly object EngineLifecycleLock = new();
     private static readonly ConcurrentDictionary<string, TranslationEngine> Engines =
         new(StringComparer.OrdinalIgnoreCase);
-    private static readonly System.Threading.Timer EngineUnloadTimer = new(
-        _ => TryUnloadIdleEngines(),
-        state: null,
-        Timeout.InfiniteTimeSpan,
-        Timeout.InfiniteTimeSpan);
+    private static readonly System.Threading.Timer EngineUnloadTimer = BackgroundTimer.Create(
+        static _ => TryUnloadIdleEngines());
     private static int _activeOperations;
     private readonly OfflineTranslationModelManager _modelManager;
     private readonly IOfflineLanguageDetector _languageDetector;
@@ -99,10 +96,17 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
             return TranslationSegmentsResult.Failure("请选择离线翻译目标语言。");
         }
 
-        if (segments.All(segment =>
-                TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(
-                    segment,
-                    targetLanguage)))
+        var effectiveSource = TranslationLanguageCatalog.NormalizeOfflineCode(sourceLanguage);
+        if (effectiveSource is null && segments.Any(segment =>
+                segment.Any(character => character is >= '\u3040' and <= '\u30ff')))
+        {
+            // Include Han-only headings when the surrounding article is Japanese.
+            // Other scripts keep the established per-segment mixed-page handling.
+            effectiveSource = "ja";
+        }
+        effectiveSource ??= sourceLanguage;
+        if (segments.All(segment => !TranslationTargetLanguageMatcher.ShouldTranslate(
+                segment, effectiveSource, targetLanguage)))
         {
             return new TranslationSegmentsResult(true, segments.ToArray(), null);
         }
@@ -110,10 +114,8 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
         var translated = segments.ToArray();
         var eligibleIndexes = Enumerable.Range(0, segments.Count)
             .Where(index =>
-                ShouldTranslateSegment(segments[index]) &&
-                !TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(
-                    segments[index],
-                    targetLanguage))
+                TranslationTargetLanguageMatcher.ShouldTranslate(
+                    segments[index], effectiveSource, targetLanguage))
             .ToArray();
         if (eligibleIndexes.Length == 0)
         {
@@ -126,7 +128,7 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
             var sources = ResolveSourceLanguages(
                 segments,
                 eligibleIndexes,
-                sourceLanguage);
+                effectiveSource);
             if (sources.ErrorMessage is not null)
             {
                 return TranslationSegmentsResult.Failure(sources.ErrorMessage);
@@ -155,7 +157,7 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
 
                 var original = indexes.Select(index => segments[index]).ToArray();
                 var termProtector = TranslationTermProtector.Create(original);
-                var current = termProtector.Segments.ToArray();
+                var current = termProtector.Segments.Select(TranslationTextNormalizer.Normalize).ToArray();
                 foreach (var configurationPath in configurationPaths)
                 {
                     var engine = Engines.GetOrAdd(
@@ -206,6 +208,12 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
         {
             return TranslationSegmentsResult.Failure(
                 "无法加载离线翻译模型，请返回设置重新下载语言包。");
+        }
+        catch (System.Runtime.InteropServices.SEHException)
+        {
+            // A native repair failure must not discard successful paragraphs
+            // from the primary model or abort the rest of a mixed-language page.
+            return TranslationSegmentsResult.Failure("离线翻译组件未能处理本段内容，请重试或检查所选语言包。");
         }
         finally
         {
@@ -302,7 +310,7 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
 
         var combinedDetection = _languageDetector.Detect(string.Join(
             Environment.NewLine,
-            eligibleIndexes.Select(index => segments[index])));
+            eligibleIndexes.Select(index => TranslationTextNormalizer.Normalize(segments[index]))));
         if (!combinedDetection.IsSuccess ||
             combinedDetection.ErrorMessage is not null ||
             !TranslationLanguageCatalog.IsSupportedSource(
@@ -317,7 +325,7 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
         var languageByIndex = new Dictionary<int, string>();
         foreach (var index in eligibleIndexes)
         {
-            var detection = _languageDetector.Detect(segments[index]);
+            var detection = _languageDetector.Detect(TranslationTextNormalizer.Normalize(segments[index]));
             // A screenshot contains many short UI fragments. Per-line CLD3
             // guesses are noisy and one bad guess used to abort the entire
             // capture. Use the reliable whole-capture language by default;
@@ -332,7 +340,7 @@ public sealed class OfflineTranslationProvider : ITranslationProvider
                     detection.LanguageCode)
                     ? detection.LanguageCode!
                     : combinedDetection.LanguageCode!;
-            if (TranslationTargetLanguageMatcher.HasLatinNaturalLanguageClause(
+            if (TranslationTargetLanguageMatcher.HasTranslatableLatinWords(
                     segments[index]) &&
                 string.Equals(
                     detectedLanguage,

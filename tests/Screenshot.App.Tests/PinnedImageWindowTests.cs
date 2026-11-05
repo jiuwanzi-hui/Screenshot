@@ -11,6 +11,60 @@ namespace Screenshot.App.Tests;
 
 public sealed class PinnedImageWindowTests
 {
+    [DesktopFact]
+    public void ClosingEditorKeepsAnnotationsAndRestoresWholeImageDragging()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var bitmap = new System.Drawing.Bitmap(180, 120);
+            for (var y = 0; y < bitmap.Height; y++)
+            for (var x = 0; x < bitmap.Width; x++)
+                bitmap.SetPixel(x, y, System.Drawing.Color.FromArgb(x, y, (x + y) % 256));
+            using var original = new CapturedImage((System.Drawing.Bitmap)bitmap.Clone());
+            var window = new PinnedImageWindow(original.Clone());
+            try
+            {
+                window.Show();
+                window.Width = 250;
+                window.Height = 167;
+                window.UpdateLayout();
+                var bounds = window.GetPersistenceBounds();
+                Assert.True(window.CanMoveImage);
+                Assert.IsType<MenuItem>(window.FindName("EditMenuItem")).RaiseEvent(
+                    new System.Windows.RoutedEventArgs(MenuItem.ClickEvent));
+                Assert.False(window.CanMoveImage);
+                var canvas = window.AnnotationCanvas;
+                canvas.AddMosaicRegions([new System.Windows.Rect(10, 10, 80, 40)]);
+                Assert.True(canvas.CanUndo);
+                using var expected = CapturedImage.FromBitmapSource(canvas.RenderEditedImage());
+                window.EditorToolbar!.Close();
+                Assert.True(window.CanMoveImage);
+                Assert.False(window.IsInlineEditorVisible);
+                Assert.Null(window.EditorToolbar);
+                Assert.Equal(bounds, window.GetPersistenceBounds());
+                using var actual = window.CloneImage();
+                ScrollCaptureFixedRegionsTests.AssertPixelsEqual(expected.Bitmap, actual.Bitmap);
+                Assert.Null(window.FindName("PinnedHeader"));
+                var surface = Assert.IsType<Border>(window.FindName("ImageSurface"));
+                Assert.Equal((byte)0, Assert.IsType<SolidColorBrush>(surface.Background).Color.A);
+                OpenCropFromToolbar(window);
+                Assert.False(window.CanMoveImage);
+                window.EditorToolbar!.Close();
+                Assert.True(window.CanMoveImage);
+            }
+            finally { window.Close(); }
+        });
+    }
+
+    private static void OpenCropFromToolbar(PinnedImageWindow window)
+    {
+        if (!window.IsInlineEditorVisible)
+            Assert.IsType<MenuItem>(window.FindName("EditMenuItem")).RaiseEvent(
+                new System.Windows.RoutedEventArgs(MenuItem.ClickEvent));
+        var crop = Assert.IsType<Button>(window.EditorToolbar!.FindName("CropToolButton"));
+        crop.RaiseEvent(new System.Windows.RoutedEventArgs(Button.ClickEvent));
+    }
+
     private static readonly string[] WindowResizeHandleNames =
     [
         "WindowResizeLeftThumb",
@@ -23,7 +77,7 @@ public sealed class PinnedImageWindowTests
         "WindowResizeBottomRightThumb",
     ];
 
-    [Fact]
+    [DesktopFact]
     public void SinglePinEditorZoomsWithTheMouseWheel()
     {
         WpfTestHost.Invoke(() =>
@@ -34,8 +88,8 @@ public sealed class PinnedImageWindowTests
             {
                 window.Show();
                 window.UpdateLayout();
-                Assert.IsType<Button>(window.FindName("EditButton")).RaiseEvent(
-                    new System.Windows.RoutedEventArgs(Button.ClickEvent));
+                Assert.IsType<MenuItem>(window.FindName("EditMenuItem")).RaiseEvent(
+                    new System.Windows.RoutedEventArgs(MenuItem.ClickEvent));
                 var editor = Assert.IsType<ImageEditorCanvas>(
                     window.FindName("InlineEditorCanvas"));
                 var surface = Assert.IsType<Border>(window.FindName("ImageSurface"));
@@ -60,7 +114,7 @@ public sealed class PinnedImageWindowTests
     }
 
     [Fact]
-    public void PinChromeChangesWithTheSelectedApplicationTheme()
+    public void SinglePinStaysTransparentAcrossApplicationThemes()
     {
         WpfTestHost.Invoke(() =>
         {
@@ -72,16 +126,23 @@ public sealed class PinnedImageWindowTests
             try
             {
                 var shell = Assert.IsType<Border>(window.FindName("PinnedShell"));
-                var dark = Assert.IsType<LinearGradientBrush>(shell.Background)
-                    .GradientStops[0].Color;
+                var dark = Assert.IsType<SolidColorBrush>(shell.Background).Color;
 
                 AppThemeManager.ApplySettingsPalette(
                     System.Windows.Application.Current.Resources,
                     AppTheme.CoralSky);
-                var light = Assert.IsType<LinearGradientBrush>(shell.Background)
-                    .GradientStops[0].Color;
+                var light = Assert.IsType<SolidColorBrush>(shell.Background).Color;
 
-                Assert.NotEqual(dark, light);
+                Assert.Equal((byte)0, dark.A);
+                Assert.Equal((byte)0, light.A);
+                Assert.Null(window.FindName("PinnedHeader"));
+                Assert.Equal(new System.Windows.Thickness(PinnedImageWindow.ShadowMarginDip), shell.Margin);
+                Assert.Equal(new System.Windows.Thickness(0), shell.BorderThickness);
+                Assert.Null(shell.Effect); // Resampling the entire image causes white edge artifacts.
+                var outline = Assert.IsType<PinnedImageOutline>(window.FindName("ImageOutline"));
+                var shadow = Assert.IsType<System.Windows.Media.Effects.DropShadowEffect>(outline.Effect);
+                Assert.InRange(shadow.Opacity, 0.2, 0.5);
+                Assert.True(shadow.BlurRadius > 0);
             }
             finally
             {
@@ -94,7 +155,7 @@ public sealed class PinnedImageWindowTests
     }
 
     [Fact]
-    public void CropAndAnnotationCommandsAreAvailableInTheTopToolbar()
+    public void ContextMenuOffersDirectEditingWithoutToolSubmenus()
     {
         WpfTestHost.Invoke(() =>
         {
@@ -102,8 +163,10 @@ public sealed class PinnedImageWindowTests
             var window = new PinnedImageWindow(image.Clone());
             try
             {
-                Assert.IsType<Button>(window.FindName("CropButton"));
-                Assert.IsType<Button>(window.FindName("EditButton"));
+                var shell = Assert.IsType<Border>(window.FindName("PinnedShell"));
+                var edit = Assert.Single(shell.ContextMenu.Items.OfType<MenuItem>(), item => Equals(item.Header, "编辑"));
+                Assert.False(edit.HasItems);
+                Assert.Same(window.FindName("EditMenuItem"), edit);
             }
             finally
             {
@@ -112,7 +175,7 @@ public sealed class PinnedImageWindowTests
         });
     }
 
-    [Fact]
+    [DesktopFact]
     public void SinglePinEditingUsesAnAttachedToolbarWithoutOpeningAnEditorPage()
     {
         WpfTestHost.Invoke(() =>
@@ -124,16 +187,27 @@ public sealed class PinnedImageWindowTests
                 window.Show();
                 window.UpdateLayout();
                 var windowCount = System.Windows.Application.Current.Windows.Count;
-                var editButton = Assert.IsType<Button>(window.FindName("EditButton"));
+                var shell = Assert.IsType<Border>(window.FindName("PinnedShell"));
+                var editButton = Assert.Single(shell.ContextMenu.Items.OfType<MenuItem>(), item => Equals(item.Header, "编辑"));
+                Assert.False(editButton.HasItems);
 
                 editButton.RaiseEvent(new System.Windows.RoutedEventArgs(
-                    Button.ClickEvent));
+                    MenuItem.ClickEvent));
 
                 Assert.True(window.IsInlineEditorVisible);
                 Assert.False(window.IsInlineCropVisible);
                 var toolbar = Assert.IsType<PinnedImageEditorToolbarWindow>(
                     window.EditorToolbar);
                 Assert.Same(window, toolbar.Owner);
+                Assert.True(toolbar.IsVisible);
+                Assert.True(toolbar.ActualWidth > 0 && toolbar.ActualHeight > 0);
+                Assert.True(MonitorGeometryService.TryGetWindowBounds(toolbar, out var toolbarBounds));
+                var workArea = MonitorGeometryService.GetWorkArea(toolbarBounds);
+                Assert.True(workArea.Contains(toolbarBounds));
+                var opacityButton = Assert.IsType<Button>(toolbar.FindName("OpacityButton"));
+                var opacity = opacityButton.ContextMenu.Items.OfType<MenuItem>().Single(item => Equals(item.Tag, "80"));
+                opacity.RaiseEvent(new System.Windows.RoutedEventArgs(MenuItem.ClickEvent));
+                Assert.Equal(0.8, window.Opacity);
                 Assert.IsType<RadioButton>(toolbar.FindName("ShapeToolButton"));
                 var arrowButton = Assert.IsType<RadioButton>(
                     toolbar.FindName("ArrowToolButton"));
@@ -173,7 +247,7 @@ public sealed class PinnedImageWindowTests
         });
     }
 
-    [Fact]
+    [DesktopFact]
     public void SinglePinEditorRestoresTheSavedEllipseShapeVariant()
     {
         WpfTestHost.Invoke(() =>
@@ -191,9 +265,9 @@ public sealed class PinnedImageWindowTests
             {
                 window.Show();
                 window.UpdateLayout();
-                var editButton = Assert.IsType<Button>(window.FindName("EditButton"));
+                var editButton = Assert.IsType<MenuItem>(window.FindName("EditMenuItem"));
                 editButton.RaiseEvent(new System.Windows.RoutedEventArgs(
-                    Button.ClickEvent));
+                    MenuItem.ClickEvent));
                 var firstToolbar = Assert.IsType<PinnedImageEditorToolbarWindow>(
                     window.EditorToolbar);
                 var ellipseMenuItem = Assert.IsType<MenuItem>(
@@ -221,7 +295,7 @@ public sealed class PinnedImageWindowTests
         });
     }
 
-    [Fact]
+    [DesktopFact]
     public void SinglePinEditorRestoresAndUsesTheSavedCurvedArrowVariant()
     {
         WpfTestHost.Invoke(() =>
@@ -238,8 +312,8 @@ public sealed class PinnedImageWindowTests
             {
                 window.Show();
                 window.UpdateLayout();
-                Assert.IsType<Button>(window.FindName("EditButton")).RaiseEvent(
-                    new System.Windows.RoutedEventArgs(Button.ClickEvent));
+                Assert.IsType<MenuItem>(window.FindName("EditMenuItem")).RaiseEvent(
+                    new System.Windows.RoutedEventArgs(MenuItem.ClickEvent));
                 var toolbar = Assert.IsType<PinnedImageEditorToolbarWindow>(
                     window.EditorToolbar);
                 var arrowButton = Assert.IsType<RadioButton>(
@@ -263,7 +337,7 @@ public sealed class PinnedImageWindowTests
         });
     }
 
-    [Fact]
+    [DesktopFact]
     public void SinglePinCropAppliesDirectlyToThePinnedImage()
     {
         WpfTestHost.Invoke(() =>
@@ -274,9 +348,7 @@ public sealed class PinnedImageWindowTests
             {
                 window.Show();
                 window.UpdateLayout();
-                var cropButton = Assert.IsType<Button>(window.FindName("CropButton"));
-                cropButton.RaiseEvent(new System.Windows.RoutedEventArgs(
-                    Button.ClickEvent));
+                OpenCropFromToolbar(window);
                 var toolbar = Assert.IsType<PinnedImageEditorToolbarWindow>(
                     window.EditorToolbar);
                 var applyButton = Assert.IsType<Button>(
@@ -297,7 +369,7 @@ public sealed class PinnedImageWindowTests
         });
     }
 
-    [Fact]
+    [DesktopFact]
     public void CropCornersReceiveDragInsteadOfTheWindowResizeHandles()
     {
         WpfTestHost.Invoke(() =>
@@ -308,15 +380,12 @@ public sealed class PinnedImageWindowTests
             {
                 window.Show();
                 window.UpdateLayout();
-                Assert.IsType<Button>(window.FindName("CropButton")).RaiseEvent(
-                    new System.Windows.RoutedEventArgs(Button.ClickEvent));
+                OpenCropFromToolbar(window);
                 window.UpdateLayout();
 
                 foreach (var name in WindowResizeHandleNames)
                 {
-                    Assert.False(Assert.IsType<
-                        System.Windows.Controls.Primitives.Thumb>(
-                            window.FindName(name)).IsHitTestVisible);
+                    Assert.Null(window.FindName(name));
                 }
 
                 var cropCorner = Assert.IsType<
@@ -341,10 +410,7 @@ public sealed class PinnedImageWindowTests
 
                 Assert.InRange(window.Preview.PixelWidth, 1, 199);
                 Assert.InRange(window.Preview.PixelHeight, 1, 139);
-                Assert.True(Assert.IsType<
-                    System.Windows.Controls.Primitives.Thumb>(
-                        window.FindName("WindowResizeTopLeftThumb"))
-                    .IsHitTestVisible);
+                Assert.True(window.CanMoveImage);
             }
             finally
             {
@@ -353,8 +419,8 @@ public sealed class PinnedImageWindowTests
         });
     }
 
-    [Fact]
-    public async Task AutomaticallyRecognizesAndDisplaysSelectableText()
+    [DesktopFact]
+    public async Task NewPinHasNoAutomaticTextLayerAndWholeImageCanMove()
     {
         PinnedImageWindow? window = null;
         Task? recognitionTask = null;
@@ -393,13 +459,10 @@ public sealed class PinnedImageWindowTests
             WpfTestHost.Invoke(() =>
             {
                 var overlay = Assert.IsType<Canvas>(window!.FindName("TextOverlay"));
-                var textBox = Assert.Single(overlay.Children.OfType<TextBox>());
-                var translateButton = Assert.IsType<Button>(
-                    window.FindName("TranslateButton"));
-                Assert.Equal("Selectable text", textBox.Text);
-                Assert.True(textBox.IsReadOnly);
-                Assert.True(translateButton.IsEnabled);
-                Assert.True(PinnedImageWindow.IsSelectableTextSource(textBox));
+                Assert.Empty(overlay.Children);
+                Assert.False(overlay.IsHitTestVisible);
+                Assert.True(window.CanMoveImage);
+                Assert.True(window.IsTranslationEnabled);
                 Assert.False(PinnedImageWindow.IsSelectableTextSource(overlay));
             });
         }
@@ -409,7 +472,7 @@ public sealed class PinnedImageWindowTests
         }
     }
 
-    [Fact]
+    [DesktopFact]
     public async Task TranslationReplacesSelectableOverlayTextOnTheImage()
     {
         PinnedImageWindow? window = null;
@@ -461,11 +524,10 @@ public sealed class PinnedImageWindowTests
                 Assert.NotEqual(
                     System.Windows.Media.Brushes.Transparent,
                     textBox.Background);
-                var statusText = Assert.IsType<TextBlock>(
-                    window.FindName("HeaderStatusText"));
-                Assert.Contains("译文可选择复制", statusText.Text);
-                Assert.Equal("原文", Assert.IsType<Button>(
-                    window.FindName("TranslateButton")).Content);
+                var statusText = Assert.IsType<MenuItem>(
+                    window.FindName("StatusMenuItem"));
+                Assert.Contains("已显示译文", Assert.IsType<string>(statusText.Header));
+                Assert.Equal("原文", window.TranslationActionText);
             });
 
             Task? showOriginalTask = null;
@@ -478,8 +540,7 @@ public sealed class PinnedImageWindowTests
                 var overlay = Assert.IsType<Canvas>(window!.FindName("TextOverlay"));
                 Assert.Equal("Hello", Assert.Single(
                     overlay.Children.OfType<TextBox>()).Text);
-                Assert.Equal("译文", Assert.IsType<Button>(
-                    window.FindName("TranslateButton")).Content);
+                Assert.Equal("译文", window.TranslationActionText);
             });
 
             Task? showCachedTranslationTask = null;
@@ -501,7 +562,7 @@ public sealed class PinnedImageWindowTests
         }
     }
 
-    [Fact]
+    [DesktopFact]
     public void IsTopmostAndHiddenFromTheTaskbar()
     {
         var isVisible = false;

@@ -9,14 +9,15 @@ namespace Screenshot.App.Capture;
 
 /// <summary>
 /// Opt-in timing trace for diagnosing shortcut capture hitches. It is disabled
-/// unless SNAPCUT_CAPTURE_TIMING is set to a non-empty value.
+/// unless a diagnostic build has SNAPCUT_CAPTURE_TIMING or its marker enabled.
 /// </summary>
 internal static class CaptureTimingDiagnostics
 {
     // The diagnostic symbol is used only for a temporary investigation build.
     // Normal Release builds keep all input-trace call sites compiled out.
 #if DEBUG || SNAPCUT_CAPTURE_DIAGNOSTICS
-    private static readonly bool IsEnabled = IsDiagnosticsEnabled();
+    private static readonly CaptureTimingSession? Session = LoadSession();
+    private static bool IsEnabled => Session?.IsActive(DateTimeOffset.UtcNow) == true;
 #else
     private static bool IsEnabled => false;
 #endif
@@ -33,24 +34,31 @@ internal static class CaptureTimingDiagnostics
     private static long _lastMouseMoveTimestamp;
     private static int _mouseMoveSampleCount;
 
-    private static bool IsDiagnosticsEnabled()
+    private static CaptureTimingSession? LoadSession()
     {
-        if (!string.IsNullOrWhiteSpace(
-                Environment.GetEnvironmentVariable("SNAPCUT_CAPTURE_TIMING")))
-        {
-            return true;
-        }
-
         try
         {
-            return File.Exists(Path.Combine(
-                AppMetadata.DiagnosticsDirectoryPath,
-                "capture-timing.enabled"));
+            var directory = AppMetadata.DiagnosticsDirectoryPath;
+            var marker = Path.Combine(directory, "capture-timing.enabled");
+            if (File.Exists(marker))
+                return new FileInfo(marker).Length <= 4096
+                    ? CaptureTimingSession.Parse(File.ReadAllText(marker), directory, DateTimeOffset.UtcNow) : null;
+            return string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SNAPCUT_CAPTURE_TIMING"))
+                ? null : CaptureTimingSession.Parse(null, directory, DateTimeOffset.UtcNow);
         }
         catch
         {
-            return false;
+            return null;
         }
+    }
+
+    [Conditional("DEBUG"), Conditional("SNAPCUT_CAPTURE_DIAGNOSTICS")]
+    public static void UiContext(string stage, string? details = null)
+    {
+        if (!IsEnabled) return;
+        Mark(stage, $"renderTier={System.Windows.Media.RenderCapability.Tier >> 16} " +
+            $"renderMode={System.Windows.Media.RenderOptions.ProcessRenderMode} " +
+            $"remote={System.Windows.SystemParameters.IsRemoteSession}{FormatDetails(details)}");
     }
 
     public static TimingScope Begin(string stage, string? details = null)
@@ -65,6 +73,7 @@ internal static class CaptureTimingDiagnostics
         return new TimingScope(stage);
     }
 
+    [Conditional("DEBUG"), Conditional("SNAPCUT_CAPTURE_DIAGNOSTICS")]
     public static void Mark(string stage, string? details = null)
     {
         if (!IsEnabled)
@@ -76,7 +85,7 @@ internal static class CaptureTimingDiagnostics
         Write($"mark stage={stage}{FormatDetails(details)}");
     }
 
-    [Conditional("SNAPCUT_CAPTURE_DIAGNOSTICS")]
+    [Conditional("SNAPCUT_INPUT_DIAGNOSTICS")]
     public static void Input(string message)
     {
         if (!IsEnabled)
@@ -90,7 +99,7 @@ internal static class CaptureTimingDiagnostics
 
     public static bool Enabled => IsEnabled;
 
-    [Conditional("SNAPCUT_CAPTURE_DIAGNOSTICS")]
+    [Conditional("SNAPCUT_INPUT_DIAGNOSTICS")]
     public static void BeginInputWindow(string reason)
     {
         if (!IsEnabled)
@@ -106,7 +115,7 @@ internal static class CaptureTimingDiagnostics
         Input($"input-window reason={reason}");
     }
 
-    [Conditional("SNAPCUT_CAPTURE_DIAGNOSTICS")]
+    [Conditional("SNAPCUT_INPUT_DIAGNOSTICS")]
     public static void MouseMove(
         string source,
         int x,
@@ -166,13 +175,24 @@ internal static class CaptureTimingDiagnostics
         {
             try
             {
-                Directory.CreateDirectory(AppMetadata.DiagnosticsDirectoryPath);
+                var directory = AppMetadata.DiagnosticsDirectoryPath;
+#if DEBUG || SNAPCUT_CAPTURE_DIAGNOSTICS
+                directory = Session?.Directory ?? directory;
+#endif
+                Directory.CreateDirectory(directory);
                 var path = Path.Combine(
-                    AppMetadata.DiagnosticsDirectoryPath,
-                    "capture-timing.log");
-                await foreach (var line in Queue.Reader.ReadAllAsync())
+                    directory,
+                    $"capture-timing-{Environment.ProcessId}.log");
+                // The shell and its disposable worker must never compete for
+                // one append handle. Batch only on this background writer.
+                await foreach (var firstLine in Queue.Reader.ReadAllAsync())
                 {
-                    await File.AppendAllTextAsync(path, line + Environment.NewLine)
+                    var batch = new StringBuilder(firstLine).AppendLine();
+                    for (var count = 1; count < 128 && Queue.Reader.TryRead(out var line); count++)
+                        batch.AppendLine(line);
+                    if (File.Exists(path) && new FileInfo(path).Length > 5 * 1024 * 1024)
+                        File.Move(path, path + ".previous", overwrite: true);
+                    await File.AppendAllTextAsync(path, batch.ToString())
                         .ConfigureAwait(false);
                 }
             }
@@ -185,7 +205,7 @@ internal static class CaptureTimingDiagnostics
 
     public static void Flush()
     {
-        if (!IsEnabled || Volatile.Read(ref _started) == 0)
+        if (Volatile.Read(ref _started) == 0)
         {
             return;
         }
@@ -208,10 +228,15 @@ internal static class CaptureTimingDiagnostics
             CultureInfo.InvariantCulture);
         var line = new StringBuilder()
             .Append(timestamp)
+            .Append(" pid=")
+            .Append(Environment.ProcessId)
+            .Append(" qpc=")
+            .Append(Stopwatch.GetTimestamp())
             .Append(" tid=")
             .Append(Environment.CurrentManagedThreadId)
             .Append(' ')
             .Append(message)
+            .Append(CaptureDiagnosticSnapshot.Read())
             .ToString();
         Queue.Writer.TryWrite(line);
     }

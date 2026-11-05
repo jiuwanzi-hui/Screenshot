@@ -1,9 +1,11 @@
 using System.IO;
 using System.Diagnostics.CodeAnalysis;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats;
 using SixLabors.ImageSharp.Formats.Gif;
 using SixLabors.ImageSharp.Formats.Webp;
 using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Memory;
 using Windows.Media.Editing;
 using Windows.Media.MediaProperties;
 using Windows.Media.Transcoding;
@@ -22,11 +24,15 @@ internal enum AnimatedImageFormat
 [SuppressMessage(
     "Design",
     "CA1001:Types that own disposable fields should be disposable",
-    Justification = "In-flight WinRT thumbnail operations can outlive the window close event; the session and gate are reclaimed together after those tasks complete.")]
-internal sealed class VideoPreviewSession
+    Justification = "The managed-only semaphore can still have canceled waiters unwinding during DisposeAsync; no WaitHandle is created. Native clips are explicitly retired under its gate.")]
+internal sealed class VideoPreviewSession : IAsyncDisposable
 {
-    private readonly MediaComposition _composition;
+    private MediaComposition? _composition;
     private readonly SemaphoreSlim _thumbnailGate = new(1, 1);
+    private readonly CancellationTokenSource _lifetime = new();
+    private readonly CancellationToken _lifetimeToken;
+    private readonly object _disposeGate = new();
+    private Task? _disposeTask;
 
     private VideoPreviewSession(
         MediaComposition composition,
@@ -35,6 +41,7 @@ internal sealed class VideoPreviewSession
         int pixelHeight)
     {
         _composition = composition;
+        _lifetimeToken = _lifetime.Token;
         Duration = duration;
         PixelWidth = pixelWidth;
         PixelHeight = pixelHeight;
@@ -46,12 +53,15 @@ internal sealed class VideoPreviewSession
 
     public int PixelHeight { get; }
 
-    public static async Task<VideoPreviewSession> CreateAsync(string inputPath)
+    public static async Task<VideoPreviewSession> CreateAsync(string inputPath,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(inputPath);
+        cancellationToken.ThrowIfCancellationRequested();
         var file = await StorageFile.GetFileFromPathAsync(
-            Path.GetFullPath(inputPath));
-        var clip = await MediaClip.CreateFromFileAsync(file);
+            Path.GetFullPath(inputPath)).AsTask(cancellationToken).ConfigureAwait(false);
+        var clip = await MediaClip.CreateFromFileAsync(file).AsTask(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
         var composition = new MediaComposition();
         composition.Clips.Add(clip);
         var properties = clip.GetVideoEncodingProperties();
@@ -70,8 +80,11 @@ internal sealed class VideoPreviewSession
 
     public async Task<byte[]> GetFrameAsync(
         TimeSpan position,
-        int thumbnailWidth = 960)
+        int thumbnailWidth = 960,
+        CancellationToken cancellationToken = default)
     {
+        using var request = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetimeToken);
+        var token = request.Token;
         var finalFramePosition = Duration > TimeSpan.FromMilliseconds(1)
             ? Duration - TimeSpan.FromMilliseconds(1)
             : TimeSpan.Zero;
@@ -80,19 +93,43 @@ internal sealed class VideoPreviewSession
             : position > finalFramePosition
                 ? finalFramePosition
                 : position;
-        await _thumbnailGate.WaitAsync();
+        await _thumbnailGate.WaitAsync(token).ConfigureAwait(false);
         try
         {
+            token.ThrowIfCancellationRequested();
+            ObjectDisposedException.ThrowIf(_composition is null, this);
             using var thumbnail = await _composition.GetThumbnailAsync(
                 clampedPosition,
                 Math.Clamp(thumbnailWidth, 96, 1920),
                 0,
-                VideoFramePrecision.NearestFrame);
-            return await VideoPostProcessingService.ReadAllBytesAsync(thumbnail);
+                VideoFramePrecision.NearestFrame).AsTask(token).ConfigureAwait(false);
+            return await VideoPostProcessingService.ReadAllBytesAsync(thumbnail, token).ConfigureAwait(false);
         }
         finally
         {
             _thumbnailGate.Release();
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        lock (_disposeGate) return new ValueTask(_disposeTask ??= Task.Run(ReleaseAsync));
+    }
+
+    private async Task ReleaseAsync()
+    {
+        await _lifetime.CancelAsync().ConfigureAwait(false);
+        await _thumbnailGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            _composition?.Clips.Clear();
+            _composition = null;
+        }
+        finally
+        {
+            _thumbnailGate.Release();
+            _lifetime.Dispose();
+            Core.MemoryFootprint.TrimAfterHeavyOperation();
         }
     }
 }
@@ -101,7 +138,7 @@ internal static class VideoPostProcessingService
 {
     public static async Task<TimeSpan> GetDurationAsync(string inputPath)
     {
-        var clip = await LoadClipAsync(inputPath);
+        var clip = await LoadClipAsync(inputPath).ConfigureAwait(false);
         return clip.OriginalDuration;
     }
 
@@ -112,7 +149,7 @@ internal static class VideoPostProcessingService
         IProgress<double>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var clip = await LoadClipAsync(inputPath);
+        var clip = await LoadClipAsync(inputPath, cancellationToken).ConfigureAwait(false);
         var duration = clip.OriginalDuration;
         ValidateRange(start, end, duration);
         clip.TrimTimeFromStart = start;
@@ -121,18 +158,28 @@ internal static class VideoPostProcessingService
         var composition = new MediaComposition();
         composition.Clips.Add(clip);
         var outputPath = CreateOutputPath(inputPath, "-trimmed", ".mp4");
-        var output = await CreateOutputFileAsync(outputPath);
-        var operation = composition.RenderToFileAsync(
-            output,
-            MediaTrimmingPreference.Precise);
-        operation.Progress = (_, value) => progress?.Report(value / 100d);
-        using var registration = cancellationToken.Register(operation.Cancel);
-        var result = await operation;
-        if (result != TranscodeFailureReason.None)
+        StorageFile? output = null;
+        var succeeded = false;
+        try
         {
-            throw new InvalidOperationException($"视频裁剪失败：{result}");
+            cancellationToken.ThrowIfCancellationRequested();
+            output = await CreateOutputFileAsync(outputPath).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            var operation = composition.RenderToFileAsync(output, MediaTrimmingPreference.Precise);
+            var result = await operation.AsTask(cancellationToken,
+                new Progress<double>(value => progress?.Report(value / 100d))).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (result != TranscodeFailureReason.None)
+                throw new InvalidOperationException($"视频裁剪失败：{result}");
+            succeeded = true;
+            return output.Path;
         }
-        return output.Path;
+        finally
+        {
+            composition.Clips.Clear();
+            if (!succeeded && output is not null) DeleteIncompleteOutput(outputPath);
+            Core.MemoryFootprint.TrimAfterHeavyOperation();
+        }
     }
 
     public static async Task<string> ExportAnimatedImageAsync(
@@ -143,7 +190,7 @@ internal static class VideoPostProcessingService
         IProgress<double>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        var clip = await LoadClipAsync(inputPath);
+        var clip = await LoadClipAsync(inputPath, cancellationToken).ConfigureAwait(false);
         var duration = clip.OriginalDuration;
         ValidateRange(start, end, duration);
         clip.TrimTimeFromStart = start;
@@ -163,7 +210,14 @@ internal static class VideoPostProcessingService
         var delayMilliseconds = Math.Max(
             20,
             (int)Math.Round(selectedDuration.TotalMilliseconds / frameCount));
+        // Keep pooling during this operation, then return all its retained native
+        // buffers. The global ImageSharp allocator otherwise outlives every export.
+        var configuration = Configuration.Default.Clone();
+        configuration.MemoryAllocator = MemoryAllocator.Create(new MemoryAllocatorOptions());
+        var decoderOptions = new DecoderOptions { Configuration = configuration };
         Image<Rgba32>? animation = null;
+        string? outputPath = null;
+        var succeeded = false;
         try
         {
             for (var index = 0; index < frameCount; index++)
@@ -175,9 +229,9 @@ internal static class VideoPostProcessingService
                     position,
                     720,
                     0,
-                    VideoFramePrecision.NearestFrame);
-                var bytes = await ReadAllBytesAsync(thumbnail);
-                using var frame = SharpImage.Load<Rgba32>(bytes);
+                    VideoFramePrecision.NearestFrame).AsTask(cancellationToken).ConfigureAwait(false);
+                var bytes = await ReadAllBytesAsync(thumbnail, cancellationToken).ConfigureAwait(false);
+                using var frame = SharpImage.Load<Rgba32>(decoderOptions, bytes);
                 SetFrameDelay(frame.Frames.RootFrame, format, delayMilliseconds);
                 if (animation is null)
                 {
@@ -196,14 +250,14 @@ internal static class VideoPostProcessingService
             }
 
             var extension = format == AnimatedImageFormat.Gif ? ".gif" : ".webp";
-            var outputPath = CreateOutputPath(inputPath, string.Empty, extension);
+            outputPath = CreateOutputPath(inputPath, string.Empty, extension);
             if (format == AnimatedImageFormat.Gif)
             {
                 animation.Metadata.GetGifMetadata().RepeatCount = 0;
                 await animation.SaveAsync(
                     outputPath,
                     new GifEncoder(),
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
             }
             else
             {
@@ -215,14 +269,20 @@ internal static class VideoPostProcessingService
                         Quality = 82,
                         FileFormat = WebpFileFormatType.Lossy,
                     },
-                    cancellationToken);
+                    cancellationToken).ConfigureAwait(false);
             }
+            cancellationToken.ThrowIfCancellationRequested();
             progress?.Report(1);
+            succeeded = true;
             return outputPath;
         }
         finally
         {
             animation?.Dispose();
+            configuration.MemoryAllocator.ReleaseRetainedResources();
+            composition.Clips.Clear();
+            if (!succeeded && outputPath is not null) DeleteIncompleteOutput(outputPath);
+            Core.MemoryFootprint.TrimAfterHeavyOperation();
         }
     }
 
@@ -243,12 +303,14 @@ internal static class VideoPostProcessingService
         }
     }
 
-    private static async Task<MediaClip> LoadClipAsync(string inputPath)
+    private static async Task<MediaClip> LoadClipAsync(string inputPath,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(inputPath);
+        cancellationToken.ThrowIfCancellationRequested();
         var file = await StorageFile.GetFileFromPathAsync(
-            Path.GetFullPath(inputPath));
-        return await MediaClip.CreateFromFileAsync(file);
+            Path.GetFullPath(inputPath)).AsTask(cancellationToken).ConfigureAwait(false);
+        return await MediaClip.CreateFromFileAsync(file).AsTask(cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<StorageFile> CreateOutputFileAsync(string path)
@@ -261,15 +323,23 @@ internal static class VideoPostProcessingService
     }
 
     internal static async Task<byte[]> ReadAllBytesAsync(
-        IRandomAccessStreamWithContentType stream)
+        IRandomAccessStreamWithContentType stream,
+        CancellationToken cancellationToken = default)
     {
         stream.Seek(0);
         using var reader = new DataReader(stream.GetInputStreamAt(0));
         var length = checked((uint)stream.Size);
-        _ = await reader.LoadAsync(length);
+        _ = await reader.LoadAsync(length).AsTask(cancellationToken).ConfigureAwait(false);
         var bytes = new byte[length];
         reader.ReadBytes(bytes);
         return bytes;
+    }
+
+    private static void DeleteIncompleteOutput(string path)
+    {
+        try { File.Delete(path); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
     }
 
     private static void ValidateRange(

@@ -125,6 +125,18 @@ public sealed class ControlledScrollCaptureStateTests
     }
 
     [Theory]
+    [InlineData(ControlledScrollCaptureState.BottomReached, ControlledScrollCaptureState.ScrollingDown)]
+    [InlineData(ControlledScrollCaptureState.TopReached, ControlledScrollCaptureState.ScrollingUpFirst)]
+    [InlineData(ControlledScrollCaptureState.FinalTopReached, ControlledScrollCaptureState.ScrollingUp)]
+    [InlineData(ControlledScrollCaptureState.FinalBottomReached, ControlledScrollCaptureState.ScrollingDownSecond)]
+    public void AStoppedViewportCanResumeTheSameLeg(ControlledScrollCaptureState stopped,
+        ControlledScrollCaptureState scrolling)
+    {
+        Assert.Equal(scrolling, Apply(stopped, ScrollCapturePointerAction.Click));
+        Assert.True(ScrollCaptureService.IsControlledResumeTransition(stopped, scrolling));
+    }
+
+    [Theory]
     [InlineData(ControlledScrollCaptureState.ScrollingUp)]
     [InlineData(ControlledScrollCaptureState.ScrollingDownSecond)]
     [InlineData(ControlledScrollCaptureState.FinalTopReached)]

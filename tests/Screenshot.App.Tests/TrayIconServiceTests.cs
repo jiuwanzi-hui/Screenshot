@@ -5,10 +5,16 @@ namespace Screenshot.App.Tests;
 
 public sealed class TrayIconServiceTests
 {
-    [Fact]
-    public void ContextMenuUsesApplicationThemeColorsAndComfortableSpacing()
+    [Theory]
+    [InlineData(AppTheme.AuroraMist)]
+    [InlineData(AppTheme.CoralSky)]
+    [InlineData(AppTheme.GinkgoPaper)]
+    [InlineData(AppTheme.ForestNight)]
+    [InlineData(AppTheme.ObsidianGold)]
+    [InlineData(AppTheme.NeonDeep)]
+    public void ContextMenuUsesApplicationThemeColorsAndComfortableSpacing(AppTheme theme)
     {
-        using var tray = new TrayIconService(AppTheme.ObsidianGold);
+        using var tray = new TrayIconService(theme);
         var menu = tray.ContextMenuForTesting;
         var darkBackground = menu.BackColor;
 
@@ -41,10 +47,10 @@ public sealed class TrayIconServiceTests
                 .OfType<System.Windows.Forms.ToolStripMenuItem>(),
             item => Assert.True(item.Padding.Top >= 6));
 
-        tray.ApplyTheme(AppTheme.CoralSky);
+        tray.ApplyTheme(AppThemeManager.IsDarkTheme(theme) ? AppTheme.CoralSky : AppTheme.ForestNight);
 
         Assert.NotEqual(darkBackground, menu.BackColor);
-        Assert.True(menu.BackColor.GetBrightness() > darkBackground.GetBrightness());
+        Assert.Equal(AppThemeManager.IsDarkTheme(theme), menu.BackColor.GetBrightness() > darkBackground.GetBrightness());
     }
 
     [Fact]
@@ -61,6 +67,41 @@ public sealed class TrayIconServiceTests
         item.PerformClick();
 
         Assert.True(requested);
+    }
+
+    [Theory]
+    [InlineData(AppTheme.GlassMist)]
+    [InlineData(AppTheme.GlassInk)]
+    public void ThemeMenuKeepsItsBackgroundAndHoverReadable(AppTheme theme)
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            using var tray = new TrayIconService(theme);
+            var menu = tray.ContextMenuForTesting;
+            Assert.Equal(255, menu.BackColor.A);
+            Assert.True(GetContrastRatio(menu.ForeColor, menu.BackColor) >= 4.5);
+            Assert.True(GetContrastRatio(tray.HoverForegroundForTesting, tray.HoverBackgroundForTesting) >= 4.5);
+            menu.Size = new System.Drawing.Size(180, 240);
+            using var bitmap = new System.Drawing.Bitmap(menu.Width, menu.Height);
+            using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
+                menu.Renderer.DrawToolStripBackground(new System.Windows.Forms.ToolStripRenderEventArgs(graphics, menu));
+            var first = bitmap.GetPixel(20, 20);
+            if (theme == AppTheme.GlassInk)
+                Assert.NotEqual(first, bitmap.GetPixel(menu.Width - 20, menu.Height - 20));
+            for (var y = 10; y < menu.Height - 10; y += 10)
+                for (var x = 10; x < menu.Width - 10; x += 10)
+                {
+                    var pixel = bitmap.GetPixel(x, y);
+                    if (theme == AppTheme.GlassMist)
+                        Assert.Equal(first, pixel);
+                    Assert.Equal(255, pixel.A);
+                    Assert.True(GetContrastRatio(menu.ForeColor, pixel) >= 4.5);
+                }
+            tray.ApplyTheme(AppTheme.ForestNight);
+            Assert.Equal(255, menu.BackColor.A);
+            tray.ApplyTheme(theme);
+            Assert.Equal(255, menu.BackColor.A);
+        });
     }
 
     [Fact]

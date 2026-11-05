@@ -35,7 +35,7 @@
             </Grid.RowDefinitions>
             <TextBlock Text="接口地址" />
             <TextBox x:Name="EndpointBox" Grid.Row="1" Margin="0,4,0,0" Height="32" VerticalContentAlignment="Center" />
-            <TextBlock Grid.Row="2" Margin="0,10,0,4" Text="模型名称" />
+            <TextBlock x:Name="ModelLabel" Grid.Row="2" Margin="0,10,0,4" Text="模型名称" />
             <Grid Grid.Row="3">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -47,6 +47,7 @@
                           IsEditable="True"
                           IsTextSearchEnabled="True"
                           VerticalContentAlignment="Center" />
+                <TextBox x:Name="AppIdBox" Grid.ColumnSpan="3" Height="32" Visibility="Collapsed" VerticalContentAlignment="Center" />
                 <Button x:Name="FetchModelsButton"
                         Grid.Column="2"
                         Height="32"
@@ -54,8 +55,20 @@
                         ToolTip="使用当前接口地址和 API Key 获取模型列表；接口不开放列表时仍可手动填写模型名称。"
                         Click="OnFetchModelsClick" />
             </Grid>
-            <TextBlock Grid.Row="4" Margin="0,10,0,4" Text="API Key" />
+            <TextBlock x:Name="KeyLabel" Grid.Row="4" Margin="0,10,0,4" Text="API Key" />
             <PasswordBox x:Name="ApiKeyBox" Grid.Row="5" Height="32" VerticalContentAlignment="Center" />
+            <StackPanel Grid.Row="6">
+            <StackPanel x:Name="PurposePanel" Margin="0,12,0,0">
+                <TextBlock Text="模型用途" Margin="0,0,0,4"/>
+                <ComboBox x:Name="PurposeBox" Height="32" SelectedValuePath="Tag">
+                    <ComboBoxItem Tag="Automatic" Content="自动判断（图片模型名称走图像接口）"/>
+                    <ComboBoxItem Tag="TextTranslation" Content="文字翻译 / 通用聊天（可用于问图）"/>
+                    <ComboBoxItem Tag="ImageQuestion" Content="看图问答（聊天接口，测试图片识别）"/>
+                    <ComboBoxItem Tag="ImageGeneration" Content="图片生成 / 编辑（图像接口）"/>
+                </ComboBox>
+                <TextBlock Text="测试会实际调用所选用途，可能消耗服务额度。图片专用模型仅用于问图，不参与文字翻译；服务商使用聊天接口时可手动选择。" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0"/>
+            </StackPanel>
+            <CheckBox x:Name="BaiduAdvancedBox" Margin="0,12,0,0" Visibility="Collapsed" Content="已在百度开通高级版或尊享版（允许更快的批量请求）" />
             <TextBlock x:Name="TestStatusText"
                        Grid.Row="6"
                        MinHeight="18"
@@ -64,6 +77,7 @@
                        FontSize="12"
                        Foreground="{DynamicResource AppTextSecondaryBrush}"
                        TextWrapping="Wrap" />
+            </StackPanel>
             <StackPanel Grid.Row="7"
                         Margin="0,12,0,0"
                         HorizontalAlignment="Right"

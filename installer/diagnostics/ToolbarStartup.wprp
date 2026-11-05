@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WindowsPerformanceRecorder Version="1.0" Author="SnapCut">
+  <Profiles>
+    <SystemCollector Id="ToolbarSystem" Name="SnapCut Toolbar System">
+      <BufferSize Value="1024" />
+      <Buffers Value="128" />
+    </SystemCollector>
+    <EventCollector Id="ToolbarEvents" Name="SnapCut Toolbar Events">
+      <BufferSize Value="1024" />
+      <Buffers Value="64" />
+    </EventCollector>
+    <SystemProvider Id="ToolbarKernel">
+      <Keywords>
+        <Keyword Value="CpuConfig" /><Keyword Value="ProcessThread" /><Keyword Value="Loader" />
+        <Keyword Value="CSwitch" /><Keyword Value="ReadyThread" /><Keyword Value="SampledProfile" />
+        <Keyword Value="ThreadPriority" /><Keyword Value="HardFaults" />
+      </Keywords>
+      <Stacks>
+        <Stack Value="CSwitch" /><Stack Value="ReadyThread" /><Stack Value="SampledProfile" />
+        <Stack Value="PagefaultHard" />
+      </Stacks>
+    </SystemProvider>
+    <EventProvider Id="ToolbarClr" Name="Microsoft-Windows-DotNETRuntime" Level="5">
+      <Keywords><Keyword Value="0x20098" /></Keywords>
+      <CaptureStateOnSave><Keyword Value="0x20118" /></CaptureStateOnSave>
+    </EventProvider>
+    <EventProvider Id="ToolbarClrRundown" Name="Microsoft-Windows-DotNETRuntimeRundown" Level="5" CaptureStateOnly="true">
+      <CaptureStateOnSave><Keyword Value="0x20118" /></CaptureStateOnSave>
+    </EventProvider>
+    <EventProvider Id="ToolbarDwm" Name="Microsoft-Windows-Dwm-Core" Level="5">
+      <Keywords><Keyword Value="0x1ffff" /></Keywords>
+    </EventProvider>
+    <EventProvider Id="ToolbarDxg" Name="Microsoft-Windows-DxgKrnl" Level="5">
+      <Keywords><Keyword Value="0x65" /></Keywords>
+    </EventProvider>
+    <Profile Id="ToolbarStartup.Verbose.Memory" Name="ToolbarStartup" Description="Bounded cold toolbar CPU, waits and compositor trace" LoggingMode="Memory" DetailLevel="Verbose">
+      <Collectors>
+        <SystemCollectorId Value="ToolbarSystem"><SystemProviderId Value="ToolbarKernel" /></SystemCollectorId>
+        <EventCollectorId Value="ToolbarEvents">
+          <EventProviders>
+            <EventProviderId Value="ToolbarClr" /><EventProviderId Value="ToolbarClrRundown" />
+            <EventProviderId Value="ToolbarDwm" /><EventProviderId Value="ToolbarDxg" />
+          </EventProviders>
+        </EventCollectorId>
+      </Collectors>
+    </Profile>
+  </Profiles>
+</WindowsPerformanceRecorder>

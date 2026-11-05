@@ -36,6 +36,14 @@ public sealed class CaptureHistoryService
     public CaptureHistoryItem? Add(CapturedImage capturedImage, int capacity)
     {
         ArgumentNullException.ThrowIfNull(capturedImage);
+        return capacity <= 0 ? null : Add(capturedImage.Preview, capacity);
+    }
+
+    internal CaptureHistoryItem? Add(BitmapSource fullImage, int capacity)
+    {
+        ArgumentNullException.ThrowIfNull(fullImage);
+        if (!fullImage.IsFrozen)
+            throw new ArgumentException("History requires an immutable image.", nameof(fullImage));
 
         capacity = Math.Clamp(capacity, 0, AppSettings.MaximumHistoryItems);
         if (capacity == 0)
@@ -43,15 +51,14 @@ public sealed class CaptureHistoryService
             return null;
         }
 
-        var fullImage = capturedImage.Preview;
         var capturedAt = DateTimeOffset.Now;
         var imagePath = CreateCachePath(capturedAt);
         var item = new CaptureHistoryItem(
             CreateThumbnail(fullImage),
             fullImage,
             capturedAt,
-            capturedImage.Bitmap.Width,
-            capturedImage.Bitmap.Height,
+            fullImage.PixelWidth,
+            fullImage.PixelHeight,
             imagePath);
         RememberPath(imagePath);
         Items.Insert(0, item);
@@ -113,17 +120,28 @@ public sealed class CaptureHistoryService
                 using var stream = file.OpenRead();
                 var decoder = BitmapDecoder.Create(
                     stream,
-                    BitmapCreateOptions.PreservePixelFormat,
-                    BitmapCacheOption.OnLoad);
-                var fullImage = decoder.Frames[0];
-                fullImage.Freeze();
+                    BitmapCreateOptions.DelayCreation,
+                    BitmapCacheOption.None);
+                var width = decoder.Frames[0].PixelWidth;
+                var height = decoder.Frames[0].PixelHeight;
+                stream.Position = 0;
+                // Read only a thumbnail-sized decode when restoring history.
+                // A page of large screenshots must not allocate every original.
+                var thumbnail = new BitmapImage();
+                thumbnail.BeginInit();
+                thumbnail.CacheOption = BitmapCacheOption.OnLoad;
+                if (width >= height) thumbnail.DecodePixelWidth = Math.Min(width, (int)MaximumThumbnailEdgeLength);
+                else thumbnail.DecodePixelHeight = Math.Min(height, (int)MaximumThumbnailEdgeLength);
+                thumbnail.StreamSource = stream;
+                thumbnail.EndInit();
+                thumbnail.Freeze();
                 loaded.Add(new CaptureHistoryItem(
-                    CreateThumbnail(fullImage),
+                    thumbnail,
                     file.FullName,
                     new DateTimeOffset(file.LastWriteTimeUtc, TimeSpan.Zero)
                         .ToLocalTime(),
-                    fullImage.PixelWidth,
-                    fullImage.PixelHeight));
+                    width,
+                    height));
             }
             catch (Exception exception) when (
                 exception is IOException
@@ -219,6 +237,7 @@ public sealed class CaptureHistoryService
         BitmapSource fullImage,
         string imagePath)
     {
+        var featureActivity = Infrastructure.FeatureActivity.Begin();
         _ = Task.Run(() =>
         {
             try
@@ -254,6 +273,13 @@ public sealed class CaptureHistoryService
             }
             catch (NotSupportedException)
             {
+            }
+            finally
+            {
+                // Encoding may finish after the capture/editor has closed.
+                // Retire its full-size WPF surface once the writer releases it.
+                MemoryFootprint.TrimAfterHeavyOperation();
+                featureActivity.Dispose();
             }
         });
     }

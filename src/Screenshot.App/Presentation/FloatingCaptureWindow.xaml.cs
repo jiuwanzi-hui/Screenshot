@@ -191,7 +191,7 @@ internal static class FloatingCaptureLayout
 
 public partial class FloatingCaptureWindow : Window
 {
-    private const double CollapsedOpacity = 0.25;
+    private const double CollapsedOpacity = 0.75;
     private const double CollapsedVisibleRatio = 0.75;
     private const double DockThresholdDip = 26;
     private const double MenuGapDip = 7;

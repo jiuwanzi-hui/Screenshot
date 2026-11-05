@@ -40,7 +40,7 @@
         <Style x:Key="ColorSlider" TargetType="Slider">
             <Setter Property="Height" Value="20" />
             <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Foreground" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AppAccentTextBrush}" />
             <Setter Property="Background" Value="{DynamicResource ImageEditorSliderTrackBrush}" />
             <Setter Property="Template">
                 <Setter.Value>

@@ -18,7 +18,7 @@ namespace Screenshot.App.Tests;
 /// </summary>
 public sealed class ScrollCaptureReverseFlingIntegrationTests
 {
-    [Theory]
+    [DesktopTheory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task DownThenUpFlingPrependsContentAboveTheStart(

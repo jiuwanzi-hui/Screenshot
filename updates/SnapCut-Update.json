@@ -1,18 +1,25 @@
 {
-  "version": "3.8.1",
-  "releasePage": "https://github.com/jiuwanzi-hui/Screenshot/releases/latest",
+  "version": "4.2.0",
+  "releasePage": "https://github.com/jiuwanzi-hui/Screenshot/releases/tag/v4.2.0",
   "installer": {
-    "fileName": "SnapCut-Setup-3.8.1-win-x64.exe",
-    "githubUrl": "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Setup-3.8.1-win-x64.exe",
-    "giteeUrl": "https://gitee.com/wwangyunhui/screenshot/releases/download/v3.8.1/SnapCut-Setup-3.8.1-win-x64.exe",
-    "size": 65796938,
-    "sha256": "29DB01129D93945F2BE34B0BE114E555728146FB9F6C24418993467643CD5D92"
+    "fileName": "SnapCut-Setup-4.2.0-win-x64.exe",
+    "githubUrl": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.2.0/SnapCut-Setup-4.2.0-win-x64.exe",
+    "giteeUrl": "https://gitee.com/wwangyunhui/screenshot/releases/download/v4.2.0/SnapCut-Setup-4.2.0-win-x64.exe",
+    "size": 99835740,
+    "sha256": "F9DDB0CA926D71586A9B3A256DD2F60F979E380D414B707496A5A3F60DAE051A"
   },
   "portable": {
-    "fileName": "SnapCut-Portable-3.8.1-win-x64.zip",
-    "githubUrl": "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Portable-3.8.1-win-x64.zip",
-    "giteeUrl": "https://gitee.com/wwangyunhui/screenshot/releases/download/v3.8.1/SnapCut-Portable-3.8.1-win-x64.zip",
-    "size": 95572559,
-    "sha256": "EC8B23D502B93F85631BF2932E0A7DCF675E30C69559BCAC85A97613FFDDEF8D"
+    "fileName": "SnapCut-Portable-4.2.0-win-x64.zip",
+    "githubUrl": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.2.0/SnapCut-Portable-4.2.0-win-x64.zip",
+    "giteeUrl": "https://gitee.com/wwangyunhui/screenshot/releases/download/v4.2.0/SnapCut-Portable-4.2.0-win-x64.zip",
+    "size": 131021405,
+    "sha256": "6F4882DC644009E89778C145CADD7A97B44D95CE911C68C5FF398C642DF63BA0"
+  },
+  "portable7z": {
+    "fileName": "SnapCut-Portable-4.2.0-win-x64.7z",
+    "githubUrl": "https://github.com/jiuwanzi-hui/Screenshot/releases/download/v4.2.0/SnapCut-Portable-4.2.0-win-x64.7z",
+    "giteeUrl": "https://gitee.com/wwangyunhui/screenshot/releases/download/v4.2.0/SnapCut-Portable-4.2.0-win-x64.7z",
+    "size": 97073750,
+    "sha256": "0F4CBBE022050C61369F6152BF5F025D4756E955AD9714C17D47477803081CD6"
   }
 }

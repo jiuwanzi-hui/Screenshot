@@ -8,8 +8,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>SnapCut</AssemblyName>
     <RootNamespace>Screenshot.App</RootNamespace>
+    <StartupObject>Screenshot.App.Program</StartupObject>
     <ApplicationIcon>Assets\Screenshot.ico</ApplicationIcon>
-    <Version>3.8.1</Version>
+    <Version>4.2.0</Version>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Authors>九万字 (jiuwanzi-hui)</Authors>
     <Copyright>Copyright © 2026 九万字 (jiuwanzi-hui). All rights reserved.</Copyright>
@@ -24,12 +25,22 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Presentation\Localization\*.json" />
     <Resource Include="Assets\Screenshot.ico" />
+    <Content Include="..\..\artifacts\translation-runtime\llama-b10276-bin-win-vulkan-x64.zip"
+             Condition="Exists('..\..\artifacts\translation-runtime\llama-b10276-bin-win-vulkan-x64.zip')"
+             Link="OfflinePackages\llama-b10276-bin-win-vulkan-x64.zip"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"
+             ExcludeFromSingleFile="true" />
     <Resource Include="Assets\Screenshot.png" />
     <Resource Include="Assets\DonateQr.jpg" />
     <Resource Include="Assets\SnapCutCommunityQr.jpg" />
     <Resource Include="Assets\CreatorAvatar.jpg" />
     <Content Include="THIRD-PARTY-NOTICES.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Licenses\Hy-MT2-1.8B.txt" CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <Content Include="Licenses\Qwen3-VL-4B.txt" CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <Content Include="..\..\LICENSE" Link="LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\..\updates\SnapCut-Releases.json" Link="SnapCut-Releases.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
@@ -40,8 +51,11 @@
                       Version="1.0.0"
                       NoWarn="NU1701" />
     <PackageReference Include="Panlingo.LanguageIdentification.CLD3" Version="0.8.0" />
-    <PackageReference Include="RapidOcrNet" Version="3.0.0" ExcludeAssets="build" />
+    <ProjectReference Include="..\Screenshot.OcrRuntime\Screenshot.OcrRuntime.csproj" />
+    <Content Include="..\Screenshot.OcrRuntime\LICENSE.txt" Link="Licenses\RapidOcrNet.txt"
+             CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <PackageReference Include="SixLabors.ImageSharp" Version="3.1.11" />
+    <PackageReference Include="SharpCompress" Version="0.50.4" />
     <PackageReference Include="ZXing.Net" Version="0.16.10" />
     <PackageReference Include="ScreenRecorderLib" Version="6.6.0" ExcludeAssets="build;compile" GeneratePathProperty="true" />
     <Reference Include="ScreenRecorderLib">

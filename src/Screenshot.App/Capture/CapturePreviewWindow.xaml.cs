@@ -57,6 +57,8 @@ public partial class CapturePreviewWindow : Window
                     virtualBounds.Height));
 
         InitializeComponent();
+        if (Content is FrameworkElement surface)
+            Screenshot.App.Presentation.UiTransitions.PrepareWindow(this, surface);
         _hasSavedPlacement = WindowPlacementService.Track(
             this,
             WindowPlacementKeys.CapturePreview);
@@ -82,6 +84,10 @@ public partial class CapturePreviewWindow : Window
     public void ConfigureForHistoryView()
     {
         Title = "截图历史查看";
+        // History previews are independent document windows. Keeping them in
+        // the capture UI's topmost band obscures the history list even after
+        // the user explicitly selects that list from the taskbar.
+        Topmost = false;
         _resizeWindowToImage = !_hasSavedPlacement;
         ConfirmButton.Visibility = Visibility.Collapsed;
         CloseButton.Visibility = Visibility.Collapsed;
@@ -109,6 +115,10 @@ public partial class CapturePreviewWindow : Window
         _isClosed = true;
         EndPanning();
         SourceInitialized -= OnSourceInitialized;
+        Loaded -= OnLoaded;
+        PreviewScrollViewer.SizeChanged -= OnPreviewViewportSizeChanged;
+        PreviewImage.Source = null;
+        DataContext = null;
         _capturedImage.Dispose();
         base.OnClosed(e);
         Core.MemoryFootprint.TrimAfterHeavyOperation();

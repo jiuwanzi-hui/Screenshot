@@ -13,7 +13,12 @@ internal sealed record PinnedImageState(
     double Left,
     double Top,
     double Width,
-    double Height);
+    double Height)
+{
+    // Older persisted images already contain the output scaling. Keep those
+    // pixels as-is; new pins store the source and defer scaling until export.
+    public int OutputScalePercent { get; init; } = 100;
+}
 
 internal sealed class PinnedImagePersistenceStore
 {

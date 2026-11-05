@@ -8,7 +8,6 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
-using System.Windows.Media.Animation;
 using System.Windows.Controls.Primitives;
 using System.Windows.Threading;
 using Microsoft.Win32;
@@ -46,20 +45,20 @@ public partial class VideoRecordingControlWindow : Window
     internal const string SuccessfulCompletionMessage = "录制完成，已保存";
     internal static readonly TimeSpan SuccessfulCompletionHoldDuration =
         TimeSpan.FromMilliseconds(1500);
-    private RegionVideoRecorder _recorder;
-    private readonly RecordingRegionFrameWindow _frameWindow;
-    private readonly string _saveDirectory;
-    private readonly Action<VideoRecordingPreferences>?
+    private RegionVideoRecorder _recorder = null!;
+    private RecordingRegionFrameWindow _frameWindow = null!;
+    private string _saveDirectory = null!;
+    private Action<VideoRecordingPreferences>?
         _recordingPreferencesChanged;
-    private readonly Action<VideoRecordingAnnotationPreferences>?
+    private Action<VideoRecordingAnnotationPreferences>?
         _recordingAnnotationPreferencesChanged;
-    private readonly Action<int[]>? _customColorPaletteChanged;
-    private readonly string _endRecordingHotKey;
-    private readonly double _toolbarScale;
+    private Action<int[]>? _customColorPaletteChanged;
+    private string _endRecordingHotKey = null!;
+    private double _toolbarScale;
     private VideoRecordingPreferences _recorderPreferences;
-    private readonly DispatcherTimer _elapsedTimer;
-    private readonly DispatcherTimer _collapsedToolbarTopmostTimer;
-    private readonly TimeSpan _interactionFrameInterval;
+    private DispatcherTimer _elapsedTimer = null!;
+    private DispatcherTimer _collapsedToolbarTopmostTimer = null!;
+    private TimeSpan _interactionFrameInterval;
     private readonly Stopwatch _elapsed = new();
     private readonly TaskCompletionSource<RegionVideoRecordingResult> _completion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -74,15 +73,15 @@ public partial class VideoRecordingControlWindow : Window
     private bool _allowClose;
     private bool _isCompleting;
     private bool _isStarting;
+    private bool _captureInteractionActive;
     private bool _isInitializingOptions = true;
     private bool _isInitializingDevices;
     private bool _hasSavedWindowPlacement;
     private Action _resetWindowPlacement = static () => { };
-    private readonly ToolbarDragHintBehavior _toolbarDragHint;
+    private ToolbarDragHintBehavior _toolbarDragHint = null!;
     private bool _isControlSurfaceDragging;
     private bool _isToolbarCollapsed;
     private DrawingRectangle _expandedToolbarBounds;
-    private bool _hasExpandedToolbarBounds;
     private Visibility _expandedStatusVisibility;
     private Visibility _expandedOptionsVisibility;
     private Visibility _expandedAnnotationVisibility;
@@ -93,11 +92,10 @@ public partial class VideoRecordingControlWindow : Window
     private bool _collapsedToolbarDragMoved;
     private int _toolbarMoveAnimationVersion;
     private static readonly TimeSpan ToolbarMoveAnimationDuration =
-        TimeSpan.FromMilliseconds(600);
+        TimeSpan.FromMilliseconds(150);
     private DrawingPoint _controlPointerStart;
     private DrawingRectangle _controlWindowStart;
     private long _lastControlDragUpdateTimestamp;
-    private long _lastCollapsedDragUpdateTimestamp;
     private int _feedbackVersion;
     private System.Windows.Media.Color _annotationColor =
         System.Windows.Media.Color.FromRgb(240, 68, 85);
@@ -108,7 +106,7 @@ public partial class VideoRecordingControlWindow : Window
     private IReadOnlyDictionary<CaptureToolbarFeature, string> _toolbarFeatureShortcuts =
         new Dictionary<CaptureToolbarFeature, string>();
 
-    private VideoRecordingControlWindow(
+    private void InitializeSession(
         RegionVideoRecorder recorder,
         string saveDirectory,
         bool recordSystemAudio,
@@ -181,6 +179,7 @@ public partial class VideoRecordingControlWindow : Window
         _annotationOverlay = annotationOverlay;
         _annotationOverlay.AnnotationSelectionChanged +=
             OnAnnotationSelectionChanged;
+        _annotationOverlay.AnnotationCanvas.HistoryChanged += OnAnnotationHistoryChanged;
         _annotationOverlay.AddHandler(
             Keyboard.PreviewKeyDownEvent,
             new System.Windows.Input.KeyEventHandler(OnAnnotationOverlayPreviewKeyDown),
@@ -197,7 +196,25 @@ public partial class VideoRecordingControlWindow : Window
         };
         _collapsedToolbarTopmostTimer.Tick += OnCollapsedToolbarTopmostTimerTick;
         _recorder.Failed += OnRecorderFailed;
+        _recorder.StartupProgress += OnRecorderStartupProgress;
         InitializeComponent();
+        AnnotationVariantButton.Configure(DoubleArrowToolButton, EditorTool.DoubleArrow, tool =>
+            SelectAnnotationTool(tool == EditorTool.HollowDoubleArrow
+                ? RecordingAnnotationTool.HollowDoubleArrow : RecordingAnnotationTool.DoubleArrow), inlineOptions: true);
+        NumberAnnotationOptions.Configure(NumberToolButton, () => _annotationOverlay?.AnnotationCanvas,
+            () => SelectAnnotationTool(RecordingAnnotationTool.Number), inlineOptions: true);
+        TextAnnotationOptions.Configure(TextToolButton, () => _annotationOverlay?.AnnotationCanvas,
+            () => SelectAnnotationTool(RecordingAnnotationTool.Text), inlineOptions: true);
+        foreach (var item in ArrowToolButton.ContextMenu.Items.OfType<System.Windows.Controls.MenuItem>())
+            item.IsCheckable = true;
+        RecordingToolAdjustments.OptionsChanged += ScheduleToolbarLayout;
+        ToolbarOptionsRow? VariantOptions() => AnnotationToolsPanel.Visibility == Visibility.Visible &&
+            _annotationOverlay?.DrawingCanvas.IsTextInputActive != true &&
+            _annotationOverlay?.AnnotationCanvas.IsMouseCaptured != true
+                ? RecordingToolAdjustments : null;
+        ToolbarVariantShortcut.Attach(this, VariantOptions);
+        ToolbarVariantShortcut.Attach(_annotationOverlay, VariantOptions);
+        MosaicToolButton.Content = AnnotationToolIcons.Create(AnnotationToolIcons.Mosaic);
         ToolbarLayoutScale.ScaleX = _toolbarScale;
         ToolbarLayoutScale.ScaleY = _toolbarScale;
         ApplyExpandedToolbarDimensions(annotationMode: false);
@@ -208,7 +225,10 @@ public partial class VideoRecordingControlWindow : Window
             System.Windows.Controls.Primitives.Selector.SelectionChangedEvent,
             new SelectionChangedEventHandler(OnRecordingComboBoxSelectionChanged));
         ApplySavedAnnotationPreferences(annotationPreferences.StrokeWidth);
-        PopulateRecordingEmojiMenu();
+        RecordingEmojiMenu.Opened += (_, _) =>
+        {
+            if (RecordingEmojiMenu.Items.Count == 0) PopulateRecordingEmojiMenu();
+        };
         _toolbarDragHint = new ToolbarDragHintBehavior(
             ControlSurface,
             ControlSurface);
@@ -233,8 +253,10 @@ public partial class VideoRecordingControlWindow : Window
         ShowCameraCheckBox.IsChecked = showCamera;
         UpdateFormatDependentControls();
         _isInitializingOptions = false;
-        SourceInitialized += OnSourceInitialized;
+        if (new WindowInteropHelper(this).Handle == IntPtr.Zero) SourceInitialized += OnSourceInitialized;
+        else OnSourceInitialized(this, EventArgs.Empty);
         SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
+        _isPreparedForSelection = false;
     }
 
     internal static async Task<RegionVideoRecordingResult> ShowSessionAsync(
@@ -259,8 +281,13 @@ public partial class VideoRecordingControlWindow : Window
         Action<int[]>? customColorPaletteChanged = null,
         string endRecordingHotKey = AppSettings.DefaultEndVideoRecordingHotKey,
         double toolbarScalePercent = 100,
-        IReadOnlyDictionary<CaptureToolbarFeature, string>? toolbarFeatureShortcuts = null)
+        IReadOnlyDictionary<CaptureToolbarFeature, string>? toolbarFeatureShortcuts = null,
+        Action? controlsReady = null,
+        Func<Task>? selectionPresented = null,
+        VideoRecordingControlWindow? preparedToolbar = null)
     {
+        using var featureActivity = Infrastructure.FeatureActivity.Begin();
+        CaptureTimingDiagnostics.UiContext("recording-session-start", $"prepared={preparedToolbar is not null}");
         // ScreenRecorderLib may initialize Desktop Duplication, hardware
         // encoders, and audio devices synchronously. Keep that native work
         // off WPF's dispatcher so a slow driver cannot freeze the shell.
@@ -268,9 +295,11 @@ public partial class VideoRecordingControlWindow : Window
         frameWindow.Show();
         var inputOverlay = new RecordingInputOverlayWindow(recordingRegion);
         var annotationOverlay = new RecordingAnnotationOverlayWindow(recordingRegion);
+        CaptureTimingDiagnostics.Mark("recording-overlays-ready");
         RegionVideoRecorder recorder;
         try
         {
+            CaptureTimingDiagnostics.Mark("recording-recorder-create-start");
             recorder = await Task.Run(() => new RegionVideoRecorder(
                 recordingRegion,
                 saveDirectory,
@@ -279,9 +308,11 @@ public partial class VideoRecordingControlWindow : Window
                 codec,
                 frameRate,
                 microphoneDeviceId));
+            CaptureTimingDiagnostics.Mark("recording-recorder-create-end");
         }
         catch
         {
+            preparedToolbar?.Close();
             inputOverlay.Close();
             annotationOverlay.Close();
             frameWindow.Close();
@@ -290,7 +321,8 @@ public partial class VideoRecordingControlWindow : Window
         VideoRecordingControlWindow? window = null;
         try
         {
-            window = new VideoRecordingControlWindow(
+            window = preparedToolbar ?? new VideoRecordingControlWindow();
+            window.InitializeSession(
                 recorder,
                 saveDirectory,
                 recordSystemAudio,
@@ -321,9 +353,11 @@ public partial class VideoRecordingControlWindow : Window
                 toolbarFeatureShortcuts,
                 frameWindow);
             frameWindow = null!;
+            CaptureTimingDiagnostics.Mark("recording-session-initialized");
         }
         catch
         {
+            window?.Close();
             recorder.Dispose();
             inputOverlay.Close();
             annotationOverlay.Close();
@@ -337,19 +371,43 @@ public partial class VideoRecordingControlWindow : Window
         // If recording was launched from an existing capture, keep the old
         // overlay visible until this native frame is ready, then close it in
         // the same UI turn so the selection never visibly disappears.
-        CaptureOverlayWindow.CloseActiveInteractiveSelectionForTransition();
+        // A capture handoff is ready as soon as its toolbar is rendered.
+        // Do not add the ordinary window's fade-in to this first usable frame.
+        window.ControlSurface.Opacity = 1;
+        CaptureTimingDiagnostics.Mark("recording-toolbar-show-start");
         window.Show();
         window.UpdateLayout();
+        CaptureTimingDiagnostics.Mark("recording-toolbar-show-end");
         window.EnsureControlVisibleAndTopmost();
-        await window.InitializeRecordingDevicesAsync();
-        if (showCamera)
-        {
-            await window.SetCameraVisibilityAsync(visible: true);
-        }
+        CaptureOverlayWindow.CloseActiveInteractiveSelectionForTransition();
         _activeWindow = new WeakReference<VideoRecordingControlWindow>(window);
         try
         {
+            if (selectionPresented is not null)
+            {
+                // Do not allow Start to capture the resident's frozen desktop.
+                // Publish the toolbar first, then wait for the native surface
+                // to be hidden. Device enumeration must not delay this handoff.
+                window.IsEnabled = false;
+                CaptureTimingDiagnostics.Mark("recording-render-wait-start");
+                await Dispatcher.Yield(DispatcherPriority.ContextIdle);
+                CaptureTimingDiagnostics.Mark("recording-render-wait-end");
+                await selectionPresented();
+                CaptureTimingDiagnostics.Mark("recording-resident-released");
+                window.IsEnabled = true;
+            }
+            CaptureTimingDiagnostics.Mark("recording-devices-start");
+            if (!window._allowClose) await window.InitializeRecordingDevicesAsync();
+            CaptureTimingDiagnostics.Mark("recording-devices-end");
+            if (showCamera && !window._allowClose)
+                await window.SetCameraVisibilityAsync(visible: true);
+            controlsReady?.Invoke();
             return await window._completion.Task;
+        }
+        catch
+        {
+            window.Close();
+            throw;
         }
         finally
         {
@@ -429,7 +487,7 @@ public partial class VideoRecordingControlWindow : Window
 
         _ = Dispatcher.BeginInvoke(
             DispatcherPriority.Loaded,
-            EnsureControlVisibleAndTopmost);
+            () => EnsureControlVisibleAndTopmost());
     }
 
     private void PositionOutsideRecordingRegion(IntPtr handle)
@@ -531,8 +589,10 @@ public partial class VideoRecordingControlWindow : Window
         {
             var preferences = GetRecordingPreferences();
             await ReplaceRecorderAsync(preferences);
+            if (_isCompleting || _allowClose) return;
             _recordingPreferencesChanged?.Invoke(preferences);
             await _recorder.StartAsync();
+            if (_isCompleting || _allowClose || _recorder.State != RegionVideoRecorderState.Recording) return;
             StartInputFeedback(preferences);
             StartAnnotationOverlay();
             if (preferences.ShowCamera)
@@ -541,11 +601,19 @@ public partial class VideoRecordingControlWindow : Window
             }
             _elapsed.Restart();
             _elapsedTimer.Start();
-            RecordingStatusText.Text = "正在录屏";
+            RecordingStatusText.Text = _recorder.IsCompatibilityMode ? "兼容录屏" : "正在录屏";
+            RecordingStatusText.ToolTip = _recorder.StartupFallbackReason is { } startupReason
+                ? $"已自动切换到兼容录制。此前启动失败：{startupReason}" : _recorder.RecordingDescription;
+            RecordingDevicePopup.IsOpen = false;
             ElapsedTimeText.Visibility = Visibility.Visible;
+            RecordingStatusDot.Visibility = Visibility.Visible;
             RecordingStatusText.Foreground = new SolidColorBrush(
                 System.Windows.Media.Color.FromRgb(240, 68, 85));
-            RecordingOptionsPanel.Visibility = Visibility.Collapsed;
+            EncodingOptionsPanel.Visibility = Visibility.Collapsed;
+            UpdateFormatDependentControls();
+            InputDisplayModeComboBox.IsEnabled = false;
+            MouseTrailCheckBox.IsEnabled = false;
+            MicrophoneDeviceComboBox.IsEnabled = false;
             AnnotationToolsPanel.Visibility = Visibility.Visible;
             StartButton.Visibility = Visibility.Collapsed;
             PauseButton.Visibility = Visibility.Visible;
@@ -576,7 +644,7 @@ public partial class VideoRecordingControlWindow : Window
         catch (Exception exception)
         {
             StartButton.IsEnabled = true;
-            _ = CompleteAfterFailureAsync(exception.Message);
+            await CompleteAfterFailureAsync(exception.Message, exception: exception);
         }
         finally
         {
@@ -609,7 +677,7 @@ public partial class VideoRecordingControlWindow : Window
             {
                 _recorder.Resume();
                 _elapsed.Start();
-                RecordingStatusText.Text = "正在录屏";
+                RecordingStatusText.Text = _recorder.IsCompatibilityMode ? "兼容录屏" : "正在录屏";
                 PauseButton.ToolTip = "暂停录制";
                 PauseIcon.Data = (Geometry)FindResource("PauseIconGeometry");
                 _inputOverlay?.SetPaused(false);
@@ -628,6 +696,24 @@ public partial class VideoRecordingControlWindow : Window
     {
         if (_isInitializingOptions)
         {
+            return;
+        }
+
+        if (_recorder.State is RegionVideoRecorderState.Recording or RegionVideoRecorderState.Paused &&
+            (ReferenceEquals(sender, SystemAudioCheckBox) || ReferenceEquals(sender, MicrophoneCheckBox)))
+        {
+            try
+            {
+                _recorder.SetAudioSources(SystemAudioCheckBox.IsChecked == true, MicrophoneCheckBox.IsChecked == true);
+                _recordingPreferencesChanged?.Invoke(GetRecordingPreferences());
+            }
+            catch (Exception exception)
+            {
+                _isInitializingOptions = true;
+                if (sender is System.Windows.Controls.CheckBox toggle) toggle.IsChecked = toggle.IsChecked != true;
+                _isInitializingOptions = false;
+                Screenshot.App.Presentation.LocalizedMessageBox.Show(this, exception.Message, "声音切换", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
             return;
         }
 
@@ -674,6 +760,7 @@ public partial class VideoRecordingControlWindow : Window
         {
             var microphones = await Task.Run(
                 RegionVideoRecorder.GetAudioInputDevices);
+            if (_allowClose) return;
             MicrophoneDeviceComboBox.ItemsSource = microphones;
             if (!string.IsNullOrWhiteSpace(_microphoneDeviceId) &&
                 MicrophoneDeviceComboBox.Items.Cast<RecordingDeviceOption>()
@@ -691,6 +778,7 @@ public partial class VideoRecordingControlWindow : Window
             FitComboBoxToContent(MicrophoneDeviceComboBox);
 
             var cameras = await CameraCaptureService.GetDevicesAsync();
+            if (_allowClose) return;
             CameraDeviceComboBox.ItemsSource = cameras;
             if (!string.IsNullOrWhiteSpace(_cameraDeviceId) &&
                 cameras.Any(device => device.Id == _cameraDeviceId))
@@ -718,6 +806,7 @@ public partial class VideoRecordingControlWindow : Window
         }
         catch
         {
+            if (_allowClose) return;
             MicrophoneDeviceComboBox.ItemsSource = Array.Empty<RecordingDeviceOption>();
             CameraDeviceComboBox.ItemsSource = Array.Empty<RecordingDeviceOption>();
             CameraDeviceComboBox.IsEnabled = false;
@@ -735,11 +824,11 @@ public partial class VideoRecordingControlWindow : Window
     {
         var (minimum, maximum) = comboBox.Name switch
         {
-            nameof(CodecComboBox) => (116d, 190d),
-            nameof(FrameRateComboBox) => (68d, 100d),
-            nameof(InputDisplayModeComboBox) => (108d, 180d),
-            nameof(MicrophoneDeviceComboBox) => (132d, 360d),
-            nameof(CameraDeviceComboBox) => (132d, 360d),
+            nameof(CodecComboBox) => (144d, 160d),
+            nameof(FrameRateComboBox) => (100d, 100d),
+            nameof(InputDisplayModeComboBox) => (220d, 220d),
+            nameof(MicrophoneDeviceComboBox) => (220d, 220d),
+            nameof(CameraDeviceComboBox) => (220d, 220d),
             _ => (96d, 360d),
         };
 
@@ -787,36 +876,25 @@ public partial class VideoRecordingControlWindow : Window
 
     private void FitOptionsToolbarWidth()
     {
-        if (!IsLoaded || RecordingOptionsPanel.Visibility != Visibility.Visible)
-        {
-            return;
-        }
-
-        RecordingOptionsPanel.Width = double.NaN;
-        RecordingOptionsPanel.Measure(
-            new System.Windows.Size(double.PositiveInfinity, 54));
-        RecordingOptionsPanel.Width = Math.Ceiling(RecordingOptionsPanel.DesiredSize.Width);
-        UpdateLayout();
-        var width = RecordingStatusPanel.ActualWidth +
-            RecordingOptionsPanel.ActualWidth +
-            RecordingActionPanel.ActualWidth + 36;
-        Width = Math.Max(ExpandedMinimumWidth, Math.Ceiling(width * _toolbarScale));
+        FitExpandedToolbarSize();
     }
 
     private void FitAnnotationToolbarWidth()
     {
-        if (!IsLoaded || AnnotationToolsPanel.Visibility != Visibility.Visible)
-        {
-            return;
-        }
+        FitExpandedToolbarSize();
+    }
 
-        AnnotationToolsPanel.Measure(new System.Windows.Size(
-            double.PositiveInfinity,
-            double.PositiveInfinity));
-        var width = RecordingStatusPanel.ActualWidth +
-            AnnotationToolsPanel.DesiredSize.Width +
-            RecordingActionPanel.ActualWidth + 36;
-        Width = Math.Max(ExpandedMinimumWidth, Math.Ceiling(width * _toolbarScale));
+    private void FitExpandedToolbarSize()
+    {
+        if (!IsLoaded || _isToolbarCollapsed || _finishToolbarTransition is not null) return;
+        var workArea = MonitorGeometryService.GetWorkArea(this);
+        var dpi = VisualTreeHelper.GetDpi(this);
+        RecordingAdjustmentLine.MaxWidth = Math.Max(260, (workArea.Width / dpi.DpiScaleX - 16) / _toolbarScale);
+        // Measure the actual two rows, including their shared user scale.
+        // Moving device selectors into the popup must not reserve blank space.
+        ControlSurface.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+        Width = Math.Max(ExpandedMinimumWidth, Math.Ceiling(ControlSurface.DesiredSize.Width));
+        Height = Math.Ceiling(ControlSurface.DesiredSize.Height);
     }
 
     internal static double NormalizeToolbarScale(double toolbarScalePercent) =>
@@ -829,7 +907,7 @@ public partial class VideoRecordingControlWindow : Window
         bool annotationMode)
     {
         var scale = NormalizeToolbarScale(toolbarScalePercent);
-        var contentHeight = annotationMode ? 32d : 54d;
+        var contentHeight = annotationMode ? 91d : 44d;
         const double verticalPadding = 6d;
         return Math.Ceiling(
             (contentHeight * scale) + (verticalPadding * 2) + 2);
@@ -839,7 +917,9 @@ public partial class VideoRecordingControlWindow : Window
 
     private void ApplyExpandedToolbarDimensions(bool annotationMode)
     {
-        const double verticalPadding = 4d;
+        Grid.SetColumn(RecordingActionPanel, 2);
+        RecordingActionPanel.HorizontalAlignment = System.Windows.HorizontalAlignment.Left;
+        const double verticalPadding = 6d;
         ControlSurface.Padding = new Thickness(7, verticalPadding, 7, verticalPadding);
         MinWidth = ExpandedMinimumWidth;
         Height = CalculateExpandedToolbarHeight(
@@ -967,10 +1047,10 @@ public partial class VideoRecordingControlWindow : Window
         MicrophoneCheckBox.IsEnabled = !isGif;
         SystemAudioCheckBox.ToolTip = isGif
             ? "GIF 不包含声音；切换回 MP4 后保留原选择"
-            : "录制电脑正在播放的声音";
+            : "系统声音：录制中也可随时开关";
         MicrophoneCheckBox.ToolTip = isGif
             ? "GIF 不包含声音；切换回 MP4 后保留原选择"
-            : "录制系统默认麦克风";
+            : "麦克风：录制中也可随时开关";
     }
 
     internal static RecordingInputDisplayMode ResolveInputDisplayMode(
@@ -1016,12 +1096,19 @@ public partial class VideoRecordingControlWindow : Window
             CancellationToken.None,
             TaskCreationOptions.LongRunning,
             TaskScheduler.Default);
+        if (_isCompleting || _allowClose)
+        {
+            await replacement.DisposeAsync();
+            return;
+        }
         replacement.Failed += OnRecorderFailed;
+        replacement.StartupProgress += OnRecorderStartupProgress;
         var previous = _recorder;
         previous.Failed -= OnRecorderFailed;
+        previous.StartupProgress -= OnRecorderStartupProgress;
         _recorder = replacement;
         _recorderPreferences = preferences;
-        previous.Dispose();
+        await previous.DisposeAsync();
     }
 
     internal static bool RequiresRecorderReplacement(
@@ -1038,6 +1125,11 @@ public partial class VideoRecordingControlWindow : Window
 
     private async void OnStopClick(object sender, RoutedEventArgs e)
     {
+        if (_isStarting)
+        {
+            await CancelAndCloseAsync();
+            return;
+        }
         if (_recorder.State == RegionVideoRecorderState.Ready)
         {
             CloseWithResult(new RegionVideoRecordingResult(null, null));
@@ -1053,6 +1145,9 @@ public partial class VideoRecordingControlWindow : Window
     }
 
     private async void OnCancelRecordingClick(object sender, RoutedEventArgs e)
+        => await CancelAndCloseAsync();
+
+    private async Task CancelAndCloseAsync()
     {
         if (_isCompleting)
         {
@@ -1119,9 +1214,20 @@ public partial class VideoRecordingControlWindow : Window
             () => _ = CompleteAfterFailureAsync(errorMessage));
     }
 
+    private void OnRecorderStartupProgress(string message)
+    {
+        _ = Dispatcher.InvokeAsync(() =>
+        {
+            if (!_isStarting || _isCompleting || _allowClose) return;
+            RecordingStatusText.Text = message;
+            RecordingStatusText.ToolTip = message;
+        });
+    }
+
     private async Task CompleteAfterFailureAsync(
         string errorMessage,
-        bool alreadyCompleting = false)
+        bool alreadyCompleting = false,
+        Exception? exception = null)
     {
         if (_isCompleting && !alreadyCompleting)
         {
@@ -1141,8 +1247,11 @@ public partial class VideoRecordingControlWindow : Window
         RecordingStatusText.Text = "录制失败";
         EnterCompletionUi();
         RecordingStatusText.ToolTip = errorMessage;
-        await Task.Delay(1400);
-        CloseWithResult(new RegionVideoRecordingResult(null, errorMessage));
+        var log = _recorder.RecordFailureAsync(_isStarting ? "start-controls" : "recording-controls",
+            exception?.ToString() ?? errorMessage, GetRecordingPreferences());
+        await Task.WhenAll(Task.Delay(1400), log);
+        var diagnostic = await log;
+        CloseWithResult(new RegionVideoRecordingResult(null, $"{errorMessage}\n{diagnostic.Description}"));
     }
 
     private void OnElapsedTimerTick(object? sender, EventArgs e)
@@ -1157,6 +1266,8 @@ public partial class VideoRecordingControlWindow : Window
         object sender,
         MouseButtonEventArgs e)
     {
+        if (_finishToolbarTransition is not null)
+            FinishToolbarTransition(preserveCollapsedPosition: true);
         if (_isToolbarCollapsed)
         {
             return;
@@ -1291,6 +1402,7 @@ public partial class VideoRecordingControlWindow : Window
             return;
         }
 
+        FinishToolbarTransition(preserveCollapsedPosition: true);
         if (!MonitorGeometryService.TryGetWindowBounds(this, out _collapsedWindowStart))
         {
             var cursor = WinForms.Cursor.Position;
@@ -1302,7 +1414,6 @@ public partial class VideoRecordingControlWindow : Window
         }
 
         _collapsedDragStartCursor = WinForms.Cursor.Position;
-        _lastCollapsedDragUpdateTimestamp = 0;
         _collapsedToolbarDragMoved = false;
         _isCollapsedToolbarDragging = true;
         CollapsedToolbarButton.Cursor = System.Windows.Input.Cursors.SizeAll;
@@ -1362,13 +1473,10 @@ public partial class VideoRecordingControlWindow : Window
             Y = _collapsedWindowStart.Y + deltaY,
         };
         var workArea = WinForms.Screen.FromPoint(cursor).WorkingArea;
-        var hiddenWidth = Math.Max(1, requested.Width / 4);
+        requested = ConstrainDockBounds(requested, workArea);
         SetToolbarNativeBounds(
-            Math.Clamp(
-                requested.X,
-                workArea.Left - hiddenWidth,
-                workArea.Right - requested.Width + hiddenWidth),
-            Math.Clamp(requested.Y, workArea.Top, workArea.Bottom - requested.Height),
+            requested.X,
+            requested.Y,
             requested.Width,
             requested.Height);
         e.Handled = true;
@@ -1409,11 +1517,6 @@ public partial class VideoRecordingControlWindow : Window
             return;
         }
 
-        if (!IsInteractionFrameDue(ref _lastCollapsedDragUpdateTimestamp))
-        {
-            return;
-        }
-
         _isCollapsedToolbarDragging = false;
         CollapsedToolbarButton.ClearValue(
             System.Windows.Controls.Control.CursorProperty);
@@ -1433,31 +1536,27 @@ public partial class VideoRecordingControlWindow : Window
         {
             FloatingDockEdge.Right => bounds with
             {
-                X = workArea.Right - ((bounds.Width * 3) / 4),
+                X = workArea.Right - bounds.Width - 4,
                 Y = Math.Clamp(bounds.Y, workArea.Top, workArea.Bottom - bounds.Height),
             },
             FloatingDockEdge.Left => bounds with
             {
-                X = workArea.Left - (bounds.Width / 4),
+                X = workArea.Left + 4,
                 Y = Math.Clamp(bounds.Y, workArea.Top, workArea.Bottom - bounds.Height),
             },
             FloatingDockEdge.Top => bounds with
             {
                 X = Math.Clamp(bounds.X, workArea.Left, workArea.Right - bounds.Width),
-                Y = workArea.Top - (bounds.Height / 4),
+                Y = workArea.Top + 4,
             },
             FloatingDockEdge.Bottom => bounds with
             {
                 X = Math.Clamp(bounds.X, workArea.Left, workArea.Right - bounds.Width),
-                Y = workArea.Bottom - bounds.Height + (bounds.Height / 4),
+                Y = workArea.Bottom - bounds.Height - 4,
             },
             _ => FloatingCaptureLayout.ConstrainToWorkArea(bounds, workArea),
         };
-        _ = AnimateToolbarNativeBoundsAsync(bounds, next);
-        // The native bounds already contain the one-quarter hidden offset.
-        // Keep the visual transform centered so a second snap does not push
-        // the button in the opposite direction.
-        AnimateCollapsedDock(0, 0);
+        _ = AnimateToolbarPositionAsync(bounds, ConstrainDockBounds(next, workArea), ++_toolbarMoveAnimationVersion);
     }
 
     private bool ShouldAutoCollapseForRecordingRegion()
@@ -1473,271 +1572,6 @@ public partial class VideoRecordingControlWindow : Window
             .WorkingArea;
         return region.Width >= workArea.Width - 4 &&
                region.Height >= workArea.Height - 4;
-    }
-
-    private void CollapseToolbarToEdge()
-    {
-        if (_isToolbarCollapsed || _isCompleting || !IsLoaded ||
-            !MonitorGeometryService.TryGetWindowBounds(this, out var bounds))
-        {
-            return;
-        }
-
-        _expandedToolbarBounds = bounds;
-        _hasExpandedToolbarBounds = true;
-        _expandedStatusVisibility = RecordingStatusPanel.Visibility;
-        _expandedOptionsVisibility = RecordingOptionsPanel.Visibility;
-        _expandedAnnotationVisibility = AnnotationToolsPanel.Visibility;
-        _expandedActionsVisibility = RecordingActionPanel.Visibility;
-        _isToolbarCollapsed = true;
-
-        // The expanded toolbar uses a fixed status column. When the window is
-        // reduced to 40 px that column would push the collapsed button outside
-        // the client area, leaving only a thin sliver visible. Switch the
-        // layout itself before resizing so the recording icon stays centered.
-        ToolbarGrid.ColumnDefinitions[0].Width = new GridLength(0);
-        ToolbarGrid.ColumnDefinitions[1].Width = new GridLength(0);
-        ToolbarGrid.ColumnDefinitions[2].Width = new GridLength(0);
-
-        RecordingStatusPanel.Visibility = Visibility.Collapsed;
-        RecordingOptionsPanel.Visibility = Visibility.Collapsed;
-        AnnotationToolsPanel.Visibility = Visibility.Collapsed;
-        RecordingActionPanel.Visibility = Visibility.Collapsed;
-        ControlSurface.Visibility = Visibility.Collapsed;
-        Topmost = true;
-        ControlSurface.Background = System.Windows.Media.Brushes.Transparent;
-        ControlSurface.BorderBrush = System.Windows.Media.Brushes.Transparent;
-        ControlSurface.BorderThickness = new Thickness(0);
-        ControlSurface.Padding = new Thickness(0);
-        ControlSurface.CornerRadius = new CornerRadius(0);
-        ControlSurface.Cursor = System.Windows.Input.Cursors.Arrow;
-        CollapsedToolbarButton.Visibility = Visibility.Visible;
-        ToolbarVisualScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-        ToolbarVisualScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-        ControlSurface.BeginAnimation(OpacityProperty, null);
-        ToolbarVisualScale.ScaleX = 1;
-        ToolbarVisualScale.ScaleY = 1;
-        ControlSurface.Opacity = 1;
-        CollapsedToolbarDockTransform.BeginAnimation(
-            TranslateTransform.XProperty,
-            null);
-        CollapsedToolbarDockTransform.BeginAnimation(
-            TranslateTransform.YProperty,
-            null);
-        CollapsedToolbarScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
-        CollapsedToolbarScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-        CollapsedToolbarButton.BeginAnimation(OpacityProperty, null);
-        CollapsedToolbarDockTransform.X = 0;
-        CollapsedToolbarDockTransform.Y = 0;
-        CollapsedToolbarScale.ScaleX = 0.82;
-        CollapsedToolbarScale.ScaleY = 0.82;
-        CollapsedToolbarButton.Opacity = 0.2;
-        // Stop SizeToContent from restoring the expanded toolbar width while
-        // the collapsed button is being laid out. Use a physical native size
-        // that matches the WPF DIP size on high-DPI displays as well.
-        SizeToContent = SizeToContent.Manual;
-        const double collapsedSizeDip = 28;
-        // The expanded window has a 360 DIP minimum width. Leaving that
-        // constraint active makes the collapsed icon sit in the middle of a
-        // large transparent window and can place it behind the recording
-        // surface on remote desktops.
-        MinWidth = collapsedSizeDip;
-        MinHeight = collapsedSizeDip;
-        Width = collapsedSizeDip;
-        Height = collapsedSizeDip;
-        UpdateLayout();
-
-        var region = _recorder.Region;
-        var workArea = WinForms.Screen.FromRectangle(
-            new DrawingRectangle(region.X, region.Y, region.Width, region.Height))
-            .WorkingArea;
-        var dpi = VisualTreeHelper.GetDpi(this);
-        var collapsedWidth = Math.Max(
-            28,
-            (int)Math.Round(collapsedSizeDip * dpi.DpiScaleX));
-        var collapsedHeight = Math.Max(
-            28,
-            (int)Math.Round(collapsedSizeDip * dpi.DpiScaleY));
-        var x = workArea.Right - ((collapsedWidth * 3) / 4);
-        var y = workArea.Bottom - collapsedHeight - 12;
-        _ = AnimateToolbarNativeBoundsAsync(
-            bounds,
-            new DrawingRectangle(x, y, collapsedWidth, collapsedHeight));
-        _collapsedToolbarTopmostTimer.Start();
-        AnimateCollapsedDock(0, 0);
-    }
-
-    private async void ExpandToolbarFromEdge()
-    {
-        if (!_isToolbarCollapsed || _isCompleting)
-        {
-            return;
-        }
-
-        _isToolbarCollapsed = false;
-        _collapsedToolbarTopmostTimer.Stop();
-        var currentBounds = MonitorGeometryService.TryGetWindowBounds(this, out var measuredBounds)
-            ? measuredBounds
-            : _expandedToolbarBounds;
-        CollapsedToolbarButton.BeginAnimation(OpacityProperty, null);
-        CollapsedToolbarButton.Opacity = 1;
-        MinWidth = ExpandedMinimumWidth;
-        MinHeight = 28;
-        SizeToContent = SizeToContent.Width;
-        ToolbarGrid.ColumnDefinitions[0].Width = GridLength.Auto;
-        ToolbarGrid.ColumnDefinitions[1].Width = new GridLength(1, GridUnitType.Star);
-        ToolbarGrid.ColumnDefinitions[2].Width = GridLength.Auto;
-        ControlSurface.SetResourceReference(
-            Border.BackgroundProperty,
-            "AppPanelBackgroundBrush");
-        ControlSurface.SetResourceReference(
-            Border.BorderBrushProperty,
-            "AppBorderBrush");
-        ControlSurface.BorderThickness = new Thickness(1);
-        ApplyExpandedToolbarDimensions(
-            _expandedAnnotationVisibility == Visibility.Visible);
-        ControlSurface.CornerRadius = new CornerRadius(6);
-        ControlSurface.Cursor = System.Windows.Input.Cursors.Arrow;
-        RecordingStatusPanel.Visibility = _expandedStatusVisibility;
-        RecordingOptionsPanel.Visibility = _expandedOptionsVisibility;
-        AnnotationToolsPanel.Visibility = _expandedAnnotationVisibility;
-        RecordingActionPanel.Visibility = _expandedActionsVisibility;
-
-        if (_hasExpandedToolbarBounds)
-        {
-            Width = _expandedToolbarBounds.Width;
-            Height = _expandedToolbarBounds.Height;
-            ControlSurface.Visibility = Visibility.Collapsed;
-            await AnimateToolbarNativeBoundsAsync(currentBounds, _expandedToolbarBounds);
-            CollapsedToolbarButton.Visibility = Visibility.Collapsed;
-            ControlSurface.Visibility = Visibility.Visible;
-            ToolbarVisualScale.ScaleX = 0.94;
-            ToolbarVisualScale.ScaleY = 0.94;
-            ControlSurface.Opacity = 0.72;
-            AnimateExpandedToolbar();
-        }
-        else
-        {
-            ScheduleToolbarLayout();
-        }
-    }
-
-    private void SetToolbarNativeBounds(int x, int y, int width, int height)
-    {
-        var handle = new WindowInteropHelper(this).Handle;
-        if (handle == IntPtr.Zero)
-        {
-            return;
-        }
-
-        _ = NativeMethods.SetWindowPos(
-            handle,
-            new IntPtr(TopmostWindow),
-            x,
-            y,
-            width,
-            height,
-            DoNotActivate | DoNotChangeOwnerZOrder);
-        Topmost = true;
-        EnsureControlVisibleAndTopmost(restorePlacement: false);
-    }
-
-    private Task AnimateToolbarNativeBoundsAsync(
-        DrawingRectangle from,
-        DrawingRectangle to)
-    {
-        return AnimateToolbarNativeBoundsCoreAsync(
-            from,
-            to,
-            ++_toolbarMoveAnimationVersion);
-    }
-
-    private async Task AnimateToolbarNativeBoundsCoreAsync(
-        DrawingRectangle from,
-        DrawingRectangle to,
-        int version)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        while (stopwatch.Elapsed < ToolbarMoveAnimationDuration &&
-               version == _toolbarMoveAnimationVersion)
-        {
-            var progress = Math.Clamp(
-                stopwatch.Elapsed.TotalMilliseconds /
-                ToolbarMoveAnimationDuration.TotalMilliseconds,
-                0,
-                1);
-            progress = progress * progress * (3 - (2 * progress));
-            SetToolbarNativeBounds(
-                Interpolate(from.X, to.X, progress),
-                Interpolate(from.Y, to.Y, progress),
-                Interpolate(from.Width, to.Width, progress),
-                Interpolate(from.Height, to.Height, progress));
-            await Task.Delay(16);
-        }
-
-        if (version == _toolbarMoveAnimationVersion)
-        {
-            SetToolbarNativeBounds(to.X, to.Y, to.Width, to.Height);
-        }
-    }
-
-    private static int Interpolate(int from, int to, double progress) =>
-        (int)Math.Round(from + ((to - from) * progress));
-
-    private void OnCollapsedToolbarTopmostTimerTick(
-        object? sender,
-        EventArgs e)
-    {
-        if (!_isToolbarCollapsed || !IsLoaded)
-        {
-            _collapsedToolbarTopmostTimer.Stop();
-            return;
-        }
-
-        EnsureControlVisibleAndTopmost(restorePlacement: false);
-    }
-
-    private void AnimateCollapsedDock(double offsetX, double offsetY)
-    {
-        var directionX = Math.Abs(offsetX) < 0.1 ? 1 : Math.Sign(offsetX);
-        var directionY = Math.Abs(offsetY) < 0.1 ? 1 : Math.Sign(offsetY);
-        CollapsedToolbarDockTransform.X = offsetX + (directionX * 8);
-        CollapsedToolbarDockTransform.Y = offsetY + (directionY * 8);
-        CollapsedToolbarScale.ScaleX = 0.8;
-        CollapsedToolbarScale.ScaleY = 0.8;
-        CollapsedToolbarButton.Opacity = 0.8;
-        var duration = new Duration(TimeSpan.FromSeconds(1));
-        var easing = new CubicEase { EasingMode = EasingMode.EaseInOut };
-        CollapsedToolbarDockTransform.BeginAnimation(
-            TranslateTransform.XProperty,
-            new DoubleAnimation(offsetX, duration) { EasingFunction = easing });
-        CollapsedToolbarDockTransform.BeginAnimation(
-            TranslateTransform.YProperty,
-            new DoubleAnimation(offsetY, duration) { EasingFunction = easing });
-        CollapsedToolbarScale.BeginAnimation(
-            ScaleTransform.ScaleXProperty,
-            new DoubleAnimation(1, duration) { EasingFunction = easing });
-        CollapsedToolbarScale.BeginAnimation(
-            ScaleTransform.ScaleYProperty,
-            new DoubleAnimation(1, duration) { EasingFunction = easing });
-        CollapsedToolbarButton.BeginAnimation(
-            OpacityProperty,
-            new DoubleAnimation(1, duration) { EasingFunction = easing });
-    }
-
-    private void AnimateExpandedToolbar()
-    {
-        var duration = new Duration(TimeSpan.FromSeconds(1));
-        var easing = new CubicEase { EasingMode = EasingMode.EaseInOut };
-        ToolbarVisualScale.BeginAnimation(
-            ScaleTransform.ScaleXProperty,
-            new DoubleAnimation(1, duration) { EasingFunction = easing });
-        ToolbarVisualScale.BeginAnimation(
-            ScaleTransform.ScaleYProperty,
-            new DoubleAnimation(1, duration) { EasingFunction = easing });
-        ControlSurface.BeginAnimation(
-            OpacityProperty,
-            new DoubleAnimation(1, duration) { EasingFunction = easing });
     }
 
     private void FinishControlSurfaceDrag(bool ensureVisible = true)
@@ -1799,7 +1633,7 @@ public partial class VideoRecordingControlWindow : Window
 
     private void EnsureControlVisibleAndTopmost(bool restorePlacement = true)
     {
-        if (!IsLoaded)
+        if (!IsLoaded || _captureInteractionActive)
         {
             return;
         }
@@ -1840,7 +1674,7 @@ public partial class VideoRecordingControlWindow : Window
 
         _ = Dispatcher.BeginInvoke(
             DispatcherPriority.Loaded,
-            EnsureControlVisibleAndTopmost);
+            () => EnsureControlVisibleAndTopmost());
     }
 
     private void UpdateLowProfileOpacity()
@@ -1850,6 +1684,13 @@ public partial class VideoRecordingControlWindow : Window
 
     private void EnterCompletionUi()
     {
+        FinishToolbarTransition();
+        if (_isToolbarCollapsed)
+        {
+            _isToolbarCollapsed = false;
+            _collapsedToolbarTopmostTimer.Stop();
+            ApplyExpandedToolbarLayout(_expandedToolbarBounds);
+        }
         RecordingOptionsPanel.Visibility = Visibility.Collapsed;
         AnnotationToolsPanel.Visibility = Visibility.Collapsed;
         StartButton.Visibility = Visibility.Collapsed;
@@ -1876,12 +1717,14 @@ public partial class VideoRecordingControlWindow : Window
         }
 
         _inputOverlay?.SetMouseTrailEnabled(preferences.ShowMouseTrail);
-        _inputOverlay?.Show();
+        _inputOverlay?.SetPaused(_captureInteractionActive);
+        if (!_captureInteractionActive) _inputOverlay?.Show();
         _inputMonitor = new RecordingInputMonitor(
             preferences.ShowKeyboardInput,
             preferences.ShowMouseInput,
             preferences.ShowMouseTrail);
         _inputMonitor.InputChanged += OnRecordingInputChanged;
+        _inputMonitor.SetPaused(_captureInteractionActive);
         _inputMonitor.Start();
     }
 
@@ -1924,7 +1767,8 @@ public partial class VideoRecordingControlWindow : Window
         // tool selected internally so color/size changes still target it.
         _annotationOverlay?.SelectTool(RecordingAnnotationTool.Rectangle);
         _annotationOverlay?.SetArrowStyle(_recordingArrowStyle);
-        _annotationOverlay?.Show();
+        _annotationOverlay?.SetPaused(_captureInteractionActive);
+        if (!_captureInteractionActive) _annotationOverlay?.Show();
         _inputOverlay?.EnsureTopmost();
         // The annotation HWND is also topmost. Reassert the camera preview
         // after it is shown so the preview remains visible and clickable.
@@ -1957,7 +1801,7 @@ public partial class VideoRecordingControlWindow : Window
 
                 _cameraOverlay = overlay;
                 overlay.Owner = this;
-                overlay.Show();
+                if (!_captureInteractionActive) overlay.Show();
                 var connectionVersion = ++_cameraConnectionVersion;
                 _ = EnsureCameraFirstFrameAsync(
                     overlay,
@@ -1966,8 +1810,8 @@ public partial class VideoRecordingControlWindow : Window
                     remainingRetries: 2);
             }
 
-            _cameraOverlay?.SetCameraVisible(visible);
-            if (visible)
+            _cameraOverlay?.SetCameraVisible(visible && !_captureInteractionActive);
+            if (visible && !_captureInteractionActive)
             {
                 _cameraOverlay?.EnsureTopmost();
             }
@@ -2026,9 +1870,12 @@ public partial class VideoRecordingControlWindow : Window
 
         _cameraOverlay = replacement;
         replacement.Owner = this;
-        replacement.Show();
-        replacement.SetCameraVisible(true);
-        replacement.EnsureTopmost();
+        replacement.SetCameraVisible(!_captureInteractionActive);
+        if (!_captureInteractionActive)
+        {
+            replacement.Show();
+            replacement.EnsureTopmost();
+        }
         _ = EnsureCameraFirstFrameAsync(
             replacement,
             cameraDeviceId,
@@ -2077,7 +1924,7 @@ public partial class VideoRecordingControlWindow : Window
             : RecordingAnnotationTool.Arrow;
         ArrowToolButton.Tag = arrowTool.ToString();
         UpdateRecordingArrowButton(arrowTool, _recordingArrowStyle);
-        AnnotationColorSwatch.Fill = new SolidColorBrush(_annotationColor);
+        UpdateAnnotationColorSwatch();
         AnnotationStrokeWidthSlider.Value = Math.Clamp(strokeWidth, 1, 12);
     }
 
@@ -2133,6 +1980,7 @@ public partial class VideoRecordingControlWindow : Window
         {
             _annotationOverlay.AnnotationSelectionChanged -=
                 OnAnnotationSelectionChanged;
+            _annotationOverlay.AnnotationCanvas.HistoryChanged -= OnAnnotationHistoryChanged;
             _annotationOverlay.RemoveHandler(
                 Keyboard.PreviewKeyDownEvent,
                 new System.Windows.Input.KeyEventHandler(OnAnnotationOverlayPreviewKeyDown));
@@ -2143,6 +1991,7 @@ public partial class VideoRecordingControlWindow : Window
 
     private void OnAnnotationSelectionChanged(object? sender, EventArgs e)
     {
+        OnAnnotationHistoryChanged(sender, e);
         if (_annotationOverlay?.SelectedAnnotationStrokeWidth is not { } width)
         {
             return;
@@ -2152,6 +2001,12 @@ public partial class VideoRecordingControlWindow : Window
             width,
             AnnotationStrokeWidthSlider.Minimum,
             AnnotationStrokeWidthSlider.Maximum);
+    }
+
+    private void OnAnnotationHistoryChanged(object? sender, EventArgs e)
+    {
+        if (NumberToolButton?.IsChecked == true)
+            RecordingToolAdjustments.Show(NumberToolButton, () => _annotationOverlay?.AnnotationCanvas, number: true);
     }
 
     private void OnAnnotationOverlayPreviewKeyDown(
@@ -2188,6 +2043,7 @@ public partial class VideoRecordingControlWindow : Window
         BrushToolButton.IsChecked = tool == RecordingAnnotationTool.Brush;
         ArrowToolButton.IsChecked = tool is RecordingAnnotationTool.Arrow or
             RecordingAnnotationTool.CurvedArrow;
+        DoubleArrowToolButton.IsChecked = tool is RecordingAnnotationTool.DoubleArrow or RecordingAnnotationTool.HollowDoubleArrow;
         EmojiToolButton.IsChecked = tool == RecordingAnnotationTool.Emoji;
         NumberToolButton.IsChecked = tool == RecordingAnnotationTool.Number;
         TextToolButton.IsChecked = tool == RecordingAnnotationTool.Text;
@@ -2201,9 +2057,44 @@ public partial class VideoRecordingControlWindow : Window
 
     private void ApplySelectedAnnotationToolStyle(RecordingAnnotationTool tool)
     {
+        var emoji = tool == RecordingAnnotationTool.Emoji;
+        if ((RecordingAdjustmentLine.Children.IndexOf(AnnotationPropertiesPanel) == 0) == emoji)
+        {
+            RecordingAdjustmentLine.Children.Remove(AnnotationPropertiesPanel);
+            RecordingAdjustmentLine.Children.Insert(emoji ? RecordingAdjustmentLine.Children.Count : 0, AnnotationPropertiesPanel);
+        }
+        RecordingToolAdjustments.Margin = emoji ? new Thickness(0, 0, 8, 0) : new Thickness(8, 0, 0, 0);
+        foreach (var item in ShapeToolButton.ContextMenu.Items.OfType<System.Windows.Controls.MenuItem>())
+            item.IsChecked = item.Tag as string == ShapeToolButton.Tag as string;
+        var arrowTag = $"{ArrowToolButton.Tag},{_recordingArrowStyle}";
+        foreach (var item in ArrowToolButton.ContextMenu.Items.OfType<System.Windows.Controls.MenuItem>())
+            item.IsChecked = item.Tag as string == arrowTag;
+        AnnotationPropertiesPanel.Visibility = tool == RecordingAnnotationTool.Pointer
+            ? Visibility.Collapsed : Visibility.Visible;
+        if (tool == RecordingAnnotationTool.Pointer) RecordingToolAdjustments.Clear();
+        else if (tool == RecordingAnnotationTool.Emoji)
+            RecordingToolAdjustments.ShowEmoji(emoji =>
+                OnRecordingEmojiMenuItemClick(new System.Windows.Controls.Button { Tag = emoji }, new RoutedEventArgs()));
+        else
+        {
+            var button = tool switch
+            {
+                RecordingAnnotationTool.Rectangle or RecordingAnnotationTool.Ellipse => ShapeToolButton,
+                RecordingAnnotationTool.Arrow or RecordingAnnotationTool.CurvedArrow => ArrowToolButton,
+                RecordingAnnotationTool.DoubleArrow or RecordingAnnotationTool.HollowDoubleArrow => DoubleArrowToolButton,
+                RecordingAnnotationTool.Number => NumberToolButton,
+                RecordingAnnotationTool.Text => TextToolButton,
+                RecordingAnnotationTool.Mosaic => MosaicToolButton,
+                _ => BrushToolButton,
+            };
+            RecordingToolAdjustments.Show(button, () => _annotationOverlay?.AnnotationCanvas,
+                number: tool == RecordingAnnotationTool.Number);
+        }
+        ScheduleToolbarLayout();
         AnnotationColorButton.Visibility = tool == RecordingAnnotationTool.Emoji
             ? Visibility.Collapsed
             : Visibility.Visible;
+        AnnotationCyanColorButton.Visibility = AnnotationWhiteColorButton.Visibility = AnnotationColorButton.Visibility;
 
         if (tool == RecordingAnnotationTool.Pointer || _annotationOverlay is null)
         {
@@ -2211,7 +2102,7 @@ public partial class VideoRecordingControlWindow : Window
         }
 
         _annotationColor = _annotationOverlay.CurrentSelectedColor;
-        AnnotationColorSwatch.Fill = new SolidColorBrush(_annotationColor);
+        UpdateAnnotationColorSwatch();
         AnnotationStrokeWidthSlider.Value = Math.Clamp(
             _annotationOverlay.CurrentStrokeWidth,
             AnnotationStrokeWidthSlider.Minimum,
@@ -2244,25 +2135,25 @@ public partial class VideoRecordingControlWindow : Window
         e.Handled = true;
     }
 
-    private void OnRecordingShapeMenuArrowMouseDown(
+    private void OnRecordingShapeMenuArrowClick(
         object sender,
-        MouseButtonEventArgs e)
+        RoutedEventArgs e)
     {
         OpenRecordingToolMenu(ShapeToolButton);
         e.Handled = true;
     }
 
-    private void OnRecordingEmojiMenuArrowMouseDown(
+    private void OnRecordingEmojiMenuArrowClick(
         object sender,
-        MouseButtonEventArgs e)
+        RoutedEventArgs e)
     {
         OpenRecordingToolMenu(EmojiToolButton);
         e.Handled = true;
     }
 
-    private void OnRecordingArrowMenuArrowMouseDown(
+    private void OnRecordingArrowMenuArrowClick(
         object sender,
-        MouseButtonEventArgs e)
+        RoutedEventArgs e)
     {
         OpenRecordingToolMenu(ArrowToolButton);
         e.Handled = true;
@@ -2379,12 +2270,11 @@ public partial class VideoRecordingControlWindow : Window
                 "CurvedHollowArrowIconGeometry",
             _ => "StraightFilledArrowIconGeometry",
         });
-        ArrowToolIcon.Fill = style == ArrowStyle.Filled
-            ? TryFindResource("EditorToolbarIconBrush") as System.Windows.Media.Brush
-            : System.Windows.Media.Brushes.Transparent;
-        ArrowToolIcon.Stroke = style == ArrowStyle.Hollow
-            ? TryFindResource("EditorToolbarIconBrush") as System.Windows.Media.Brush
-            : System.Windows.Media.Brushes.Transparent;
+        ArrowToolIcon.Fill = System.Windows.Media.Brushes.Transparent;
+        ArrowToolIcon.Stroke = System.Windows.Media.Brushes.Transparent;
+        ArrowToolIcon.SetResourceReference(
+            style == ArrowStyle.Filled ? System.Windows.Shapes.Shape.FillProperty : System.Windows.Shapes.Shape.StrokeProperty,
+            "EditorToolbarIconBrush");
         ArrowToolIcon.StrokeThickness = style == ArrowStyle.Hollow ? 1.7 : 0;
     }
 
@@ -2399,7 +2289,7 @@ public partial class VideoRecordingControlWindow : Window
         picker.ColorSelected += (_, color) =>
         {
             _annotationColor = color;
-            AnnotationColorSwatch.Fill = new SolidColorBrush(color);
+            UpdateAnnotationColorSwatch();
             _annotationOverlay?.SetSelectedColor(color);
             SaveRecordingAnnotationPreferences();
         };
@@ -2408,7 +2298,31 @@ public partial class VideoRecordingControlWindow : Window
             _customColorPalette = NormalizeCustomColorPalette(colors);
             _customColorPaletteChanged?.Invoke(_customColorPalette.ToArray());
         };
-        picker.Show();
+        picker.ShowBelow(AnnotationColorButton);
+        e.Handled = true;
+    }
+
+    private void OnAnnotationQuickColorClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string value }) return;
+        _annotationColor = ParseAnnotationColor(value);
+        UpdateAnnotationColorSwatch();
+        _annotationOverlay?.SetSelectedColor(_annotationColor);
+        SaveRecordingAnnotationPreferences();
+        e.Handled = true;
+    }
+
+    private void UpdateAnnotationColorSwatch()
+    {
+        AnnotationColorSwatch.Fill = new SolidColorBrush(_annotationColor);
+        var brightness = .2126 * _annotationColor.R + .7152 * _annotationColor.G + .0722 * _annotationColor.B;
+        AnnotationColorCheckMark.Stroke = brightness > 150
+            ? System.Windows.Media.Brushes.Black : System.Windows.Media.Brushes.White;
+    }
+
+    private void OnRecordingSettingsClick(object sender, RoutedEventArgs e)
+    {
+        RecordingDevicePopup.IsOpen = !RecordingDevicePopup.IsOpen;
         e.Handled = true;
     }
 
@@ -2469,8 +2383,13 @@ public partial class VideoRecordingControlWindow : Window
 
     private void SetCaptureInteractionVisibility(bool isActive)
     {
+        if (_captureInteractionActive == isActive) return;
+        _captureInteractionActive = isActive;
         if (isActive)
         {
+            // Hide only presentation and input feedback. The native recorder
+            // and elapsed clock continue running throughout the screenshot.
+            Hide();
             _inputMonitor?.SetPaused(true);
             _inputOverlay?.SetPaused(true);
             _inputOverlay?.Hide();
@@ -2480,6 +2399,7 @@ public partial class VideoRecordingControlWindow : Window
             return;
         }
 
+        Show();
         if (_inputOverlay is not null)
         {
             _inputOverlay.Show();
@@ -2522,6 +2442,7 @@ public partial class VideoRecordingControlWindow : Window
         e.Handled = true;
         if (_isStarting)
         {
+            _ = CancelAndCloseAsync();
             return;
         }
 
@@ -2537,23 +2458,11 @@ public partial class VideoRecordingControlWindow : Window
 
     private void OnFeatureShortcutPreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        if (Keyboard.Modifiers != ModifierKeys.None ||
-            Keyboard.FocusedElement is System.Windows.Controls.TextBox ||
-            _annotationOverlay?.DrawingCanvas.IsTextInputActive == true)
-        {
-            return;
-        }
-        var key = e.Key == Key.System ? e.SystemKey : e.Key;
-        var shortcut = key >= Key.D0 && key <= Key.D9
-                ? key.ToString()[1..]
-                : key >= Key.NumPad0 && key <= Key.NumPad9
-                    ? ((int)key - (int)Key.NumPad0).ToString(CultureInfo.InvariantCulture)
-                    : string.Empty;
-        if (string.IsNullOrEmpty(shortcut)) return;
-        var match = _toolbarFeatureShortcuts.FirstOrDefault(pair =>
-            string.Equals(pair.Value, shortcut, StringComparison.OrdinalIgnoreCase));
-        if (match.Equals(default(KeyValuePair<CaptureToolbarFeature, string>))) return;
-        var tool = match.Key switch
+        if (Keyboard.FocusedElement is System.Windows.Controls.TextBox ||
+            _annotationOverlay?.DrawingCanvas.IsTextInputActive == true) return;
+        var key = e.Key switch { Key.System => e.SystemKey, Key.ImeProcessed => e.ImeProcessedKey, _ => e.Key };
+        if (!CaptureToolbarShortcut.TryFind(_toolbarFeatureShortcuts, key, Keyboard.Modifiers, out var feature)) return;
+        var tool = feature switch
         {
             CaptureToolbarFeature.Shape => _recordingShapeToolMode == ShapeToolMode.Ellipse
                 ? RecordingAnnotationTool.Ellipse
@@ -2561,6 +2470,8 @@ public partial class VideoRecordingControlWindow : Window
             CaptureToolbarFeature.Arrow => _recordingArrowToolMode == ArrowToolMode.Curved
                 ? RecordingAnnotationTool.CurvedArrow
                 : RecordingAnnotationTool.Arrow,
+            CaptureToolbarFeature.DoubleArrow => AnnotationToolPreferences.GetVariant(EditorTool.DoubleArrow) == EditorTool.HollowDoubleArrow
+                ? RecordingAnnotationTool.HollowDoubleArrow : RecordingAnnotationTool.DoubleArrow,
             CaptureToolbarFeature.Emoji => RecordingAnnotationTool.Emoji,
             CaptureToolbarFeature.Number => RecordingAnnotationTool.Number,
             CaptureToolbarFeature.Brush => RecordingAnnotationTool.Brush,
@@ -2568,7 +2479,7 @@ public partial class VideoRecordingControlWindow : Window
             CaptureToolbarFeature.Mosaic => RecordingAnnotationTool.Mosaic,
             _ => RecordingAnnotationTool.Pointer,
         };
-        if (match.Key is CaptureToolbarFeature.Shape or CaptureToolbarFeature.Arrow or
+        if (feature is CaptureToolbarFeature.Shape or CaptureToolbarFeature.Arrow or CaptureToolbarFeature.DoubleArrow or
             CaptureToolbarFeature.Emoji or CaptureToolbarFeature.Number or
             CaptureToolbarFeature.Brush or CaptureToolbarFeature.Text or CaptureToolbarFeature.Mosaic)
         {
@@ -2579,19 +2490,23 @@ public partial class VideoRecordingControlWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
+        if (_isPreparedForSelection) { base.OnClosing(e); return; }
         if (!_allowClose)
         {
             e.Cancel = true;
             if (_isStarting)
             {
-                RecordingStatusText.ToolTip =
-                    "录制器仍在初始化，请稍候。";
+                _ = CancelAndCloseAsync();
                 return;
             }
 
             if (_recorder.State == RegionVideoRecorderState.Ready)
             {
-                CloseWithResult(new RegionVideoRecordingResult(null, null));
+                // Already inside WPF's close operation; recursively calling
+                // Close here throws before the window can release its overlays.
+                _allowClose = true;
+                e.Cancel = false;
+                _completion.TrySetResult(new RegionVideoRecordingResult(null, null));
             }
             else
             {
@@ -2604,6 +2519,10 @@ public partial class VideoRecordingControlWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        if (_isPreparedForSelection) { base.OnClosed(e); return; }
+        ++_toolbarMoveAnimationVersion;
+        _finishToolbarTransition = null;
+        RecordingDevicePopup.IsOpen = false;
         FinishControlSurfaceDrag(ensureVisible: false);
         _toolbarDragHint.Detach();
         SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
@@ -2612,7 +2531,8 @@ public partial class VideoRecordingControlWindow : Window
         _collapsedToolbarTopmostTimer.Stop();
         _collapsedToolbarTopmostTimer.Tick -= OnCollapsedToolbarTopmostTimerTick;
         _recorder.Failed -= OnRecorderFailed;
-        _recorder.Dispose();
+        _recorder.StartupProgress -= OnRecorderStartupProgress;
+        _ = ReleaseRecorderAsync(_recorder);
         DisposeInputFeedback();
         DisposeAnnotationOverlay();
         _cameraOverlay?.Close();
@@ -2620,6 +2540,26 @@ public partial class VideoRecordingControlWindow : Window
         _frameWindow.Close();
         _completion.TrySetResult(new RegionVideoRecordingResult(null, null));
         base.OnClosed(e);
+    }
+
+    private static async Task ReleaseRecorderAsync(RegionVideoRecorder recorder)
+    {
+        using var featureActivity = Infrastructure.FeatureActivity.Begin();
+        try { await recorder.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception exception)
+        {
+            // Error-only diagnostics, written off the dispatcher. Never keep
+            // the toolbar or desktop overlays open waiting on a driver release.
+            try
+            {
+                System.IO.Directory.CreateDirectory(AppMetadata.DiagnosticsDirectoryPath);
+                var path = System.IO.Path.Combine(AppMetadata.DiagnosticsDirectoryPath, "recording-release-error.log");
+                await System.IO.File.WriteAllTextAsync(path, exception.ToString()).ConfigureAwait(false);
+            }
+            catch (System.IO.IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+        finally { Core.MemoryFootprint.TrimAfterHeavyOperation(); }
     }
 
     private void CloseWithResult(RegionVideoRecordingResult result)

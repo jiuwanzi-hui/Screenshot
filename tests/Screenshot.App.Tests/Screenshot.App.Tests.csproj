@@ -19,10 +19,21 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <EmbeddedResource Include="Fixtures\mini-code-false-positive-text.png" />
+    <EmbeddedResource Include="Fixtures\small-yellow-title.png" />
+    <EmbeddedResource Include="Fixtures\aliased-chat.png" />
+    <EmbeddedResource Include="Fixtures\pin-recapture-chat.jpg" />
+    <EmbeddedResource Include="Fixtures\camel-case-selection.png" />
+    <EmbeddedResource Include="Fixtures\translation-provider-selection.png" />
+    <EmbeddedResource Include="Fixtures\mixed-ocr-host-selection.png" />
+    <EmbeddedResource Include="Fixtures\installer-path-selection.png" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Screenshot.App\Screenshot.App.csproj" />
+    <Reference Include="ScreenRecorderLib">
+      <HintPath>..\..\src\Screenshot.App\bin\$(Configuration)\$(TargetFramework)\ScreenRecorderLib.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
 </Project>

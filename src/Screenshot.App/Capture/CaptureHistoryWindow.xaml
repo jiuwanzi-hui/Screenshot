@@ -1,6 +1,7 @@
 <Window x:Class="Screenshot.App.Capture.CaptureHistoryWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:presentation="clr-namespace:Screenshot.App.Presentation"
         xmlns:capture="clr-namespace:Screenshot.App.Capture"
         Title="历史查看"
         Width="720"
@@ -53,6 +54,10 @@
             <Setter Property="Foreground" Value="#E24A5A" />
         </Style>
         <Style x:Key="HistoryViewSwitch" TargetType="RadioButton">
+            <Setter Property="presentation:SelectionMotion.SurfaceName" Value="TabSurface" />
+            <Setter Property="presentation:SelectionMotion.ThemeVisibility" Value="{DynamicResource AppSelectionMotionVisibility}" />
+            <Setter Property="presentation:SelectionMotion.Fill" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="presentation:SelectionMotion.Edge" Value="{DynamicResource AppSelectedEdgeBrush}" />
             <Setter Property="MinWidth" Value="132" />
             <Setter Property="Height" Value="42" />
             <Setter Property="Margin" Value="0,0,10,0" />
@@ -81,8 +86,16 @@
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="TabSurface" Property="Background" Value="{DynamicResource AppAccentBrush}" />
                                 <Setter TargetName="TabSurface" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
-                                <Setter Property="Foreground" Value="#FFFFFF" />
+                                <Setter Property="Foreground" Value="{DynamicResource AppOnAccentBrush}" />
                             </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="presentation:SelectionMotion.IsHosted" Value="True" />
+                                    <Condition Property="IsChecked" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="TabSurface" Property="Background" Value="Transparent" />
+                                <Setter TargetName="TabSurface" Property="BorderBrush" Value="Transparent" />
+                            </MultiTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -375,7 +388,7 @@
                                                                VerticalAlignment="Center"
                                                                FontFamily="Segoe MDL2 Assets"
                                                                FontSize="22"
-                                                               Foreground="{DynamicResource AppAccentBrush}"
+                                                               Foreground="{DynamicResource AppAccentTextBrush}"
                                                                Text="&#xE714;">
                                                         <TextBlock.Style>
                                                             <Style TargetType="TextBlock">

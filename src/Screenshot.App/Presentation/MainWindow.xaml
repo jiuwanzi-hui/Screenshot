@@ -8,10 +8,10 @@
         mc:Ignorable="d"
         Icon="/SnapCut;component/Assets/Screenshot.ico"
         Title="SnapCut"
-        Width="780"
-        Height="560"
-        MinWidth="680"
-        MinHeight="480"
+        Width="980"
+        Height="820"
+        MinWidth="480"
+        MinHeight="360"
         ResizeMode="CanResize"
         ShowInTaskbar="False"
         Background="{DynamicResource AppWindowBackgroundBrush}"
@@ -20,20 +20,20 @@
         TextOptions.TextRenderingMode="ClearType"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
-        <Geometry x:Key="SettingsNavigationGeneralIcon">M 9,1 L 10.5,1.5 L 11.1,3.1 L 12.7,3.8 L 14.2,3.1 L 15.5,4.4 L 14.8,5.9 L 15.5,7.5 L 17,8.1 V 9.9 L 15.5,10.5 L 14.8,12.1 L 15.5,13.6 L 14.2,14.9 L 12.7,14.2 L 11.1,14.9 L 10.5,16.5 H 8.5 L 7.9,14.9 L 6.3,14.2 L 4.8,14.9 L 3.5,13.6 L 4.2,12.1 L 3.5,10.5 L 2,9.9 V 8.1 L 3.5,7.5 L 4.2,5.9 L 3.5,4.4 L 4.8,3.1 L 6.3,3.8 L 7.9,3.1 L 8.5,1 Z M 9.5,5.8 A 2.2,2.2 0 1 0 9.5,10.2 A 2.2,2.2 0 1 0 9.5,5.8 Z</Geometry>
-        <Geometry x:Key="SettingsNavigationHotkeyIcon">M 2,4 H 16 V 13 H 2 Z M 4,6 H 5 M 7,6 H 8 M 10,6 H 11 M 13,6 H 14 M 4,9 H 5 M 7,9 H 8 M 10,9 H 11 M 13,9 H 14 M 4,12 H 12</Geometry>
-        <Geometry x:Key="SettingsNavigationOcrIcon">M 3,2 H 15 V 16 H 3 Z M 6,5 H 12 M 6,8 H 12 M 6,11 H 10</Geometry>
-        <Geometry x:Key="SettingsNavigationTranslateIcon">M 3,3 H 15 M 5,6 H 13 M 7,9 H 11 M 10,11 L 15,16</Geometry>
-        <Geometry x:Key="SettingsNavigationUpdateIcon">M 4,5 A 6,6 0 1 1 4,13 M 4,5 V 1 M 4,5 H 8</Geometry>
-        <Geometry x:Key="SettingsNavigationDonateIcon">M 9,15 C 8,14 3,11 3,7 A 3,3 0 0 1 9,5 A 3,3 0 0 1 15,7 C 15,11 10,14 9,15 Z</Geometry>
-        <Geometry x:Key="SettingsNavigationContactIcon">M 2,3 H 16 V 12 H 10 L 6,16 V 12 H 2 Z M 5,6 H 13 M 5,9 H 11</Geometry>
+        <Geometry x:Key="SettingsNavigationGeneralIcon">M 3,6 H 8 M 12,6 H 21 M 3,12 H 14 M 18,12 H 21 M 3,18 H 6 M 10,18 H 21 M 8,3 V 9 H 12 V 3 Z M 14,9 V 15 H 18 V 9 Z M 6,15 V 21 H 10 V 15 Z</Geometry>
+        <Geometry x:Key="SettingsNavigationHotkeyIcon">M 5,5 H 19 Q 22,5 22,8 V 17 Q 22,20 19,20 H 5 Q 2,20 2,17 V 8 Q 2,5 5,5 Z M 6,9 H 7 M 11,9 H 12 M 16,9 H 17 M 6,13 H 7 M 11,13 H 12 M 16,13 H 17 M 7,17 H 17</Geometry>
+        <Geometry x:Key="SettingsNavigationOcrIcon">M 3,8 V 4 Q 3,3 4,3 H 8 M 16,3 H 20 Q 21,3 21,4 V 8 M 21,16 V 20 Q 21,21 20,21 H 16 M 8,21 H 4 Q 3,21 3,20 V 16 M 8,8 H 16 M 12,8 V 16 M 9,16 H 15</Geometry>
+        <Geometry x:Key="SettingsNavigationTranslateIcon">M 2,5 H 14 M 8,2 V 5 M 5,5 C 6,10 9,13 13,15 M 12,5 C 11,10 7,14 3,16 M 13,21 L 17,11 L 21,21 M 14.5,17 H 19.5</Geometry>
+        <Geometry x:Key="SettingsNavigationUpdateIcon">M 12,22 A 10,10 0 1 1 12,2 A 10,10 0 1 1 12,22 M 12,17 V 7 M 7,12 L 12,7 L 17,12</Geometry>
+        <Geometry x:Key="SettingsNavigationDonateIcon">M 12,21 L 3.8,13 C -2,7 5,-1 12,6 C 19,-1 26,7 20.2,13 Z</Geometry>
+        <Geometry x:Key="SettingsNavigationContactIcon">M 21,11.5 C 21,17 17,21 11.5,21 C 9,21 7,20 5.5,19 L 2,21 L 3.5,16.5 C 2.5,15 2,13.5 2,11.5 C 2,6 6,2 11.5,2 C 17,2 21,6 21,11.5 Z M 7,11.5 H 7.1 M 11.5,11.5 H 11.6 M 16,11.5 H 16.1</Geometry>
         <Style x:Key="SettingsNavigationIcon" TargetType="Path">
-            <Setter Property="Width" Value="18" />
-            <Setter Property="Height" Value="18" />
+            <Setter Property="Width" Value="20" />
+            <Setter Property="Height" Value="20" />
             <Setter Property="Stretch" Value="Uniform" />
             <Setter Property="Fill" Value="Transparent" />
             <Setter Property="Stroke" Value="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=Foreground}" />
-            <Setter Property="StrokeThickness" Value="1.5" />
+            <Setter Property="StrokeThickness" Value="1.6" />
             <Setter Property="StrokeStartLineCap" Value="Round" />
             <Setter Property="StrokeEndLineCap" Value="Round" />
             <Setter Property="StrokeLineJoin" Value="Round" />
@@ -43,21 +43,36 @@
             <Setter Property="MinWidth" Value="76" />
             <Setter Property="Padding" Value="14,7" />
             <Setter Property="Background" Value="{DynamicResource AppPanelBackgroundBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppControlEdgeBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}"
+                        <Border x:Name="SecondaryButtonSurface" Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="8"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center" />
+                                CornerRadius="{DynamicResource AppControlCornerRadius}">
+                            <Grid>
+                                <Border x:Name="SecondaryButtonLight" Margin="1" BorderThickness="1" BorderBrush="{DynamicResource AppControlHighlightBrush}"
+                                        Background="{DynamicResource AppControlReflectionBrush}"
+                                        CornerRadius="{DynamicResource AppControlCornerRadius}" IsHitTestVisible="False" />
+                                <local:LiquidGlassLens Visibility="{DynamicResource AppLiquidLensVisibility}" IsEmphasized="{Binding IsMouseOver, RelativeSource={RelativeSource TemplatedParent}}" />
+                                <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                            </Grid>
                         </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="SecondaryButtonSurface" Property="BorderBrush" Value="{DynamicResource AppSelectedEdgeBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="SecondaryButtonLight" Property="Opacity" Value="0.3" />
+                                <Setter TargetName="SecondaryButtonSurface" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
+                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -70,48 +85,70 @@
             <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
             <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="Foreground" Value="{DynamicResource AppOnAccentBrush}" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
         <Style x:Key="NavigationItem" TargetType="ListBoxItem">
+            <Setter Property="local:SelectionMotion.SurfaceName" Value="NavigationBackground" />
+            <Setter Property="local:SelectionMotion.ThemeVisibility" Value="{DynamicResource AppSelectionMotionVisibility}" />
+            <Setter Property="local:SelectionMotion.Fill" Value="{DynamicResource AppAccentMutedBrush}" />
+            <Setter Property="local:SelectionMotion.Edge" Value="{DynamicResource AppSelectedEdgeBrush}" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Margin" Value="0,2" />
             <Setter Property="Padding" Value="12,10" />
-            <Setter Property="MinHeight" Value="48" />
-            <Setter Property="FontSize" Value="16" />
-            <Setter Property="Foreground" Value="{DynamicResource AppTextSecondaryBrush}" />
+            <Setter Property="MinHeight" Value="42" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Foreground" Value="{DynamicResource AppNavigationForegroundBrush}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
-                        <Border x:Name="NavigationBackground"
+                        <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                        <Border x:Name="NavigationSeparator" Height="1" Margin="4,13,4,13" Background="{DynamicResource AppBorderBrush}" Opacity="0.65" Visibility="Collapsed" IsHitTestVisible="False" />
+                        <Border x:Name="NavigationBackground" Grid.Row="1"
                                 Background="Transparent"
-                                CornerRadius="8"
+                                CornerRadius="{DynamicResource AppControlCornerRadius}"
                                 Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                               VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
-                        </Border>
+                        </Border><Border x:Name="NavigationAccent" Grid.Row="1" Width="3" HorizontalAlignment="Left" Margin="0,5" CornerRadius="1.5" Background="{DynamicResource SelectionBorderBrush}" Visibility="Collapsed" /></Grid>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsSelected" Value="True">
+                            <Trigger Property="Tag" Value="Maintenance"><Setter TargetName="NavigationSeparator" Property="Visibility" Value="Visible" /></Trigger>
+                            <Trigger Property="IsSelected" Value="True"><Setter TargetName="NavigationAccent" Property="Visibility" Value="Visible" />
                                 <Setter TargetName="NavigationBackground" Property="Background" Value="{DynamicResource AppAccentMutedBrush}" />
+                                <Setter TargetName="NavigationBackground" Property="BorderBrush" Value="{DynamicResource AppSelectedEdgeBrush}" />
+                                <Setter TargetName="NavigationBackground" Property="BorderThickness" Value="1" />
                                 <Setter Property="Foreground" Value="{DynamicResource AppAccentForegroundBrush}" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
                             </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="local:SelectionMotion.IsHosted" Value="True" />
+                                    <Condition Property="IsSelected" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="NavigationBackground" Property="Background" Value="Transparent" />
+                                <Setter TargetName="NavigationBackground" Property="BorderBrush" Value="Transparent" />
+                                <Setter TargetName="NavigationAccent" Property="Visibility" Value="Collapsed" />
+                            </MultiTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
         <Style x:Key="ThemeOptionButton" TargetType="RadioButton">
+            <Setter Property="local:SelectionMotion.SurfaceName" Value="ThemeOptionBorder" />
+            <Setter Property="local:SelectionMotion.ThemeVisibility" Value="{DynamicResource AppSelectionMotionVisibility}" />
+            <Setter Property="local:SelectionMotion.Fill" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="local:SelectionMotion.Edge" Value="{DynamicResource AppSelectedEdgeBrush}" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="MinWidth" Value="92" />
             <Setter Property="Height" Value="34" />
             <Setter Property="Margin" Value="0,0,8,0" />
             <Setter Property="Padding" Value="14,4" />
             <Setter Property="Background" Value="{DynamicResource AppPanelBackgroundBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppControlEdgeBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
             <Setter Property="Cursor" Value="Hand" />
@@ -119,24 +156,35 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
                         <Border x:Name="ThemeOptionBorder"
-                                Padding="{TemplateBinding Padding}"
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="8">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center" />
+                                CornerRadius="{DynamicResource AppControlCornerRadius}">
+                            <Grid>
+                                <Border Margin="1" BorderThickness="1" BorderBrush="{DynamicResource AppControlHighlightBrush}"
+                                        CornerRadius="{DynamicResource AppControlCornerRadius}" IsHitTestVisible="False" />
+                                <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
                                 <Setter TargetName="ThemeOptionBorder" Property="Background" Value="{DynamicResource AppAccentBrush}" />
-                                <Setter TargetName="ThemeOptionBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
-                                <Setter Property="Foreground" Value="#FFFFFF" />
+                                <Setter TargetName="ThemeOptionBorder" Property="BorderBrush" Value="{DynamicResource AppSelectedEdgeBrush}" />
+                                <Setter Property="Foreground" Value="{DynamicResource AppOnAccentBrush}" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="ThemeOptionBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
                             </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="local:SelectionMotion.IsHosted" Value="True" />
+                                    <Condition Property="IsChecked" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="ThemeOptionBorder" Property="Background" Value="Transparent" />
+                                <Setter TargetName="ThemeOptionBorder" Property="BorderBrush" Value="Transparent" />
+                            </MultiTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -148,7 +196,7 @@
             <Setter Property="Margin" Value="0,0,10,10" />
             <Setter Property="Padding" Value="10" />
             <Setter Property="Background" Value="{DynamicResource AppPanelBackgroundBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppControlEdgeBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
             <Setter Property="Cursor" Value="Hand" />
@@ -161,9 +209,12 @@
                                     Background="{TemplateBinding Background}"
                                     BorderBrush="{TemplateBinding BorderBrush}"
                                     BorderThickness="{TemplateBinding BorderThickness}"
-                                    CornerRadius="8">
+                                    CornerRadius="{DynamicResource AppControlCornerRadius}">
                                 <ContentPresenter VerticalAlignment="Center" />
                             </Border>
+                            <Border Margin="2" BorderThickness="1" BorderBrush="{DynamicResource AppControlHighlightBrush}"
+                                    CornerRadius="{DynamicResource AppControlCornerRadius}" IsHitTestVisible="False" />
+                            <local:LiquidGlassLens Visibility="{DynamicResource AppLiquidLensVisibility}" IsEmphasized="{Binding IsMouseOver, RelativeSource={RelativeSource TemplatedParent}}" />
                             <Border x:Name="ThemeSelectedBadge"
                                     Width="20"
                                     Height="20"
@@ -177,7 +228,7 @@
                                            VerticalAlignment="Center"
                                            FontFamily="Segoe MDL2 Assets"
                                            FontSize="10"
-                                           Foreground="#FFFFFF"
+                                           Foreground="{DynamicResource AppOnAccentBrush}"
                                            Text="&#xE73E;" />
                             </Border>
                         </Grid>
@@ -188,12 +239,13 @@
                                         Value="{DynamicResource AppAccentBrush}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
+                                <Setter Property="Foreground" Value="{DynamicResource AppSelectedControlForegroundBrush}" />
                                 <Setter TargetName="ThemeCardSurface"
                                         Property="Background"
                                         Value="{DynamicResource AppAccentMutedBrush}" />
                                 <Setter TargetName="ThemeCardSurface"
                                         Property="BorderBrush"
-                                        Value="{DynamicResource AppAccentBrush}" />
+                                        Value="{DynamicResource AppSelectedEdgeBrush}" />
                                 <Setter TargetName="ThemeCardSurface"
                                         Property="BorderThickness"
                                         Value="2" />
@@ -352,10 +404,16 @@
                         <Border Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="8">
-                            <ScrollViewer x:Name="PART_ContentHost"
+                                CornerRadius="{DynamicResource AppControlCornerRadius}">
+                            <Grid>
+                                <Border Margin="1" BorderThickness="1" BorderBrush="{DynamicResource AppControlHighlightBrush}"
+                                        Background="{DynamicResource AppControlReflectionBrush}"
+                                        CornerRadius="{DynamicResource AppControlCornerRadius}" IsHitTestVisible="False" />
+                                <local:LiquidGlassLens Visibility="{DynamicResource AppLiquidLensVisibility}" IsEmphasized="{Binding IsMouseOver, RelativeSource={RelativeSource TemplatedParent}}" />
+                                <ScrollViewer x:Name="PART_ContentHost"
                                           Margin="{TemplateBinding Padding}"
                                           Focusable="False" />
+                            </Grid>
                         </Border>
                     </ControlTemplate>
                 </Setter.Value>
@@ -366,8 +424,8 @@
         <Style x:Key="ToolbarShortcutIcon" TargetType="Border">
             <Setter Property="Width" Value="36" />
             <Setter Property="Height" Value="32" />
-            <Setter Property="Background" Value="{DynamicResource EditorToolbarButtonBackgroundBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource EditorToolbarButtonBorderBrush}" />
+            <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="7" />
             <Style.Triggers>
@@ -379,8 +437,8 @@
         </Style>
         <Style x:Key="ToolbarShortcutCapture" TargetType="{x:Type local:HotKeyCaptureBox}">
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
-            <Setter Property="Background" Value="{DynamicResource EditorToolbarButtonBackgroundBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource EditorToolbarButtonBorderBrush}" />
+            <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Foreground" Value="{DynamicResource EditorToolbarIconBrush}" />
             <Setter Property="Template">
@@ -389,10 +447,16 @@
                         <Border Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="7">
-                            <ScrollViewer x:Name="PART_ContentHost"
+                                CornerRadius="{DynamicResource AppControlCornerRadius}">
+                            <Grid>
+                                <Border Margin="1" BorderThickness="1" BorderBrush="{DynamicResource AppControlHighlightBrush}"
+                                        Background="{DynamicResource AppControlReflectionBrush}"
+                                        CornerRadius="{DynamicResource AppControlCornerRadius}" IsHitTestVisible="False" />
+                                <local:LiquidGlassLens Visibility="{DynamicResource AppLiquidLensVisibility}" IsEmphasized="{Binding IsMouseOver, RelativeSource={RelativeSource TemplatedParent}}" />
+                                <ScrollViewer x:Name="PART_ContentHost"
                                           Margin="{TemplateBinding Padding}"
                                           Focusable="False" />
+                            </Grid>
                         </Border>
                     </ControlTemplate>
                 </Setter.Value>
@@ -404,17 +468,34 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="SettingsSwitch" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{DynamicResource AppTextPrimaryBrush}" />
+            <Setter Property="MinHeight" Value="34" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox">
+                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="48"/></Grid.ColumnDefinitions>
+                    <ContentPresenter VerticalAlignment="Center" />
+                    <Border x:Name="SwitchTrack" Grid.Column="1" Height="25" CornerRadius="12.5" Background="{DynamicResource AppSubtleBorderBrush}">
+                        <Ellipse x:Name="SwitchThumb" Width="19" Height="19" Margin="3" HorizontalAlignment="Left" Fill="White" />
+                    </Border>
+                </Grid>
+                <ControlTemplate.Triggers><Trigger Property="IsChecked" Value="True">
+                    <Setter TargetName="SwitchTrack" Property="Background" Value="{DynamicResource AppAccentBrush}"/>
+                    <Setter TargetName="SwitchThumb" Property="HorizontalAlignment" Value="Right"/>
+                </Trigger><Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45"/></Trigger></ControlTemplate.Triggers>
+            </ControlTemplate></Setter.Value></Setter>
+        </Style>
     </Window.Resources>
 
-    <Border Margin="8"
+    <Border Margin="10"
             Background="{DynamicResource AppGlassBackgroundBrush}"
             BorderBrush="{DynamicResource AppBorderBrush}"
             BorderThickness="1"
-            CornerRadius="20"
+            CornerRadius="12"
             SnapsToDevicePixels="True">
-      <Grid Background="{DynamicResource AppWindowBackgroundBrush}">
+      <Grid>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="178" />
+            <ColumnDefinition Width="180" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
@@ -422,8 +503,8 @@
                 Background="{DynamicResource AppSidebarBackgroundBrush}"
                 BorderBrush="{DynamicResource AppSubtleBorderBrush}"
                 BorderThickness="0,0,1,0"
-                CornerRadius="16">
-            <Grid Margin="24,26,20,24">
+                CornerRadius="12,0,0,12">
+            <Grid Margin="14,22,14,18">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
@@ -435,7 +516,7 @@
                                Foreground="{DynamicResource AppTextPrimaryBrush}"
                                Text="SnapCut" />
                     <Border Height="1"
-                            Margin="0,24,0,18"
+                            Margin="0,20,0,14"
                             Background="{DynamicResource AppSeparatorBrush}" />
                 </StackPanel>
 
@@ -571,7 +652,7 @@
         </Border>
 
         <Grid Grid.Column="1"
-              Margin="34,28,34,26">
+              Margin="26,24,18,18">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
@@ -730,7 +811,7 @@
 
                     <TextBlock Margin="0,15,0,0"
                                Style="{StaticResource GeneralFieldLabel}"
-                               Text="截图输出画质" />
+                               Text="截图输出尺寸" />
                     <ComboBox x:Name="ScreenshotScalePercentComboBox"
                               Width="270"
                               Height="34"
@@ -741,25 +822,25 @@
                               SelectedValuePath="Tag"
                               SelectedValue="{Binding ScreenshotScalePercent, Mode=TwoWay}"
                               SelectionChanged="OnImmediateSettingChanged"
-                              ToolTip="调整普通截图和钉图的输出尺寸；100% 保留屏幕原始像素">
+                              ToolTip="100% 保留屏幕原始像素；大于 100% 使用插值放大，不增加真实细节。钉图显示始终保留原图。">
                         <ComboBoxItem Content="50% · 更小文件"
                                       Tag="50" />
                         <ComboBoxItem Content="75% · 平衡"
                                       Tag="75" />
                         <ComboBoxItem Content="100% · 原始像素"
                                       Tag="100" />
-                        <ComboBoxItem Content="125% · 放大"
+                        <ComboBoxItem Content="125% · 插值放大"
                                       Tag="125" />
-                        <ComboBoxItem Content="150% · 高清放大"
+                        <ComboBoxItem Content="150% · 插值放大"
                                       Tag="150" />
-                        <ComboBoxItem Content="200% · 超清放大"
+                        <ComboBoxItem Content="200% · 插值放大"
                                       Tag="200" />
                     </ComboBox>
                     <TextBlock Margin="0,7,0,0"
                                FontSize="12"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
                                TextWrapping="Wrap"
-                               Text="仅应用于普通截图和钉图的保存、复制输出；长截图保持原始拼接像素。PNG 仍为无损格式。" />
+                               Text="100% 保留原始像素；缩小会减少细节，放大仅增加像素数，不增加真实细节。仅影响保存和复制，钉图显示保留原图；长截图保持原始拼接像素。PNG 为无损格式。" />
 
                     <TextBlock Margin="0,15,0,0"
                                Style="{StaticResource GeneralFieldLabel}"
@@ -769,6 +850,7 @@
                               Margin="0,9,0,0"
                               HorizontalAlignment="Left"
                               Padding="9,2"
+                              x:Name="CaptureAspectRatioComboBox"
                               ItemsSource="{Binding CaptureAspectRatioOptions}"
                               DisplayMemberPath="Label"
                               SelectedValuePath="Value"
@@ -973,10 +1055,10 @@
                     </Grid>
                     <local:CaptureToolbarLayoutEditor Margin="0,12,0,0"
                                                       LayoutChanged="OnCaptureToolbarLayoutChanged" />
-                    <TextBlock Margin="0,12,0,0"
+                    <TextBlock Margin="0,12,0,0" TextWrapping="Wrap"
                                FontSize="12"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
-                               Text="功能快捷键（仅支持单个数字；只在普通截图、钉图编辑和视频录制中生效）" />
+                               Text="功能快捷键（支持数字或 Ctrl / Alt / Shift + 数字；在截图、钉图编辑和录制中生效）" />
                     <ItemsControl Margin="0,7,0,0"
                                   ItemsSource="{Binding CaptureToolbarAnnotationFeatureItems}">
                         <ItemsControl.ItemsPanel>
@@ -986,17 +1068,20 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <StackPanel Margin="0,0,16,8" Orientation="Horizontal">
-                                    <Border Style="{StaticResource ToolbarShortcutIcon}">
-                                        <local:ToolbarFeatureIcon Feature="{Binding Feature}"
-                                                                  Glyph="{Binding Glyph}" />
+                                <StackPanel Margin="0,0,12,8" Orientation="Horizontal">
+                                    <Border Style="{StaticResource ToolbarShortcutIcon}" Width="32" Height="32" Padding="0">
+                                        <Viewbox Width="18" Height="18" Stretch="Uniform"
+                                                 HorizontalAlignment="Center" VerticalAlignment="Center">
+                                            <local:ToolbarFeatureIcon Feature="{Binding Feature}"
+                                                                      Glyph="{Binding Glyph}" />
+                                        </Viewbox>
                                     </Border>
                                     <local:HotKeyCaptureBox Style="{StaticResource ToolbarShortcutCapture}"
-                                             Width="36"
+                                             Width="118"
                                              Height="32"
                                              Margin="7,0,0,0"
                                              Padding="2"
-                                             MaxLength="1"
+                                             MaxLength="24"
                                              HorizontalContentAlignment="Center"
                                              VerticalContentAlignment="Center"
                                              HotKeyCaptureRequested="OnHotKeyCaptureRequested"
@@ -1006,7 +1091,7 @@
                                              LostKeyboardFocus="OnHotKeyCaptureLostKeyboardFocus"
                                              Tag="{Binding Feature}"
                                              Text="{Binding Shortcut, Mode=TwoWay, UpdateSourceTrigger=Explicit}"
-                                             ToolTip="点击后按一个数字；按 Backspace 清空" />
+                                             ToolTip="点击后按数字或组合键，例如 Ctrl+1；按 Backspace 清空" />
                                 </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -1673,6 +1758,91 @@
                             </Button>
                         </Grid>
                     </StackPanel>
+<StackPanel Margin="0,17,0,0">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="AI 问图（空白对话）" />
+                        <Grid Margin="0,8,16,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <local:HotKeyCaptureBox x:Name="ImageQuestionHotKeyBox"
+                                                    Height="34"
+                                                    Padding="10,3"
+                                                    BorderBrush="{DynamicResource AppBorderBrush}"
+                                                    GotKeyboardFocus="OnHotKeyCaptureGotKeyboardFocus"
+                                                    HotKeyCaptured="OnHotKeyCaptured"
+                                                    HotKeyCaptureCanceled="OnHotKeyCaptureCanceled"
+                                                    LostKeyboardFocus="OnHotKeyCaptureLostKeyboardFocus"
+                                                    Tag="ImageQuestionHotKey"
+                                                    Text="{Binding ImageQuestionHotKey}"
+                                                    TextAlignment="Center"
+                                                    ToolTip="打开空白 AI 问图对话，拖入图片即可提问" />
+                            <Button Grid.Column="1"
+                                    Width="68"
+                                    Margin="8,0,0,0"
+                                    Click="OnBeginHotKeyEditClick"
+                                    Content="修改"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="ImageQuestionHotKeyBox"
+                                    ToolTip="修改AI 问图快捷键" />
+                            <Button Grid.Column="2"
+                                    Width="34"
+                                    Margin="6,0,0,0"
+                                    Click="OnClearHotKeyClick"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="ImageQuestionHotKeyBox"
+                                    ToolTip="不设置AI 问图快捷键">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
+                            </Button>
+                        </Grid>
+                    </StackPanel>
+
+                    <StackPanel Margin="0,17,0,0">
+                        <TextBlock FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                   Text="实时翻译（开启 / 停止）" />
+                        <Grid Margin="0,8,16,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <local:HotKeyCaptureBox x:Name="RealtimeTranslationHotKeyBox"
+                                                    Height="34"
+                                                    Padding="10,3"
+                                                    BorderBrush="{DynamicResource AppBorderBrush}"
+                                                    GotKeyboardFocus="OnHotKeyCaptureGotKeyboardFocus"
+                                                    HotKeyCaptured="OnHotKeyCaptured"
+                                                    HotKeyCaptureCanceled="OnHotKeyCaptureCanceled"
+                                                    LostKeyboardFocus="OnHotKeyCaptureLostKeyboardFocus"
+                                                    Tag="RealtimeTranslationHotKey"
+                                                    Text="{Binding RealtimeTranslationHotKey}"
+                                                    TextAlignment="Center"
+                                                    ToolTip="开启或停止当前窗口 / 指定区域实时翻译" />
+                            <Button Grid.Column="1"
+                                    Width="68"
+                                    Margin="8,0,0,0"
+                                    Click="OnBeginHotKeyEditClick"
+                                    Content="修改"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="RealtimeTranslationHotKeyBox"
+                                    ToolTip="修改实时翻译快捷键" />
+                            <Button Grid.Column="2"
+                                    Width="34"
+                                    Margin="6,0,0,0"
+                                    Click="OnClearHotKeyClick"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Tag="RealtimeTranslationHotKeyBox"
+                                    ToolTip="不设置实时翻译快捷键">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE74D;" />
+                            </Button>
+                        </Grid>
+                    </StackPanel>
 
                     <StackPanel Margin="0,17,0,0">
                         <TextBlock FontSize="14"
@@ -1818,7 +1988,7 @@
                                FontSize="13"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
                                TextWrapping="Wrap"
-                               Text="框选完成后自动在本机识别文字、二维码和表格；默认使用 Windows，也可下载更准确的多语言模型" />
+                               Text="在本机识别文字、二维码和表格；可开启框选后自动识别文字，也可下载更准确的多语言模型" />
 
                     <TextBlock FontSize="14"
                                Margin="0,28,0,0"
@@ -1875,15 +2045,15 @@
                             <TextBlock FontSize="15"
                                        FontWeight="SemiBold"
                                        Foreground="{DynamicResource AppTextPrimaryBrush}"
-                                       Text="PP-OCRv6 Small · 高质量多语言识别" />
+                                       Text="PP-OCRv6 Small + 艺术字增强 · 本机多语言识别" />
                             <TextBlock Margin="0,6,0,0"
                                        Foreground="{DynamicResource AppTextSecondaryBrush}"
                                        TextWrapping="Wrap"
-                                       Text="对中文、英文、混合文字及表格截图更准确，并返回字符级位置。完全本机运行，不上传截图。" />
+                                       Text="普通图片使用 Small 快速识别；困难小图及横竖混排海报按需调用 Medium，补充竖排与彩色描边大字识别，艺术字和标点仍需核对。完整文件约 163.1 MiB，文件大小不等于运行内存。完全本机运行，不上传截图；增强处理会增加等待和运行内存，空闲约 10 秒退出工作进程。" />
                             <TextBlock x:Name="HighQualityOcrModelStatusText"
                                        Margin="0,10,0,0"
                                        FontWeight="SemiBold"
-                                       Foreground="{DynamicResource AppAccentBrush}"
+                                       Foreground="{DynamicResource AppAccentTextBrush}"
                                        TextWrapping="Wrap" />
                             <TextBlock x:Name="HighQualityOcrModelPathText"
                                        Margin="0,5,0,0"
@@ -1923,34 +2093,64 @@
                           VerticalScrollBarVisibility="Auto"
                           Visibility="Collapsed">
                 <StackPanel>
-                    <TextBlock FontSize="22"
+                    <TextBlock x:Name="TranslationPageTitle" FontSize="22"
                                FontWeight="SemiBold"
                                Foreground="{DynamicResource AppTextPrimaryBrush}"
                                Text="翻译" />
-                    <TextBlock Margin="0,7,0,0"
+                    <TextBlock x:Name="TranslationPageIntroduction" Margin="0,7,0,0"
                                FontSize="13"
                                Foreground="{DynamicResource AppTextSecondaryBrush}"
                                Text="可以使用在线大模型，也可以下载安装后完全离线翻译" />
-                    <Button Width="150"
+                    <Button x:Name="OpenOfflineTextTranslationButton" Width="120" Height="32"
                             Margin="0,14,0,0"
                             HorizontalAlignment="Left"
                             Padding="14,6"
                             Click="OnOpenTextTranslationClick"
-                            Content="打开离线文本翻译" />
+                            Style="{StaticResource SecondaryButton}"
+                            ToolTip="打开独立的离线文本翻译窗口" Content="文本翻译" />
 
-                    <StackPanel Margin="0,18,0,0">
-                        <DockPanel Margin="0,0,0,8">
-                            <TextBlock DockPanel.Dock="Left" FontSize="15" FontWeight="SemiBold"
+                    <StackPanel x:Name="ImageQuestionSettingsGroup">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <CheckBox x:Name="EnableImageQuestionCheckBox" Content="启用 AI 问图"
+                                      VerticalAlignment="Center" Foreground="{DynamicResource AppTextPrimaryBrush}"
+                                      IsChecked="{Binding EnableImageQuestion, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                            <Button x:Name="OpenImageQuestionButton" Grid.Column="1" Content="打开 AI 问图" Margin="12,0,0,0"
+                                    Padding="12,6" Style="{StaticResource SecondaryButton}" Click="OnOpenImageQuestionClick"
+                                    IsEnabled="{Binding EnableImageQuestion}" ToolTip="打开空白对话，可拖入最多五张图片；快捷键可在快捷键设置页配置" />
+                        </Grid>
+                        <TextBlock Margin="0,8,0,0" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                   Text="在截图和钉图右侧显示问图入口，使用下方配置的在线模型。也可打开空白对话并拖入图片；快捷键在“快捷键”页设置。" />
+                        <TextBlock Margin="0,4,0,0" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                   Text="仅发送时上传图片并处理，关闭对话后释放图片和请求。关闭此开关会隐藏新截图和新编辑窗口的入口。" />
+                    </StackPanel>
+
+                    <Button x:Name="OpenRealtimeTranslationButton" Margin="0,10,0,0" HorizontalAlignment="Left" Padding="14,6"
+                            Style="{StaticResource SecondaryButton}" Content="实时翻译" Click="OnOpenRealtimeTranslationClick" />
+                    <Expander x:Name="RealtimeTranslationSettingsGroup" Margin="0,12,0,0" Header="实时翻译设置">
+                        <ContentControl x:Name="RealtimeSettingsHost" Margin="0,12,0,0" />
+                    </Expander>
+
+                    <StackPanel x:Name="OnlineTranslationProfilesPanel" Margin="0,18,0,0">
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock VerticalAlignment="Center" FontSize="15" FontWeight="SemiBold"
                                        Foreground="{DynamicResource AppTextPrimaryBrush}" Text="在线模型" />
-                            <Button DockPanel.Dock="Right" Width="152" Height="30" Padding="10,3"
-                                    Content="增加在线模型"
+                            <Button x:Name="AddOnlineTranslationProfileButton" Grid.Column="1" Width="120" Height="32" Padding="10,3"
+                                    Style="{StaticResource SecondaryButton}" Content="＋ 添加模型"
                                     Click="OnAddTranslationProfileClick" ToolTip="增加在线模型" />
-                        </DockPanel>
+                        </Grid>
                         <TextBlock Margin="0,0,0,8" FontSize="12"
                                    Foreground="{DynamicResource AppTextSecondaryBrush}"
                                    Text="勾选启用项将按列表顺序依次尝试；点击编辑可在独立窗口配置服务。"
                                    TextWrapping="Wrap" />
-                        <ItemsControl ItemsSource="{Binding TranslationProfiles}">
+                        <ItemsControl x:Name="OnlineTranslationProfilesList" ItemsSource="{Binding OnlineTranslationProfiles}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Border Margin="0,0,0,6" Padding="8,7"
@@ -1970,6 +2170,7 @@
                                                     Grid.ColumnSpan="4"
                                                     Height="3"
                                                     Panel.ZIndex="2"
+                                                    IsHitTestVisible="False"
                                                     Background="{DynamicResource AppAccentBrush}"
                                                     Visibility="Collapsed" />
                                             <CheckBox VerticalAlignment="Center" IsChecked="{Binding IsEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
@@ -2008,7 +2209,7 @@
                                                             <Setter Property="Foreground" Value="{DynamicResource AppTextSecondaryBrush}" />
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding IsAvailable}" Value="True">
-                                                                    <Setter Property="Foreground" Value="White" />
+                                                                    <Setter Property="Foreground" Value="{DynamicResource AppOnAccentBrush}" />
                                                                     <Setter Property="FontWeight" Value="SemiBold" />
                                                                 </DataTrigger>
                                                             </Style.Triggers>
@@ -2027,7 +2228,7 @@
                         </ItemsControl>
                     </StackPanel>
 
-                    <TextBlock Margin="0,22,0,0"
+                    <TextBlock x:Name="OfflineTranslationEngineLabel" Margin="0,22,0,0"
                                FontSize="14"
                                FontWeight="SemiBold"
                                Foreground="{DynamicResource AppTextPrimaryBrush}"
@@ -2050,32 +2251,30 @@
                         <TextBlock Margin="0,6,0,0"
                                    FontSize="12"
                                    Foreground="{DynamicResource AppTextSecondaryBrush}"
-                                   Text="按序号从上到下尝试；当前方式连接失败或翻译失败时自动使用下一项。"
+                                   Text="按序号从上到下尝试；离线优先仍允许失败后使用在线备用。仅需离线时，请取消在线模型列表中的启用勾选。结果会说明实际使用的模型和切换原因。"
                                    TextWrapping="Wrap" />
-                        <ItemsControl Margin="0,10,0,0"
+                        <TextBlock Margin="0,6,0,0" Text="拖动条目调整顺序，松手自动保存；也可选中后按 Alt+↑ / ↓。"
+                                   FontSize="12" Foreground="{DynamicResource AppTextSecondaryBrush}" TextWrapping="Wrap" />
+                        <ItemsControl x:Name="TranslationPriorityList" Margin="0,10,0,0"
                                       ItemsSource="{Binding TranslationPriorityItems}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Border Margin="0,0,0,7"
-                                            Padding="12,9"
-                                            BorderThickness="1"
-                                            CornerRadius="7"
-                                            ToolTip="{Binding AvailabilityReason}">
+                                            Padding="12,7"
+                                            BorderThickness="0,0,0,1"
+                                            CornerRadius="0"
+                                            ToolTip="{Binding AvailabilityReason}"
+                                            Cursor="SizeAll" Focusable="True" AllowDrop="True"
+                                            PreviewKeyDown="OnTranslationPriorityKeyDown"
+                                            PreviewMouseLeftButtonDown="OnTranslationProfileRowPreviewMouseLeftButtonDown"
+                                            PreviewMouseMove="OnTranslationProfileRowPreviewMouseMove"
+                                            DragOver="OnTranslationProfileRowDragOver"
+                                            DragLeave="OnTranslationProfileRowDragLeave"
+                                            Drop="OnTranslationProfileRowDrop">
                                         <Border.Style>
                                             <Style TargetType="Border">
-                                                <Setter Property="Background"
-                                                        Value="{DynamicResource AppPanelBackgroundBrush}" />
-                                                <Setter Property="BorderBrush"
-                                                        Value="{DynamicResource AppBorderBrush}" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsAvailable}"
-                                                                 Value="True">
-                                                        <Setter Property="Background"
-                                                                Value="{DynamicResource AppAccentMutedBrush}" />
-                                                        <Setter Property="BorderBrush"
-                                                                Value="{DynamicResource AppAccentBrush}" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
+                                                <Setter Property="Background" Value="Transparent" />
+                                                <Setter Property="BorderBrush" Value="{DynamicResource AppSubtleBorderBrush}" />
                                             </Style>
                                         </Border.Style>
                                         <Grid>
@@ -2092,7 +2291,7 @@
                                                 <Border.Style>
                                                     <Style TargetType="Border">
                                                         <Setter Property="Background"
-                                                                Value="{DynamicResource AppInputBackgroundBrush}" />
+                                                                Value="Transparent" />
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding IsAvailable}"
                                                                          Value="True">
@@ -2114,7 +2313,7 @@
                                                                 <DataTrigger Binding="{Binding IsAvailable}"
                                                                              Value="True">
                                                                     <Setter Property="Foreground"
-                                                                            Value="{DynamicResource AppAccentBrush}" />
+                                                                            Value="{DynamicResource AppAccentTextBrush}" />
                                                                 </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
@@ -2150,7 +2349,7 @@
                                                 <Border.Style>
                                                     <Style TargetType="Border">
                                                         <Setter Property="Background"
-                                                                Value="{DynamicResource AppInputBackgroundBrush}" />
+                                                                Value="Transparent" />
                                                         <Style.Triggers>
                                                             <DataTrigger Binding="{Binding IsAvailable}"
                                                                          Value="True">
@@ -2170,7 +2369,7 @@
                                                                 <DataTrigger Binding="{Binding IsAvailable}"
                                                                              Value="True">
                                                                     <Setter Property="Foreground"
-                                                                            Value="White" />
+                                                                            Value="{DynamicResource AppOnAccentBrush}" />
                                                                     <Setter Property="FontWeight"
                                                                             Value="SemiBold" />
                                                                 </DataTrigger>
@@ -2179,28 +2378,12 @@
                                                     </TextBlock.Style>
                                                 </TextBlock>
                                             </Border>
-                                            <StackPanel Grid.Column="3"
-                                                        Orientation="Horizontal">
-                                                <Button Width="30"
-                                                        Height="28"
-                                                        Padding="0"
-                                                        Click="OnMoveTranslationProviderUpClick"
-                                                        Content="↑"
-                                                        Focusable="False"
-                                                        IsEnabled="{Binding CanMoveUp}"
-                                                        Tag="{Binding Provider}"
-                                                        ToolTip="提高优先级" />
-                                                <Button Width="30"
-                                                        Height="28"
-                                                        Margin="6,0,0,0"
-                                                        Padding="0"
-                                                        Click="OnMoveTranslationProviderDownClick"
-                                                        Content="↓"
-                                                        Focusable="False"
-                                                        IsEnabled="{Binding CanMoveDown}"
-                                                        Tag="{Binding Provider}"
-                                                        ToolTip="降低优先级" />
-                                            </StackPanel>
+                                            <TextBlock Grid.Column="3" Text="⠿" FontSize="22" Width="30"
+                                                       HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource AppTextSecondaryBrush}" ToolTip="拖动调整优先顺序" />
+                                            <Border x:Name="TranslationProfileDropMarker" Grid.ColumnSpan="4"
+                                                    Height="3" Panel.ZIndex="2" IsHitTestVisible="False"
+                                                    Background="{DynamicResource AppAccentBrush}" Visibility="Collapsed" />
                                         </Grid>
                                     </Border>
                                 </DataTemplate>
@@ -2379,7 +2562,7 @@
                                 <TextBlock x:Name="OfflineModelStatusText"
                                            Margin="0,9,0,0"
                                            FontWeight="SemiBold"
-                                           Foreground="{DynamicResource AppAccentBrush}"
+                                           Foreground="{DynamicResource AppAccentTextBrush}"
                                            TextWrapping="Wrap" />
                                 <TextBlock x:Name="OfflineModelPathText"
                                            Margin="0,5,0,0"
@@ -2421,16 +2604,23 @@
                                 <TextBlock FontSize="15"
                                            FontWeight="SemiBold"
                                            Foreground="{DynamicResource AppTextPrimaryBrush}"
-                                           Text="Qwen2.5 1.5B · 本机翻译大模型" />
+                                           x:Name="LocalLargeModelTitleText" Text="TranslateGemma 4B · 离线多语言翻译" />
                                 <TextBlock Margin="0,6,0,0"
                                            Foreground="{DynamicResource AppTextSecondaryBrush}"
                                            TextWrapping="Wrap"
-                                           Text="比轻量翻译模型更擅长结合上下文和修正明显 OCR 断词；CPU 本机运行，速度较慢，建议至少 4 GB 可用内存。" />
+                                           x:Name="LocalLargeModelDescriptionText" Text="离线多语言翻译；首次加载及长文本取决于电脑性能。" />
+                                <TextBlock Margin="0,6,0,0"
+                                           Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                           TextWrapping="Wrap"
+                                           x:Name="LocalLargeModelCleanupText" Text="保留多语言离线语言包与文字识别模型。" />
                                 <TextBlock x:Name="LocalLargeModelStatusText"
                                            Margin="0,10,0,0"
                                            FontWeight="SemiBold"
-                                           Foreground="{DynamicResource AppAccentBrush}"
+                                           Foreground="{DynamicResource AppAccentTextBrush}"
                                            TextWrapping="Wrap" />
+                                <TextBlock Margin="0,6,0,0" FontSize="12"
+                                           Foreground="{DynamicResource AppTextSecondaryBrush}" TextWrapping="Wrap"
+                                           Text="模型优先使用魔搭国内源，失败自动换源并续传。Windows 安装包附带推理组件；无法联网时可导入当前版本的 GGUF 模型或 ZIP 推理组件。" />
                                 <TextBlock x:Name="LocalLargeModelPathText"
                                            Margin="0,5,0,0"
                                            FontSize="12"
@@ -2444,6 +2634,7 @@
                                 <TextBlock x:Name="LocalLargeModelDownloadProgressText"
                                            Margin="0,5,0,0"
                                            FontSize="12"
+                                           TextWrapping="Wrap"
                                            Foreground="{DynamicResource AppTextSecondaryBrush}"
                                            Visibility="Collapsed" />
                                 <StackPanel Margin="0,14,0,0"
@@ -2452,7 +2643,10 @@
                                             MinWidth="126"
                                             Padding="14,5"
                                             Click="OnDownloadLocalLargeModelClick"
-                                            Content="下载翻译大模型" />
+                                            Content="下载多语言模型" />
+                                    <Button x:Name="ImportLocalLargeModelButton" Margin="8,0,0,0"
+                                            Padding="14,5" Click="OnImportLocalLargeModelClick"
+                                            Content="导入本地文件" />
                                     <Button Margin="8,0,0,0"
                                             Padding="14,5"
                                             Click="OnOpenLocalLargeModelDirectoryClick"
@@ -2503,6 +2697,7 @@
                                                Foreground="{DynamicResource AppTextPrimaryBrush}"
                                                Text="SnapCut" />
                                     <TextBlock x:Name="CurrentVersionText"
+                                               TextWrapping="Wrap"
                                                Margin="0,7,0,0"
                                                FontSize="14"
                                                Foreground="{DynamicResource AppTextSecondaryBrush}" />
@@ -2660,6 +2855,7 @@
                                TextWrapping="Wrap" />
 
                     <Border x:Name="CreatorProfileGlowHost"
+                            Background="{DynamicResource AppSubtleBorderBrush}"
                             Margin="0,22,0,0"
                             Padding="2"
                             CornerRadius="10"
@@ -2672,17 +2868,7 @@
                                 <TranslateTransform x:Name="CreatorProfileTranslate" X="0" Y="0" />
                             </TransformGroup>
                         </Border.RenderTransform>
-                        <Border.Background>
-                            <LinearGradientBrush x:Name="CreatorProfileGlowBrush"
-                                                 StartPoint="0,0"
-                                                 EndPoint="1,1">
-                                <GradientStop Color="#2EAFA5" Offset="0" />
-                                <GradientStop Color="#6D7BFF" Offset="0.28" />
-                                <GradientStop Color="#E0529F" Offset="0.55" />
-                                <GradientStop Color="#F6C85F" Offset="0.78" />
-                                <GradientStop Color="#2EAFA5" Offset="1" />
-                            </LinearGradientBrush>
-                        </Border.Background>
+
                         <Border x:Name="CreatorProfileCard"
                                 Padding="18"
                                 Background="{DynamicResource AppPanelBackgroundBrush}"
@@ -2700,7 +2886,7 @@
                                              Stroke="{DynamicResource AppAccentBrush}"
                                              StrokeThickness="2">
                                         <Ellipse.Fill>
-                                            <ImageBrush ImageSource="/SnapCut;component/Assets/CreatorAvatar.jpg"
+                                            <ImageBrush x:Name="CreatorAvatarBrush"
                                                         Stretch="UniformToFill" />
                                         </Ellipse.Fill>
                                     </Ellipse>
@@ -2762,7 +2948,6 @@
                                         BorderThickness="1"
                                         CornerRadius="6">
                                     <Image x:Name="DonateQrImage"
-                                           Source="/SnapCut;component/Assets/DonateQr.jpg"
                                            Stretch="Uniform"
                                            SnapsToDevicePixels="True" />
                                 </Border>
@@ -2852,7 +3037,6 @@
                                     BorderThickness="1"
                                     CornerRadius="6">
                                 <Image x:Name="CommunityQrImage"
-                                       Source="/SnapCut;component/Assets/SnapCutCommunityQr.jpg"
                                        Stretch="Uniform"
                                        SnapsToDevicePixels="True" />
                             </Border>
@@ -2862,6 +3046,13 @@
                                        Foreground="{DynamicResource AppTextSecondaryBrush}"
                                        Text="扫码后按群内提示加入 SnapCut 交流群"
                                        TextWrapping="Wrap" />
+                            <TextBlock x:Name="CommunityQrStatusText"
+                                       Margin="0,10,0,0" MaxWidth="360" FontSize="12"
+                                       Foreground="{DynamicResource AppTextSecondaryBrush}"
+                                       TextWrapping="Wrap" />
+                            <Button x:Name="CommunityQrRefreshButton" Margin="0,10,0,0"
+                                    HorizontalAlignment="Center" Padding="16,6"
+                                    Content="刷新二维码" Click="OnCommunityQrRefreshClick" />
                         </StackPanel>
                     </Border>
                 </StackPanel>

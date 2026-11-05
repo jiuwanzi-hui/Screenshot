@@ -68,6 +68,11 @@ internal sealed class TranslationTermProtector
         string term,
         Dictionary<string, int> leadingTerms)
     {
+        // Protect the brand spelling, not an entire descriptive download
+        // label such as "SnapCut-Portable" before its version number.
+        if (term.Contains('-') && !TranslationTargetLanguageMatcher.IsLikelyInvariant(term))
+            return false;
+
         var hasInternalUppercase = term.Skip(1).Any(character =>
             character is >= 'A' and <= 'Z');
         if (hasInternalUppercase ||

@@ -38,6 +38,14 @@ public partial class ContentRecognitionWindow : Window
         Opacity = 1;
     }
 
+    protected override void OnClosed(EventArgs e)
+    {
+        Loaded -= OnLoaded;
+        ResultTextBox.Clear();
+        base.OnClosed(e);
+        Core.MemoryFootprint.TrimAfterHeavyOperation();
+    }
+
     private void OnTitleMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         if (e.LeftButton == MouseButtonState.Pressed)

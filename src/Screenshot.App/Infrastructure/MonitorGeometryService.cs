@@ -98,6 +98,22 @@ internal static class MonitorGeometryService
             SetWindowPositionNoActivate);
     }
 
+    internal static bool TryResizeWindow(Window window, System.Windows.Rect bounds)
+    {
+        var handle = new WindowInteropHelper(window).Handle;
+        if (handle == IntPtr.Zero) return false;
+        var transform = System.Windows.PresentationSource.FromVisual(window)?.CompositionTarget?.TransformToDevice
+            ?? System.Windows.Media.Matrix.Identity;
+        var origin = transform.Transform(bounds.TopLeft);
+        var corner = transform.Transform(bounds.BottomRight);
+        // Submit position and both dimensions together, on the HWND dispatcher.
+        return SetWindowPos(handle, IntPtr.Zero,
+            (int)Math.Round(origin.X), (int)Math.Round(origin.Y),
+            Math.Max(1, (int)Math.Round(corner.X) - (int)Math.Round(origin.X)),
+            Math.Max(1, (int)Math.Round(corner.Y) - (int)Math.Round(origin.Y)),
+            SetWindowPositionNoZOrder | SetWindowPositionNoActivate);
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct NativeRect(
         int Left,

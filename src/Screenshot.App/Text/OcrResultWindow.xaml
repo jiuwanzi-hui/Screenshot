@@ -11,7 +11,7 @@
         MinHeight="300"
         FontFamily="Microsoft YaHei UI"
         WindowStartupLocation="CenterScreen">
-    <Grid Background="{DynamicResource AppWindowBackgroundBrush}">
+    <Grid Background="Transparent">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="*" />
@@ -41,7 +41,7 @@
                  AcceptsReturn="True"
                  AcceptsTab="True"
                  Background="{DynamicResource AppInputBackgroundBrush}"
-                 BorderBrush="{DynamicResource AppBorderBrush}"
+                 BorderThickness="0"
                  FontSize="14"
                  PreviewKeyDown="OnSelectableTextPreviewKeyDown"
                  TextWrapping="Wrap"
@@ -54,7 +54,7 @@
                  AcceptsReturn="True"
                  AcceptsTab="True"
                  Background="{DynamicResource AppInputBackgroundBrush}"
-                 BorderBrush="{DynamicResource AppBorderBrush}"
+                 BorderThickness="0"
                  FontSize="14"
                  IsReadOnly="True"
                  PreviewKeyDown="OnSelectableTextPreviewKeyDown"

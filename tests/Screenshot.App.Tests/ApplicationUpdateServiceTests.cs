@@ -9,7 +9,7 @@ using Screenshot.App.Update;
 
 namespace Screenshot.App.Tests;
 
-public sealed class ApplicationUpdateServiceTests
+public sealed partial class ApplicationUpdateServiceTests
 {
     [Fact]
     public async Task FindsNewerReleaseFromTheFixedLatestManifest()
@@ -506,6 +506,23 @@ public sealed class ApplicationUpdateServiceTests
                 StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task PrefersCompactPackageWithoutReplacingLegacyZipMetadata()
+    {
+        var package = Encoding.UTF8.GetBytes("package");
+        var manifest = System.Text.Json.Nodes.JsonNode.Parse(CreateManifest("4.0.2", package))!;
+        var compact = manifest["portable"]!.DeepClone();
+        foreach (var field in new[] { "fileName", "githubUrl", "giteeUrl" })
+            compact[field] = compact[field]!.GetValue<string>().Replace("Screenshot-", "SnapCut-").Replace(".zip", ".7z");
+        manifest["portable7z"] = compact;
+        using var client = new HttpClient(new StaticResponseHandler(Encoding.UTF8.GetBytes(manifest.ToJsonString()), "application/json"));
+        using var service = new ApplicationUpdateService(client, new Uri("https://github.com/update.json"), CreateTemporaryPath());
+        var result = await service.CheckAsync(new Version(4, 0, 1));
+        Assert.True(result.IsSuccess, result.Message);
+        Assert.Equal("SnapCut-Portable-4.0.2-win-x64.7z", result.AvailableUpdate!.Portable.FileName);
+        Assert.EndsWith(".zip", manifest["portable"]!["fileName"]!.GetValue<string>());
+    }
+
     private static string CreateManifest(string version, byte[] package)
     {
         var hash = Convert.ToHexString(SHA256.HashData(package));
@@ -674,7 +691,7 @@ public sealed class ApplicationUpdateServiceTests
         {
             var uri = request.RequestUri!;
             if (!uri.AbsolutePath.EndsWith(
-                    "/updates/SnapCut-Releases.json",
+                    "/SnapCut-Releases.json",
                     StringComparison.OrdinalIgnoreCase))
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)

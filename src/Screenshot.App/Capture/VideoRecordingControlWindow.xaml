@@ -1,6 +1,7 @@
 <Window x:Class="Screenshot.App.Capture.VideoRecordingControlWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:presentation="clr-namespace:Screenshot.App.Presentation"
         xmlns:editor="clr-namespace:Screenshot.App.Editor"
         MinWidth="360"
         Height="64"
@@ -67,15 +68,21 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="ButtonBorder"
+                        <presentation:ToolbarButtonSurface x:Name="ButtonBorder"
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="8">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center" />
-                        </Border>
+                                CornerRadius="8" LensVisibility="{DynamicResource AppLiquidLensVisibility}"
+                                HighlightBrush="{DynamicResource AppControlHighlightBrush}"
+                                ReflectionBrush="{DynamicResource AppControlReflectionBrush}"
+                                ReflectionRadius="{DynamicResource AppControlCornerRadius}"
+                                IsEmphasized="{Binding IsMouseOver, RelativeSource={RelativeSource TemplatedParent}}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </presentation:ToolbarButtonSurface>
                         <ControlTemplate.Triggers>
+                            <DataTrigger Binding="{Binding LensVisibility, ElementName=ButtonBorder}" Value="Visible">
+                                <Setter TargetName="ButtonBorder" Property="CornerRadius" Value="11" />
+                            </DataTrigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="ButtonBorder"
                                         Property="Background"
@@ -93,6 +100,11 @@
             </Setter>
         </Style>
         <Style x:Key="RecordingToolButton" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="{DynamicResource EditorToolbarIconBrush}" />
+            <Setter Property="presentation:SelectionMotion.SurfaceName" Value="ButtonBorder" />
+            <Setter Property="presentation:SelectionMotion.ThemeVisibility" Value="{DynamicResource AppSelectionMotionVisibility}" />
+            <Setter Property="presentation:SelectionMotion.Fill" Value="{DynamicResource EditorToolbarButtonSelectedBackgroundBrush}" />
+            <Setter Property="presentation:SelectionMotion.Edge" Value="{DynamicResource EditorToolbarButtonSelectedBorderBrush}" />
             <Setter Property="Width" Value="36" />
             <Setter Property="Height" Value="32" />
             <Setter Property="Cursor" Value="Hand" />
@@ -104,15 +116,21 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
-                        <Border x:Name="ButtonBorder"
+                        <presentation:ToolbarButtonSurface x:Name="ButtonBorder"
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="8">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center" />
-                        </Border>
+                                CornerRadius="8" LensVisibility="{DynamicResource AppLiquidLensVisibility}"
+                                HighlightBrush="{DynamicResource AppControlHighlightBrush}"
+                                ReflectionBrush="{DynamicResource AppControlReflectionBrush}"
+                                ReflectionRadius="{DynamicResource AppControlCornerRadius}"
+                                IsEmphasized="{Binding IsMouseOver, RelativeSource={RelativeSource TemplatedParent}}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </presentation:ToolbarButtonSurface>
                         <ControlTemplate.Triggers>
+                            <DataTrigger Binding="{Binding LensVisibility, ElementName=ButtonBorder}" Value="Visible">
+                                <Setter TargetName="ButtonBorder" Property="CornerRadius" Value="11" />
+                            </DataTrigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="ButtonBorder"
                                         Property="Background"
@@ -126,31 +144,81 @@
                                         Property="BorderBrush"
                                         Value="{DynamicResource AppAccentBrush}" />
                             </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="presentation:SelectionMotion.IsHosted" Value="True" />
+                                    <Condition Property="IsChecked" Value="True" />
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="Transparent" />
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="Transparent" />
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="RecordingAudioToggle" TargetType="CheckBox">
+            <Setter Property="Width" Value="36" />
+            <Setter Property="Height" Value="34" />
+            <Setter Property="Margin" Value="3,0,0,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Border x:Name="Surface" CornerRadius="6" Background="Transparent"
+                                BorderThickness="1" BorderBrush="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Surface" Property="Background" Value="{DynamicResource AppAccentMutedBrush}" />
+                                <Setter TargetName="Surface" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Surface" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.6" />
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
         <Style x:Key="RecordingDockButton" TargetType="Button">
-            <Setter Property="Width" Value="28" />
-            <Setter Property="Height" Value="28" />
+            <Setter Property="Width" Value="116" />
+            <Setter Property="Height" Value="40" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="Margin" Value="0" />
-            <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource AppControlForegroundBrush}" />
+            <Setter Property="Background" Value="{DynamicResource AppFloatingSurfaceBrush}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource AppBorderBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource AppTextPrimaryBrush}" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="BorderThickness" Value="1" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}"
+                        <Border x:Name="DockSurface" Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="3"
-                                Opacity="0.94">
+                                CornerRadius="20">
                             <ContentPresenter HorizontalAlignment="Center"
                                               VerticalAlignment="Center" />
                         </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="DockSurface" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="DockSurface" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="DockSurface" Property="Opacity" Value="0.8" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -250,16 +318,21 @@
           Background="Transparent"
           ClipToBounds="False">
     <Border x:Name="ControlSurface"
+            RenderTransformOrigin="1,0.5"
             Padding="7,6"
-            Background="{DynamicResource AppPanelBackgroundBrush}"
-            BorderBrush="{DynamicResource AppBorderBrush}"
+            Background="{DynamicResource AppFloatingSurfaceBrush}"
+            BorderBrush="{DynamicResource AppControlEdgeBrush}"
             BorderThickness="1"
-            CornerRadius="6"
+            CornerRadius="10"
             QueryCursor="OnControlSurfaceQueryCursor">
         <Border.RenderTransform>
             <ScaleTransform x:Name="ToolbarVisualScale" ScaleX="1" ScaleY="1" />
         </Border.RenderTransform>
         <Grid x:Name="ToolbarGrid">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
             <Grid.LayoutTransform>
                 <ScaleTransform x:Name="ToolbarLayoutScale"
                                 ScaleX="1"
@@ -271,171 +344,77 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <Grid x:Name="RecordingStatusPanel"
-                  VerticalAlignment="Center">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-                <TextBlock x:Name="RecordingStatusText"
-                           Grid.Row="0"
-                           FontSize="10"
-                           FontWeight="SemiBold"
-                           Foreground="{DynamicResource AppTextPrimaryBrush}"
-                           LineHeight="11"
-                           LineStackingStrategy="BlockLineHeight"
-                           Text="准备录制"
-                           TextTrimming="CharacterEllipsis" />
-                <TextBlock x:Name="ElapsedTimeText"
-                           Grid.Row="1"
-                           Margin="0,1,0,0"
-                           FontFamily="Consolas"
-                           FontSize="11"
-                           Foreground="{DynamicResource AppTextSecondaryBrush}"
-                           LineHeight="12"
-                           LineStackingStrategy="BlockLineHeight"
-                           Text="00:00"
-                           Visibility="Collapsed" />
-             </Grid>
+            <StackPanel x:Name="RecordingStatusPanel" Orientation="Horizontal"
+                        Margin="4,0,16,0" VerticalAlignment="Center">
+                <Ellipse x:Name="RecordingStatusDot" Width="8" Height="8" Margin="0,0,8,0"
+                         Fill="#F04455" Visibility="Collapsed" />
+                <TextBlock x:Name="RecordingStatusText" FontSize="13" FontWeight="SemiBold"
+                           VerticalAlignment="Center"
+                           Foreground="{DynamicResource AppTextPrimaryBrush}" Text="准备录制" />
+                <TextBlock x:Name="ElapsedTimeText" Margin="10,0,0,0"
+                           FontFamily="Consolas" FontSize="13" VerticalAlignment="Center"
+                           Foreground="{DynamicResource AppTextSecondaryBrush}" Text="00:00" />
+            </StackPanel>
 
-             <Grid x:Name="RecordingOptionsPanel"
-                        Grid.Column="1"
-                        Margin="8,0,4,0"
-                        Height="54"
-                        HorizontalAlignment="Left"
-                        VerticalAlignment="Center">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="27" />
-                    <RowDefinition Height="27" />
-                </Grid.RowDefinitions>
-                <StackPanel Grid.Row="0"
-                            Orientation="Horizontal"
-                            HorizontalAlignment="Left">
-                    <ComboBox x:Name="CodecComboBox"
-                          MinWidth="116"
-                          Height="24"
-                          Padding="7,0,34,0"
-                          Margin="0,0,5,0"
-                          FontSize="11"
-                          Cursor="Arrow"
-                          SelectedValuePath="Tag"
-                          SelectionChanged="OnRecordingOptionChanged"
-                          ToolTip="视频格式与编码">
-                    <ComboBoxItem Content="MP4 · H.264" Tag="H264" />
-                    <ComboBoxItem Content="MP4 · H.265" Tag="H265" />
-                    <ComboBoxItem Content="GIF（无声音）" Tag="Gif" />
+            <StackPanel x:Name="RecordingOptionsPanel" Grid.Column="1" Height="44"
+                        Margin="0,0,10,0" Orientation="Horizontal"
+                        HorizontalAlignment="Left" VerticalAlignment="Center">
+                <StackPanel x:Name="EncodingOptionsPanel" Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <ComboBox x:Name="CodecComboBox" Width="144" MinWidth="144" Height="36"
+                              Padding="9,0,28,0" Margin="0,0,8,0" FontSize="12"
+                              SelectedValuePath="Tag" SelectionChanged="OnRecordingOptionChanged"
+                              ToolTip="视频格式与编码">
+                        <ComboBoxItem Content="MP4 · H.264" Tag="H264" />
+                        <ComboBoxItem Content="MP4 · H.265" Tag="H265" />
+                        <ComboBoxItem Content="GIF（无声音）" Tag="Gif" />
                     </ComboBox>
-                    <ComboBox x:Name="FrameRateComboBox"
-                          MinWidth="68"
-                          Height="24"
-                          Padding="7,0,34,0"
-                          Margin="0,0,7,0"
-                          FontSize="11"
-                          Cursor="Arrow"
-                          SelectedValuePath="Tag"
-                          SelectionChanged="OnRecordingOptionChanged"
-                          ToolTip="录制帧率">
-                    <ComboBoxItem Content="24 FPS" Tag="24" />
-                    <ComboBoxItem Content="30 FPS" Tag="30" />
-                          <ComboBoxItem Content="60 FPS" Tag="60" />
+                    <ComboBox x:Name="FrameRateComboBox" Width="100" MinWidth="100" Height="36"
+                              Padding="9,0,28,0" Margin="0,0,8,0" FontSize="12"
+                              SelectedValuePath="Tag" SelectionChanged="OnRecordingOptionChanged"
+                              ToolTip="录制帧率">
+                        <ComboBoxItem Content="24 FPS" Tag="24" />
+                        <ComboBoxItem Content="30 FPS" Tag="30" />
+                        <ComboBoxItem Content="60 FPS" Tag="60" />
                     </ComboBox>
-                    <Border Width="1" Height="18" Margin="2,0,7,0"
-                            Background="{DynamicResource AppBorderBrush}" />
-                    <CheckBox x:Name="SystemAudioCheckBox"
-                          Margin="0,0,4,0"
-                          VerticalAlignment="Center"
-                          Cursor="Hand"
-                          FontSize="11"
-                          Checked="OnRecordingOptionChanged"
-                          Unchecked="OnRecordingOptionChanged"
-                          Content="系统"
-                          Foreground="{DynamicResource AppTextPrimaryBrush}"
-                          ToolTip="录制电脑正在播放的声音" />
-                    <CheckBox x:Name="MicrophoneCheckBox"
-                          Margin="0,0,4,0"
-                          VerticalAlignment="Center"
-                          Cursor="Hand"
-                          FontSize="11"
-                          Checked="OnRecordingOptionChanged"
-                          Unchecked="OnRecordingOptionChanged"
-                          Content="麦克"
-                          Foreground="{DynamicResource AppTextPrimaryBrush}"
-                          ToolTip="录制系统默认麦克风" />
-                    <ComboBox x:Name="MicrophoneDeviceComboBox"
-                          MinWidth="132"
-                          Height="24"
-                          Margin="0,0,7,0"
-                          Padding="7,0,34,0"
-                          FontSize="11"
-                          Cursor="Arrow"
-                          DisplayMemberPath="Name"
-                          SelectedValuePath="Id"
-                          SelectionChanged="OnMicrophoneDeviceChanged"
-                          ToolTip="选择录音麦克风" />
                 </StackPanel>
-                <StackPanel Grid.Row="1"
-                            Orientation="Horizontal"
-                            HorizontalAlignment="Left">
-                    <ComboBox x:Name="InputDisplayModeComboBox"
-                          MinWidth="108"
-                          Height="24"
-                          Padding="7,0,34,0"
-                          Margin="0,0,7,0"
-                          FontSize="11"
-                          Cursor="Arrow"
-                          SelectedValuePath="Tag"
-                          SelectionChanged="OnRecordingOptionChanged"
-                          ToolTip="在视频中显示键盘或鼠标输入">
-                        <ComboBoxItem Content="不显示" Tag="None" />
-                        <ComboBoxItem Content="显示鼠标" Tag="Mouse" />
-                        <ComboBoxItem Content="显示键盘" Tag="Keyboard" />
-                        <ComboBoxItem Content="显示键盘鼠标" Tag="KeyboardAndMouse" />
-                    </ComboBox>
-                    <Border Width="1" Height="18" Margin="2,0,7,0"
-                            Background="{DynamicResource AppBorderBrush}" />
-                    <CheckBox x:Name="MouseTrailCheckBox"
-                          Margin="0,0,4,0"
-                          VerticalAlignment="Center"
-                          Cursor="Hand"
-                          FontSize="11"
-                          Checked="OnRecordingOptionChanged"
-                          Unchecked="OnRecordingOptionChanged"
-                          Content="鼠标移动轨迹"
-                          Foreground="{DynamicResource AppTextPrimaryBrush}"
-                          ToolTip="在视频中显示鼠标移动轨迹" />
-                    <Border Width="1" Height="18" Margin="2,0,7,0"
-                            Background="{DynamicResource AppBorderBrush}" />
-                    <CheckBox x:Name="ShowCameraCheckBox"
-                          Margin="4,0,0,0"
-                          VerticalAlignment="Center"
-                          Cursor="Hand"
-                          FontSize="11"
-                          Checked="OnRecordingOptionChanged"
-                          Unchecked="OnRecordingOptionChanged"
-                          Content="相机"
-                          Foreground="{DynamicResource AppTextPrimaryBrush}"
-                          ToolTip="在录制区域显示摄像头画面" />
-                    <ComboBox x:Name="CameraDeviceComboBox"
-                          MinWidth="132"
-                          Height="24"
-                          Margin="0,0,0,0"
-                          Padding="7,0,34,0"
-                          FontSize="11"
-                          Cursor="Arrow"
-                          DisplayMemberPath="Name"
-                          SelectedValuePath="Id"
-                          SelectionChanged="OnCameraDeviceChanged"
-                          ToolTip="选择录制区域中的摄像头" />
-                </StackPanel>
-            </Grid>
+                <CheckBox x:Name="SystemAudioCheckBox" Style="{StaticResource RecordingAudioToggle}"
+                          Checked="OnRecordingOptionChanged" Unchecked="OnRecordingOptionChanged"
+                          ToolTip="录制电脑正在播放的声音">
+                    <Path Width="20" Height="20" Stretch="Uniform" Fill="Transparent"
+                          Stroke="{DynamicResource EditorToolbarIconBrush}" StrokeThickness="1.6"
+                          StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                          Data="M 2,7 H 6 L 11,3 V 17 L 6,13 H 2 Z M 14,6 Q 18,10 14,14 M 17,3 Q 23,10 17,17" />
+                </CheckBox>
+                <CheckBox x:Name="MicrophoneCheckBox" Style="{StaticResource RecordingAudioToggle}"
+                          Checked="OnRecordingOptionChanged" Unchecked="OnRecordingOptionChanged"
+                          ToolTip="录制系统默认麦克风">
+                    <Path Width="20" Height="20" Stretch="Uniform" Fill="Transparent"
+                          Stroke="{DynamicResource EditorToolbarIconBrush}" StrokeThickness="1.6"
+                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                          Data="M 7,5 A 3,3 0 0 1 13,5 V 10 A 3,3 0 0 1 7,10 Z M 4,9 V 10 A 6,6 0 0 0 16,10 V 9 M 10,16 V 20 M 7,20 H 13" />
+                </CheckBox>
+                <CheckBox x:Name="ShowCameraCheckBox" Style="{StaticResource RecordingAudioToggle}"
+                          Checked="OnRecordingOptionChanged" Unchecked="OnRecordingOptionChanged"
+                          ToolTip="显示/隐藏摄像头">
+                    <Path Data="{StaticResource CameraIconGeometry}" Style="{StaticResource RecordingIconPath}" />
+                </CheckBox>
+            </StackPanel>
+
+            <Border x:Name="AnnotationRow" Grid.Row="1" Grid.ColumnSpan="3"
+                    Visibility="{Binding Visibility, ElementName=AnnotationToolsPanel}"
+                    Margin="0,8,0,0" Padding="0,6,0,0" BorderThickness="0,1,0,0"
+                    BorderBrush="{DynamicResource AppSubtleBorderBrush}">
+              <StackPanel Orientation="Vertical" HorizontalAlignment="Center">
+                <StackPanel x:Name="RecordingAnnotationMainRow" Orientation="Horizontal" HorizontalAlignment="Center">
 
             <StackPanel x:Name="AnnotationToolsPanel"
-                        Grid.Column="1"
-                        Margin="6,0,4,0"
+                        Visibility="Collapsed"
+                        HorizontalAlignment="Center"
                         VerticalAlignment="Center"
-                        Orientation="Horizontal"
-                        Visibility="Collapsed">
+                        Orientation="Horizontal">
                 <ToggleButton x:Name="CameraToggleButton"
+                              Visibility="Collapsed"
                               Click="OnCameraToggleClick"
                               Style="{StaticResource RecordingToolButton}"
                               Tag="Camera"
@@ -443,7 +422,7 @@
                               <Path Data="{StaticResource CameraIconGeometry}"
                           Style="{StaticResource RecordingIconPath}" />
                 </ToggleButton>
-                <Border Width="1" Height="18" Margin="4,0,3,0"
+                <Border Width="1" Height="18" Margin="4,0,3,0" Visibility="Collapsed"
                         Background="{DynamicResource AppBorderBrush}" />
                 <ToggleButton x:Name="ShapeToolButton"
                               Click="OnAnnotationToolClick"
@@ -452,31 +431,24 @@
                               ToolTip="矩形/椭圆">
                     <ToggleButton.ContextMenu>
                         <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
-                            <MenuItem Tag="Rectangle"
+                            <MenuItem Tag="Rectangle" IsCheckable="True"
                                       Style="{StaticResource ThemedMenuItemStyle}"
                                       Click="OnRecordingShapeMenuItemClick">
                                 <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource RectangleIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.6" /><TextBlock VerticalAlignment="Center" Text="矩形" /></StackPanel></MenuItem.Header>
                             </MenuItem>
-                            <MenuItem Tag="Ellipse"
+                            <MenuItem Tag="Ellipse" IsCheckable="True"
                                       Style="{StaticResource ThemedMenuItemStyle}"
                                       Click="OnRecordingShapeMenuItemClick">
                                 <MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource EllipseIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.6" /><TextBlock VerticalAlignment="Center" Text="椭圆" /></StackPanel></MenuItem.Header>
                             </MenuItem>
                         </ContextMenu>
                     </ToggleButton.ContextMenu>
-                    <Grid Width="29">
+                    <Grid Width="20">
                         <Path x:Name="ShapeToolIcon"
                               Width="18" Height="18"
-                              HorizontalAlignment="Left"
+                              HorizontalAlignment="Center"
                               Data="{StaticResource RectangleIconGeometry}"
                               Style="{StaticResource RecordingIconPath}" />
-                        <TextBlock HorizontalAlignment="Right"
-                                   VerticalAlignment="Center"
-                                   FontSize="8"
-                                   Foreground="{DynamicResource EditorToolbarIconBrush}"
-                                   Text="▾"
-                                   ToolTip="选择形状"
-                                   PreviewMouseLeftButtonDown="OnRecordingShapeMenuArrowMouseDown" />
                     </Grid>
                 </ToggleButton>
                 <ToggleButton x:Name="ArrowToolButton"
@@ -492,22 +464,18 @@
                             <MenuItem Tag="CurvedArrow,Hollow" Style="{StaticResource ThemedMenuItemStyle}" Click="OnRecordingArrowMenuItemClick"><MenuItem.Header><StackPanel Orientation="Horizontal"><Path Width="18" Height="18" Margin="0,0,8,0" Data="{StaticResource CurvedHollowArrowIconGeometry}" Fill="Transparent" Stroke="{DynamicResource AppControlForegroundBrush}" StrokeThickness="1.8" /><TextBlock VerticalAlignment="Center" Text="弧形空心箭头" /></StackPanel></MenuItem.Header></MenuItem>
                         </ContextMenu>
                     </ToggleButton.ContextMenu>
-                    <Grid Width="29">
+                    <Grid Width="20">
                         <Path x:Name="ArrowToolIcon"
                               Width="18" Height="18"
-                              HorizontalAlignment="Left"
+                              HorizontalAlignment="Center"
                               Data="{StaticResource StraightFilledArrowIconGeometry}"
                               Fill="{DynamicResource EditorToolbarIconBrush}"
                               Stretch="Uniform" />
-                        <TextBlock HorizontalAlignment="Right"
-                                   VerticalAlignment="Center"
-                                   FontSize="8"
-                                   Foreground="{DynamicResource EditorToolbarIconBrush}"
-                                   Text="▾"
-                                   ToolTip="选择箭头"
-                                   PreviewMouseLeftButtonDown="OnRecordingArrowMenuArrowMouseDown" />
                     </Grid>
                 </ToggleButton>
+                <ToggleButton x:Name="DoubleArrowToolButton" Tag="DoubleArrow" Click="OnAnnotationToolClick"
+                              Foreground="{DynamicResource EditorToolbarIconBrush}"
+                              Style="{StaticResource RecordingToolButton}" ToolTip="双向箭头" />
                 <ToggleButton x:Name="EmojiToolButton"
                               Click="OnAnnotationToolClick"
                               Style="{StaticResource RecordingToolButton}"
@@ -518,18 +486,11 @@
                                      ItemContainerStyle="{StaticResource RecordingEmojiHostMenuItem}"
                                      Style="{StaticResource ThemedContextMenuStyle}" />
                     </ToggleButton.ContextMenu>
-                    <Grid Width="29">
+                    <Grid Width="20">
                         <editor:EmojiStickerImage x:Name="EmojiToolIcon"
                                                   Width="22" Height="22"
-                                                  HorizontalAlignment="Left"
+                                                  HorizontalAlignment="Center"
                                                   Sticker="😊" />
-                        <TextBlock HorizontalAlignment="Right"
-                                   VerticalAlignment="Center"
-                                   FontSize="8"
-                                   Foreground="{DynamicResource EditorToolbarIconBrush}"
-                                   Text="▾"
-                                   ToolTip="选择表情"
-                                   PreviewMouseLeftButtonDown="OnRecordingEmojiMenuArrowMouseDown" />
                     </Grid>
                 </ToggleButton>
                 <ToggleButton x:Name="NumberToolButton"
@@ -571,30 +532,8 @@
                     <Path Data="{StaticResource MosaicIconGeometry}"
                           Style="{StaticResource RecordingIconPath}" />
                 </ToggleButton>
-                <Border Width="1" Height="18" Margin="5,0,1,0"
-                        Background="{DynamicResource AppBorderBrush}" />
-                <Button x:Name="AnnotationColorButton"
-                        Click="OnAnnotationColorClick"
-                        Style="{StaticResource RecordingControlButton}"
-                        ToolTip="标注颜色">
-                    <Ellipse x:Name="AnnotationColorSwatch"
-                             Width="18" Height="18"
-                             Fill="#F04455"
-                             Stroke="{DynamicResource AppBorderBrush}"
-                             StrokeThickness="1" />
-                </Button>
-                <Slider x:Name="AnnotationStrokeWidthSlider"
-                        Width="58" Height="20"
-                        Margin="5,0,1,0"
-                        VerticalAlignment="Center"
-                        Minimum="1" Maximum="12" Value="3"
-                        SmallChange="1" LargeChange="2"
-                        TickFrequency="1"
-                        Style="{StaticResource RecordingEditorSlider}"
-                        ValueChanged="OnAnnotationStrokeWidthChanged"
-                        PreviewMouseLeftButtonUp="OnAnnotationStrokeWidthCommitted"
-                        LostKeyboardFocus="OnAnnotationStrokeWidthCommitted"
-                        ToolTip="标注大小" />
+            </StackPanel>
+            <StackPanel x:Name="AnnotationHistoryPanel" Orientation="Horizontal">
                 <Border Width="1" Height="18" Margin="4,0,3,0"
                         Background="{DynamicResource AppBorderBrush}" />
                 <Button Click="OnAnnotationUndoClick"
@@ -618,42 +557,84 @@
                                Text="&#xE74D;" />
                 </Button>
             </StackPanel>
+            </StackPanel>
+            <presentation:ToolbarAdjustmentPanel x:Name="RecordingAdjustmentLine"
+                WidthSource="{Binding ElementName=RecordingAnnotationMainRow}">
+            <StackPanel x:Name="AnnotationPropertiesPanel"
+                        Orientation="Horizontal"
+                        VerticalAlignment="Center"
+                        Visibility="Collapsed">
+                <Button x:Name="AnnotationColorButton"
+                        Click="OnAnnotationColorClick"
+                        Style="{StaticResource RecordingControlButton}"
+                        ToolTip="标注颜色">
+                    <Grid Width="26" Height="26">
+                        <Rectangle x:Name="AnnotationColorSwatch" RadiusX="3" RadiusY="3" Fill="#F04455"
+                                   Stroke="{DynamicResource AppBorderBrush}" StrokeThickness="1" />
+                        <Path x:Name="AnnotationColorCheckMark" Margin="6" Data="M 1,6 L 5,10 L 13,1" Stretch="Uniform"
+                              Stroke="White" StrokeThickness="2" StrokeLineJoin="Round" />
+                    </Grid>
+                </Button>
+                <Button x:Name="AnnotationCyanColorButton" Style="{StaticResource RecordingControlButton}" Tag="#00A6B2"
+                        Click="OnAnnotationQuickColorClick" ToolTip="青色">
+                    <Rectangle Width="24" Height="24" RadiusX="3" RadiusY="3" Fill="#00A6B2"
+                               Stroke="{DynamicResource AppBorderBrush}" StrokeThickness="1" />
+                </Button>
+                <Button x:Name="AnnotationWhiteColorButton" Style="{StaticResource RecordingControlButton}" Tag="#FFFFFF"
+                        Click="OnAnnotationQuickColorClick" ToolTip="白色">
+                    <Rectangle Width="24" Height="24" RadiusX="3" RadiusY="3" Fill="#FFFFFF"
+                               Stroke="{DynamicResource AppBorderBrush}" StrokeThickness="1" />
+                </Button>
+                <Slider x:Name="AnnotationStrokeWidthSlider"
+                        Width="90" Height="20"
+                        Margin="5,0,1,0"
+                        VerticalAlignment="Center"
+                        Minimum="1" Maximum="12" Value="3"
+                        SmallChange="1" LargeChange="2"
+                        TickFrequency="1"
+                        Style="{StaticResource RecordingEditorSlider}"
+                        ValueChanged="OnAnnotationStrokeWidthChanged"
+                        PreviewMouseLeftButtonUp="OnAnnotationStrokeWidthCommitted"
+                        LostKeyboardFocus="OnAnnotationStrokeWidthCommitted"
+                        ToolTip="标注大小" />
+                <TextBlock Text="{Binding Value, ElementName=AnnotationStrokeWidthSlider, StringFormat={}{0:0} px}"
+                           Margin="5,0,0,0" MinWidth="30" VerticalAlignment="Center"
+                           Foreground="{DynamicResource EditorToolbarIconBrush}" />
+            </StackPanel>
+            <presentation:ToolbarOptionsRow x:Name="RecordingToolAdjustments" Margin="8,0,0,0" VerticalAlignment="Center" />
+            </presentation:ToolbarAdjustmentPanel>
+
+              </StackPanel>
+            </Border>
 
             <StackPanel x:Name="RecordingActionPanel"
                         Grid.Column="2"
                         VerticalAlignment="Center"
                         Orientation="Horizontal">
+                <Button x:Name="RecordingSettingsButton" Click="OnRecordingSettingsClick"
+                        Style="{StaticResource RecordingControlButton}"
+                        ToolTip="输入显示与录制设备">
+                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="18"
+                               Foreground="{DynamicResource EditorToolbarIconBrush}" Text="&#xE713;" />
+                </Button>
                 <Border Width="1" Height="18" Margin="3,0,4,0"
                         Background="{DynamicResource AppBorderBrush}" />
                 <Button x:Name="DockToolbarButton"
                         Click="OnDockToolbarClick"
                         Visibility="Collapsed"
                         Style="{StaticResource RecordingControlButton}"
-                        ToolTip="折叠到屏幕边缘">
-                    <Grid Width="18" Height="16">
-                        <Border Width="14" Height="2.5" Margin="0,0,4,0"
-                                HorizontalAlignment="Left" VerticalAlignment="Top"
-                                CornerRadius="1.25"
-                                Background="{DynamicResource EditorToolbarIconBrush}" />
-                        <Border Width="10" Height="2.5" Margin="0,6.5,8,0"
-                                HorizontalAlignment="Left" VerticalAlignment="Top"
-                                CornerRadius="1.25"
-                                Background="{DynamicResource EditorToolbarIconBrush}" />
-                        <Border Width="14" Height="2.5" Margin="0,13,4,0"
-                                HorizontalAlignment="Left" VerticalAlignment="Top"
-                                CornerRadius="1.25"
-                                Background="{DynamicResource EditorToolbarIconBrush}" />
-                        <Path Width="7" Height="9" Margin="11,3.5,0,0"
-                              HorizontalAlignment="Left" VerticalAlignment="Top"
-                              Data="M 0,0 L 7,4.5 L 0,9 Z"
-                              Fill="{DynamicResource EditorToolbarIconBrush}" />
-                    </Grid>
+                        ToolTip="收起录制工具栏">
+                    <Path Width="18" Height="18" Stretch="Uniform"
+                          Data="M 3,3 H 15 V 15 H 3 Z M 6,9 H 12 M 9,6 L 12,9 L 9,12"
+                          Fill="Transparent" Stroke="{DynamicResource EditorToolbarIconBrush}"
+                          StrokeThickness="1.6" StrokeLineJoin="Round"
+                          StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
                 </Button>
                 <Button x:Name="StartButton"
                         Click="OnStartClick"
                         Style="{StaticResource RecordingControlButton}"
                         ToolTip="开始录制">
-                    <Ellipse Width="18" Height="18" Fill="#F04455" />
+                    <Ellipse Width="22" Height="22" Fill="#F04455" Stroke="White" StrokeThickness="1.5" />
                 </Button>
                 <Button x:Name="PauseButton"
                         Click="OnPauseClick"
@@ -716,9 +697,48 @@
             </StackPanel>
         </Grid>
     </Border>
+    <Popup x:Name="RecordingDevicePopup" Placement="Top"
+           PlacementTarget="{Binding ElementName=RecordingSettingsButton}"
+           AllowsTransparency="True" StaysOpen="False">
+        <Border Padding="16" Margin="0,0,0,8" CornerRadius="10"
+                Background="{DynamicResource AppFloatingSurfaceBrush}"
+                BorderBrush="{DynamicResource AppBorderBrush}" BorderThickness="1">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="104" /><ColumnDefinition Width="220" /></Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" /><RowDefinition Height="44" /><RowDefinition Height="40" />
+                    <RowDefinition Height="44" /><RowDefinition Height="44" />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.ColumnSpan="2" Margin="0,0,0,10" Text="输入显示与录制设备"
+                           FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource AppTextPrimaryBrush}" />
+                <TextBlock Grid.Row="1" Text="输入显示" VerticalAlignment="Center" Foreground="{DynamicResource AppTextPrimaryBrush}" />
+                <ComboBox x:Name="InputDisplayModeComboBox" Grid.Row="1" Grid.Column="1"
+                          Width="220" Height="32" Padding="8,0,28,0" FontSize="12"
+                          SelectedValuePath="Tag" SelectionChanged="OnRecordingOptionChanged">
+                    <ComboBoxItem Content="不显示" Tag="None" />
+                    <ComboBoxItem Content="显示鼠标" Tag="Mouse" />
+                    <ComboBoxItem Content="显示键盘" Tag="Keyboard" />
+                    <ComboBoxItem Content="显示键盘鼠标" Tag="KeyboardAndMouse" />
+                </ComboBox>
+                <CheckBox x:Name="MouseTrailCheckBox" Grid.Row="2" Grid.ColumnSpan="2"
+                          Content="鼠标移动轨迹" VerticalAlignment="Center"
+                          Checked="OnRecordingOptionChanged" Unchecked="OnRecordingOptionChanged"
+                          Foreground="{DynamicResource AppTextPrimaryBrush}" />
+                <TextBlock Grid.Row="3" Text="麦克风" VerticalAlignment="Center" Foreground="{DynamicResource AppTextPrimaryBrush}" />
+                <ComboBox x:Name="MicrophoneDeviceComboBox" Grid.Row="3" Grid.Column="1"
+                          Width="220" Height="32" Padding="8,0,28,0" FontSize="12"
+                          DisplayMemberPath="Name" SelectedValuePath="Id"
+                          SelectionChanged="OnMicrophoneDeviceChanged" ToolTip="选择录音麦克风" />
+                <TextBlock Grid.Row="4" Text="摄像头" VerticalAlignment="Center" Foreground="{DynamicResource AppTextPrimaryBrush}" />
+                <ComboBox x:Name="CameraDeviceComboBox" Grid.Row="4" Grid.Column="1"
+                          Width="220" Height="32" Padding="8,0,28,0" FontSize="12"
+                          DisplayMemberPath="Name" SelectedValuePath="Id"
+                          SelectionChanged="OnCameraDeviceChanged" ToolTip="选择摄像头" />
+            </Grid>
+        </Border>
+    </Popup>
     <Button x:Name="CollapsedToolbarButton"
-            Width="28"
-            Height="28"
+            RenderTransformOrigin="0.5,0.5"
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
             PreviewMouseLeftButtonDown="OnCollapsedToolbarMouseLeftButtonDown"
@@ -729,27 +749,40 @@
             Visibility="Collapsed"
             Panel.ZIndex="999"
             Style="{StaticResource RecordingDockButton}"
-            ToolTip="点击展开工具栏；按住拖动调整贴边位置">
+            AutomationProperties.Name="展开录制工具栏"
+            ToolTip="点击展开录制工具栏 · 按住拖动">
         <Button.RenderTransform>
-            <TransformGroup>
-                <TranslateTransform x:Name="CollapsedToolbarDockTransform" />
-                <ScaleTransform x:Name="CollapsedToolbarScale" ScaleX="1" ScaleY="1" />
-            </TransformGroup>
+            <ScaleTransform x:Name="CollapsedToolbarScale" ScaleX="1" ScaleY="1" />
         </Button.RenderTransform>
-        <Grid Width="24" Height="20">
-            <Border Width="18" Height="13"
-                    HorizontalAlignment="Left" VerticalAlignment="Center"
-                    CornerRadius="2"
-                    BorderBrush="{DynamicResource AppControlForegroundBrush}"
-                    BorderThickness="1.5" />
-            <Path Width="8" Height="11" Margin="15,0,0,0"
-                  HorizontalAlignment="Left" VerticalAlignment="Center"
-                  Data="M 0,1 L 8,0 L 8,11 L 0,10 Z"
-                  Fill="{DynamicResource AppControlForegroundBrush}" />
-            <Ellipse Width="4" Height="4" Margin="5,0,0,0"
-                     HorizontalAlignment="Left" VerticalAlignment="Center"
-                     Fill="#F04455" />
-        </Grid>
+        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <Grid Width="22" Height="22" Margin="0,0,7,0">
+                <Path Data="M 7,2 H 5 Q 2,2 2,5 V 7 M 15,2 H 17 Q 20,2 20,5 V 7 M 20,15 V 17 Q 20,20 17,20 H 15 M 7,20 H 5 Q 2,20 2,17 V 15"
+                      Stroke="{DynamicResource AppTextPrimaryBrush}" StrokeThickness="1.5"
+                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" Opacity="0.8" />
+                <Ellipse Width="8" Height="8" Fill="#F04455">
+                    <Ellipse.Style><Style TargetType="Ellipse">
+                        <Style.Triggers><DataTrigger Binding="{Binding Text, ElementName=RecordingStatusText}" Value="已暂停">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger></Style.Triggers>
+                    </Style></Ellipse.Style>
+                </Ellipse>
+                <Path x:Name="CollapsedPauseIcon" Data="M 8,7 V 15 M 14,7 V 15"
+                      Stroke="#E8AD50" StrokeThickness="2.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round">
+                    <Path.Style><Style TargetType="Path">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                        <Style.Triggers><DataTrigger Binding="{Binding Text, ElementName=RecordingStatusText}" Value="已暂停">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger></Style.Triggers>
+                    </Style></Path.Style>
+                </Path>
+            </Grid>
+            <TextBlock x:Name="CollapsedElapsedText" Text="{Binding Text, ElementName=ElapsedTimeText}"
+                       FontFamily="Consolas" FontSize="11" Width="53" TextAlignment="Center"
+                       VerticalAlignment="Center" Foreground="{DynamicResource AppTextPrimaryBrush}" />
+            <Path Width="5" Height="9" Margin="5,0,0,0" Stretch="Uniform"
+                  Data="M 4,1 L 0,5 L 4,9" Stroke="{DynamicResource AppTextSecondaryBrush}"
+                  StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+        </StackPanel>
     </Button>
     </Grid>
 </Window>

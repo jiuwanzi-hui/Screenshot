@@ -72,7 +72,7 @@ public sealed class TextTranslationWindowTests
                     window.FindName("InstallModelButton"));
 
                 Assert.Equal(Visibility.Collapsed, button.Visibility);
-                Assert.Equal("安装当前语言包", button.Content);
+                Assert.Equal("下载所需离线模型", button.Content);
             }
             finally
             {

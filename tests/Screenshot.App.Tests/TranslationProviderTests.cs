@@ -9,6 +9,83 @@ namespace Screenshot.App.Tests;
 
 public sealed class TranslationProviderTests
 {
+    [Theory]
+    [InlineData("OCR Host 和 Core。", "OCR 宿主和核心。")]
+    [InlineData("OCR Host 和 Core", "OCR 宿主和核心")]
+    [InlineData("API Reference", "API 参考")]
+    [InlineData("CPU Usage", "CPU 使用率")]
+    [InlineData("设置 Settings", "设置")]
+    [InlineData("Open/Close 设置", "打开/关闭设置")]
+    public async Task ShortMixedLabelsReachTranslatorInsteadOfBeingSkipped(string source, string translated)
+    {
+        Assert.False(TranslationTargetLanguageMatcher.IsLikelyInvariant(source));
+        Assert.False(TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(source, "zh-Hans"));
+        Assert.True(TranslationTargetLanguageMatcher.ShouldTranslate(source, "auto", "zh-Hans"));
+        Assert.Equal([1], TranslationTargetLanguageMatcher.GetPendingSegmentIndices(["已经是中文。", source, "CPU"], "auto", "zh-Hans"));
+        var handler = new RecordingHandler(JsonSerializer.Serialize(
+            new { choices = new[] { new { message = new { content = translated } } } }));
+        using var client = new HttpClient(handler);
+        var provider = new OrderedTranslationProvider([new OpenAiCompatibleTranslationProvider(
+            "https://translation.example/v1/chat/completions", "test-key", client)]);
+        var result = await provider.TranslateAsync(source, "auto", "zh-Hans");
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        using var request = JsonDocument.Parse(handler.RequestBody);
+        Assert.Contains(source, string.Join("\n", request.RootElement.GetProperty("messages")
+            .EnumerateArray().Select(message => message.GetProperty("content").GetString())), StringComparison.Ordinal);
+        Assert.Equal(translated, result.Text);
+    }
+
+    [Theory]
+    [InlineData("OCR Host 和 Core。")]
+    [InlineData("Host 和 Core")]
+    [InlineData("设置 Settings")]
+    public void MixedLabelEchoIsNotMistakenForCompletedTranslation(string source)
+    {
+        Assert.NotNull(TranslationCompletenessValidator.Validate(source, source, "zh-Hans"));
+        Assert.False(OrderedTranslationProvider.HasMeaningfulTranslation(
+            ["Please save.", source], ["请保存。", source], "zh-Hans"));
+    }
+
+    [Theory]
+    [InlineData("SnapCut-Portable", "SnapCut 便携版")]
+    [InlineData("SnapCut-Portable-4...", "SnapCut 便携版 4...")]
+    [InlineData("SnapCut-Portable-4.0.0.zip", "SnapCut 便携版 4.0.0.zip")]
+    [InlineData("AcmeTool-User-Guide.pdf", "AcmeTool 用户指南.pdf")]
+    public async Task BrandPrefixedLabelsAreSentForChineseTranslation(string source, string translated)
+    {
+        Assert.False(TranslationTargetLanguageMatcher.IsLikelyInvariant(source));
+        Assert.False(TranslationTargetLanguageMatcher.IsAlreadyTargetLanguage(source, "zh-Hans"));
+        var handler = new RecordingHandler(
+            JsonSerializer.Serialize(new { choices = new[] { new { message = new { content = translated } } } }));
+        using var client = new HttpClient(handler);
+        var provider = new OpenAiCompatibleTranslationProvider(
+            "https://translation.example/v1/chat/completions", "test-key", client);
+        var result = await provider.TranslateAsync(source, "auto", "zh-Hans");
+        Assert.Contains(source, handler.RequestBody, StringComparison.Ordinal);
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(translated, result.Text);
+    }
+
+    [Fact]
+    public async Task DownloadLabelWithSeparatedVersionReachesScreenshotSegmentTranslation()
+    {
+        const string source = "SnapCut-Portable 4.0.0";
+        const string translated = "SnapCut 便携版 4.0.0";
+        Assert.Equal(source, TranslationTermProtector.Create([source]).Segments[0]);
+        var body = JsonSerializer.Serialize(new { translations = new[] { translated } });
+        var handler = new RecordingHandler(JsonSerializer.Serialize(new
+        {
+            choices = new[] { new { message = new { content = body } } },
+        }));
+        using var client = new HttpClient(handler);
+        var provider = new OpenAiCompatibleTranslationProvider(
+            "https://translation.example/v1/chat/completions", "test-key", client);
+        var result = await provider.TranslateSegmentsAsync([source], "auto", "zh-Hans");
+        Assert.True(result.IsSuccess, result.ErrorMessage);
+        Assert.Equal(translated, Assert.Single(result.Segments));
+        Assert.Contains(source, handler.RequestBody, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task OrderedProviderRejectsHexGarbageAndFallsBack()
     {
@@ -88,9 +165,8 @@ public sealed class TranslationProviderTests
     {
         string[] source =
         [
-            "OrderedTranslationProvider.cs",
+            "src/OrderedTranslationProvider.cs",
             "src/Screenshot.App/Capture/AutomaticImageOverlapMatcher.cs +2240",
-            "AutomaticViewportFingerprint",
             "��",
         ];
 
@@ -102,6 +178,12 @@ public sealed class TranslationProviderTests
             source,
             source,
             "zh-Hans"));
+        // Selected descriptive identifiers/file stems need translation; a full
+        // source path still establishes that the entries above are references.
+        Assert.False(OrderedTranslationProvider.HasMeaningfulTranslation(
+            ["AutomaticViewportFingerprint"], ["AutomaticViewportFingerprint"], "zh-Hans"));
+        Assert.False(OrderedTranslationProvider.HasMeaningfulTranslation(
+            ["OrderedTranslationProvider.cs"], ["OrderedTranslationProvider.cs"], "zh-Hans"));
     }
 
     [Fact]
@@ -118,7 +200,7 @@ public sealed class TranslationProviderTests
     public async Task SendsConfiguredTextToAnOpenAiCompatibleEndpoint()
     {
         var handler = new RecordingHandler(
-            """{"choices":[{"message":{"content":"translated text"}}]}""");
+            """{"choices":[{"message":{"content":"翻译文本"}}]}""");
         using var client = new HttpClient(handler);
         var provider = new OpenAiCompatibleTranslationProvider(
             "https://translation.example/v1/chat/completions",
@@ -131,7 +213,7 @@ public sealed class TranslationProviderTests
             "zh-Hans");
 
         Assert.True(result.IsSuccess, result.ErrorMessage);
-        Assert.Equal("translated text", result.Text);
+        Assert.Equal("翻译文本", result.Text);
         Assert.Equal("Bearer", handler.AuthorizationScheme);
         Assert.Equal("test-key", handler.AuthorizationParameter);
         Assert.Contains("source text", handler.RequestBody);
@@ -515,7 +597,7 @@ public sealed class TranslationProviderTests
     public async Task RejectsAnUnchangedBatchAsNotTranslated()
     {
         var handler = new RecordingHandler(
-            """{"choices":[{"message":{"content":"{\"translations\":[{\"id\":0,\"text\":\"Service temporarily unavailable\"}]}"}}]}""");
+            """{"choices":[{"message":{"content":"Service temporarily unavailable"}}]}""");
         using var client = new HttpClient(handler);
         var provider = new OpenAiCompatibleTranslationProvider(
             "https://translation.example/v1/chat/completions",
@@ -679,7 +761,7 @@ public sealed class TranslationProviderTests
     }
 
     [Fact]
-    public void QwenSelectionKeepsBergamotAsTheFirstOfflineTranslator()
+    public void MultilingualSelectionUsesTheSelectedModelWithoutSilentQualityDowngrade()
     {
         var settings = AppSettings.CreateDefault() with
         {
@@ -700,7 +782,6 @@ public sealed class TranslationProviderTests
 
         Assert.Equal(
             [
-                TranslationProviderFactory.OfflineProviderId,
                 TranslationProviderFactory.LocalLargeModelProviderId,
                 TranslationProviderFactory.OpenAiCompatibleProviderId,
             ],
@@ -800,7 +881,7 @@ public sealed class TranslationProviderTests
 
         Assert.True(result.IsSuccess, result.ErrorMessage);
         Assert.Equal("已经是中文", result.Text);
-        Assert.Equal(1, first.TextCallCount);
+        Assert.Equal(0, first.TextCallCount);
         Assert.Equal(0, second.TextCallCount);
     }
 
@@ -811,23 +892,25 @@ public sealed class TranslationProviderTests
             "First",
             segmentResult: new TranslationSegmentsResult(
                 true,
-                ["连接", "IDC Flare"],
+                // Ask the provider about the short title; capitalization alone
+                // cannot tell a product name from a label such as “CPU Usage”.
+                ["连接到服务器。", "IDC Flare"],
                 null));
         var second = new StubTranslationProvider(
             "Second",
             segmentResult: new TranslationSegmentsResult(
                 true,
-                ["不应调用", "不应调用"],
+                ["不应调用"],
                 null));
         var provider = new OrderedTranslationProvider([first, second]);
 
         var result = await provider.TranslateSegmentsAsync(
-            ["Connect", "IDC Flare"],
+            ["Connect to the server.", "IDC Flare"],
             "auto",
             "zh-Hans");
 
         Assert.True(result.IsSuccess, result.ErrorMessage);
-        Assert.Equal(["连接", "IDC Flare"], result.Segments);
+        Assert.Equal(["连接到服务器。", "IDC Flare"], result.Segments);
         Assert.Equal(1, first.SegmentCallCount);
         Assert.Equal(0, second.SegmentCallCount);
     }
@@ -990,7 +1073,7 @@ public sealed class TranslationProviderTests
             "zh-Hans");
 
         Assert.False(result.IsSuccess);
-        Assert.Contains("10 秒时间限制", result.ErrorMessage);
+        Assert.Contains("时间限制", result.ErrorMessage);
     }
 
     [Fact]

@@ -10,6 +10,8 @@ public sealed class SettingsValidationTests
     [InlineData(AppTheme.Light, AppTheme.AuroraMist)]
     [InlineData(AppTheme.Dark, AppTheme.ForestNight)]
     [InlineData(AppTheme.CoralSky, AppTheme.CoralSky)]
+    [InlineData(AppTheme.GlassMist, AppTheme.GlassMist)]
+    [InlineData(AppTheme.GlassInk, AppTheme.GlassInk)]
     [InlineData((AppTheme)999, AppTheme.AuroraMist)]
     public void MigratesLegacyAndInvalidThemes(
         AppTheme input,

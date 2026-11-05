@@ -1,26 +1,33 @@
-using System.Collections.Specialized;
+using System.Buffers.Binary;
 using System.IO;
-using WpfClipboard = System.Windows.Clipboard;
+using System.Text;
 
 namespace Screenshot.App.Capture;
 
 public static class ClipboardFileService
 {
-    public static Task SetFileAsync(
-        string filePath,
-        CancellationToken cancellationToken = default)
+    public static Task SetFileAsync(string filePath, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
-        cancellationToken.ThrowIfCancellationRequested();
-
         var fullPath = Path.GetFullPath(filePath);
-        if (!File.Exists(fullPath))
+        return NativeClipboardWriter.WriteAsync(() =>
         {
-            throw new FileNotFoundException("视频文件不存在。", fullPath);
-        }
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!File.Exists(fullPath)) throw new FileNotFoundException("视频文件不存在。", fullPath);
+            using var payload = new ClipboardPayload(15, CreateFileDropPayload(fullPath));
+            NativeClipboardWriter.Publish(cancellationToken, payload);
+        }, cancellationToken);
+    }
 
-        var files = new StringCollection { fullPath };
-        WpfClipboard.SetFileDropList(files);
-        return Task.CompletedTask;
+    internal static byte[] CreateFileDropPayload(string fullPath)
+    {
+        // DROPFILES: a 20-byte header, fWide=TRUE, and a double-NUL-terminated
+        // Unicode path list. No delayed OLE data object remains in the UI process.
+        var names = Encoding.Unicode.GetBytes(fullPath + "\0\0");
+        var bytes = new byte[checked(20 + names.Length)];
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(0, 4), 20);
+        BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(16, 4), 1);
+        names.CopyTo(bytes, 20);
+        return bytes;
     }
 }

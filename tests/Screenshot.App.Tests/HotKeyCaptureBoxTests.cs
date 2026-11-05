@@ -1,4 +1,5 @@
 using System.Windows.Input;
+using System.Windows.Interop;
 using Screenshot.App.Core;
 using Screenshot.App.Presentation;
 
@@ -6,6 +7,50 @@ namespace Screenshot.App.Tests;
 
 public sealed class HotKeyCaptureBoxTests
 {
+    [Fact]
+    public void CompletionCaptureAcceptsEveryStandaloneLetterAndCanBeChangedAgain()
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var box = new HotKeyCaptureBox { Tag = "CompleteCaptureHotKey", Text = "Ctrl+C" };
+            string? captured = null;
+            box.HotKeyCaptured += (_, e) => captured = e.Gesture;
+            Assert.False(InputMethod.GetIsInputMethodEnabled(box));
+            for (var key = 'A'; key <= 'Z'; key++)
+            {
+                captured = null;
+                box.ProcessCapturedVirtualKey(key, HotKeyModifiers.None);
+                Assert.Equal(key.ToString(), captured);
+                Assert.Equal(key.ToString(), box.Text);
+            }
+
+            box.ProcessCapturedVirtualKey('C', HotKeyModifiers.Control);
+            Assert.Equal("Ctrl+C", captured);
+        });
+    }
+
+    [Theory]
+    [InlineData(Key.A, "A")]
+    [InlineData(Key.C, "C")]
+    [InlineData(Key.Z, "Z")]
+    public void CompletionCaptureAcceptsLettersThroughWpfInput(Key key, string expected)
+    {
+        WpfTestHost.Invoke(() =>
+        {
+            var box = new HotKeyCaptureBox { Tag = "CompleteCaptureHotKey", Text = "Ctrl+C" };
+            using var source = new HwndSource(new HwndSourceParameters("Offscreen completion shortcut"));
+            source.RootVisual = box;
+            string? captured = null;
+            box.HotKeyCaptured += (_, e) => captured = e.Gesture;
+            box.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, source, 0, key)
+            {
+                RoutedEvent = Keyboard.PreviewKeyDownEvent,
+            });
+            Assert.Equal(expected, captured);
+            Assert.Equal(expected, box.Text);
+        });
+    }
+
     [Fact]
     public void IsReadOnlyAndUsesAKeyboardCaptureSurface()
     {

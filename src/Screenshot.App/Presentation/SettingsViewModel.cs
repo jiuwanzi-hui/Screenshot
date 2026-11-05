@@ -17,6 +17,8 @@ public sealed class AiTranslationProfileItem : INotifyPropertyChanged
     private string _provider;
     private string _endpoint;
     private string _model;
+    private string _appId;
+    private OnlineModelPurpose _purpose;
     private bool _isAvailable;
     private bool _hasAvailabilityResult;
     private bool _isAvailabilityChecking;
@@ -30,6 +32,8 @@ public sealed class AiTranslationProfileItem : INotifyPropertyChanged
         _provider = profile.Provider;
         _endpoint = profile.Endpoint;
         _model = profile.Model;
+        _appId = profile.AppId;
+        _purpose = profile.Purpose;
         _isAvailable = profile.LastAvailability ?? false;
         _hasAvailabilityResult = profile.LastAvailability.HasValue;
         _availabilityReason = string.IsNullOrWhiteSpace(
@@ -64,6 +68,8 @@ public sealed class AiTranslationProfileItem : INotifyPropertyChanged
         TranslationProviderFactory.GetDefinition(Provider).DisplayName;
     public string Endpoint { get => _endpoint; set => Set(ref _endpoint, value); }
     public string Model { get => _model; set => Set(ref _model, value); }
+    public string AppId { get => _appId; set => Set(ref _appId, value); }
+    public OnlineModelPurpose Purpose { get => _purpose; set => Set(ref _purpose, value); }
 
     public bool IsAvailable
     {
@@ -102,6 +108,12 @@ public sealed class AiTranslationProfileItem : INotifyPropertyChanged
         IsAvailabilityChecking = true;
     }
 
+    public void SetAvailabilityUnverified(string reason)
+    {
+        IsAvailabilityChecking = false; _hasAvailabilityResult = false; AvailabilityReason = reason;
+        OnPropertyChanged(nameof(AvailabilityLabel));
+    }
+
     public void SetAvailability(bool isAvailable, string reason)
     {
         var previousLabel = AvailabilityLabel;
@@ -129,6 +141,8 @@ public sealed class AiTranslationProfileItem : INotifyPropertyChanged
         Provider = Provider?.Trim() ?? string.Empty,
         Endpoint = Endpoint?.Trim() ?? string.Empty,
         Model = Model?.Trim() ?? string.Empty,
+        AppId = AppId?.Trim() ?? string.Empty,
+        Purpose = Purpose,
         LastAvailability = _hasAvailabilityResult ? IsAvailable : null,
         LastAvailabilityReason = AvailabilityReason ?? string.Empty,
     };
@@ -180,8 +194,8 @@ public sealed class CaptureToolbarFeatureItem : INotifyPropertyChanged
         set
         {
             var normalized = value?.Trim() ?? string.Empty;
-            normalized = normalized.Length == 1 && IsAsciiDigit(normalized[0])
-                ? normalized.ToUpperInvariant()
+            normalized = CaptureToolbarShortcut.TryNormalize(normalized, out var formatted)
+                ? formatted
                 : string.Empty;
             if (_shortcut == normalized) return;
             _shortcut = normalized;
@@ -190,10 +204,8 @@ public sealed class CaptureToolbarFeatureItem : INotifyPropertyChanged
         }
     }
 
-    /// <summary>Whether this feature has a configured single-key shortcut.</summary>
+    /// <summary>Whether this feature has a configured toolbar shortcut.</summary>
     public bool HasShortcut => !string.IsNullOrWhiteSpace(Shortcut);
-
-    private static bool IsAsciiDigit(char value) => value is >= '0' and <= '9';
 
     public CaptureToolbarFeature Feature { get; }
 
@@ -246,15 +258,25 @@ public sealed class TranslationPriorityItem : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public int Position { get; }
+    public int Position { get; private set; }
 
     public TranslationProviderKind Provider { get; }
 
     public string Label { get; }
 
-    public bool CanMoveUp { get; }
+    public bool CanMoveUp { get; private set; }
 
-    public bool CanMoveDown { get; }
+    public bool CanMoveDown { get; private set; }
+
+    internal void UpdatePosition(int position, int count)
+    {
+        Position = position;
+        CanMoveUp = position > 1;
+        CanMoveDown = position < count;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Position)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveUp)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CanMoveDown)));
+    }
 
     public bool IsAvailable
     {
@@ -359,16 +381,22 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     private string _scrollCaptureHotKey;
     private string _ocrHotKey;
     private string _textTranslationHotKey;
+    private string _realtimeTranslationHotKey;
+    private RealtimeTranslationSettings _realtimeTranslation;
     private string _pinHotKey;
     private string _openSettingsHotKey;
     private int _mouseLongPressMilliseconds;
     private bool _mouseSideButtonsUseLongPress;
     private string _ocrLanguageTag;
     private OcrEngineMode _ocrEngine;
+    private bool _autoOcrAfterCapture;
+    private bool _enableImageQuestion;
+    private string _imageQuestionHotKey;
     private RecognitionResultPresentationMode _recognitionResultPresentation;
     private string _translationProvider;
     private string _translationEndpoint;
     private string _translationTargetLanguage;
+    private string _interfaceLanguage = "zh-Hans";
     private string _translationModel;
     private string _selectedTranslationProfileId = string.Empty;
     private OfflineTranslationQuality _offlineTranslationQuality;
@@ -378,6 +406,9 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public SettingsViewModel(AppSettings settings)
     {
+        PublicTranslationProfiles = new(_publicTranslationProfiles);
+        OnlineTranslationProfiles = new(_onlineTranslationProfiles);
+        TranslationProfiles.CollectionChanged += (_, _) => RefreshTranslationProfileViews();
         _baseSettings = settings;
         _saveDirectory = settings.SaveDirectory;
         _videoSaveDirectory = settings.VideoSaveDirectory;
@@ -445,12 +476,18 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         _scrollCaptureHotKey = settings.ScrollCaptureHotKey;
         _ocrHotKey = settings.OcrHotKey;
         _textTranslationHotKey = settings.TextTranslationHotKey;
+        _imageQuestionHotKey = settings.ImageQuestionHotKey;
+        _realtimeTranslationHotKey = settings.RealtimeTranslationHotKey;
+        _realtimeTranslation = settings.RealtimeTranslation;
         _pinHotKey = settings.PinHotKey;
         _openSettingsHotKey = settings.OpenSettingsHotKey;
         _mouseLongPressMilliseconds = settings.MouseLongPressMilliseconds;
         _mouseSideButtonsUseLongPress = settings.MouseSideButtonsUseLongPress;
         _ocrLanguageTag = settings.OcrLanguageTag;
         _ocrEngine = settings.OcrEngine;
+        _autoOcrAfterCapture = settings.AutoOcrAfterCapture;
+        _enableImageQuestion = settings.EnableImageQuestion;
+        Watermark = settings.Watermark;
         _recognitionResultPresentation = settings.RecognitionResultPresentation;
         _translationProvider = TranslationProviderFactory.ResolveProviderId(
             settings.TranslationProvider);
@@ -463,6 +500,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             _translationEndpoint = providerDefinition.OfficialEndpoint;
         }
         _translationTargetLanguage = settings.TranslationTargetLanguage;
+        _interfaceLanguage = settings.InterfaceLanguage;
         _translationModel = TranslationProviderFactory.NormalizeModel(
             settings.TranslationEndpoint,
             settings.TranslationModel);
@@ -489,6 +527,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     [
         new(nameof(OcrEngineMode.Windows), "Windows 系统识别（默认）"),
         new(nameof(OcrEngineMode.PaddleOcrV6), "PP-OCRv6 高质量识别"),
+        new(nameof(OcrEngineMode.QwenVisualOcr), "Qwen3-VL 4B 视觉识别"),
     ];
 
     public IReadOnlyList<SettingOption> RecognitionResultPresentationOptions { get; } =
@@ -572,7 +611,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     public IReadOnlyList<SettingOption> OfflineTranslationEngineOptions { get; } =
     [
         new(nameof(OfflineTranslationEngine.Mozilla), "Mozilla 轻量翻译（默认）"),
-        new(nameof(OfflineTranslationEngine.QwenLargeModel), "Qwen 本机翻译大模型"),
+        new(nameof(OfflineTranslationEngine.QwenLargeModel), "TranslateGemma 离线多语言模型"),
+        new(nameof(OfflineTranslationEngine.HunyuanLightweight), "Hy-MT2 1.8B · 轻量多语言模型"),
     ];
 
     public ObservableCollection<string> TranslationModelOptions { get; } = new(
@@ -797,6 +837,12 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _theme, value);
     }
 
+    public string InterfaceLanguage
+    {
+        get => _interfaceLanguage;
+        set => SetProperty(ref _interfaceLanguage, UiLocalization.Normalize(value));
+    }
+
     public bool KeepAllScreenshotHistory
     {
         get => _keepAllScreenshotHistory;
@@ -904,29 +950,20 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     }
 
     public IReadOnlyList<SettingOption> CaptureAspectRatioOptions { get; } =
-    [
-        new(nameof(CaptureAspectRatio.Free), "自由比例"),
-        new(nameof(CaptureAspectRatio.Ratio16x9), "16:9（横屏）"),
-        new(nameof(CaptureAspectRatio.Ratio16x10), "16:10（横屏）"),
-        new(nameof(CaptureAspectRatio.Ratio3x2), "3:2（横屏）"),
-        new(nameof(CaptureAspectRatio.Ratio4x3), "4:3（横屏）"),
-        new(nameof(CaptureAspectRatio.Ratio5x4), "5:4（横屏）"),
-        new(nameof(CaptureAspectRatio.Ratio1x1), "1:1（正方形）"),
-        new(nameof(CaptureAspectRatio.Ratio9x16), "9:16（手机竖屏）"),
-        new(nameof(CaptureAspectRatio.Ratio10x16), "10:16（竖屏）"),
-        new(nameof(CaptureAspectRatio.Ratio2x3), "2:3（竖屏）"),
-        new(nameof(CaptureAspectRatio.Ratio19x5x9), "19.5:9（手机）"),
-        new(nameof(CaptureAspectRatio.Ratio20x9), "20:9（手机）"),
-    ];
+        Enum.GetValues<CaptureAspectRatio>()
+            .Select(ratio => new SettingOption(ratio.ToString(), CaptureAspectRatioHelper.GetLabel(ratio)))
+            .ToArray();
 
     public IReadOnlyList<SettingOption> ThemeOptions { get; } =
     [
-        new(nameof(AppTheme.AuroraMist), "极光晨雾", "浅色 · 雾白与靛蓝"),
-        new(nameof(AppTheme.CoralSky), "珊瑚晴空", "浅色 · 珊瑚与天青"),
-        new(nameof(AppTheme.GinkgoPaper), "银杏纸白", "浅色 · 纸白与银杏"),
-        new(nameof(AppTheme.ForestNight), "松林夜雨", "深色 · 石墨与松绿"),
-        new(nameof(AppTheme.ObsidianGold), "熔金曜石", "深色 · 曜石与暖金"),
-        new(nameof(AppTheme.NeonDeep), "霓虹深海", "深色 · 深海与玫红"),
+        new(nameof(AppTheme.AuroraMist), "青瓷月桂", "浅色 · 青瓷绿与月桂米"),
+        new(nameof(AppTheme.CoralSky), "晚桃晴山", "浅色 · 晚桃粉与暮山蓝"),
+        new(nameof(AppTheme.GinkgoPaper), "雾紫燕麦", "浅色 · 哑光灰紫与暖燕麦"),
+        new(nameof(AppTheme.ForestNight), "墨青豆沙", "深色 · 墨青灰与豆沙粉"),
+        new(nameof(AppTheme.ObsidianGold), "暮山晚桃", "深色 · 暮山蓝与晚桃粉"),
+        new(nameof(AppTheme.NeonDeep), "雾紫夜幕", "深色 · 哑光烟紫与暖灰"),
+        new(nameof(AppTheme.GlassMist), "清透琉璃", "清透玻璃 · 真实透底、中性色泽与边缘反光"),
+        new(nameof(AppTheme.GlassInk), "墨湾流光", "深色 · 自绘蓝紫柔光、玻璃弧面与指针高光；比普通主题有额外图形开销"),
     ];
 
     public AnnotationToolSetting[] AnnotationToolSettings
@@ -965,10 +1002,28 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         set => SetProperty(ref _ocrHotKey, value);
     }
 
+    public string ImageQuestionHotKey
+    {
+        get => _imageQuestionHotKey;
+        set => SetProperty(ref _imageQuestionHotKey, value);
+    }
+
     public string TextTranslationHotKey
     {
         get => _textTranslationHotKey;
         set => SetProperty(ref _textTranslationHotKey, value);
+    }
+
+    public string RealtimeTranslationHotKey
+    {
+        get => _realtimeTranslationHotKey;
+        set => SetProperty(ref _realtimeTranslationHotKey, value);
+    }
+
+    public RealtimeTranslationSettings RealtimeTranslation
+    {
+        get => _realtimeTranslation;
+        set => SetProperty(ref _realtimeTranslation, value);
     }
 
     public string PinHotKey
@@ -1005,6 +1060,18 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
     {
         get => _ocrEngine;
         set => SetProperty(ref _ocrEngine, value);
+    }
+
+    public bool AutoOcrAfterCapture
+    {
+        get => _autoOcrAfterCapture;
+        set => SetProperty(ref _autoOcrAfterCapture, value);
+    }
+
+    public bool EnableImageQuestion
+    {
+        get => _enableImageQuestion;
+        set => SetProperty(ref _enableImageQuestion, value);
     }
 
     public RecognitionResultPresentationMode RecognitionResultPresentation
@@ -1061,6 +1128,8 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         private set => SetProperty(ref _statusMessage, value);
     }
 
+    public WatermarkSettings Watermark { get; set; } = new();
+
     public AppSettings CreateSettings()
     {
         var profiles = TranslationProfiles.Select(item => item.ToProfile()).ToArray();
@@ -1070,6 +1139,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             ?? profiles.FirstOrDefault();
         return _baseSettings with
         {
+            Watermark = Watermark,
             SaveDirectory = SaveDirectory,
             VideoSaveDirectory = VideoSaveDirectory,
             PngSaveLocationMode = PngSaveLocationMode,
@@ -1106,7 +1176,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
                 .Select(item => item.Feature)
                 .ToArray(),
             CaptureToolbarFeatureShortcuts = CaptureToolbarFeatureItems
-                .Where(item => item.Shortcut.Length == 1)
+                .Where(item => !string.IsNullOrWhiteSpace(item.Shortcut))
                 .ToDictionary(item => item.Feature, item => item.Shortcut),
             CaptureToolbarRows = CaptureToolbarRows,
             ToolbarScalePercent = ToolbarScalePercent,
@@ -1119,6 +1189,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             RequestAdministratorPrivileges = RequestAdministratorPrivileges,
             CloseBehavior = CloseBehavior,
             Theme = Theme,
+            InterfaceLanguage = InterfaceLanguage,
             HistoryLimit = ParseHistoryLimit(
                 ScreenshotHistoryLimitText,
                 _baseSettings.HistoryLimit),
@@ -1142,12 +1213,17 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             ScrollCaptureHotKey = ScrollCaptureHotKey,
             OcrHotKey = OcrHotKey,
             TextTranslationHotKey = TextTranslationHotKey,
+            ImageQuestionHotKey = ImageQuestionHotKey,
+            RealtimeTranslationHotKey = RealtimeTranslationHotKey,
+            RealtimeTranslation = RealtimeTranslation,
             PinHotKey = PinHotKey,
             OpenSettingsHotKey = OpenSettingsHotKey,
             MouseLongPressMilliseconds = MouseLongPressMilliseconds,
             MouseSideButtonsUseLongPress = MouseSideButtonsUseLongPress,
             OcrLanguageTag = OcrLanguageTag,
             OcrEngine = OcrEngine,
+            AutoOcrAfterCapture = AutoOcrAfterCapture,
+            EnableImageQuestion = EnableImageQuestion,
             RecognitionResultPresentation = RecognitionResultPresentation,
             TranslationMode = TranslationMode.Automatic,
             SendTextToOnlineTranslation = true,
@@ -1210,6 +1286,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         RequestAdministratorPrivileges = settings.RequestAdministratorPrivileges;
         CloseBehavior = settings.CloseBehavior;
         Theme = settings.Theme;
+        InterfaceLanguage = settings.InterfaceLanguage;
         if (settings.ScreenshotHistoryRetentionDays > 0)
         {
             _screenshotHistoryRetentionDaysBeforeKeepAll = settings.ScreenshotHistoryRetentionDays;
@@ -1235,12 +1312,18 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         ScrollCaptureHotKey = settings.ScrollCaptureHotKey;
         OcrHotKey = settings.OcrHotKey;
         TextTranslationHotKey = settings.TextTranslationHotKey;
+        ImageQuestionHotKey = settings.ImageQuestionHotKey;
+        RealtimeTranslationHotKey = settings.RealtimeTranslationHotKey;
+        RealtimeTranslation = settings.RealtimeTranslation;
         PinHotKey = settings.PinHotKey;
         OpenSettingsHotKey = settings.OpenSettingsHotKey;
         MouseLongPressMilliseconds = settings.MouseLongPressMilliseconds;
         MouseSideButtonsUseLongPress = settings.MouseSideButtonsUseLongPress;
         OcrLanguageTag = settings.OcrLanguageTag;
         OcrEngine = settings.OcrEngine;
+        AutoOcrAfterCapture = settings.AutoOcrAfterCapture;
+        EnableImageQuestion = settings.EnableImageQuestion;
+        Watermark = settings.Watermark;
         RecognitionResultPresentation = settings.RecognitionResultPresentation;
         SetTranslationProviderPriority(
             settings.ResolveTranslationProviderPriority());
@@ -1305,13 +1388,16 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             (string Label, string Glyph, CaptureToolbarFeatureGroup Group)>
         {
             [CaptureToolbarFeature.Shape] = ("矩形 / 椭圆", "□", CaptureToolbarFeatureGroup.Annotation),
+            [CaptureToolbarFeature.DoubleArrow] = ("双向箭头", "⇌", CaptureToolbarFeatureGroup.Annotation),
             [CaptureToolbarFeature.Arrow] = ("箭头", "→", CaptureToolbarFeatureGroup.Annotation),
             [CaptureToolbarFeature.Emoji] = ("表情", "😊", CaptureToolbarFeatureGroup.Annotation),
             [CaptureToolbarFeature.Number] = ("序号", "1", CaptureToolbarFeatureGroup.Annotation),
+            [CaptureToolbarFeature.Line] = ("直线/波浪线", "／", CaptureToolbarFeatureGroup.Annotation),
             [CaptureToolbarFeature.Brush] = ("画笔", "✎", CaptureToolbarFeatureGroup.Annotation),
             [CaptureToolbarFeature.Text] = ("文字", "T", CaptureToolbarFeatureGroup.Annotation),
             [CaptureToolbarFeature.Mosaic] = ("马赛克", "▦", CaptureToolbarFeatureGroup.Annotation),
             [CaptureToolbarFeature.VideoRecording] = ("录屏", "●", CaptureToolbarFeatureGroup.Action),
+            [CaptureToolbarFeature.AspectRatio] = ("普通截图比例", "▭", CaptureToolbarFeatureGroup.Action),
             [CaptureToolbarFeature.Save] = ("保存图片", "▣", CaptureToolbarFeatureGroup.Action),
             [CaptureToolbarFeature.ScrollCapture] = ("长截图", "↕", CaptureToolbarFeatureGroup.Action),
             [CaptureToolbarFeature.TextRecognition] = ("文字识别", "文", CaptureToolbarFeatureGroup.Action),
@@ -1320,6 +1406,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             [CaptureToolbarFeature.Translation] = ("翻译", "译", CaptureToolbarFeatureGroup.Action),
             [CaptureToolbarFeature.PrivacyRedaction] = ("一键隐私打码", "隐", CaptureToolbarFeatureGroup.Action),
             [CaptureToolbarFeature.PinImage] = ("钉图", "⌖", CaptureToolbarFeatureGroup.Action),
+            [CaptureToolbarFeature.Watermark] = ("水印", "印", CaptureToolbarFeatureGroup.Action),
             [CaptureToolbarFeature.UndoRedo] = ("撤销 / 重做", "↶", CaptureToolbarFeatureGroup.History),
         };
 
@@ -1401,6 +1488,30 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         }
     }
 
+    private readonly ObservableCollection<AiTranslationProfileItem> _publicTranslationProfiles = [];
+    private readonly ObservableCollection<AiTranslationProfileItem> _onlineTranslationProfiles = [];
+    public ReadOnlyObservableCollection<AiTranslationProfileItem> PublicTranslationProfiles { get; }
+    public ReadOnlyObservableCollection<AiTranslationProfileItem> OnlineTranslationProfiles { get; }
+    internal void RefreshTranslationProfileViews()
+    {
+        SynchronizeProfileView(_publicTranslationProfiles, isPublic: true);
+        SynchronizeProfileView(_onlineTranslationProfiles, isPublic: false);
+    }
+
+    private void SynchronizeProfileView(ObservableCollection<AiTranslationProfileItem> view, bool isPublic)
+    {
+        var expected = TranslationProfiles.Where(item =>
+            TranslationProviderFactory.IsPublicProvider(item.Provider) == isPublic).ToArray();
+        for (var index = view.Count - 1; index >= 0; index--)
+            if (!expected.Contains(view[index])) view.RemoveAt(index);
+        for (var index = 0; index < expected.Length; index++)
+        {
+            var current = view.IndexOf(expected[index]);
+            if (current < 0) view.Insert(index, expected[index]);
+            else if (current != index) view.Move(current, index);
+        }
+    }
+
     private void SetTranslationProfiles(AppSettings settings)
     {
         var existingItems = TranslationProfiles.ToDictionary(
@@ -1425,8 +1536,11 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
                 }),
             ];
         }
-        TranslationProfiles.Clear();
-        foreach (var profile in profiles) TranslationProfiles.Add(profile);
+        if (!TranslationProfiles.SequenceEqual(profiles))
+        {
+            TranslationProfiles.Clear();
+            foreach (var profile in profiles) TranslationProfiles.Add(profile);
+        }
         if (!profiles.Any(profile => string.Equals(
                 profile.Id,
                 SelectedTranslationProfileId,
@@ -1438,14 +1552,23 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
 
     public AiTranslationProfileItem AddTranslationProfile()
     {
-        var item = new AiTranslationProfileItem(new AiTranslationProfile
+        var item = CreateTranslationProfileDraft();
+        CommitTranslationProfile(item);
+        return item;
+    }
+
+    internal AiTranslationProfileItem CreateTranslationProfileDraft() =>
+        new(new AiTranslationProfile
         {
             Name = $"翻译配置 {TranslationProfiles.Count + 1}",
             Provider = TranslationProviderFactory.OpenAiCompatibleProviderId,
         });
+
+    internal void CommitTranslationProfile(AiTranslationProfileItem item)
+    {
+        if (TranslationProfiles.Contains(item)) return;
         TranslationProfiles.Add(item);
         SelectedTranslationProfileId = item.Id;
-        return item;
     }
 
     public bool RemoveTranslationProfile(AiTranslationProfileItem item)
@@ -1539,6 +1662,18 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
         return true;
     }
 
+    public bool MoveTranslationProviderToInsertionIndex(TranslationPriorityItem item, int insertionIndex)
+    {
+        var current = TranslationPriorityItems.IndexOf(item);
+        if (current < 0 || insertionIndex < 0 || insertionIndex > TranslationPriorityItems.Count) return false;
+        var target = insertionIndex > current ? insertionIndex - 1 : insertionIndex;
+        if (target == current) return false;
+        TranslationPriorityItems.Move(current, target);
+        for (var index = 0; index < TranslationPriorityItems.Count; index++)
+            TranslationPriorityItems[index].UpdatePosition(index + 1, TranslationPriorityItems.Count);
+        return true;
+    }
+
     private void SetTranslationProviderPriority(
         IEnumerable<TranslationProviderKind> providers)
     {
@@ -1557,6 +1692,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             }
         }
 
+        if (TranslationPriorityItems.Select(item => item.Provider).SequenceEqual(values)) return;
         TranslationPriorityItems.Clear();
         for (var index = 0; index < values.Count; index++)
         {
@@ -1565,9 +1701,7 @@ public sealed class SettingsViewModel : INotifyPropertyChanged
             TranslationPriorityItems.Add(new TranslationPriorityItem(
                 index + 1,
                 provider,
-                provider == TranslationProviderKind.Online
-                    ? "在线大模型"
-                    : "本机离线模型",
+                provider switch { TranslationProviderKind.Online => "在线大模型", TranslationProviderKind.Public => "公共翻译", _ => "本机离线模型" },
                 index > 0,
                 index < values.Count - 1,
                 currentAvailability.IsAvailable,

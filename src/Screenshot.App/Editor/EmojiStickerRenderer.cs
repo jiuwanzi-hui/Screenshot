@@ -28,9 +28,18 @@ public static class EmojiStickerRenderer
     private const ushort ForegroundPaletteIndex = 0xFFFF;
     private static readonly ConcurrentDictionary<(string, int), ImageSource> Cache =
         new();
-    private static readonly Lazy<ColorEmojiFont?> Font = new(
+    private static Lazy<ColorEmojiFont?> Font = new(
         ColorEmojiFont.TryLoad,
         LazyThreadSafetyMode.ExecutionAndPublication);
+
+    internal static void ReleaseIdleCache()
+    {
+        Cache.Clear();
+        // Existing drawings keep their own frozen images. New requests may
+        // reload the font, but an idle tray must not root its native typeface.
+        Interlocked.Exchange(ref Font, new Lazy<ColorEmojiFont?>(
+            ColorEmojiFont.TryLoad, LazyThreadSafetyMode.ExecutionAndPublication));
+    }
 
     public static ImageSource GetImage(string emoji)
     {
@@ -197,17 +206,15 @@ public static class EmojiStickerRenderer
                     return null;
                 }
 
-                var fontBytes = File.ReadAllBytes(glyphTypeface.FontUri.LocalPath);
-                var tables = ReadTableDirectory(fontBytes);
-
-                if (!tables.TryGetValue("COLR", out var colrRange) ||
-                    !tables.TryGetValue("CPAL", out var cpalRange))
+                using var font = File.OpenRead(glyphTypeface.FontUri.LocalPath);
+                var tables = EmojiFontTables.Read(font);
+                if (tables is not { } colorTables)
                 {
                     return null;
                 }
 
-                var layers = ParseColrLayers(fontBytes, colrRange.Offset);
-                var palette = ParseCpalPalette(fontBytes, cpalRange.Offset);
+                var layers = ParseColrLayers(colorTables.Layers, 0);
+                var palette = ParseCpalPalette(colorTables.Palette, 0);
                 return new ColorEmojiFont(glyphTypeface, layers, palette);
             }
             catch (Exception)
@@ -216,38 +223,6 @@ public static class EmojiStickerRenderer
                 // rather than breaking the editor.
                 return null;
             }
-        }
-
-        private static Dictionary<string, (int Offset, int Length)> ReadTableDirectory(
-            byte[] font)
-        {
-            var start = 0;
-
-            // A font collection wraps the table directory of each face.
-            if (font.Length >= 16 &&
-                font[0] == 't' && font[1] == 't' && font[2] == 'c' && font[3] == 'f')
-            {
-                start = (int)ReadUInt32(font, 12);
-            }
-
-            var tableCount = ReadUInt16(font, start + 4);
-            var tables = new Dictionary<string, (int, int)>(
-                tableCount,
-                StringComparer.Ordinal);
-
-            for (var index = 0; index < tableCount; index++)
-            {
-                var recordOffset = start + 12 + (index * 16);
-                var tag = System.Text.Encoding.ASCII.GetString(
-                    font,
-                    recordOffset,
-                    4);
-                tables[tag] = (
-                    (int)ReadUInt32(font, recordOffset + 8),
-                    (int)ReadUInt32(font, recordOffset + 12));
-            }
-
-            return tables;
         }
 
         private static Dictionary<ushort, (ushort, ushort)[]> ParseColrLayers(

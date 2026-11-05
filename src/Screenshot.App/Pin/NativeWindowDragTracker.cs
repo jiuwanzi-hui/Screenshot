@@ -7,165 +7,154 @@ using DrawingPoint = System.Drawing.Point;
 
 namespace Screenshot.App.Pin;
 
-internal sealed class NativeWindowDragTracker
+internal sealed class NativeWindowDragTracker : IDisposable
 {
-    private const int LeftButton = 0x01;
-    private const uint NoSize = 0x0001;
-    private const uint NoZOrder = 0x0004;
-    private const uint NoActivate = 0x0010;
     private readonly Window _window;
     private readonly Action _released;
-    private readonly TimeSpan _frameInterval;
-    private Thread? _thread;
+    private readonly IWindowDragInput _input;
+    private PointerFramePump? _frames;
+    private HwndSource? _source;
+    private bool _disposed;
     private IntPtr _handle;
     private DrawingPoint _startCursor;
+    private DrawingPoint _lastCursor;
     private Rectangle _startBounds;
-    private int _active;
 
-    public NativeWindowDragTracker(Window window, Action released)
+    public NativeWindowDragTracker(Window window, Action released, IWindowDragInput? input = null)
     {
         _window = window;
         _released = released;
-        _frameInterval = DisplayRefreshRateService.GetInteractionFrameInterval(
-            System.Windows.Forms.Screen.PrimaryScreen?.Bounds ??
-            System.Windows.Forms.SystemInformation.VirtualScreen);
+        _input = input ?? new NativeDragInput();
     }
 
-    public bool IsActive => Volatile.Read(ref _active) != 0;
+    public bool IsActive => _frames?.IsActive == true;
 
     public bool Start()
     {
-        Stop();
-        if (!MonitorGeometryService.TryGetWindowBounds(_window, out _startBounds))
-        {
-            return false;
-        }
-
+        if (_disposed) return false;
+        Stop(commitPosition: false);
+        if (!MonitorGeometryService.TryGetWindowBounds(_window, out _startBounds)) return false;
         _handle = new WindowInteropHelper(_window).Handle;
-        if (_handle == IntPtr.Zero)
+        var source = HwndSource.FromHwnd(_handle);
+        if (source is null || !_input.TryGetCursorPosition(out _startCursor) || !_input.Capture(_handle))
         {
             _handle = IntPtr.Zero;
             return false;
         }
-
-        SetCapture(_handle);
-        if (GetCapture() != _handle)
-        {
-            _handle = IntPtr.Zero;
-            return false;
-        }
-
-        _startCursor = Cursor.Position;
-        Interlocked.Exchange(ref _active, 1);
-        _thread = new Thread(Run)
-        {
-            IsBackground = true,
-            Name = "SnapCut native pinned window drag",
-            Priority = ThreadPriority.BelowNormal,
-        };
-        _thread.Start();
+        _lastCursor = _startCursor;
+        _source = source;
+        _source.AddHook(OnWindowMessage);
+        // Moving an HWND does not need a WPF render pass. Under sustained
+        // mouse input a transparent window's Rendering event can lag behind.
+        // The native clock queues at most one dispatcher frame, at display cadence.
+        _frames = new PointerFramePump(Present, nativeFrames: true);
+        _frames.Start();
         return true;
     }
 
-    public void Stop()
-    {
-        if (Interlocked.Exchange(ref _active, 0) == 0)
-        {
-            return;
-        }
+    public void Stop() => Stop(commitPosition: true);
 
-        var thread = _thread;
-        _thread = null;
-        if (_handle != IntPtr.Zero && GetCapture() == _handle)
-        {
-            ReleaseCapture();
-        }
-        if (thread is not null && thread != Thread.CurrentThread && thread.IsAlive)
-        {
-            _ = thread.Join(100);
-        }
+    private void Stop(bool commitPosition)
+    {
+        if (!IsActive) return;
+        var frames = _frames;
+        _frames = null; // ReleaseCapture can synchronously reenter the hook.
+        frames?.Dispose(); // Wake and retire the clock worker without joining it.
+        if (_source is { IsDisposed: false }) _source.RemoveHook(OnWindowMessage);
+        _source = null;
+        // A release can arrive between two render frames.
+        if (commitPosition && _input.CapturedWindow == _handle) MoveToLatestCursor();
+        if (_handle != IntPtr.Zero && _input.CapturedWindow == _handle) _input.Release();
         _handle = IntPtr.Zero;
     }
 
-    private void Run()
+    private void Present()
     {
-        _ = timeBeginPeriod(1);
-        try
+        if (_input.CapturedWindow != _handle)
         {
-            while (IsActive)
-            {
-                if ((GetAsyncKeyState(LeftButton) & unchecked((short)0x8000)) == 0)
-                {
-                    if (Interlocked.Exchange(ref _active, 0) != 0)
-                    {
-                        if (_handle != IntPtr.Zero && GetCapture() == _handle)
-                        {
-                            ReleaseCapture();
-                        }
-
-                        _ = _window.Dispatcher.BeginInvoke(_released);
-                    }
-
-                    return;
-                }
-
-                if (GetCursorPos(out var cursor))
-                {
-                    _ = SetWindowPos(
-                        _handle,
-                        IntPtr.Zero,
-                        _startBounds.Left + cursor.X - _startCursor.X,
-                        _startBounds.Top + cursor.Y - _startCursor.Y,
-                        0,
-                        0,
-                        NoSize | NoZOrder | NoActivate);
-                }
-
-                var delay = _frameInterval;
-                if (delay > TimeSpan.Zero)
-                {
-                    Thread.Sleep(delay);
-                }
-            }
+            Stop(commitPosition: false);
+            _released();
         }
-        finally
+        else if (!_input.IsLeftButtonDown)
         {
-            _ = timeEndPeriod(1);
-            if (ReferenceEquals(_thread, Thread.CurrentThread))
-            {
-                _thread = null;
-            }
+            Stop();
+            _released();
         }
+        else MoveToLatestCursor();
     }
 
-    [DllImport("user32.dll")]
-    private static extern IntPtr SetCapture(IntPtr windowHandle);
+    private IntPtr OnWindowMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (!IsActive || window != _handle) return IntPtr.Zero;
+        switch (message)
+        {
+            case 0x0200: // WM_MOUSEMOVE
+                // Consume before WPF's mouse provider does hit testing, input
+                // staging and routed events for every packet. Only this HWND's
+                // whole-window drag uses this hook; drawing/text selection do not.
+                handled = true;
+                break;
+            case 0x0202: // WM_LBUTTONUP: keep WPF's button state in sync.
+                Stop();
+                _released();
+                break;
+            case 0x0215: // WM_CAPTURECHANGED
+            case 0x001F: // WM_CANCELMODE
+            case 0x0082: // WM_NCDESTROY
+                Stop(commitPosition: false);
+                _released();
+                break;
+        }
+        return IntPtr.Zero;
+    }
 
-    [DllImport("user32.dll")]
-    private static extern bool ReleaseCapture();
+    private void MoveToLatestCursor()
+    {
+        if (_handle == IntPtr.Zero || !_input.TryGetCursorPosition(out var cursor) || cursor == _lastCursor) return;
+        // The HWND belongs to this dispatcher. Cross-thread synchronous moves
+        // used to contend with WPF layout and a 100 ms Join on mouse release.
+        if (SetWindowPos(_handle, IntPtr.Zero,
+            _startBounds.Left + cursor.X - _startCursor.X,
+            _startBounds.Top + cursor.Y - _startCursor.Y,
+            0, 0, 0x0015)) _lastCursor = cursor; // NOSIZE | NOZORDER | NOACTIVATE
+    }
 
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetCapture();
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+        Stop(commitPosition: false);
+    }
 
-    [DllImport("user32.dll")]
-    private static extern short GetAsyncKeyState(int virtualKey);
+    private sealed class NativeDragInput : IWindowDragInput
+    {
+        public IntPtr CapturedWindow => GetCapture();
+        public bool IsLeftButtonDown => (GetAsyncKeyState(1) & 0x8000) != 0;
+        public bool TryGetCursorPosition(out DrawingPoint point) => GetCursorPos(out point);
+        public bool Capture(IntPtr window)
+        {
+            _ = SetCapture(window);
+            return GetCapture() == window;
+        }
+        public void Release() => _ = ReleaseCapture();
+    }
 
-    [DllImport("user32.dll")]
-    private static extern bool GetCursorPos(out DrawingPoint point);
+    [DllImport("user32.dll")] private static extern IntPtr SetCapture(IntPtr windowHandle);
+    [DllImport("user32.dll")] private static extern bool ReleaseCapture();
+    [DllImport("user32.dll")] private static extern IntPtr GetCapture();
+    [DllImport("user32.dll")] private static extern short GetAsyncKeyState(int virtualKey);
+    [DllImport("user32.dll")] private static extern bool GetCursorPos(out DrawingPoint point);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(
+        IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+}
 
-    [DllImport("user32.dll")]
-    private static extern bool SetWindowPos(
-        IntPtr window,
-        IntPtr insertAfter,
-        int x,
-        int y,
-        int width,
-        int height,
-        uint flags);
-
-    [DllImport("winmm.dll")]
-    private static extern uint timeBeginPeriod(uint periodMilliseconds);
-
-    [DllImport("winmm.dll")]
-    private static extern uint timeEndPeriod(uint periodMilliseconds);
+// Keep native pointer reads replaceable for offscreen regression tests. Tests
+// exercise the real HWND/message/move path without moving or capturing the user's mouse.
+internal interface IWindowDragInput
+{
+    IntPtr CapturedWindow { get; }
+    bool IsLeftButtonDown { get; }
+    bool TryGetCursorPosition(out DrawingPoint point);
+    bool Capture(IntPtr window);
+    void Release();
 }

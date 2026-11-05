@@ -1,12 +1,13 @@
 using Screenshot.App.Capture;
 using Screenshot.App.Core;
 using Screenshot.App.Pin;
+using System.Windows.Controls;
 
 namespace Screenshot.App.Tests;
 
 public sealed class PinnedImageManagerTests
 {
-    [Fact]
+    [DesktopFact]
     public void ShowsAndReleasesPinnedImages()
     {
         var countAfterPinning = 0;
@@ -37,7 +38,7 @@ public sealed class PinnedImageManagerTests
         Assert.Equal(0, countAfterDisposal);
     }
 
-    [Fact]
+    [DesktopFact]
     public void GroupingCombinesPinsIntoOneWindowAndUngroupRestoresThem()
     {
         WpfTestHost.Invoke(() =>
@@ -67,11 +68,15 @@ public sealed class PinnedImageManagerTests
             Assert.IsType<System.Windows.Controls.Canvas>(
                 group.FindName("CropOverlay"));
             Assert.Null(group.EditorToolbar);
-            Assert.Equal(235, group.CompositePreview.PixelWidth);
-            Assert.Equal(112, group.CompositePreview.PixelHeight);
-            var opacitySlider = Assert.IsType<System.Windows.Controls.Slider>(
-                group.FindName("GroupOpacitySlider"));
-            Assert.NotNull(opacitySlider.Template);
+            // Group the displayed image sizes, independent of desktop DPI and
+            // the window chrome insets used by the current native resize shell.
+            Assert.Equal(
+                members[0].GroupingPreview.PixelWidth + members[1].GroupingPreview.PixelWidth + 1,
+                group.CompositePreview.PixelWidth);
+            Assert.Equal(
+                Math.Max(members[0].GroupingPreview.PixelHeight, members[1].GroupingPreview.PixelHeight),
+                group.CompositePreview.PixelHeight);
+            Assert.Null(group.FindName("GroupHeader"));
 
             manager.UngroupAll();
 
@@ -86,7 +91,7 @@ public sealed class PinnedImageManagerTests
         });
     }
 
-    [Fact]
+    [DesktopFact]
     public void GroupingKeepsTheOrderPinsWereAddedInsteadOfSortingByWindowPosition()
     {
         WpfTestHost.Invoke(() =>
@@ -119,7 +124,7 @@ public sealed class PinnedImageManagerTests
         });
     }
 
-    [Fact]
+    [DesktopFact]
     public void GroupLevelEditIsSplitBackIntoMembersWhenUngrouped()
     {
         WpfTestHost.Invoke(() =>
@@ -154,7 +159,7 @@ public sealed class PinnedImageManagerTests
         });
     }
 
-    [Fact]
+    [DesktopFact]
     public void GroupEditorZoomsWithTheMouseWheel()
     {
         WpfTestHost.Invoke(() =>
@@ -167,9 +172,9 @@ public sealed class PinnedImageManagerTests
             members[1].SetGroupedState(true);
             var group = Assert.IsType<PinnedImageGroupWindow>(manager.GroupWindow);
             group.UpdateLayout();
-            Assert.IsType<System.Windows.Controls.Button>(group.FindName("GroupEditButton"))
+            Assert.IsType<System.Windows.Controls.MenuItem>(group.FindName("GroupEditMenuItem"))
                 .RaiseEvent(new System.Windows.RoutedEventArgs(
-                    System.Windows.Controls.Button.ClickEvent));
+                    MenuItem.ClickEvent));
             var editor = Assert.IsType<Screenshot.App.Editor.ImageEditorCanvas>(
                 group.FindName("InlineEditorCanvas"));
             var canvas = Assert.IsType<System.Windows.Controls.Grid>(
@@ -189,7 +194,7 @@ public sealed class PinnedImageManagerTests
         });
     }
 
-    [Fact]
+    [DesktopFact]
     public void GroupCropIsPreservedAfterUngrouping()
     {
         WpfTestHost.Invoke(() =>
@@ -208,15 +213,18 @@ public sealed class PinnedImageManagerTests
             members[1].SetGroupedState(true);
             var group = Assert.IsType<PinnedImageGroupWindow>(manager.GroupWindow);
 
-            group.ApplyCompositeCrop(new System.Windows.Int32Rect(0, 10, 40, 10));
+            var cropWidth = members[0].GroupingPreview.PixelWidth;
+            var cropTop = members[0].GroupingPreview.PixelHeight / 2;
+            var cropHeight = members[0].GroupingPreview.PixelHeight - cropTop;
+            group.ApplyCompositeCrop(new System.Windows.Int32Rect(0, cropTop, cropWidth, cropHeight));
             manager.UngroupAll();
 
-            Assert.Equal(40, members[0].Preview.PixelWidth);
-            Assert.Equal(10, members[0].Preview.PixelHeight);
+            Assert.Equal(cropWidth, members[0].Preview.PixelWidth);
+            Assert.Equal(cropHeight, members[0].Preview.PixelHeight);
         });
     }
 
-    [Fact]
+    [DesktopFact]
     public void GroupEditAndCropUseTheSameAttachedToolbarOutsideTheGroupWindow()
     {
         WpfTestHost.Invoke(() =>
@@ -236,13 +244,13 @@ public sealed class PinnedImageManagerTests
             var group = Assert.IsType<PinnedImageGroupWindow>(manager.GroupWindow);
             group.UpdateLayout();
             var windowCount = System.Windows.Application.Current.Windows.Count;
-            var editButton = Assert.IsType<System.Windows.Controls.Button>(
-                group.FindName("GroupEditButton"));
-            var cropButton = Assert.IsType<System.Windows.Controls.Button>(
-                group.FindName("GroupCropButton"));
+            var editButton = Assert.IsType<System.Windows.Controls.MenuItem>(
+                group.FindName("GroupEditMenuItem"));
+            Assert.Equal("编辑", editButton.Header);
+            Assert.False(editButton.HasItems);
 
             editButton.RaiseEvent(new System.Windows.RoutedEventArgs(
-                System.Windows.Controls.Button.ClickEvent));
+                MenuItem.ClickEvent));
             Assert.True(group.IsInlineEditorVisible);
             Assert.False(group.IsInlineCropVisible);
             var editToolbar = Assert.IsType<PinnedImageEditorToolbarWindow>(
@@ -265,8 +273,13 @@ public sealed class PinnedImageManagerTests
             group.ResetInlineToolbarPosition();
             Assert.False(group.ToolbarHasCustomPosition);
 
-            cropButton.RaiseEvent(new System.Windows.RoutedEventArgs(
-                System.Windows.Controls.Button.ClickEvent));
+            var opacityButton = Assert.IsType<Button>(editToolbar.FindName("OpacityButton"));
+            var opacityOption = opacityButton.ContextMenu.Items.OfType<MenuItem>().Single(item => Equals(item.Tag, "60"));
+            opacityOption.RaiseEvent(new System.Windows.RoutedEventArgs(MenuItem.ClickEvent));
+            Assert.Equal(0.6, group.Opacity);
+            Assert.True(editToolbar.IsVisible);
+            var cropButton = Assert.IsType<Button>(editToolbar.FindName("CropToolButton"));
+            cropButton.RaiseEvent(new System.Windows.RoutedEventArgs(Button.ClickEvent));
             Assert.False(group.IsInlineEditorVisible);
             Assert.True(group.IsInlineCropVisible);
             var cropToolbar = Assert.IsType<PinnedImageEditorToolbarWindow>(
@@ -305,7 +318,7 @@ public sealed class PinnedImageManagerTests
         Assert.Equal(new System.Drawing.Point(445, 268), position);
     }
 
-    [Fact]
+    [DesktopFact]
     public void PinnedToolbarUsesCaptureColorsFeaturesAndSeparatorVisibility()
     {
         WpfTestHost.Invoke(() =>
@@ -330,11 +343,11 @@ public sealed class PinnedImageManagerTests
                 customColorPaletteChanged: colors => savedPalette = colors);
             manager.Pin(new CapturedImage(new System.Drawing.Bitmap(100, 80)));
             var pin = Assert.Single(manager.Windows);
-            var editButton = Assert.IsType<System.Windows.Controls.Button>(
-                pin.FindName("EditButton"));
+            var editButton = Assert.IsType<System.Windows.Controls.MenuItem>(
+                pin.FindName("EditMenuItem"));
 
             editButton.RaiseEvent(new System.Windows.RoutedEventArgs(
-                System.Windows.Controls.Button.ClickEvent));
+                MenuItem.ClickEvent));
 
             var toolbar = Assert.IsType<PinnedImageEditorToolbarWindow>(
                 pin.EditorToolbar);
@@ -384,7 +397,7 @@ public sealed class PinnedImageManagerTests
                 customColorButton.Content);
             Assert.Equal("\uE790", paletteGlyph.Text);
             customColorButton.RaiseEvent(new System.Windows.RoutedEventArgs(
-                System.Windows.Controls.Button.ClickEvent));
+                Button.ClickEvent));
             var picker = Assert.Single(
                 System.Windows.Application.Current.Windows
                     .OfType<Screenshot.App.Editor.ThemeColorPickerWindow>());
@@ -483,7 +496,7 @@ public sealed class PinnedImageManagerTests
         });
     }
 
-    [Fact]
+    [DesktopFact]
     public void PinnedToolbarExpandsEmojiPaletteAndRaisesSelection()
     {
         WpfTestHost.Invoke(() =>
@@ -491,16 +504,16 @@ public sealed class PinnedImageManagerTests
             using var manager = new PinnedImageManager();
             manager.Pin(new CapturedImage(new System.Drawing.Bitmap(100, 80)));
             var pin = Assert.Single(manager.Windows);
-            var editButton = Assert.IsType<System.Windows.Controls.Button>(
-                pin.FindName("EditButton"));
+            var editButton = Assert.IsType<System.Windows.Controls.MenuItem>(
+                pin.FindName("EditMenuItem"));
             editButton.RaiseEvent(new System.Windows.RoutedEventArgs(
-                System.Windows.Controls.Button.ClickEvent));
+                MenuItem.ClickEvent));
 
             var toolbar = Assert.IsType<PinnedImageEditorToolbarWindow>(
                 pin.EditorToolbar);
             var emojiButton = Assert.IsType<System.Windows.Controls.RadioButton>(
                 toolbar.FindName("EmojiToolButton"));
-            var palette = Assert.IsType<System.Windows.Controls.ScrollViewer>(
+            var palette = Assert.IsAssignableFrom<System.Windows.Controls.ScrollViewer>(
                 toolbar.FindName("EmojiPalette"));
             var palettePanel = Assert.IsType<System.Windows.Controls.WrapPanel>(
                 toolbar.FindName("EmojiPalettePanel"));
@@ -525,13 +538,13 @@ public sealed class PinnedImageManagerTests
             var firstEmoji = Assert.IsType<System.Windows.Controls.Button>(
                 palettePanel.Children[0]);
             firstEmoji.RaiseEvent(new System.Windows.RoutedEventArgs(
-                System.Windows.Controls.Button.ClickEvent));
+                Button.ClickEvent));
 
             Assert.Equal(Editor.EmojiStickerCatalog.All[0], selectedEmoji);
         });
     }
 
-    [Fact]
+    [DesktopFact]
     public void HideAndShowStateTracksWhetherPinsAreHidden()
     {
         WpfTestHost.Invoke(() =>
@@ -551,7 +564,7 @@ public sealed class PinnedImageManagerTests
         });
     }
 
-    [Fact]
+    [DesktopFact]
     public void NewPinRemainsReachableWhenExistingPinsAreMinimized()
     {
         WpfTestHost.Invoke(() =>

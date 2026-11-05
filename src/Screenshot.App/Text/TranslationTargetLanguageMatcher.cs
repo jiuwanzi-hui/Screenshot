@@ -2,6 +2,11 @@ namespace Screenshot.App.Text;
 
 internal static class TranslationTargetLanguageMatcher
 {
+    // Product names embedded in Chinese prose can remain unchanged. Do not
+    // generalize this to every capitalized English word (Host, Core, Settings).
+    private static readonly HashSet<string> EmbeddedProductNames = new(
+        ["Windows", "Mac", "Linux", "Ubuntu", "Debian", "Word", "Excel", "PowerPoint"],
+        StringComparer.Ordinal);
     private static readonly HashSet<string> EnglishFunctionWords = new(
         [
             "a", "an", "and", "are", "as", "at", "be", "been", "but",
@@ -44,42 +49,75 @@ internal static class TranslationTargetLanguageMatcher
             var han = text.Count(IsHanCharacter);
             var kana = text.Count(character =>
                 character is >= '\u3040' and <= '\u30ff');
-            // OCR often groups Chinese and English from the same visual row
-            // (for example “服务状态 Service is running”). Treating any row
-            // containing one Han character as already translated silently
-            // drops the English part. Only skip rows where Han is clearly the
-            // dominant script; mixed/English-heavy rows are sent to the
-            // translator, which can preserve the embedded Chinese and product
-            // identifiers while translating the English words.
+            // Preserve mixed-language rows even when OCR groups the scripts.
             if (kana != 0)
             {
                 return false;
             }
 
-            // Keep isolated Han glyphs and technical identifiers (for example
-            // MySQL+PG_TD) out of the translation request. They are not prose,
-            // even when the identifier also contains a Chinese suffix.
-            if ((han == 1 && letters <= 2) ||
-                (han > 0 && text.Any(character => character is '+' or '_' or '/' or '\\')))
-            {
-                return true;
-            }
-
-            return han > 0 && !HasLatinNaturalLanguageClause(text);
+            // A short mixed label such as “OCR Host 和 Core。” still contains
+            // words to translate. Sentence length and function words cannot
+            // establish that its English content is already Chinese.
+            return han > 0 && !HasTranslatableLatinWords(text);
         }
 
-        if (target == "en")
-        {
-            var latin = text.Count(character =>
-                character is >= 'A' and <= 'Z' or >= 'a' and <= 'z');
-            return latin >= 1 && latin >= letters * 0.8;
-        }
-
-        var detection = Cld3OfflineLanguageDetector.Shared.Detect(text);
-        return detection.IsSuccess && string.Equals(
+        var detection = Cld3OfflineLanguageDetector.Shared.Detect(TranslationTextNormalizer.Normalize(text));
+        // Sharing the Latin alphabet does not make French or Spanish English.
+        // Only a reliable language match may suppress a translation request.
+        return detection.IsSuccess && detection.ErrorMessage is null &&
+            detection.IsReliable && detection.Confidence >= 0.85 && string.Equals(
             detection.LanguageCode,
             target,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool ShouldTranslate(string text, string sourceLanguage, string targetLanguage)
+    {
+        if (string.IsNullOrWhiteSpace(text) || !text.Any(char.IsLetter) || IsLikelyInvariant(text))
+        {
+            return false;
+        }
+
+        var source = TranslationLanguageCatalog.NormalizeOfflineCode(sourceLanguage);
+        var target = TranslationLanguageCatalog.NormalizeOfflineCode(targetLanguage);
+        // Explicit source selection also disambiguates Han-only Japanese titles
+        // and short phrases which a statistical detector cannot identify.
+        return source is not null && !string.Equals(source, target, StringComparison.OrdinalIgnoreCase) ||
+            !IsAlreadyTargetLanguage(text, targetLanguage);
+    }
+
+    internal static int[] GetPendingSegmentIndices(IReadOnlyList<string> segments, string sourceLanguage, string targetLanguage)
+    {
+        var source = TranslationLanguageCatalog.NormalizeOfflineCode(sourceLanguage);
+        var target = TranslationLanguageCatalog.NormalizeOfflineCode(targetLanguage);
+        // Han-only headings on a Japanese page must not be mistaken for Chinese.
+        // A browser translation icon (for example “aあ”) is not Japanese
+        // page context. It must not cause already-Chinese navigation to be sent
+        // to the model again; actual Japanese phrases still supply context.
+        var hasJapaneseContext = source is null && segments.Any(text => text.Count(c => c is >= '\u3040' and <= '\u30ff') >= 2);
+        var pending = Enumerable.Range(0, segments.Count)
+            .Where(index => ShouldTranslate(segments[index],
+                hasJapaneseContext && segments[index].Any(IsHanCharacter) &&
+                !segments[index].Any(c => char.IsLetter(c) && c <= '\u024f') ? "ja" : sourceLanguage,
+                targetLanguage)).ToArray();
+        if (source is not null || target is null || pending.Length == 0) return pending;
+
+        // A short title alone is often uncertain even when its detector agrees
+        // with the target. Use a confidently identified body paragraph as context;
+        // never override a different detected language or a different script.
+        var hasTargetContext = segments.Where(text => text.Count(char.IsLetter) >= 64)
+            .Select(text => Cld3OfflineLanguageDetector.Shared.Detect(text))
+            .Any(detection => detection.ErrorMessage is null && detection.IsReliable &&
+                detection.Confidence >= .98 && detection.LanguageCode == target);
+        if (!hasTargetContext) return pending;
+        return pending.Where(index =>
+        {
+            var text = segments[index];
+            if (text.Length > 80 || target is not ("en" or "fr" or "es" or "de" or "it" or "pt" or "nl") ||
+                text.Any(c => char.IsLetter(c) && c > '\u024f')) return true;
+            var detection = Cld3OfflineLanguageDetector.Shared.Detect(text);
+            return detection.LanguageCode != target || detection.Confidence < .35;
+        }).ToArray();
     }
 
     private static bool IsHanCharacter(char value) =>
@@ -94,9 +132,17 @@ internal static class TranslationTargetLanguageMatcher
             (words.Any(EnglishFunctionWords.Contains) || words.Length >= 5);
     }
 
+    internal static bool HasTranslatableLatinWords(string text) => GetLatinWords(text)
+        .Any(word => word.Length > 1 && !LooksLikeCodeIdentifier(word) &&
+            !EmbeddedProductNames.Contains(word) && word.Any(char.IsLower));
+
     internal static bool IsAmbiguousShortLabel(string text)
     {
         var value = text.Trim();
+        if (value.Any(IsHanCharacter) && HasTranslatableLatinWords(value)) return false;
+        // A selected compound label must not be silently echoed just because
+        // other paragraphs in the batch translated successfully.
+        if (TranslationTextNormalizer.ExpandCompoundLabel(value) is not null) return false;
         if (value.Length == 0 || value.Length > 24 ||
             value.Any(character => character is '.' or ',' or ';' or ':' or
                 '!' or '?' or '。' or '，' or '；' or '：' or '！' or '？'))
@@ -123,35 +169,55 @@ internal static class TranslationTargetLanguageMatcher
             return true;
         }
 
-        if (Uri.TryCreate(value, UriKind.Absolute, out _) ||
-            value.Contains('\\'))
+        // Selected compound labels are language-bearing even when OCR includes
+        // wrappers, naming separators or a file suffix. Check before URI/file
+        // heuristics: a trailing colon can otherwise look like a URI scheme.
+        if (TranslationTextNormalizer.ExpandCompoundLabel(value) is not null) return false;
+
+        if (IsStandaloneResourceReference(value))
         {
             return true;
+        }
+
+        // A brand joined to ordinary words is still a translatable label
+        // (including versioned/truncated download names). The first CamelCase
+        // token must not exempt every word following a hyphen.
+        if (value.Contains('-') && !value.Contains('/') && !value.Contains('@'))
+        {
+            var label = HasFileLikeExtension(value)
+                ? value[..^System.IO.Path.GetExtension(value).Length]
+                : value;
+            var labelWords = GetLatinWords(label);
+            if (labelWords.Length >= 2 && labelWords.Any(word =>
+                    word.Length > 2 && !LooksLikeCodeIdentifier(word)))
+                return false;
         }
 
         // An @-mention can appear inside an ordinary sentence (for example
         // "I @UseListary every day"). Protect standalone handles, but do not
         // discard the surrounding prose from translation.
-        if (value.Contains('@') && !HasLatinNaturalLanguageClause(value))
+        if (value.Contains('@') && !value.Any(char.IsWhiteSpace))
         {
             return true;
         }
 
-        var firstToken = value.Split(
-            [' ', '\t'],
-            StringSplitOptions.RemoveEmptyEntries)[0];
-        if ((firstToken.Contains('/') &&
-             !string.IsNullOrWhiteSpace(System.IO.Path.GetExtension(firstToken))) ||
-            (!value.Any(char.IsWhiteSpace) && value.Contains('/')) ||
-            (!value.Any(char.IsWhiteSpace) && HasFileLikeExtension(value)))
+        if (!value.Any(char.IsWhiteSpace) && HasFileLikeExtension(value))
         {
             return true;
         }
 
         if (LooksLikeMeasurement(value) || LooksLikeProductVersion(value) ||
-            LooksLikeSourceCode(value) || value.EndsWith('>'))
+            value.StartsWith('<') && value.EndsWith('>'))
         {
             return true;
+        }
+
+        // A trailing attribution such as “（編集WB）” or an embedded CPU/API
+        // acronym does not make an entire Japanese, Chinese, Russian or Arabic
+        // paragraph invariant. Preserve standalone identifiers, not their prose.
+        if (value.Count(character => char.IsLetter(character) && character > '\u024f') >= 4)
+        {
+            return false;
         }
 
         var latinWords = GetLatinWords(value);
@@ -168,14 +234,53 @@ internal static class TranslationTargetLanguageMatcher
             return false;
         }
 
-        if (latinWords.Length <= 3 && latinWords.Any(word =>
-                word.Length >= 2 && word.All(char.IsUpper)))
+        if (latinWords.Length <= 3 && latinWords.Any(word => word.Length >= 2 && word.All(char.IsUpper)) &&
+            latinWords.All(word => word.All(char.IsUpper) || LooksLikeCodeIdentifier(word)))
         {
             return true;
         }
 
-        return !value.Any(char.IsWhiteSpace) &&
+        return latinWords.Length == 1 && !value.Any(char.IsWhiteSpace) &&
             LooksLikeCodeIdentifier(latinWords[0]);
+    }
+
+    private static bool IsStandaloneResourceReference(string text)
+    {
+        // A resource must occupy the whole selection. Uri.TryCreate alone also
+        // accepts prose such as "Status: installation failed", and a backslash
+        // inside a paragraph only protects the path, not the surrounding words.
+        var value = text;
+        if (value.Length >= 2 && value[0] is '\'' or '"' && value[^1] == value[0])
+            value = value[1..^1];
+        if (!value.Any(char.IsWhiteSpace))
+            return value.Contains('\\') || value.Contains('/') ||
+                value.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase);
+
+        // File-list annotations such as "src/file.cs +2240" are not prose.
+        // Any letters after the reference must go through language detection.
+        var firstSpace = value.IndexOfAny([' ', '\t']);
+        if (firstSpace > 0 && value[..firstSpace].Any(c => c is '\\' or '/') &&
+            !value[firstSpace..].Any(char.IsLetter)) return true;
+
+        // Spaces are legal in directory names. Only rooted/explicit relative
+        // paths can use this exception; reject prose within each component.
+        // Check components separately so "D:\Program Files\My App\model.bin"
+        // does not look like a sentence merely because it has many words.
+        var drivePath = value.Length >= 3 && char.IsAsciiLetter(value[0]) && value[1] == ':' &&
+            value[2] is '\\' or '/';
+        var rootedPath = drivePath || value.StartsWith(@"\\", StringComparison.Ordinal) ||
+            value.StartsWith('/') || value.StartsWith(@".\", StringComparison.Ordinal) ||
+            value.StartsWith(@"..\", StringComparison.Ordinal) ||
+            value.StartsWith("./", StringComparison.Ordinal) || value.StartsWith("../", StringComparison.Ordinal);
+        if (!rootedPath || value.Any(c => c is '\r' or '\n' or '\t' or '"' or '<' or '>' or '|' or '?' or '*'))
+            return false;
+
+        var path = drivePath ? value[3..] : value;
+        return !path.Contains(':') && path.Split(['\\', '/']).All(component =>
+            !component.Any(char.IsWhiteSpace) ||
+            !HasLatinNaturalLanguageClause(component) &&
+            !component.Any(c => char.IsPunctuation(c) && c is not '-' and not '_') &&
+            !component.Any(c => char.IsLetter(c) && c > '\u024f'));
     }
 
     private static string[] GetLatinWords(string text)
@@ -224,8 +329,12 @@ internal static class TranslationTargetLanguageMatcher
             return false;
         }
 
-        return compact[firstLetter..].All(character =>
-            IsAsciiLatinLetter(character) || character is '/' or '%');
+        // A count such as "1 Comment" is prose, not a measurement unit.
+        return compact[firstLetter..].ToLowerInvariant() is
+            "px" or "pt" or "em" or "rem" or "dpi" or "hz" or "khz" or "mhz" or "ghz" or
+            "fps" or "ms" or "s" or "min" or "h" or "mm" or "cm" or "m" or "km" or
+            "mg" or "g" or "kg" or "kb" or "mb" or "gb" or "tb" or "kib" or "mib" or
+            "gib" or "tib" or "kbps" or "mbps" or "gbps" or "mb/s" or "gb/s" or "km/h";
     }
 
     private static bool HasFileLikeExtension(string value)

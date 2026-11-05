@@ -1,9 +1,11 @@
 <UserControl x:Class="Screenshot.App.Presentation.CaptureToolbarLayoutEditor"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:presentation="clr-namespace:Screenshot.App.Presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              DataContextChanged="OnDataContextChanged">
     <UserControl.Resources>
         <Geometry x:Key="RectangleIconGeometry">M 2,2 H 16 V 16 H 2 Z</Geometry>
+        <Geometry x:Key="DoubleArrowIconGeometry">M 1,7 H 17 L 11,1 M 17,10 H 1 L 7,16</Geometry>
         <Geometry x:Key="ArrowIconGeometry">M 2,9 H 15 M 10,4 L 15,9 L 10,14</Geometry>
         <Geometry x:Key="RedoIconGeometry">M 12,2 L 18,8 L 12,14 V 11 C 7,11 4,13 3,17 C 3,10 7,6 12,6 Z</Geometry>
         <Geometry x:Key="TableIconGeometry">M 2,2 H 16 V 16 H 2 Z M 2,6 H 16 M 7,6 V 16 M 12,6 V 16 M 7,11 H 16</Geometry>
@@ -46,9 +48,15 @@
                                 Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="7">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center" />
+                                CornerRadius="{DynamicResource EditorToolbarButtonCornerRadius}">
+                            <Grid>
+                                <Border Margin="1" BorderThickness="1" BorderBrush="{DynamicResource AppControlHighlightBrush}"
+                                        Background="{DynamicResource AppControlReflectionBrush}" CornerRadius="{DynamicResource AppControlCornerRadius}"
+                                        Visibility="{DynamicResource AppLiquidLensVisibility}" IsHitTestVisible="False" />
+                                <presentation:LiquidGlassLens Visibility="{DynamicResource AppLiquidLensVisibility}"
+                                    IsEmphasized="{Binding IsMouseOver, RelativeSource={RelativeSource TemplatedParent}}" />
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
@@ -56,7 +64,7 @@
                                 <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource EditorToolbarButtonHoverBorderBrush}" />
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource EditorToolbarButtonSelectedBackgroundBrush}" />
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ToolbarDesignerVisibleBackgroundBrush}" />
                                 <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource EditorToolbarButtonSelectedBorderBrush}" />
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -128,36 +136,42 @@
             </StackPanel>
         </Grid>
 
-        <Border Margin="0,10,0,0"
-                Padding="9"
-                Background="{DynamicResource AppPanelBackgroundBrush}"
-                BorderBrush="{DynamicResource AppBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="7">
-            <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                          PreviewMouseWheel="OnNestedScrollViewerPreviewMouseWheel"
-                          VerticalScrollBarVisibility="Disabled">
-                <StackPanel x:Name="EditorRowsHost"
-                            HorizontalAlignment="Left" />
-            </ScrollViewer>
-        </Border>
+        <Grid Margin="0,10,0,0">
+            <Border Margin="0"
+                    Padding="9"
+                    Background="{DynamicResource ToolbarDesignerSurfaceBrush}"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="7">
+                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                              PreviewMouseWheel="OnNestedScrollViewerPreviewMouseWheel"
+                              VerticalScrollBarVisibility="Disabled">
+                    <StackPanel x:Name="EditorRowsHost"
+                                HorizontalAlignment="Left" />
+                </ScrollViewer>
+            </Border>
+            <presentation:LiquidGlassLens Visibility="{DynamicResource AppLiquidLensVisibility}" />
+        </Grid>
 
         <TextBlock Margin="0,13,0,0"
                    FontSize="12"
                    Foreground="{DynamicResource AppTextSecondaryBrush}"
                    Text="实时预览" />
-        <Border Margin="0,7,0,0"
-                Padding="9"
-                Background="{DynamicResource AppPanelBackgroundBrush}"
-                BorderBrush="{DynamicResource AppBorderBrush}"
-                BorderThickness="1"
-                CornerRadius="7">
-            <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                          PreviewMouseWheel="OnNestedScrollViewerPreviewMouseWheel"
-                          VerticalScrollBarVisibility="Disabled">
-                <StackPanel x:Name="PreviewRowsHost"
-                            HorizontalAlignment="Left" />
-            </ScrollViewer>
-        </Border>
+        <Grid Margin="0,7,0,0">
+            <Border Margin="0"
+                    Padding="9"
+                    Background="{DynamicResource ToolbarDesignerSurfaceBrush}"
+                    BorderBrush="{DynamicResource AppBorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="7">
+                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                              PreviewMouseWheel="OnNestedScrollViewerPreviewMouseWheel"
+                              VerticalScrollBarVisibility="Disabled">
+                    <StackPanel x:Name="PreviewRowsHost"
+                                HorizontalAlignment="Left" />
+                </ScrollViewer>
+            </Border>
+            <presentation:LiquidGlassLens Visibility="{DynamicResource AppLiquidLensVisibility}" />
+        </Grid>
     </StackPanel>
 </UserControl>

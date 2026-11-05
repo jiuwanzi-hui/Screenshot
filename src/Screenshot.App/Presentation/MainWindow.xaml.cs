@@ -40,9 +40,6 @@ internal sealed class ReleaseHistoryItemViewModel
 public partial class MainWindow : Window, IDisposable
 {
     private const string CreatorProfileUrl = "https://b23.tv/ZzD0zPS";
-    // Replace this file in the repository when the time-limited QR code changes.
-    private const string CommunityQrImageUrl =
-        "https://raw.githubusercontent.com/jiuwanzi-hui/Screenshot/main/src/Screenshot.App/Assets/SnapCutCommunityQr.jpg";
     private const string GithubRepositoryUrl =
         "https://github.com/jiuwanzi-hui/Screenshot";
     private static readonly Version MinimumAutomaticRollbackVersion = new(2, 0, 0);
@@ -61,7 +58,11 @@ public partial class MainWindow : Window, IDisposable
     private readonly HighQualityOcrModelManager _highQualityOcrModelManager;
     private readonly LocalLargeTranslationModelManager
         _localLargeTranslationModelManager;
+    private LocalLargeTranslationModelManager SelectedLocalModelManager =>
+        _settingsViewModel.OfflineTranslationEngine == OfflineTranslationEngine.HunyuanLightweight
+            ? LocalLargeTranslationModelManager.LightweightShared : _localLargeTranslationModelManager;
     private readonly CancellationTokenSource _updateCancellationSource = new();
+    private bool _installingUpdate;
     private AppSettings _savedSettings;
     private IReadOnlyList<HotKeyBinding>? _suspendedHotKeyBindings;
     private bool _exitRequested;
@@ -79,8 +80,9 @@ public partial class MainWindow : Window, IDisposable
     private int _automaticUpdateCheckInProgress;
     private int _onlineAvailabilityCheckInProgress;
     private System.Windows.Point? _translationProfileDragStart;
-    private AiTranslationProfileItem? _translationProfileDragItem;
+    private object? _translationProfileDragItem;
     private Border? _translationProfileDropTarget;
+    private ProfileReorderFeedback? _translationProfileReorderFeedback;
     private int _offlineModelPlanGeneration;
     private bool _isFolderDialogOpen;
     private bool? _pendingShowInTaskbar;
@@ -88,8 +90,10 @@ public partial class MainWindow : Window, IDisposable
     private bool _disposed;
     private bool _updateRetryRequested;
     private int _communityQrLoadStarted;
+    private CancellationTokenSource? _communityQrCancellation;
     private bool _isDisplayStateSubscribed;
     private bool _settingsStatusInitialized;
+    private bool _settingsStatusRefreshQueued;
     private readonly TimeSpan _interactionFrameInterval =
         DisplayRefreshRateService.GetInteractionFrameInterval(
             new System.Drawing.Rectangle(
@@ -153,6 +157,8 @@ public partial class MainWindow : Window, IDisposable
         _idleMemoryTrimTimer.Tick += OnIdleMemoryTrimTimerTick;
 
         InitializeComponent();
+        ArrangeSettingsPages();
+        InitializeRealtimeSettings();
         foreach (var captureBox in new[]
                  {
                      RegionCaptureHotKeyBox,
@@ -161,6 +167,8 @@ public partial class MainWindow : Window, IDisposable
                      EndVideoRecordingHotKeyBox,
                      OcrHotKeyBox,
                      TextTranslationHotKeyBox,
+                     ImageQuestionHotKeyBox,
+                     RealtimeTranslationHotKeyBox,
                      PinHotKeyBox,
                      OpenSettingsHotKeyBox,
                  })
@@ -218,7 +226,7 @@ public partial class MainWindow : Window, IDisposable
 
     public void ApplySettingsPalette(AppTheme theme)
     {
-        AppThemeManager.ApplySettingsPalette(Resources, theme);
+        AppThemeManager.ApplyWindowPalette(this, theme);
     }
 
     internal void SaveVideoRecordingPreferences(
@@ -307,6 +315,13 @@ public partial class MainWindow : Window, IDisposable
         ScheduleSettingsApply();
     }
 
+    internal void SaveCaptureAspectRatio(CaptureAspectRatio ratio)
+    {
+        if (!Enum.IsDefined(ratio)) return;
+        _settingsViewModel.CaptureAspectRatio = ratio;
+        ApplySettingsImmediately();
+    }
+
     internal void SaveTranslationTargetLanguage(string languageTag)
     {
         if (string.IsNullOrWhiteSpace(languageTag))
@@ -325,21 +340,29 @@ public partial class MainWindow : Window, IDisposable
     public event EventHandler? UpdateInstallationStarted;
 
     public event EventHandler? TextTranslationRequested;
+    public event EventHandler? ImageQuestionRequested;
+    public event EventHandler? RealtimeTranslationRequested;
+
+    internal event EventHandler? HiddenIdle;
+
+    internal bool HasActiveSettingsOperation =>
+        _isFolderDialogOpen || OwnedWindows.Count != 0 ||
+        UpdateProgressBar.Visibility == Visibility.Visible ||
+        OfflineModelDownloadProgressBar.Visibility == Visibility.Visible ||
+        HighQualityOcrDownloadProgressBar.Visibility == Visibility.Visible ||
+        LocalLargeModelDownloadProgressBar.Visibility == Visibility.Visible;
+
+    internal int SelectedSection => SettingsNavigation.SelectedIndex;
+
+    internal void RestoreSection(int sectionIndex) =>
+        SettingsNavigation.SelectedIndex = Math.Clamp(sectionIndex, 0, 6);
 
     public bool IsCapturingHotKey { get; private set; }
 
     public void ShowFromTray()
     {
         ApplyPendingTaskbarVisibility();
-        Show();
-
-        if (WindowState == WindowState.Minimized)
-        {
-            WindowState = WindowState.Normal;
-        }
-
-        _ = WindowPlacementService.EnsureVisible(this);
-        Activate();
+        WindowActivation.Show(this);
         if (_updateRetryRequested)
         {
             _updateRetryRequested = false;
@@ -348,7 +371,7 @@ public partial class MainWindow : Window, IDisposable
         ScheduleIdleMemoryTrim();
     }
 
-    private void ScheduleIdleMemoryTrim()
+    internal void ScheduleIdleMemoryTrim()
     {
         if (_disposed)
         {
@@ -356,6 +379,8 @@ public partial class MainWindow : Window, IDisposable
         }
 
         _idleMemoryTrimTimer.Stop();
+        _idleMemoryTrimTimer.Interval = IsVisible || HasActiveSettingsOperation
+            ? TimeSpan.FromSeconds(15) : TimeSpan.FromSeconds(2);
         _idleMemoryTrimTimer.Start();
     }
 
@@ -365,6 +390,17 @@ public partial class MainWindow : Window, IDisposable
         if (_disposed)
         {
             return;
+        }
+
+        if (!IsVisible)
+        {
+            if (HasActiveSettingsOperation)
+            {
+                ScheduleIdleMemoryTrim();
+                return;
+            }
+            HiddenIdle?.Invoke(this, EventArgs.Empty);
+            if (_disposed) return;
         }
 
         if (IsVisible &&
@@ -389,16 +425,34 @@ public partial class MainWindow : Window, IDisposable
         ShowSettingsSection(3);
         Dispatcher.BeginInvoke(
             System.Windows.Threading.DispatcherPriority.Input,
-            () => DownloadOfflineModelButton?.Focus());
+            () =>
+            {
+                var button = _settingsViewModel.OfflineTranslationEngine != OfflineTranslationEngine.Mozilla
+                    ? DownloadLocalLargeModelButton : DownloadOfflineModelButton;
+                button?.BringIntoView();
+                button?.Focus();
+            });
         ShowFromTray();
     }
 
     private void OnSettingsWindowActivated(object? sender, EventArgs e)
     {
+        if (ContactSettingsPanel.Visibility == Visibility.Visible) _ = LoadCommunityQrImageAsync();
         // Keep a topmost capture surface from retaining keyboard input while
         // the settings page is active (especially during shortcut editing).
         CaptureOverlayWindow.CloseActiveInteractiveSelectionForTransition();
         ApplySettingsWindowRenderMode();
+        if (_settingsStatusRefreshQueued) return;
+        _settingsStatusRefreshQueued = true;
+        _ = Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, new Action(() =>
+        {
+            _settingsStatusRefreshQueued = false;
+            if (!_disposed && IsVisible) RefreshSettingsStatusAfterPresentation();
+        }));
+    }
+
+    private void RefreshSettingsStatusAfterPresentation()
+    {
         _ = CheckForUpdatesOnOpenAsync();
         RefreshCachedOfflineTranslationInstallationState();
         RefreshHighQualityOcrModelStatus();
@@ -501,6 +555,7 @@ public partial class MainWindow : Window, IDisposable
         EventArgs e)
     {
         SourceInitialized -= OnSettingsWindowSourceInitialized;
+        CaptureTargetWindowResolver.AllowContentWindow(new System.Windows.Interop.WindowInteropHelper(this).Handle);
         ApplySettingsWindowRenderMode();
         if (!_isDisplayStateSubscribed)
         {
@@ -546,11 +601,13 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
-        // The settings window must remain paintable when a laptop lid closes
-        // and Windows removes the hardware display target. Keep this window's
-        // WPF composition on the CPU; capture, recording, and other windows
-        // retain the process-wide rendering policy configured at startup.
-        target.RenderMode = RenderMode.SoftwareOnly;
+        // Use the same capability/compatibility policy as the result popup.
+        // Forcing just this large window onto the CPU makes every resize
+        // repaint compete with remote desktop encoding. Re-evaluate on display
+        // changes so virtual-only / unavailable render targets still fall back.
+        var mode = WpfRenderingCompatibility.GetCurrentSessionRenderMode();
+        if (target.RenderMode == mode) return;
+        target.RenderMode = mode;
         InvalidateVisual();
     }
 
@@ -562,6 +619,13 @@ public partial class MainWindow : Window, IDisposable
         }
 
         _disposed = true;
+        _watermarkSettingsControl?.Dispose();
+        _communityQrCancellation?.Cancel();
+        _translationProfileReorderFeedback?.Dispose();
+        _translationProfileReorderFeedback = null;
+        DonateQrImage.Source = null;
+        CommunityQrImage.Source = null;
+        CreatorAvatarBrush.ImageSource = null;
         _globalHotKeyManager.HotKeyCaptureInputReceived -=
             OnGlobalHotKeyCaptureInputReceived;
         _globalHotKeyManager.EndKeyboardCapture();
@@ -598,6 +662,7 @@ public partial class MainWindow : Window, IDisposable
                 _savedSettings.CloseBehavior))
         {
             e.Cancel = true;
+            _communityQrCancellation?.Cancel();
             Hide();
             ApplyPendingTaskbarVisibility();
             ScheduleIdleMemoryTrim();
@@ -658,7 +723,7 @@ public partial class MainWindow : Window, IDisposable
             {
                 using var dialog = new WinForms.FolderBrowserDialog
                 {
-                    Description = description,
+                    Description = UiLocalization.Get(description),
                     UseDescriptionForTitle = true,
                 };
                 if (Directory.Exists(initialDirectory))
@@ -721,7 +786,7 @@ public partial class MainWindow : Window, IDisposable
         catch (Exception exception) when (
             exception is InvalidOperationException or Win32Exception)
         {
-            _ = System.Windows.MessageBox.Show(
+            _ = Screenshot.App.Presentation.LocalizedMessageBox.Show(
                 this,
                 $"无法打开作者主页：{exception.Message}",
                 "SnapCut",
@@ -742,7 +807,7 @@ public partial class MainWindow : Window, IDisposable
         catch (Exception exception) when (
             exception is InvalidOperationException or Win32Exception)
         {
-            _ = System.Windows.MessageBox.Show(
+            _ = Screenshot.App.Presentation.LocalizedMessageBox.Show(
                 this,
                 $"无法打开 GitHub 项目：{exception.Message}",
                 "SnapCut",
@@ -791,6 +856,7 @@ public partial class MainWindow : Window, IDisposable
 
     private async Task CheckForUpdatesAsync(bool showBusyState)
     {
+        if (_installingUpdate) return;
         if (showBusyState)
         {
             CheckForUpdatesButton.IsEnabled = false;
@@ -807,13 +873,10 @@ public partial class MainWindow : Window, IDisposable
                 _updateCancellationSource.Token);
             var historyTask = _applicationUpdateService.GetReleaseHistoryAsync(
                 _updateCancellationSource.Token);
-            await Task.WhenAll(updateTask, historyTask);
             var result = await updateTask;
-            var historyResult = await historyTask;
             _availableUpdate = result.AvailableUpdate;
             UpdateStatusText.Text = result.Message;
             SetUpdateNavigationState(result.AvailableUpdate?.Version);
-            UpdateReleaseHistory(historyResult);
             if (result.AvailableUpdate is not null)
             {
                 InstallUpdateButton.Content =
@@ -824,6 +887,9 @@ public partial class MainWindow : Window, IDisposable
             {
                 InstallUpdateButton.Visibility = Visibility.Collapsed;
             }
+            // The update action is ready as soon as its verified manifest is
+            // ready. Release notes/history must not gate installing an update.
+            UpdateReleaseHistory(await historyTask);
         }
         catch (OperationCanceledException)
         {
@@ -834,9 +900,10 @@ public partial class MainWindow : Window, IDisposable
         }
         finally
         {
-            if (showBusyState)
+            if (showBusyState && !_installingUpdate)
             {
                 CheckForUpdatesButton.IsEnabled = true;
+                InstallUpdateButton.IsEnabled = true;
             }
         }
     }
@@ -906,6 +973,7 @@ public partial class MainWindow : Window, IDisposable
 
     private async Task InstallReleaseAsync(ApplicationUpdateInfo update)
     {
+        if (_installingUpdate) return;
         var targetVersion = ApplicationUpdateService.NormalizeVersion(update.Version);
         var currentVersion = ApplicationUpdateService.NormalizeVersion(
             AppMetadata.CurrentVersion);
@@ -918,7 +986,7 @@ public partial class MainWindow : Window, IDisposable
             : "更新下载完成后程序会自动关闭并覆盖更新，然后重新启动。\n\n" +
               "ScreenshotData 中的设置、历史和截图会保留。是否继续？";
 
-        var confirmation = System.Windows.MessageBox.Show(
+        var confirmation = Screenshot.App.Presentation.LocalizedMessageBox.Show(
             this,
             prompt,
             isRollback ? $"回退到 SnapCut {targetVersion}" : "更新 SnapCut",
@@ -930,6 +998,7 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
+        _installingUpdate = true;
         CheckForUpdatesButton.IsEnabled = false;
         InstallUpdateButton.IsEnabled = false;
         SelectedReleaseActionButton.IsEnabled = false;
@@ -941,6 +1010,7 @@ public partial class MainWindow : Window, IDisposable
             : update.Portable;
         var progress = new Progress<double>(value =>
         {
+            if (!_installingUpdate || _disposed) return;
             UpdateProgressBar.Value = value * 100;
             UpdateStatusText.Text = isRollback
                 ? $"正在下载回退版本 {targetVersion}… {value:P0}"
@@ -956,7 +1026,8 @@ public partial class MainWindow : Window, IDisposable
             UpdateStatusText.Text = isRollback
                 ? "校验完成，正在启动版本回退..."
                 : "校验完成，正在启动覆盖更新...";
-            ApplicationUpdateLauncher.Launch(update, packagePath);
+            await Task.Run(() => ApplicationUpdateLauncher.Launch(update, packagePath),
+                _updateCancellationSource.Token);
             UpdateInstallationStarted?.Invoke(this, EventArgs.Empty);
         }
         catch (OperationCanceledException)
@@ -968,6 +1039,11 @@ public partial class MainWindow : Window, IDisposable
         {
             UpdateStatusText.Text = $"更新失败：{exception.Message}";
             RestoreUpdateButtons();
+        }
+        finally
+        {
+            _installingUpdate = false;
+            if (!_disposed) RestoreUpdateButtons();
         }
     }
 
@@ -1322,33 +1398,56 @@ public partial class MainWindow : Window, IDisposable
 
     private void OnAddTranslationProfileClick(object sender, RoutedEventArgs e)
     {
-        var item = _settingsViewModel.AddTranslationProfile();
-        OpenTranslationProfileEditor(item);
+        AddTranslationProfile(isPublic: false);
+    }
+
+    private void OnAddPublicTranslationProfileClick(object sender, RoutedEventArgs e)
+    {
+        AddTranslationProfile(isPublic: true);
+    }
+
+    internal void AddTranslationProfile(bool isPublic, Func<TranslationProfileEditorWindow, bool?>? showEditor = null)
+    {
+        var item = _settingsViewModel.CreateTranslationProfileDraft();
+        if (isPublic)
+        {
+            item.Provider = BaiduTranslationProvider.ProviderId;
+            item.Name = "百度翻译";
+            item.Endpoint = BaiduTranslationProvider.Endpoint;
+            item.Model = "Standard";
+        }
+        OpenTranslationProfileEditor(item, isNew: true, showEditor);
     }
 
     private void OnEditTranslationProfileClick(object sender, RoutedEventArgs e)
     {
-        if (sender is System.Windows.Controls.Button { Tag: AiTranslationProfileItem item })
+        if (sender is FrameworkElement control &&
+            (control.DataContext as AiTranslationProfileItem ?? control.Tag as AiTranslationProfileItem) is { } item)
+        {
+            e.Handled = true;
             OpenTranslationProfileEditor(item);
+        }
     }
 
-    private void OpenTranslationProfileEditor(AiTranslationProfileItem item)
+    private void OpenTranslationProfileEditor(AiTranslationProfileItem item, bool isNew = false,
+        Func<TranslationProfileEditorWindow, bool?>? showEditor = null)
     {
         var profileBeforeEditing = item.ToProfile();
         var apiKeyBeforeEditing = _translationCredentialStore.GetApiKey(
             item.Id,
             item.Provider) ?? string.Empty;
-        var editor = new TranslationProfileEditorWindow(item, _translationCredentialStore)
+        using var editor = new TranslationProfileEditorWindow(item, _translationCredentialStore)
         {
-            Owner = this,
+            Owner = IsVisible ? this : null,
         };
-        if (editor.ShowDialog() == true)
+        if ((showEditor is null ? editor.ShowDialog() : showEditor(editor)) == true)
         {
+            if (isNew) _settingsViewModel.CommitTranslationProfile(item);
             var profileAfterEditing = item.ToProfile();
             var apiKeyAfterEditing = _translationCredentialStore.GetApiKey(
                 item.Id,
                 item.Provider) ?? string.Empty;
-            var profileChanged = !Equals(profileBeforeEditing, profileAfterEditing) ||
+            var profileChanged = isNew || !Equals(profileBeforeEditing, profileAfterEditing) ||
                 !string.Equals(apiKeyBeforeEditing, apiKeyAfterEditing, StringComparison.Ordinal);
             if (!profileChanged)
             {
@@ -1372,25 +1471,44 @@ public partial class MainWindow : Window, IDisposable
                     profileBeforeEditing.Model,
                     profileAfterEditing.Model,
                     StringComparison.Ordinal) ||
+                !string.Equals(profileBeforeEditing.AppId, profileAfterEditing.AppId, StringComparison.Ordinal) ||
                 !string.Equals(apiKeyBeforeEditing, apiKeyAfterEditing, StringComparison.Ordinal);
 
-            _settingsViewModel.SelectedTranslationProfileId = item.Id;
-            _settingsViewModel.TranslationProvider = item.Provider;
-            _settingsViewModel.TranslationEndpoint = item.Endpoint;
-            _settingsViewModel.TranslationModel = item.Model;
-            _settingsViewModel.TranslationApiKey =
-                _translationCredentialStore.GetApiKey(item.Id, item.Provider) ?? string.Empty;
+            if (connectionChanged || editor.HasTestResultForCurrentValues)
+                TranslationProfileHealth.Invalidate(item.Id);
+            SynchronizeEditedTranslationProfile(item);
             ApplySettingsImmediately();
             if (editor.HasTestResultForCurrentValues)
             {
                 RefreshTranslationProfilesProviderAvailability();
                 ScheduleSettingsApply();
             }
-            else
+            else if (connectionChanged)
             {
                 _ = VerifyTranslationProfileAvailabilityAsync(item);
             }
         }
+    }
+
+    internal void SynchronizeEditedTranslationProfile(AiTranslationProfileItem item)
+    {
+        // Updating the hidden legacy editor raises SelectionChanged/TextChanged.
+        // Those handlers used to copy the previous profile's endpoint/default
+        // model into the newly selected item, including on a name-only edit.
+        var snapshot = item.ToProfile();
+        var wasApplying = _isApplyingSettings;
+        _isApplyingSettings = true;
+        try
+        {
+            _settingsViewModel.SelectedTranslationProfileId = snapshot.Id;
+            _settingsViewModel.TranslationProvider = snapshot.Provider;
+            _settingsViewModel.TranslationEndpoint = snapshot.Endpoint;
+            _settingsViewModel.TranslationModel = snapshot.Model;
+            _settingsViewModel.TranslationApiKey =
+                _translationCredentialStore.GetApiKey(snapshot.Id, snapshot.Provider) ?? string.Empty;
+            RefreshTranslationProviderDetails();
+        }
+        finally { _isApplyingSettings = wasApplying; }
     }
 
     private void OnRemoveTranslationProfileClick(object sender, RoutedEventArgs e)
@@ -1398,6 +1516,7 @@ public partial class MainWindow : Window, IDisposable
         if (sender is System.Windows.Controls.Button { Tag: AiTranslationProfileItem item } &&
             _settingsViewModel.RemoveTranslationProfile(item))
         {
+            TranslationProfileHealth.Invalidate(item.Id);
             ApplySettingsImmediately();
             RefreshTranslationProfilesProviderAvailability();
         }
@@ -1413,7 +1532,8 @@ public partial class MainWindow : Window, IDisposable
         object sender,
         MouseButtonEventArgs e)
     {
-        if (sender is not Border { DataContext: AiTranslationProfileItem item } ||
+        if (sender is not Border { DataContext: { } item } ||
+            item is not (AiTranslationProfileItem or TranslationPriorityItem) ||
             IsProfileRowInteractiveControl(e.OriginalSource as DependencyObject))
         {
             _translationProfileDragItem = null;
@@ -1423,6 +1543,7 @@ public partial class MainWindow : Window, IDisposable
 
         _translationProfileDragItem = item;
         _translationProfileDragStart = e.GetPosition(this);
+        if (item is TranslationPriorityItem) ((Border)sender).Focus();
     }
 
     private void OnTranslationProfileRowPreviewMouseMove(
@@ -1454,6 +1575,10 @@ public partial class MainWindow : Window, IDisposable
         _translationProfileDragStart = null;
         try
         {
+            var row = (Border)sender;
+            var owner = FindProfileItemsControl(row);
+            if (owner is not null)
+                _translationProfileReorderFeedback = new ProfileReorderFeedback(row, owner, e.GetPosition(owner));
             DragDrop.DoDragDrop(
                 (Border)sender,
                 item,
@@ -1461,6 +1586,8 @@ public partial class MainWindow : Window, IDisposable
         }
         finally
         {
+            _translationProfileReorderFeedback?.Dispose();
+            _translationProfileReorderFeedback = null;
             ClearTranslationProfileDropTarget();
         }
     }
@@ -1488,18 +1615,31 @@ public partial class MainWindow : Window, IDisposable
         return false;
     }
 
+    private static ItemsControl? FindProfileItemsControl(DependencyObject source)
+    {
+        while (VisualTreeHelper.GetParent(source) is { } parent)
+        {
+            if (parent is ItemsControl items) return items;
+            source = parent;
+        }
+        return null;
+    }
+
     private void OnTranslationProfileRowDragOver(
         object sender,
         System.Windows.DragEventArgs e)
     {
         if (sender is not Border row ||
-            !e.Data.GetDataPresent(typeof(AiTranslationProfileItem)))
+            !(row.DataContext is AiTranslationProfileItem && e.Data.GetDataPresent(typeof(AiTranslationProfileItem)) ||
+              row.DataContext is TranslationPriorityItem && e.Data.GetDataPresent(typeof(TranslationPriorityItem))))
         {
             e.Effects = System.Windows.DragDropEffects.None;
             return;
         }
 
         e.Effects = System.Windows.DragDropEffects.Move;
+        if (_translationProfileReorderFeedback is { } feedback)
+            feedback.Update(e.GetPosition(feedback.Owner));
         ShowTranslationProfileDropTarget(
             row,
             e.GetPosition(row).Y >= row.ActualHeight / 2d);
@@ -1522,6 +1662,21 @@ public partial class MainWindow : Window, IDisposable
         object sender,
         System.Windows.DragEventArgs e)
     {
+        if (sender is Border { DataContext: TranslationPriorityItem priorityTarget } priorityRow &&
+            e.Data.GetDataPresent(typeof(TranslationPriorityItem)) &&
+            e.Data.GetData(typeof(TranslationPriorityItem)) is TranslationPriorityItem priorityItem)
+        {
+            var index = _settingsViewModel.TranslationPriorityItems.IndexOf(priorityTarget);
+            if (index >= 0 && _settingsViewModel.MoveTranslationProviderToInsertionIndex(priorityItem,
+                    index + (e.GetPosition(priorityRow).Y >= priorityRow.ActualHeight / 2 ? 1 : 0)))
+            {
+                SaveTranslationPriorityOrder();
+                _translationProfileReorderFeedback?.AnimatePlacement();
+            }
+            ClearTranslationProfileDropTarget();
+            e.Handled = true;
+            return;
+        }
         if (sender is not Border { DataContext: AiTranslationProfileItem target } ||
             !e.Data.GetDataPresent(typeof(AiTranslationProfileItem)) ||
             e.Data.GetData(typeof(AiTranslationProfileItem)) is not AiTranslationProfileItem item)
@@ -1541,6 +1696,7 @@ public partial class MainWindow : Window, IDisposable
         if (_settingsViewModel.MoveTranslationProfileToInsertionIndex(item, insertionIndex))
         {
             ApplySettingsImmediately();
+            _translationProfileReorderFeedback?.AnimatePlacement();
         }
 
         ClearTranslationProfileDropTarget();
@@ -1697,6 +1853,22 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
+    private void OnTranslationPriorityKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (sender is not Border { DataContext: TranslationPriorityItem item } ||
+            Keyboard.Modifiers != ModifierKeys.Alt || e.SystemKey is not (Key.Up or Key.Down)) return;
+        var index = _settingsViewModel.TranslationPriorityItems.IndexOf(item);
+        var insertion = e.SystemKey == Key.Up ? index - 1 : index + 2;
+        if (_settingsViewModel.MoveTranslationProviderToInsertionIndex(item, insertion)) SaveTranslationPriorityOrder();
+        e.Handled = true;
+    }
+
+    private void SaveTranslationPriorityOrder()
+    {
+        ApplySettingsImmediately();
+        _settingsViewModel.SetStatus($"翻译优先顺序已更新，将先尝试{_settingsViewModel.TranslationPriorityItems[0].Label}。");
+    }
+
     private void OnMoveTranslationProviderUpClick(
         object sender,
         RoutedEventArgs e)
@@ -1757,7 +1929,7 @@ public partial class MainWindow : Window, IDisposable
         var availableSpace = status.AvailableSpace > 0
             ? FormatFileSize(status.AvailableSpace)
             : "无法读取";
-        var confirmation = System.Windows.MessageBox.Show(
+        var confirmation = Screenshot.App.Presentation.LocalizedMessageBox.Show(
             this,
             $"将下载“{plan.DisplayName}”所需离线模型。\n" +
             "源语言将在翻译时完全离线自动检测；非英语语言之间将通过 English 中转。\n" +
@@ -1847,23 +2019,23 @@ public partial class MainWindow : Window, IDisposable
         }
 
         var status = _highQualityOcrModelManager.GetStatus();
-        var isRepair = status.IsInstalled;
+        var isRepair = status.IsInstalled && status.HasArtisticModel;
 
         var availableSpace = status.AvailableSpace > 0
             ? FormatFileSize(status.AvailableSpace)
             : "无法读取";
         var confirmationMessage = isRepair
-            ? "将校验 PP-OCRv6 的四个模型文件。只有发现文件损坏时才会重新下载。\n\n" +
+            ? "将校验 PP-OCRv6 Small 和艺术字增强文件。只有发现文件损坏时才会重新下载。\n\n" +
               $"完整模型大小：约 {FormatFileSize(status.InstalledSize)}\n" +
               $"安装位置：\n{status.InstallationDirectory}\n\n" +
               "是否开始校验并修复？"
-            : "将下载 PP-OCRv6 Small 多语言识别模型。\n\n" +
+            : "将补全 PP-OCRv6 Small 快速识别和 Medium 艺术字增强文件，已有完整文件会复用。\n\n" +
               $"下载流量：{FormatFileSize(status.DownloadSize)}\n" +
               $"安装占用：约 {FormatFileSize(status.InstalledSize)}\n" +
               $"磁盘可用：{availableSpace}\n\n" +
               $"安装位置：\n{status.InstallationDirectory}\n\n" +
               "模型来自 PaddleOCR / RapidOCR（Apache-2.0），完全本机运行。是否继续？";
-        var confirmation = System.Windows.MessageBox.Show(
+        var confirmation = Screenshot.App.Presentation.LocalizedMessageBox.Show(
             this,
             confirmationMessage,
             isRepair ? "校验高质量识别模型" : "下载高质量识别模型",
@@ -1937,6 +2109,7 @@ public partial class MainWindow : Window, IDisposable
 
     private void RefreshHighQualityOcrModelStatus()
     {
+        RefreshVisualOcrStatus();
         if (HighQualityOcrModelStatusText is null ||
             HighQualityOcrModelPathText is null ||
             DownloadHighQualityOcrModelButton is null)
@@ -1946,12 +2119,13 @@ public partial class MainWindow : Window, IDisposable
 
         var status = _highQualityOcrModelManager.GetStatus();
         HighQualityOcrModelStatusText.Text = status.IsInstalled
-            ? $"已安装 · 占用约 {FormatFileSize(status.InstalledSize)}"
+            ? status.HasArtisticModel ? $"Small 与艺术字增强已安装 · 文件约 {FormatFileSize(status.InstalledSize)}"
+                : $"Small 已安装 · 艺术字增强需补充 {FormatFileSize(status.DownloadSize)}"
             : $"未安装 · 需下载 {FormatFileSize(status.DownloadSize)}";
         HighQualityOcrModelPathText.Text =
             $"安装目录：{status.InstallationDirectory}";
         DownloadHighQualityOcrModelButton.Content = status.IsInstalled
-            ? "校验 / 修复"
+            ? status.HasArtisticModel ? "校验 / 修复" : "补全艺术字增强"
             : "下载识别模型";
     }
 
@@ -1964,26 +2138,30 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
-        var status = _localLargeTranslationModelManager.GetStatus();
+        var manager = SelectedLocalModelManager;
+        var status = manager.GetStatus();
         if (status.IsInstalled)
         {
             RefreshLocalLargeModelStatus();
-            _settingsViewModel.SetStatus("Qwen 本机翻译大模型已经安装。");
+            _settingsViewModel.SetStatus($"{manager.DisplayName} 离线多语言模型已经安装。");
             return;
         }
 
         var availableSpace = status.AvailableSpace > 0
             ? FormatFileSize(status.AvailableSpace)
             : "无法读取";
-        var confirmation = System.Windows.MessageBox.Show(
+        var confirmation = Screenshot.App.Presentation.LocalizedMessageBox.Show(
             this,
-            "将下载 Qwen2.5 1.5B 4-bit 本机翻译大模型及 CPU 推理程序。\n\n" +
+            $"将下载 {manager.DisplayName} 4-bit 多语言模型及显卡 / CPU 推理程序。\n\n" +
+            "模型优先使用魔搭国内源，失败自动切换并保留断点；优先使用随安装包附带的推理组件。\n\n" +
             $"本次需下载：{FormatFileSize(status.DownloadSize)}\n" +
             $"安装占用：约 {FormatFileSize(status.InstalledSize)}\n" +
             $"磁盘可用：{availableSpace}\n" +
-            "运行建议：至少 4 GB 可用内存，纯 CPU 翻译会比在线模型慢。\n\n" +
+            (manager.IsLightweight ? "适合核显和 CPU 电脑；建议预留至少 3 GB 可用内存。\n\n" :
+                "运行建议：至少 6 GB 可用内存或 4 GB 显存，显卡启动失败时尝试 CPU。\n\n") +
             $"安装位置：\n{status.InstallationDirectory}\n\n" +
-            "模型为 Qwen2.5（Apache-2.0），推理程序为 llama.cpp（MIT）。是否继续？",
+            (manager.IsLightweight ? "Hy-MT2 1.8B 模型使用 Apache-2.0 许可证，推理程序为 llama.cpp（MIT）。" :
+                "模型遵循 Gemma 使用条款（https://ai.google.dev/gemma/terms），推理程序为 llama.cpp（MIT）。请阅读并同意条款后继续下载。"),
             "下载本机翻译大模型",
             MessageBoxButton.YesNo,
             MessageBoxImage.Information,
@@ -1994,6 +2172,8 @@ public partial class MainWindow : Window, IDisposable
         }
 
         button.IsEnabled = false;
+        ImportLocalLargeModelButton.IsEnabled = false;
+        OfflineTranslationEngineComboBox.IsEnabled = false;
         LocalLargeModelDownloadProgressBar.Value = 0;
         LocalLargeModelDownloadProgressBar.Visibility = Visibility.Visible;
         LocalLargeModelDownloadProgressText.Visibility = Visibility.Visible;
@@ -2008,21 +2188,23 @@ public partial class MainWindow : Window, IDisposable
             LocalLargeModelDownloadProgressBar.Value = percent;
             LocalLargeModelDownloadProgressText.Text =
                 $"{percent:0.0}% · {FormatFileSize(value.DownloadedBytes)} / " +
-                $"{FormatFileSize(value.TotalBytes)} · {value.CurrentFileName}";
+                $"{FormatFileSize(value.TotalBytes)} · {value.CurrentFileName} · {value.StatusMessage}";
         });
         try
         {
-            var result = await _localLargeTranslationModelManager.InstallAsync(
+            var result = await manager.InstallAsync(
                 progress,
                 _updateCancellationSource.Token);
             RefreshLocalLargeModelStatus();
             _settingsViewModel.SetStatus(result.IsSuccess
-                ? "Qwen 本机翻译大模型安装完成。"
+                ? $"{manager.DisplayName} 离线多语言模型安装完成。"
                 : result.ErrorMessage ?? "本机翻译大模型安装失败。");
         }
         finally
         {
             button.IsEnabled = true;
+            ImportLocalLargeModelButton.IsEnabled = true;
+            OfflineTranslationEngineComboBox.IsEnabled = true;
             LocalLargeModelDownloadProgressBar.Visibility = Visibility.Collapsed;
             LocalLargeModelDownloadProgressText.Visibility = Visibility.Collapsed;
         }
@@ -2035,11 +2217,11 @@ public partial class MainWindow : Window, IDisposable
         try
         {
             Directory.CreateDirectory(
-                _localLargeTranslationModelManager.InstallationDirectory);
+                SelectedLocalModelManager.InstallationDirectory);
             Process.Start(new ProcessStartInfo
             {
                 FileName =
-                    _localLargeTranslationModelManager.InstallationDirectory,
+                    SelectedLocalModelManager.InstallationDirectory,
                 UseShellExecute = true,
             });
         }
@@ -2060,7 +2242,15 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
-        var status = _localLargeTranslationModelManager.GetStatus();
+        var manager = SelectedLocalModelManager;
+        var status = manager.GetStatus();
+        LocalLargeModelTitleText.Text = manager.DisplayName;
+        LocalLargeModelDescriptionText.Text = manager.IsLightweight
+            ? "轻量多语言翻译，模型文件约 1.1 GB；按可用显存使用显卡，显卡不可用时回退 CPU。建议预留至少 3 GB 可用内存，实际运行占用高于文件大小。按需加载，最后一次翻译结束后空闲约 10 秒退出工作进程，释放模型及运行库；首次加载及长文本可随时取消。与 TranslateGemma 分别安装。"
+            : "TranslateGemma 4B 多语言翻译，模型约 2.5 GB。建议至少 6 GB 可用内存或 4 GB 显存。显卡启动失败时尝试 CPU；首次加载及长文本需要更长时间，可随时取消。";
+        LocalLargeModelCleanupText.Text = manager.IsLightweight
+            ? "Hy-MT2 1.8B · Tencent · Apache-2.0。独立下载，不删除现有翻译及识别模型。"
+            : "新模型完整性校验通过后，自动清理旧版千问离线模型；保留轻量模型、Mozilla 语言包与文字识别模型。";
         LocalLargeModelStatusText.Text = status.IsInstalled
             ? $"已安装 · 占用约 {FormatFileSize(status.InstalledSize)}"
             : $"未安装 · 本次需下载 {FormatFileSize(status.DownloadSize)}";
@@ -2068,17 +2258,16 @@ public partial class MainWindow : Window, IDisposable
             $"安装目录：{status.InstallationDirectory}";
         DownloadLocalLargeModelButton.Content = status.IsInstalled
             ? "模型已安装"
-            : "下载翻译大模型";
+            : "下载多语言模型";
 
-        if (_settingsViewModel.OfflineTranslationEngine ==
-            OfflineTranslationEngine.QwenLargeModel)
+        if (_settingsViewModel.OfflineTranslationEngine != OfflineTranslationEngine.Mozilla)
         {
             _settingsViewModel.UpdateTranslationProviderAvailability(
                 TranslationProviderKind.Offline,
                 status.IsInstalled,
                 status.IsInstalled
-                    ? "Qwen 本机翻译大模型已安装"
-                    : "Qwen 本机翻译大模型尚未下载");
+                    ? $"{manager.DisplayName} 离线多语言模型已安装"
+                    : $"{manager.DisplayName} 离线多语言模型尚未下载");
         }
     }
 
@@ -2215,7 +2404,7 @@ public partial class MainWindow : Window, IDisposable
 
     private void OnImmediateSettingChanged(object sender, RoutedEventArgs e)
     {
-        if (!IsLoaded || _isApplyingSettings)
+        if (_disposed || !IsLoaded || _isApplyingSettings)
         {
             return;
         }
@@ -2283,9 +2472,8 @@ public partial class MainWindow : Window, IDisposable
             RefreshCachedOfflineTranslationInstallationState();
             RefreshLocalLargeModelStatus();
             _settingsViewModel.SetStatus(
-                _settingsViewModel.OfflineTranslationEngine ==
-                OfflineTranslationEngine.QwenLargeModel
-                    ? "本机离线翻译已切换为 Qwen 大模型。"
+                _settingsViewModel.OfflineTranslationEngine != OfflineTranslationEngine.Mozilla
+                    ? $"本机离线翻译已切换为 {SelectedLocalModelManager.DisplayName} 多语言模型。"
                     : "本机离线翻译已切换为 Mozilla 轻量模型。");
         }
     }
@@ -2407,6 +2595,44 @@ public partial class MainWindow : Window, IDisposable
         ScheduleSettingsApply();
     }
 
+    private async void OnImportLocalLargeModelClick(object sender, RoutedEventArgs e)
+    {
+        var manager = SelectedLocalModelManager;
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = UiLocalization.Get($"导入 {manager.DisplayName} 模型或 llama.cpp 推理组件（可多选）"),
+            Filter = UiLocalization.Get("模型和推理文件") + " (*.gguf;*.zip)|*.gguf;*.zip",
+            Multiselect = true,
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog(this) != true) return;
+        DownloadLocalLargeModelButton.IsEnabled = ImportLocalLargeModelButton.IsEnabled = false;
+        OfflineTranslationEngineComboBox.IsEnabled = false;
+        LocalLargeModelDownloadProgressBar.Value = 0;
+        LocalLargeModelDownloadProgressBar.Visibility = Visibility.Visible;
+        LocalLargeModelDownloadProgressText.Visibility = Visibility.Visible;
+        var progress = new Progress<ModelDownloadProgress>(value =>
+        {
+            var percent = value.TotalBytes <= 0 ? 0 : Math.Clamp(value.DownloadedBytes * 100d / value.TotalBytes, 0, 100);
+            LocalLargeModelDownloadProgressBar.Value = percent;
+            LocalLargeModelDownloadProgressText.Text = $"{percent:0.0}% · {value.CurrentFileName} · {value.StatusMessage}";
+        });
+        try
+        {
+            var result = await manager.ImportAsync(dialog.FileNames,
+                progress, _updateCancellationSource.Token);
+            RefreshLocalLargeModelStatus();
+            _settingsViewModel.SetStatus(result.ErrorMessage ?? (result.IsSuccess ? "本地导入完成。" : "本地导入失败。"));
+        }
+        finally
+        {
+            DownloadLocalLargeModelButton.IsEnabled = ImportLocalLargeModelButton.IsEnabled = true;
+            OfflineTranslationEngineComboBox.IsEnabled = true;
+            LocalLargeModelDownloadProgressBar.Visibility = Visibility.Collapsed;
+            LocalLargeModelDownloadProgressText.Visibility = Visibility.Collapsed;
+        }
+    }
+
     private void OnToolbarScaleChanged(
         object sender,
         RoutedPropertyChangedEventArgs<double> e)
@@ -2431,7 +2657,9 @@ public partial class MainWindow : Window, IDisposable
         }
 
         _settingsViewModel.Theme = theme;
-        ApplySettingsImmediately();
+        // The bound combo can save synchronously while Theme raises its
+        // notification. Do not save/apply the same choice a second time.
+        if (_savedSettings.Theme != theme) ApplySettingsImmediately();
     }
 
     private void OnThemeSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -2444,8 +2672,7 @@ public partial class MainWindow : Window, IDisposable
         }
 
         _settingsViewModel.Theme = AppSettings.NormalizeTheme(theme);
-        ApplySettingsPalette(_settingsViewModel.Theme);
-        ApplySettingsImmediately();
+        if (_savedSettings.Theme != _settingsViewModel.Theme) ApplySettingsImmediately();
         UpdateThemeSelection(_settingsViewModel.Theme);
     }
 
@@ -2462,6 +2689,8 @@ public partial class MainWindow : Window, IDisposable
         ForestNightThemeOption.IsChecked = theme == AppTheme.ForestNight;
         ObsidianGoldThemeOption.IsChecked = theme == AppTheme.ObsidianGold;
         NeonDeepThemeOption.IsChecked = theme == AppTheme.NeonDeep;
+        foreach (var (glassTheme, option) in _glassThemeOptions)
+            option.IsChecked = theme == glassTheme;
     }
 
     private void OnCloseBehaviorOptionChecked(object sender, RoutedEventArgs e)
@@ -2545,6 +2774,17 @@ public partial class MainWindow : Window, IDisposable
     private async Task VerifyTranslationProfileAvailabilityAsync(
         AiTranslationProfileItem profile)
     {
+        if (!OnlineModelCapabilities.CanTranslate(profile.ToProfile()))
+        {
+            // Never generate billable pictures merely by reopening Settings.
+            if (!profile.ToProfile().LastAvailability.HasValue || !profile.AvailabilityReason.Contains("图片", StringComparison.Ordinal))
+            {
+                profile.SetAvailabilityUnverified("图片专用模型：请点击编辑 → 测试模型验证图片用途；不使用文字翻译测试判定。");
+                ScheduleSettingsApply();
+            }
+            RefreshTranslationProfilesProviderAvailability();
+            return;
+        }
         try
         {
             if (!profile.IsEnabled ||
@@ -2587,21 +2827,23 @@ public partial class MainWindow : Window, IDisposable
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(model))
+            if (!TranslationProviderFactory.IsPublicProvider(providerId) && string.IsNullOrWhiteSpace(model))
             {
                 profile.SetAvailability(false, "请选择或填写翻译模型");
                 ScheduleSettingsApply();
                 return;
             }
 
+            var health = TranslationProfileHealth.Observe(profile.ToProfile(), apiKey);
+            var request = health.BeginRequest();
             var result = await TranslationModelCatalogService.TestAsync(
-                endpoint,
-                model,
+                profile.ToProfile(),
                 apiKey,
                 _modelCatalogHttpClient,
                 _updateCancellationSource.Token);
             if (!_disposed)
             {
+                health.Complete(request, result.IsSuccess, result.Message);
                 profile.SetAvailability(result.IsSuccess, result.Message);
                 RefreshTranslationProfilesProviderAvailability();
                 ScheduleSettingsApply();
@@ -2619,36 +2861,31 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
+    internal void ApplyTranslationProfileHealth(TranslationProfileHealthUpdate update)
+    {
+        if (_disposed) return;
+        var profile = _settingsViewModel.TranslationProfiles.FirstOrDefault(item =>
+            TranslationProfileHealth.SameConnection(item.ToProfile(), update.Profile));
+        if (profile is null) return;
+        profile.SetAvailability(update.IsAvailable, update.Reason);
+        RefreshTranslationProfilesProviderAvailability();
+    }
+
     private void RefreshTranslationProfilesProviderAvailability()
     {
-        var enabledProfiles = _settingsViewModel.TranslationProfiles
-            .Where(profile => profile.IsEnabled)
-            .ToArray();
-        if (enabledProfiles.Length == 0)
+        foreach (var profile in _settingsViewModel.TranslationProfiles)
+            if (TranslationProfileHealth.Latest(profile.ToProfile()) is { } update)
+                profile.SetAvailability(update.IsAvailable, update.Reason);
+        _settingsViewModel.RefreshTranslationProfileViews();
+        foreach (var kind in new[] { TranslationProviderKind.Public, TranslationProviderKind.Online })
         {
-            _settingsViewModel.UpdateTranslationProviderAvailability(
-                TranslationProviderKind.Online,
-                isAvailable: false,
-                "没有启用的在线模型配置");
-            return;
+            var profiles = _settingsViewModel.TranslationProfiles.Where(profile => profile.IsEnabled && OnlineModelCapabilities.CanTranslate(profile.ToProfile()) &&
+                TranslationProviderFactory.IsPublicProvider(profile.Provider) == (kind == TranslationProviderKind.Public)).ToArray();
+            var available = profiles.FirstOrDefault(profile => profile.IsAvailable);
+            _settingsViewModel.UpdateTranslationProviderAvailability(kind, available is not null,
+                available is not null ? $"可用配置：{available.Name}" : profiles.Length == 0 ? "没有启用的翻译配置" :
+                    $"所有启用的配置均不可用。{profiles[0].Name}：{profiles[0].AvailabilityReason}");
         }
-
-        var availableProfile = enabledProfiles.FirstOrDefault(
-            profile => profile.IsAvailable);
-        if (availableProfile is not null)
-        {
-            _settingsViewModel.UpdateTranslationProviderAvailability(
-                TranslationProviderKind.Online,
-                isAvailable: true,
-                $"可用配置：{availableProfile.Name}");
-            return;
-        }
-
-        var firstFailure = enabledProfiles[0];
-        _settingsViewModel.UpdateTranslationProviderAvailability(
-            TranslationProviderKind.Online,
-            isAvailable: false,
-            $"所有启用的在线配置均不可用。{firstFailure.Name}：{firstFailure.AvailabilityReason}");
     }
 
     private void RefreshOnlineTranslationAvailability()
@@ -2915,7 +3152,7 @@ public partial class MainWindow : Window, IDisposable
             var item = _settingsViewModel.CaptureToolbarFeatureItems
                 .FirstOrDefault(candidate => candidate.Feature == feature);
             var previousShortcut = item?.Shortcut ?? string.Empty;
-            if (shortcut.Length == 0 || shortcut.Length == 1 && IsAsciiDigit(shortcut[0]))
+            if (CaptureToolbarShortcut.TryNormalize(shortcut, out shortcut))
             {
                 if (item is not null)
                 {
@@ -2938,7 +3175,7 @@ public partial class MainWindow : Window, IDisposable
             else
             {
                 captureBox.Text = previousShortcut;
-                _settingsViewModel.SetStatus("工具栏快捷键只能设置单个数字。");
+                _settingsViewModel.SetStatus("工具栏快捷键支持数字或 Ctrl、Alt、Shift 与数字的组合。");
             }
             Keyboard.ClearFocus();
             return;
@@ -2974,6 +3211,12 @@ public partial class MainWindow : Window, IDisposable
             case nameof(SettingsViewModel.TextTranslationHotKey):
                 _settingsViewModel.TextTranslationHotKey = e.Gesture;
                 break;
+            case nameof(SettingsViewModel.ImageQuestionHotKey):
+                _settingsViewModel.ImageQuestionHotKey = e.Gesture;
+                break;
+            case nameof(SettingsViewModel.RealtimeTranslationHotKey):
+                _settingsViewModel.RealtimeTranslationHotKey = e.Gesture;
+                break;
             case nameof(SettingsViewModel.PinHotKey):
                 _settingsViewModel.PinHotKey = e.Gesture;
                 break;
@@ -2992,8 +3235,6 @@ public partial class MainWindow : Window, IDisposable
 
         Keyboard.ClearFocus();
     }
-
-    private static bool IsAsciiDigit(char value) => value is >= '0' and <= '9';
 
     private void OnHotKeyCaptureGotKeyboardFocus(
         object sender,
@@ -3032,7 +3273,7 @@ public partial class MainWindow : Window, IDisposable
         IsCapturingHotKey = true;
         _settingsViewModel.SetStatus(
             captureBox.Tag is CaptureToolbarFeature
-                ? "请按下一个数字；录入期间会屏蔽其他应用的输入，按 Esc 取消。"
+                ? "请按下数字或 Ctrl、Alt、Shift 与数字的组合；按 Backspace 清空，按 Esc 取消。"
                 : "请按下键盘或鼠标组合；单独按左、中、右键会录为长按。" +
                   "录入期间会屏蔽其他应用的输入。" +
                   "按 Backspace 或 Delete 清空，按 Esc 取消。");
@@ -3124,6 +3365,7 @@ public partial class MainWindow : Window, IDisposable
 
     private void ScheduleSettingsApply()
     {
+        if (_disposed) return;
         _settingsApplyTimer.Stop();
         _settingsApplyTimer.Start();
     }
@@ -3136,7 +3378,7 @@ public partial class MainWindow : Window, IDisposable
 
     private bool ApplySettings(string? editedHotKeySettingName = null)
     {
-        if (_isApplyingSettings)
+        if (_disposed || _isApplyingSettings)
         {
             return true;
         }
@@ -3156,11 +3398,13 @@ public partial class MainWindow : Window, IDisposable
                 return false;
             }
 
-            Directory.CreateDirectory(settings.SaveDirectory);
-            Directory.CreateDirectory(settings.VideoSaveDirectory);
-
-            var hotKeyRegistration =
-                _globalHotKeyManager.ApplyAvailable(hotKeyBindings);
+            // Theme/retention edits do not need to tear down input hooks and
+            // registered hotkeys. Only an actual gesture change needs that.
+            var hotKeysChanged = !HotKeyConfiguration.CreateBindings(_savedSettings).SequenceEqual(hotKeyBindings);
+            var hotKeyRegistration = hotKeysChanged || editedHotKeySettingName is not null ||
+                _globalHotKeyManager.RegisteredBindings.Count == 0
+                ? _globalHotKeyManager.ApplyAvailable(hotKeyBindings)
+                : HotKeyRegistrationResult.Success;
             var hotKeyWarning = hotKeyRegistration.IsSuccess
                 ? null
                 : hotKeyRegistration.ErrorMessage ?? "部分快捷键无法注册。";
@@ -3186,8 +3430,6 @@ public partial class MainWindow : Window, IDisposable
                     _startupRegistrationService.SetEnabled(settings.LaunchAtStartup);
                 }
 
-                _settingsStore.Save(settings);
-
                 if (!settings.RequestAdministratorPrivileges &&
                     _savedSettings.RequestAdministratorPrivileges)
                 {
@@ -3206,6 +3448,7 @@ public partial class MainWindow : Window, IDisposable
                         _settingsViewModel.TranslationApiKey);
                     _translationApiKeyChanged = false;
                 }
+                _settingsStore.QueueSave(settings);
             }
             catch
             {
@@ -3269,6 +3512,12 @@ public partial class MainWindow : Window, IDisposable
                 _settingsViewModel.TextTranslationHotKey =
                     _savedSettings.TextTranslationHotKey;
                 break;
+            case nameof(SettingsViewModel.ImageQuestionHotKey):
+                _settingsViewModel.ImageQuestionHotKey = _savedSettings.ImageQuestionHotKey;
+                break;
+            case nameof(SettingsViewModel.RealtimeTranslationHotKey):
+                _settingsViewModel.RealtimeTranslationHotKey = _savedSettings.RealtimeTranslationHotKey;
+                break;
             case nameof(SettingsViewModel.PinHotKey):
                 _settingsViewModel.PinHotKey = _savedSettings.PinHotKey;
                 break;
@@ -3296,6 +3545,8 @@ public partial class MainWindow : Window, IDisposable
                 HotKeyAction.RecognizeText,
             nameof(SettingsViewModel.TextTranslationHotKey) =>
                 HotKeyAction.TranslateSelectedText,
+            nameof(SettingsViewModel.RealtimeTranslationHotKey) => HotKeyAction.RealtimeTranslation,
+            nameof(SettingsViewModel.ImageQuestionHotKey) => HotKeyAction.ImageQuestion,
             nameof(SettingsViewModel.PinHotKey) =>
                 HotKeyAction.PinImage,
             nameof(SettingsViewModel.OpenSettingsHotKey) =>
@@ -3309,6 +3560,8 @@ public partial class MainWindow : Window, IDisposable
         TextTranslationRequested?.Invoke(this, EventArgs.Empty);
     }
 
+    private void OnOpenImageQuestionClick(object sender, RoutedEventArgs e) => ImageQuestionRequested?.Invoke(this, EventArgs.Empty);
+
     private void ShowSettingsSection(int sectionIndex)
     {
         if (GeneralSettingsPanel is null ||
@@ -3321,6 +3574,12 @@ public partial class MainWindow : Window, IDisposable
         {
             return;
         }
+
+        FrameworkElement[] sections = [GeneralSettingsPanel, HotKeySettingsPanel,
+            OcrSettingsPanel, TranslationSettingsPanel, UpdateSettingsPanel,
+            DonateSettingsPanel, ContactSettingsPanel];
+        var nextSection = sectionIndex >= 0 && sectionIndex < sections.Length ? sections[sectionIndex] : null;
+        var sectionChanged = nextSection?.Visibility != Visibility.Visible;
 
         GeneralSettingsPanel.Visibility = sectionIndex == 0
             ? Visibility.Visible
@@ -3344,42 +3603,88 @@ public partial class MainWindow : Window, IDisposable
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        if (sectionIndex == 6 &&
-            Interlocked.Exchange(ref _communityQrLoadStarted, 1) == 0)
+        if (IsLoaded && sectionChanged && nextSection is not null)
         {
+            UiTransitions.RevealPage(nextSection);
+        }
+
+        if (sectionIndex == 5 && DonateQrImage.Source is null)
+        {
+            DonateQrImage.Source = LoadSettingsImage("DonateQr.jpg", 400);
+            CreatorAvatarBrush.ImageSource = LoadSettingsImage("CreatorAvatar.jpg", 160);
+        }
+
+        if (sectionIndex != 6) _communityQrCancellation?.Cancel();
+        if (sectionIndex == 6 && sectionChanged)
+        {
+            CommunityQrImage.Source ??= LoadSettingsImage("SnapCutCommunityQr.jpg", 480);
             _ = LoadCommunityQrImageAsync();
         }
     }
 
+    private static BitmapImage LoadSettingsImage(string asset, int decodeWidth)
+    {
+        var image = new BitmapImage();
+        image.BeginInit();
+        image.CacheOption = BitmapCacheOption.OnLoad;
+        image.DecodePixelWidth = decodeWidth;
+        image.UriSource = new Uri($"pack://application:,,,/SnapCut;component/Assets/{asset}");
+        image.EndInit();
+        image.Freeze();
+        return image;
+    }
+
     private async Task LoadCommunityQrImageAsync()
     {
+        if (_disposed || Interlocked.Exchange(ref _communityQrLoadStarted, 1) != 0) return;
+        using var cancellation = new CancellationTokenSource();
+        _communityQrCancellation = cancellation;
+        var fallbackStatus = "显示本版本内置二维码。";
+        CommunityQrRefreshButton.IsEnabled = false;
+        CommunityQrStatusText.Text = "正在获取最新二维码…";
         try
         {
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(4));
-            var bytes = await _modelCatalogHttpClient.GetByteArrayAsync(
-                CommunityQrImageUrl,
-                timeout.Token);
-            using var stream = new MemoryStream(bytes, writable: false);
-            var image = new BitmapImage();
-            image.BeginInit();
-            image.CacheOption = BitmapCacheOption.OnLoad;
-            image.StreamSource = stream;
-            image.EndInit();
-            image.Freeze();
-
-            if (CommunityQrImage is not null)
-            {
-                CommunityQrImage.Source = image;
-            }
+            using var bundledStream = System.Windows.Application.GetResourceStream(
+                new Uri("pack://application:,,,/SnapCut;component/Assets/SnapCutCommunityQr.jpg"))!.Stream;
+            using var buffer = new MemoryStream();
+            bundledStream.CopyTo(buffer);
+            var loader = new CommunityQrImageLoader(_modelCatalogHttpClient,
+                Path.Combine(AppMetadata.DataDirectoryPath, "CommunityQrCache.json"), buffer.ToArray());
+            var fallback = await loader.LoadFallbackAsync(cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            fallbackStatus = fallback.Status;
+            CommunityQrImage.Source = fallback.Image;
+            var latest = await loader.RefreshAsync(cancellation.Token);
+            cancellation.Token.ThrowIfCancellationRequested();
+            CommunityQrImage.Source = latest.Image;
+            CommunityQrStatusText.Text = latest.Status;
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (Exception)
         {
-            // Keep the bundled QR code when the remote copy is unavailable.
+            if (!_disposed && !cancellation.IsCancellationRequested)
+                CommunityQrStatusText.Text = "联网刷新失败，" + fallbackStatus + "可重试刷新，或通过上方微信号联系。";
+        }
+        finally
+        {
+            if (ReferenceEquals(_communityQrCancellation, cancellation)) _communityQrCancellation = null;
+            if (!_disposed) CommunityQrRefreshButton.IsEnabled = true;
+            Interlocked.Exchange(ref _communityQrLoadStarted, 0);
+            if (!_disposed && cancellation.IsCancellationRequested && IsVisible && ContactSettingsPanel.Visibility == Visibility.Visible)
+                _ = Dispatcher.BeginInvoke(new Action(() => _ = LoadCommunityQrImageAsync()));
         }
     }
 
+    private void OnCommunityQrRefreshClick(object sender, RoutedEventArgs e) => _ = LoadCommunityQrImageAsync();
+
     private void ShowOcrLanguageAvailability()
     {
+        if (_settingsViewModel.OcrEngine == OcrEngineMode.QwenVisualOcr)
+        {
+            if (!VisualOcrModelManager.Shared.GetStatus().IsInstalled)
+                _settingsViewModel.SetStatus("Qwen3-VL 4B 视觉识别模型尚未下载。");
+            return;
+        }
         if (_settingsViewModel.OcrEngine == OcrEngineMode.PaddleOcrV6)
         {
             if (!_highQualityOcrModelManager.GetStatus().IsInstalled)

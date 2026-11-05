@@ -9,26 +9,21 @@ namespace Screenshot.App.Tests;
 public sealed class VideoPostProcessWindowTests
 {
     [Fact]
-    public void EditorUsesScrollableThemeSurfaceAndScrubbablePreview()
+    public void EditorKeepsTimelineAndActionsVisibleBelowTheResizablePreview()
     {
         WpfTestHost.Invoke(() =>
         {
             var window = new VideoPostProcessWindow(@"C:\missing-preview.mp4");
             try
             {
-                var root = Assert.IsType<Grid>(window.Content);
-                var scrollViewer = Assert.Single(
-                    root.Children.OfType<ScrollViewer>());
-                Assert.Equal(
-                    ScrollBarVisibility.Auto,
-                    scrollViewer.VerticalScrollBarVisibility);
-                Assert.Equal(
-                    ScrollBarVisibility.Disabled,
-                    scrollViewer.HorizontalScrollBarVisibility);
-
-                var controls = Assert.IsType<StackPanel>(scrollViewer.Content);
-                var previewPanel = Assert.IsType<StackPanel>(controls.Children[0]);
+                var shell = Assert.IsType<Border>(window.Content);
+                var chrome = Assert.IsType<Grid>(shell.Child);
+                var root = Assert.IsType<Grid>(chrome.Children[1]);
+                Assert.Empty(root.Children.OfType<ScrollViewer>());
+                var previewCard = Assert.IsType<Border>(root.Children[1]);
+                var previewPanel = Assert.IsType<Grid>(previewCard.Child);
                 var previewFrame = Assert.IsType<Border>(previewPanel.Children[0]);
+                Assert.True(double.IsNaN(previewFrame.Height));
                 var previewLayers = Assert.IsType<Grid>(previewFrame.Child);
                 var preview = Assert.Single(
                     previewLayers.Children.OfType<MediaElement>());
@@ -38,8 +33,8 @@ public sealed class VideoPostProcessWindowTests
                 Assert.Equal(MediaState.Manual, preview.LoadedBehavior);
                 Assert.Equal(Visibility.Visible, extractedFrame.Visibility);
 
-                var timelinePanel = Assert.IsType<StackPanel>(
-                    controls.Children[1]);
+                var timelineCard = Assert.IsType<Border>(root.Children[2]);
+                var timelinePanel = Assert.IsType<StackPanel>(timelineCard.Child);
                 var timelineBorder = Assert.Single(
                     timelinePanel.Children.OfType<Border>());
                 var timelineScroll = Assert.IsType<ScrollViewer>(
@@ -66,7 +61,19 @@ public sealed class VideoPostProcessWindowTests
                         DependencyProperty.UnsetValue,
                         handle.ReadLocalValue(FrameworkElement.StyleProperty));
                 });
-                Assert.Empty(controls.Children.OfType<Grid>());
+                var actions = Assert.Single(root.Children.OfType<System.Windows.Controls.Primitives.UniformGrid>());
+                Assert.Equal(4, actions.Children.Count);
+                shell.Measure(new Size(720, 700));
+                shell.Arrange(new Rect(0, 0, 720, 700));
+                shell.UpdateLayout();
+                var previewHeight = previewFrame.ActualHeight;
+                var origin = actions.TranslatePoint(new Point(), shell);
+                Assert.True(origin.Y + actions.ActualHeight <= shell.ActualHeight + 1);
+                Assert.True(previewHeight >= 72);
+                shell.Measure(new Size(1000, 1000));
+                shell.Arrange(new Rect(0, 0, 1000, 1000));
+                shell.UpdateLayout();
+                Assert.True(previewFrame.ActualHeight > previewHeight + 200);
             }
             finally
             {

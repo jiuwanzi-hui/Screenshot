@@ -1,7 +1,5 @@
 using System.Runtime.InteropServices;
 using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Imaging;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Threading;
@@ -74,9 +72,9 @@ public sealed class HotKeyCaptureInputEventArgs : EventArgs
 public sealed class GlobalHotKeyManager : IDisposable
 {
     private const int HotKeyAlreadyRegisteredError = 1409;
+    private const uint HotKeyNoRepeat = 0x4000;
     private const int WindowMessageHotKey = 0x0312;
     private const int WindowMessageInput = 0x00FF;
-    private const int MessageOnlyWindow = -3;
     private const int LowLevelKeyboardHook = 13;
     private const int LowLevelMouseHook = 14;
     private const int WindowMessageKeyDown = 0x0100;
@@ -145,10 +143,10 @@ public sealed class GlobalHotKeyManager : IDisposable
         TimeSpan.FromMilliseconds(500);
     private static readonly TimeSpan ContextMenuCaptureWindow = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan ContextMenuCaptureDelay =
-        // One compositor frame is enough for a popup that was already
-        // detected. A long fixed delay makes the menu visibly disappear
-        // before the overlay opens on slower desktop capture paths.
-        TimeSpan.FromMilliseconds(16);
+        // A visible HWND and DwmFlush do not mean its fade-in is complete.
+        // Cache after the menu animation, on the worker only; otherwise Alt+A
+        // reuses translucent opening pixels while mouse-hold captures look fine.
+        TimeSpan.FromMilliseconds(280);
     private static readonly TimeSpan ContextMenuCapturePollInterval =
         TimeSpan.FromMilliseconds(40);
     private static readonly TimeSpan ContextMenuCaptureWait =
@@ -157,11 +155,10 @@ public sealed class GlobalHotKeyManager : IDisposable
         TimeSpan.FromMilliseconds(800);
     private static readonly TimeSpan MouseSourceDeduplicationWindow =
         TimeSpan.FromMilliseconds(120);
-    private const uint PrintWindowRenderFullContent = 0x00000002;
     private const int WindowStyleIndex = -16;
     private const long WindowStylePopup = 0x80000000L;
 
-    private readonly HwndSource _messageSource;
+    private readonly HotKeyMessageWindow _messageSource;
     private readonly NativeMethods.LowLevelKeyboardProcedure _keyboardProcedure;
     private readonly NativeMethods.LowLevelMouseProcedure _mouseProcedure;
     private readonly DispatcherTimer _preCaptureExpiryTimer;
@@ -176,9 +173,6 @@ public sealed class GlobalHotKeyManager : IDisposable
     private readonly Dictionary<uint, PendingModifierProbe> _modifierProbeHolds = [];
     private readonly List<RecentMouseEvent> _recentMouseEvents = [];
     private readonly HashSet<uint> _suppressedMouseButtonsUntilUp = [];
-    private readonly HashSet<uint> _suppressedTransientMenuModifiers = [];
-    private readonly HashSet<uint> _suppressedTransientMenuKeys = [];
-    private readonly Dictionary<HotKeyAction, long> _earlyKeyboardHotKeys = [];
     private readonly HashSet<uint> _sideButtonsToReplayUntilUp = [];
     private readonly HashSet<uint> _primaryButtonsToReplayUntilUp = [];
     private readonly HashSet<uint> _primaryButtonsPassedThroughForHold = [];
@@ -195,7 +189,6 @@ public sealed class GlobalHotKeyManager : IDisposable
     private DateTimeOffset _preCapturedAt;
     private int _preCaptureGeneration;
     private long _lastRightButtonUpTimestamp;
-    private int _lastRightButtonUpLikelyExplorer;
     private long _contextMenuCaptureGeneration;
     private long _lastCaptureClosedTimestamp;
     private int _captureOverlayActive;
@@ -207,6 +200,8 @@ public sealed class GlobalHotKeyManager : IDisposable
     private bool _rawKeyboardRegistered;
     private bool _rawMouseRegistered;
     private bool _mouseInputHooksSuspended;
+    private int _windowPresentationDepth;
+    private bool _inputHooksStarted;
     private readonly bool _inputHooksDeferred;
     private Window? _modifierProbeWindow;
     private int _mouseReplayDepth;
@@ -218,13 +213,7 @@ public sealed class GlobalHotKeyManager : IDisposable
         CaptureTimingDiagnostics.Mark(
             "hotkey-manager-created",
             $"pid={Environment.ProcessId} base={AppContext.BaseDirectory}");
-        var parameters = new HwndSourceParameters("Screenshot.App.HotKeySink")
-        {
-            ParentWindow = new IntPtr(MessageOnlyWindow),
-            WindowStyle = 0,
-        };
-
-        _messageSource = new HwndSource(parameters);
+        _messageSource = new HotKeyMessageWindow();
         _messageSource.AddHook(WindowProcedure);
         _preCaptureExpiryTimer = new DispatcherTimer
         {
@@ -260,23 +249,28 @@ public sealed class GlobalHotKeyManager : IDisposable
     public void StartInputHooks()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        _inputHooksStarted = true;
         if (_keyboardHook != IntPtr.Zero || _mouseHook != IntPtr.Zero)
         {
             return;
         }
 
         _rawKeyboardRegistered = RegisterRawKeyboardInput();
-        _rawMouseRegistered = RegisterRawMouseInput();
+        if (_windowPresentationDepth == 0 && !_areMouseShortcutsSuspended)
+            _rawMouseRegistered = RegisterRawMouseInput();
         _keyboardHook = NativeMethods.SetWindowsHookEx(
             LowLevelKeyboardHook,
             _keyboardProcedure,
             NativeMethods.GetModuleHandle(moduleName: null),
             threadId: 0);
-        _mouseHook = NativeMethods.SetWindowsHookEx(
+        if (_windowPresentationDepth == 0 && !_areMouseShortcutsSuspended)
+            _mouseHook = NativeMethods.SetWindowsHookEx(
             LowLevelMouseHook,
             _mouseProcedure,
             NativeMethods.GetModuleHandle(moduleName: null),
             threadId: 0);
+        else
+            _mouseInputHooksSuspended = true;
         if (_mouseHook == IntPtr.Zero)
         {
             _mouseHookErrorCode = Marshal.GetLastWin32Error();
@@ -292,6 +286,7 @@ public sealed class GlobalHotKeyManager : IDisposable
     public event EventHandler<HotKeyPressedEventArgs>? HotKeyPressed;
 
     public event EventHandler<HotKeyCaptureInputEventArgs>? HotKeyCaptureInputReceived;
+    internal event Action? EscapePressed;
 
     public IReadOnlyList<HotKeyBinding> RegisteredBindings =>
         _registeredBindings.Values.OrderBy(binding => binding.Action).ToArray();
@@ -305,6 +300,10 @@ public sealed class GlobalHotKeyManager : IDisposable
     internal Action<uint>? ReplayPrimaryMouseButtonUpOverride { get; set; }
 
     internal Func<bool>? ActivateModifierProbeOverride { get; set; }
+
+    internal Func<uint, bool>? KeyboardKeyStateOverride { get; set; }
+
+    internal Func<bool>? ForegroundMenuActiveOverride { get; set; }
 
     public TimeSpan MouseLongPressDuration => _mouseLongPressDuration;
 
@@ -343,9 +342,8 @@ public sealed class GlobalHotKeyManager : IDisposable
         _recentMouseEvents.Clear();
         HideModifierProbe();
         _primaryButtonsPassedThroughForHold.Clear();
-        _suppressedTransientMenuModifiers.Clear();
-        _suppressedTransientMenuKeys.Clear();
-        _earlyKeyboardHotKeys.Clear();
+        // Suspending mouse shortcuts must not release the keyboard chord that
+        // opened this overlay. Consume repeats and key-up as one balanced pair.
         _mouseHoldTimer.Stop();
 
         // Keyboard-triggered captures have no pointer continuation that
@@ -378,7 +376,8 @@ public sealed class GlobalHotKeyManager : IDisposable
 
     private void ResumeMouseInputHooks()
     {
-        if (!_mouseInputHooksSuspended || _disposed)
+        if (!_mouseInputHooksSuspended || _disposed || !_inputHooksStarted ||
+            _areMouseShortcutsSuspended || _windowPresentationDepth != 0)
         {
             return;
         }
@@ -583,7 +582,7 @@ public sealed class GlobalHotKeyManager : IDisposable
         var registered = NativeMethods.RegisterHotKey(
             _messageSource.Handle,
             identifier,
-            (uint)binding.Gesture.Modifiers,
+            (uint)binding.Gesture.Modifiers | HotKeyNoRepeat,
             binding.Gesture.VirtualKey);
 
         if (!registered)
@@ -622,9 +621,6 @@ public sealed class GlobalHotKeyManager : IDisposable
         _primaryButtonsToReplayUntilUp.Clear();
         _primaryButtonsPassedThroughForHold.Clear();
         _suppressedMouseButtonsUntilUp.Clear();
-        _suppressedTransientMenuModifiers.Clear();
-        _suppressedTransientMenuKeys.Clear();
-        _earlyKeyboardHotKeys.Clear();
         foreach (var continuation in _capturePointerContinuations.Values)
         {
             continuation.NotifyReleased();
@@ -668,24 +664,6 @@ public sealed class GlobalHotKeyManager : IDisposable
             CaptureTimingDiagnostics.Mark(
                 "wm-hotkey",
                 $"action={binding.Action}");
-            // A transient shell menu can consume Alt (and, depending on the
-            // host, Ctrl/Shift) before RegisterHotKey posts WM_HOTKEY. In
-            // that case the low-level hook has already started this action;
-            // discard the later duplicate notification.
-            if (_earlyKeyboardHotKeys.TryGetValue(
-                    binding.Action,
-                    out var earlyTimestamp))
-            {
-                _earlyKeyboardHotKeys.Remove(binding.Action);
-                var elapsed = Stopwatch.GetTimestamp() - earlyTimestamp;
-                if (elapsed >= 0 &&
-                    elapsed <= Stopwatch.Frequency)
-                {
-                    handled = true;
-                    return IntPtr.Zero;
-                }
-            }
-
             var preCaptured = TakePreCapturedScreen(
                 binding.Action,
                 // The shell can dismiss a context menu while delivering the
@@ -694,9 +672,18 @@ public sealed class GlobalHotKeyManager : IDisposable
                 // falling back to the now-clean desktop.
                 allowImmediateContextMenuSnapshot:
                     IsTransientUiCaptureAction(binding.Action));
-            RaiseHotKeyPressed(
-                binding.Action,
-                preCaptured);
+            if (preCaptured is null && IsTransientUiCaptureAction(binding.Action) &&
+                (ForegroundMenuActiveOverride?.Invoke() ?? HasActiveForegroundMenu()))
+            {
+                // WM_HOTKEY has already granted the user-initiated activation.
+                // Let an uncached menu finish opening before publishing its
+                // pixels, without swallowing its physical shortcut in the hook.
+                QueueDeferredTransientMenuKeyboardCapture(binding.Action);
+            }
+            else
+            {
+                RaiseHotKeyPressed(binding.Action, preCaptured);
+            }
 
             handled = true;
         }
@@ -745,37 +732,17 @@ public sealed class GlobalHotKeyManager : IDisposable
 
             if (isKeyDown)
             {
-                CaptureTimingDiagnostics.Mark(
-                    "low-level-keydown",
-                    $"vk=0x{keyboardData.VirtualKey:X2}");
-                // Give an already-open shell/context menu a chance to reuse
-                // the frame captured around the right-button release. This
-                // method never captures an ordinary desktop frame from the
-                // low-level keyboard hook.
-                // Ordinary Ctrl/Alt shortcuts must stay on the lightest hook
-                // path. Only a recent right-button gesture needs the menu
-                // preservation check; it is the one case where a frame may
-                // already be waiting for Explorer's popup.
-                // Ordinary shortcut modifiers must stay completely passive.
-                // A background full-desktop pre-capture here still competes
-                // with DWM and causes the one-frame hitch reported when the
-                // user presses Shift/Ctrl/Alt. Only a recent context-menu
-                // gesture is allowed into the transient-menu path.
+                if (keyboardData.VirtualKey == 0x1B) EscapePressed?.Invoke();
+                CaptureTimingDiagnostics.Input($"low-level-keydown vk=0x{keyboardData.VirtualKey:X2}");
+                // A recent right-click may have a cached menu frame ready.
+                // Modifier keys never start desktop capture work in this hook.
                 if (HasRecentContextMenuGesture())
                 {
                     TryPreCaptureTransientUi(keyboardData.VirtualKey);
                 }
-                // Ordinary keyboard shortcuts stay completely passive here.
-                // Their screenshot is captured after the hotkey message has
-                // returned; starting GDI work on the modifier edge causes the
-                // exact one-frame hitch this hook is meant to avoid.
-
-                if (TryHandleTransientMenuKeyboardInput(
-                        keyboardData.VirtualKey,
-                        GetCurrentModifiersIncluding(keyboardData.VirtualKey)))
-                {
-                    return new IntPtr(1);
-                }
+                // Configured screenshot keys must reach RegisterHotKey even while a
+                // menu is open. Swallowing them here bypasses Windows foreground
+                // activation, so the later overlay can immediately cancel itself.
 
                 if (CaptureOverlayWindow.TryHandleGlobalPickerKey(
                         keyboardData.VirtualKey,
@@ -798,13 +765,6 @@ public sealed class GlobalHotKeyManager : IDisposable
                 CaptureTimingDiagnostics.Input(
                     $"keyboard-up vk=0x{keyboardData.VirtualKey:X2} " +
                     $"captureActive={_isKeyboardCaptureActive}");
-            }
-
-            if (!isKeyDown &&
-                TryReleaseTransientMenuKeyboardInput(
-                    keyboardData.VirtualKey))
-            {
-                return new IntPtr(1);
             }
 
             if ((isKeyDown || isKeyUp) &&
@@ -902,7 +862,7 @@ public sealed class GlobalHotKeyManager : IDisposable
                     !isButtonDown &&
                     !ShouldSuppressContextMenuGesture(isButtonDown))
                 {
-                    MarkRecentContextMenuGesture(mouseData.Point);
+                    MarkRecentContextMenuGesture();
                 }
 
                 if (TryConsumeRecentMouseEvent(
@@ -1110,7 +1070,7 @@ public sealed class GlobalHotKeyManager : IDisposable
                     out var pendingImmediateCapture) &&
                 virtualKey == HotKeyGesture.VirtualKeyMouseRight)
             {
-                MarkRecentContextMenuGesture(pendingImmediateCapture.StartPoint);
+                MarkRecentContextMenuGesture();
                 QueueDeferredTransientMenuMouseCapture(
                     pendingImmediateCapture.Binding.Action,
                     pendingImmediateCapture.Continuation);
@@ -1732,7 +1692,7 @@ public sealed class GlobalHotKeyManager : IDisposable
                 if (virtualKey == HotKeyGesture.VirtualKeyMouseRight &&
                     IsTransientUiCaptureAction(pending.Binding.Action))
                 {
-                    MarkRecentContextMenuGesture(pending.StartPoint);
+                    MarkRecentContextMenuGesture();
                     // The popup is created by the replayed button-up. Waiting
                     // for it here blocks the WPF dispatcher/timer and makes
                     // the next interaction visibly lag. The worker started
@@ -2598,11 +2558,32 @@ public sealed class GlobalHotKeyManager : IDisposable
     internal void NotifyCaptureClosed()
     {
         Volatile.Write(ref _captureOverlayActive, 0);
+        NotifyDesktopContentChanged();
+    }
+
+    internal void AdoptPointerContinuation(CapturePointerContinuation continuation)
+    {
+        var key = continuation.Button == CapturePointerButton.Left
+            ? HotKeyGesture.VirtualKeyMouseLeft : HotKeyGesture.VirtualKeyMouseRight;
+        if ((NativeMethods.GetAsyncKeyState((int)key) & 0x8000) == 0)
+        {
+            continuation.NotifyReleased();
+            return;
+        }
+        _capturePointerContinuations[key] = continuation;
+        _suppressedMouseButtonsUntilUp.Add(key);
+    }
+
+    internal void NotifyDesktopContentChanged()
+    {
+        // Pin close/minimize/group changes retire layered windows too. Their
+        // old menu snapshot must not survive for the four-second cache lifetime.
+        // Do not clear _captureOverlayActive: a pin can appear during handoff.
+        CaptureStartupFrameSource.Shared.RequestCompositionRefresh();
         Volatile.Write(
             ref _lastCaptureClosedTimestamp,
             Stopwatch.GetTimestamp());
         Volatile.Write(ref _lastRightButtonUpTimestamp, 0);
-        Volatile.Write(ref _lastRightButtonUpLikelyExplorer, 0);
         Interlocked.Increment(ref _contextMenuCaptureGeneration);
         Interlocked.Increment(ref _preCaptureGeneration);
 
@@ -2771,140 +2752,61 @@ public sealed class GlobalHotKeyManager : IDisposable
             HotKeyAction.PinImage;
     }
 
-    private bool TryHandleTransientMenuKeyboardInput(
-        uint virtualKey,
-        HotKeyModifiers modifiers)
+    private static bool HasActiveForegroundMenu()
     {
-        if (_disposed ||
-            _isKeyboardCaptureActive ||
-            Volatile.Read(ref _captureOverlayActive) != 0)
+        var info = new NativeMethods.GuiThreadInfo
         {
-            return false;
-        }
+            Size = (uint)Marshal.SizeOf<NativeMethods.GuiThreadInfo>(),
+        };
+        if (NativeMethods.GetGUIThreadInfo(0, ref info) &&
+            (info.MenuOwner != IntPtr.Zero || (info.Flags & 0x1C) != 0)) return true;
 
-        if (IsModifierKey(virtualKey) &&
-            _suppressedTransientMenuModifiers.Contains(virtualKey))
+        // WinUI flyouts may not set the classic menu-loop flags. Inspect only
+        // the foreground and pointer windows, never enumerate the desktop in
+        // WH_KEYBOARD_LL. A recent right-click alone is not an open menu.
+        if (IsPopup(NativeMethods.GetForegroundWindow())) return true;
+        if (!NativeMethods.GetCursorPos(out var point)) return false;
+        var underPointer = NativeMethods.WindowFromPoint(point);
+        return IsPopup(underPointer) || IsPopup(NativeMethods.GetAncestor(underPointer, AncestorRoot));
+
+        static bool IsPopup(IntPtr window)
         {
-            return true;
+            if (window == IntPtr.Zero) return false;
+            var name = new System.Text.StringBuilder(128);
+            _ = NativeMethods.GetClassName(window, name, name.Capacity);
+            var className = name.ToString();
+            // CoreWindow also hosts ordinary UWP applications, so its name
+            // alone is not evidence of a transient menu.
+            return className != "Windows.UI.Core.CoreWindow" && IsTransientMenuClass(className);
         }
+    }
 
-        if (!IsModifierKey(virtualKey) &&
-            _suppressedTransientMenuKeys.Contains(virtualKey))
+    // WH_MOUSE_LL calls back into this dispatcher. Temporarily detach it while
+    // a settings tree is built and painted, so desktop cursor packets never
+    // wait for that cold work. Keyboard hotkey registrations remain active.
+    internal IDisposable SuspendMouseForWindowPresentation()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _windowPresentationDepth++;
+        SuspendMouseInputHooks();
+        return new WindowPresentationLease(this);
+    }
+
+    private sealed class WindowPresentationLease(GlobalHotKeyManager owner) : IDisposable
+    {
+        private GlobalHotKeyManager? _owner = owner;
+        public void Dispose()
         {
-            return true;
+            if (Interlocked.Exchange(ref _owner, null) is not { } current) return;
+            if (--current._windowPresentationDepth != 0 || current._disposed) return;
+            // A mouse shortcut may have opened settings and been released
+            // during layout. Do not carry its old suppression into the next click.
+            current._suppressedMouseButtonsUntilUp.RemoveWhere(key => !IsKeyDown(key));
+            current._sideButtonsToReplayUntilUp.RemoveWhere(key => !IsKeyDown(key));
+            current._primaryButtonsToReplayUntilUp.RemoveWhere(key => !IsKeyDown(key));
+            current._primaryButtonsPassedThroughForHold.RemoveWhere(key => !IsKeyDown(key));
+            current.ResumeMouseInputHooks();
         }
-
-        if (IsModifierKey(virtualKey))
-        {
-            // Modifier keys must remain visible to the foreground application.
-            // In particular, swallowing Alt here leaves the shell and normal
-            // applications with a stuck/inoperable Alt key. The pre-capture
-            // work is already performed by TryPreCaptureTransientUi before
-            // this method runs, so the modifier itself never needs to be
-            // suppressed. The matching character key below can still consume
-            // the configured screenshot gesture and use that saved frame.
-            return false;
-        }
-
-        var binding = _registeredBindings.Values.FirstOrDefault(
-            candidate =>
-                !candidate.Gesture.IsMouseButton &&
-                IsTransientUiCaptureAction(candidate.Action) &&
-                candidate.Gesture.VirtualKey == virtualKey &&
-                candidate.Gesture.Modifiers == modifiers);
-        if (binding is null)
-        {
-            return false;
-        }
-
-        var recentMenuGesture = HasRecentContextMenuGesture();
-        var hasImmediateMenuSnapshot = false;
-        lock (_immediatePreCaptureLock)
-        {
-            hasImmediateMenuSnapshot = _immediatePreCapturedScreen is not null &&
-                _immediatePreCapturedActions.Contains(binding.Action) &&
-                DateTimeOffset.UtcNow - _immediatePreCapturedAt <=
-                    ContextMenuCaptureWindow;
-        }
-
-        // The hook must not synchronously walk the desktop. A recent gesture
-        // or an already captured frame is the non-blocking evidence that this
-        // key belongs to a transient menu. Background probing remains in the
-        // mouse-release worker.
-        var menuWindowVisible = recentMenuGesture || hasImmediateMenuSnapshot;
-
-        // A shell popup can be removed between the modifier and character
-        // callbacks. The pre-captured frame is the authoritative indication
-        // that this combination started while a menu was visible; accepting
-        // it here prevents the character from reaching the shell and closing
-        // the menu before the overlay opens.
-        if (_suppressedTransientMenuModifiers.Count == 0 &&
-            !menuWindowVisible &&
-            !recentMenuGesture &&
-            !hasImmediateMenuSnapshot)
-        {
-            return false;
-        }
-
-        var snapshot = TakePreCapturedScreen(
-                binding.Action,
-                allowImmediateContextMenuSnapshot: true);
-        if (snapshot is null)
-        {
-            // The right-button worker may still be waiting for Explorer's
-            // popup to appear. Consume the character key now so the shell
-            // cannot dismiss the menu, then finish the capture off the hook
-            // thread. This avoids both the old menu-disappears behavior and
-            // the input stall caused by synchronous GDI capture.
-            if (!menuWindowVisible && !recentMenuGesture)
-            {
-                return false;
-            }
-
-            _earlyKeyboardHotKeys[binding.Action] = Stopwatch.GetTimestamp();
-            _suppressedTransientMenuKeys.Add(virtualKey);
-            QueueDeferredTransientMenuKeyboardCapture(binding.Action);
-            return true;
-        }
-        _earlyKeyboardHotKeys[binding.Action] = Stopwatch.GetTimestamp();
-        _suppressedTransientMenuKeys.Add(virtualKey);
-        // Enter the UI dispatcher synchronously for this already-captured
-        // transient-menu gesture. Returning from the low-level hook first
-        // leaves a compositor gap in which the shell menu disappears and the
-        // desktop briefly shows through before the overlay is created.
-        // RaiseHotKeyPressed only queues the normal capture workflow; it does
-        // not perform a desktop capture on the hook thread.
-        try
-        {
-            var raise = new Action(() =>
-            {
-                if (_disposed)
-                {
-                    snapshot?.Dispose();
-                    return;
-                }
-
-                RaiseHotKeyPressed(binding.Action, snapshot);
-            });
-            if (_messageSource.Dispatcher.CheckAccess())
-            {
-                raise();
-            }
-            else
-            {
-                _messageSource.Dispatcher.Invoke(
-                    DispatcherPriority.Send,
-                    raise);
-            }
-        }
-        catch
-        {
-            // The hook must never propagate dispatcher shutdown failures into
-            // the system input chain. Dispose the frame if the event could
-            // not be handed off.
-            snapshot?.Dispose();
-        }
-        return true;
     }
 
     private void QueueDeferredTransientMenuKeyboardCapture(HotKeyAction action)
@@ -2914,28 +2816,13 @@ public sealed class GlobalHotKeyManager : IDisposable
             CapturedImage? snapshot = null;
             try
             {
-                var deadline = Stopwatch.GetTimestamp() +
-                    (long)(TimeSpan.FromMilliseconds(350).TotalSeconds *
-                        Stopwatch.Frequency);
-                while (Stopwatch.GetTimestamp() < deadline)
-                {
-                    snapshot = TakeImmediatePreCapturedScreen(action);
-                    if (snapshot is not null)
-                    {
-                        break;
-                    }
+                snapshot = TakeImmediatePreCapturedScreen(action);
 
-                    Thread.Sleep(8);
-                }
-
-                // The key is suppressed while this runs, so the popup is
-                // still present when the fallback capture is needed.
-                snapshot ??= CaptureTransientUiScreen();
+                // The system hotkey consumes the chord before the menu's
+                // mnemonic handler. Capture before requesting overlay focus.
+                snapshot ??= CaptureContextMenuAfterMouseRelease() ?? CaptureTransientUiScreen();
                 if (snapshot is null)
                 {
-                    _messageSource.Dispatcher.BeginInvoke(
-                        DispatcherPriority.Background,
-                        new Action(() => _earlyKeyboardHotKeys.Remove(action)));
                     return;
                 }
 
@@ -2984,7 +2871,7 @@ public sealed class GlobalHotKeyManager : IDisposable
                     Thread.Sleep(8);
                 }
 
-                snapshot ??= CaptureTransientUiScreen();
+                snapshot ??= CaptureContextMenuAfterMouseRelease() ?? CaptureTransientUiScreen();
                 if (snapshot is null)
                 {
                     return;
@@ -3037,18 +2924,16 @@ public sealed class GlobalHotKeyManager : IDisposable
         }
     }
 
-    private bool TryReleaseTransientMenuKeyboardInput(uint virtualKey)
-    {
-        if (IsModifierKey(virtualKey))
-        {
-            return _suppressedTransientMenuModifiers.Remove(virtualKey);
-        }
-
-        return _suppressedTransientMenuKeys.Remove(virtualKey);
-    }
-
     private HotKeyModifiers GetCurrentModifiersIncluding(uint virtualKey)
     {
+        // WM_INPUT can arrive after the hook's key-up (or be skipped while a
+        // capture is active). Its cached down state must never turn plain
+        // typing into a keyboard hotkey. Keep the fallback for mouse chords.
+        if (!HotKeyGesture.IsMouseVirtualKey(virtualKey))
+        {
+            return GetKeyboardModifiersIncluding(virtualKey);
+        }
+
         var modifiers = HotKeyModifiers.None;
         if (IsKeyDown(VirtualKeyControl) ||
             (!_ignoredRawModifierKeysUntilUp.Any(IsControlKey) &&
@@ -3086,20 +2971,35 @@ public sealed class GlobalHotKeyManager : IDisposable
         return modifiers;
     }
 
+    private HotKeyModifiers GetKeyboardModifiersIncluding(uint virtualKey)
+    {
+        var readKeyState = KeyboardKeyStateOverride ?? IsKeyDown;
+        var modifiers = HotKeyModifiers.None;
+        if (readKeyState(VirtualKeyControl) || IsControlKey(virtualKey))
+            modifiers |= HotKeyModifiers.Control;
+        if (readKeyState(VirtualKeyAlt) || IsAltKey(virtualKey))
+            modifiers |= HotKeyModifiers.Alt;
+        if (readKeyState(VirtualKeyShift) || IsShiftKey(virtualKey))
+            modifiers |= HotKeyModifiers.Shift;
+        if (readKeyState(VirtualKeyLeftWindows) ||
+            readKeyState(VirtualKeyRightWindows) || IsWindowsKey(virtualKey))
+            modifiers |= HotKeyModifiers.Windows;
+        // The hook runs before this event's async key state is updated; include
+        // the current modifier down explicitly, without trusting older events.
+        return modifiers;
+    }
+
     private static CapturedImage? CaptureTransientUiScreen()
     {
         var virtualBounds = VirtualScreen.GetBounds();
         CapturedImage? desktop = null;
         try
         {
-            // CaptureBlt preserves most layered shell menus in the desktop
-            // frame. Some Explorer/XAML context menus are separate popup HWNDs
-            // and are not composited by CopyFromScreen until a later frame;
-            // explicitly print only those transient windows into the same
-            // bitmap so a right-click menu cannot disappear from the capture.
-            desktop = ScreenCaptureService.CaptureIncludingLayeredWindows(
-                virtualBounds);
-            CaptureTransientMenuWindowsInto(desktop.Bitmap, virtualBounds);
+            // Read the composed desktop without asking foreign menu windows
+            // to repaint via PrintWindow (XAML/DirectComposition menus need not
+            // support it). Flush the pending compositor pass before copying.
+            _ = NativeMethods.DwmFlush();
+            desktop = ScreenCaptureService.CaptureIncludingLayeredWindows(virtualBounds);
             _ = desktop.WarmPreview();
             return desktop;
         }
@@ -3119,165 +3019,10 @@ public sealed class GlobalHotKeyManager : IDisposable
         }
     }
 
-    private static void CaptureTransientMenuWindowsInto(
-        Bitmap desktop,
-        ScreenRegion virtualBounds)
-    {
-        foreach (var windowHandle in EnumerateTransientMenuWindows())
-        {
-            try
-            {
-                if (!NativeMethods.IsWindowVisible(windowHandle) ||
-                    !NativeMethods.GetWindowRect(windowHandle, out var windowRect))
-                {
-                    continue;
-                }
-
-                var bounds = ScreenRegion.FromCorners(
-                    windowRect.Left,
-                    windowRect.Top,
-                    windowRect.Right,
-                    windowRect.Bottom);
-                var clipped = ScreenRegion.Intersect(bounds, virtualBounds);
-                if (bounds.IsEmpty || clipped.IsEmpty)
-                {
-                    continue;
-                }
-
-                using var menuBitmap = new Bitmap(
-                    bounds.Width,
-                    bounds.Height,
-                    PixelFormat.Format32bppPArgb);
-                var printed = false;
-                using (var graphics = Graphics.FromImage(menuBitmap))
-                {
-                    var hdc = graphics.GetHdc();
-                    try
-                    {
-                        printed = NativeMethods.PrintWindow(
-                                windowHandle,
-                                hdc,
-                                PrintWindowRenderFullContent);
-                        if (!printed)
-                        {
-                            printed = NativeMethods.PrintWindow(
-                                windowHandle,
-                                hdc,
-                                0);
-                        }
-                    }
-                    finally
-                    {
-                        graphics.ReleaseHdc(hdc);
-                    }
-                }
-
-                WriteInputDiagnostic(
-                    $"transient-menu-print hwnd=0x{windowHandle.ToInt64():X} " +
-                    $"bounds={bounds.X},{bounds.Y},{bounds.Width}x{bounds.Height} " +
-                    $"success={printed}");
-                if (!printed)
-                {
-                    continue;
-                }
-
-                using var desktopGraphics = Graphics.FromImage(desktop);
-                desktopGraphics.DrawImageUnscaled(
-                    menuBitmap,
-                    bounds.X - virtualBounds.X,
-                    bounds.Y - virtualBounds.Y);
-            }
-            catch
-            {
-                // A popup can close between enumeration and PrintWindow. One
-                // stale HWND must never invalidate the already captured
-                // desktop frame or force a clean-desktop fallback.
-            }
-        }
-    }
-
-    private static List<IntPtr> EnumerateTransientMenuWindows()
-    {
-        var windows = new List<IntPtr>();
-        var hasCursorPoint = NativeMethods.GetCursorPos(out var cursorPoint);
-        if (hasCursorPoint)
-        {
-            AddTransientMenuWindowTree(
-                windows,
-                NativeMethods.WindowFromPoint(cursorPoint),
-                cursorPoint);
-        }
-
-        AddTransientMenuWindowTree(
-            windows,
-            NativeMethods.GetForegroundWindow(),
-            hasCursorPoint ? cursorPoint : null);
-
-        _ = NativeMethods.EnumWindows((windowHandle, _) =>
-        {
-            if (NativeMethods.IsWindowVisible(windowHandle))
-            {
-                AddTransientMenuWindowTree(
-                    windows,
-                    windowHandle,
-                    hasCursorPoint ? cursorPoint : null);
-            }
-
-            return true;
-        }, IntPtr.Zero);
-        return windows;
-    }
-
-    private static void AddTransientMenuWindowTree(
-        List<IntPtr> windows,
-        IntPtr windowHandle,
-        NativeMethods.NativePoint? cursorPoint = null)
-    {
-        AddTransientMenuWindow(windows, windowHandle, cursorPoint);
-        if (windowHandle == IntPtr.Zero)
-        {
-            return;
-        }
-
-        AddTransientMenuWindow(
-            windows,
-            NativeMethods.GetAncestor(windowHandle, AncestorRoot),
-            cursorPoint);
-
-        // Windows 11 Explorer and several Chromium-based apps host their
-        // popup content in child windows instead of exposing the menu as a
-        // separately enumerated top-level window.
-        _ = NativeMethods.EnumChildWindows(
-            windowHandle,
-            (childHandle, _) =>
-            {
-                AddTransientMenuWindow(windows, childHandle, cursorPoint);
-                return true;
-            },
-            IntPtr.Zero);
-    }
-
-    private static void AddTransientMenuWindow(
-        List<IntPtr> windows,
-        IntPtr windowHandle,
-        NativeMethods.NativePoint? cursorPoint = null)
-    {
-        if (windowHandle == IntPtr.Zero ||
-            !NativeMethods.IsWindowVisible(windowHandle) ||
-            (!IsTransientMenuWindowHandle(windowHandle) &&
-             (!cursorPoint.HasValue ||
-              !IsTransientPopupAtPoint(windowHandle, cursorPoint.Value))) ||
-            windows.Contains(windowHandle))
-        {
-            return;
-        }
-
-        windows.Add(windowHandle);
-    }
-
     private void StoreImmediatePreCapturedScreen(
         CapturedImage? snapshot,
-        IEnumerable<HotKeyAction> actions)
+        IEnumerable<HotKeyAction> actions,
+        long expectedGeneration)
     {
         if (snapshot is null)
         {
@@ -3286,6 +3031,11 @@ public sealed class GlobalHotKeyManager : IDisposable
 
         lock (_immediatePreCaptureLock)
         {
+            if (_disposed || expectedGeneration != Volatile.Read(ref _contextMenuCaptureGeneration))
+            {
+                snapshot.Dispose();
+                return;
+            }
             _immediatePreCapturedScreen?.Dispose();
             _immediatePreCapturedScreen = snapshot;
             _immediatePreCapturedAt = DateTimeOffset.UtcNow;
@@ -3328,7 +3078,7 @@ public sealed class GlobalHotKeyManager : IDisposable
                 return;
             }
 
-            StoreImmediatePreCapturedScreen(snapshot, [action]);
+            StoreImmediatePreCapturedScreen(snapshot, [action], generation);
         });
     }
 
@@ -3356,7 +3106,7 @@ public sealed class GlobalHotKeyManager : IDisposable
                 return;
             }
 
-            StoreImmediatePreCapturedScreen(snapshot, [action]);
+            StoreImmediatePreCapturedScreen(snapshot, [action], generation);
         });
     }
 
@@ -3368,17 +3118,25 @@ public sealed class GlobalHotKeyManager : IDisposable
         {
             if (IsTransientMenuWindowVisible())
             {
-                Thread.Sleep(ContextMenuCaptureDelay);
-                if (IsTransientMenuWindowVisible())
-                {
-                    return CaptureTransientUiScreen();
-                }
+                var snapshot = CaptureSettledMenuFrame(IsTransientMenuWindowVisible,
+                    CaptureTransientUiScreen, Thread.Sleep);
+                if (snapshot is not null) return snapshot;
             }
 
             Thread.Sleep(ContextMenuCapturePollInterval);
         }
 
         return null;
+    }
+
+    internal static CapturedImage? CaptureSettledMenuFrame(Func<bool> visible,
+        Func<CapturedImage?> capture, Action<TimeSpan> wait)
+    {
+        if (!visible()) return null;
+        wait(ContextMenuCaptureDelay);
+        // A menu closed during settling must not seed the cache with the
+        // newly exposed desktop. Capturing itself still precedes activation.
+        return visible() ? capture() : null;
     }
 
     private static bool IsTransientMenuWindowVisible()
@@ -3504,21 +3262,9 @@ public sealed class GlobalHotKeyManager : IDisposable
             elapsed <= ContextMenuCaptureWindow.TotalSeconds * Stopwatch.Frequency;
     }
 
-    private void MarkRecentContextMenuGesture(
-        NativeMethods.NativePoint? releasePoint = null)
+    private void MarkRecentContextMenuGesture()
     {
         var now = Stopwatch.GetTimestamp();
-        // Classify the release before deduplicating the two physical input
-        // sources. Raw Input and WH_MOUSE_LL commonly report the same button
-        // release within a few milliseconds; the second report still carries
-        // the useful Explorer target point and must not erase that evidence.
-        var likelyExplorer = releasePoint.HasValue &&
-            IsExplorerTargetPoint(releasePoint.Value);
-        if (likelyExplorer)
-        {
-            Volatile.Write(ref _lastRightButtonUpLikelyExplorer, 1);
-        }
-
         var previous = Interlocked.Exchange(
             ref _lastRightButtonUpTimestamp,
             now);
@@ -3528,10 +3274,6 @@ public sealed class GlobalHotKeyManager : IDisposable
         {
             return;
         }
-
-        Volatile.Write(
-            ref _lastRightButtonUpLikelyExplorer,
-            likelyExplorer ? 1 : 0);
 
         var actions = _registeredBindings.Values
             .Where(binding => IsTransientUiCaptureAction(binding.Action))
@@ -3543,10 +3285,19 @@ public sealed class GlobalHotKeyManager : IDisposable
             return;
         }
 
-        var generation = Interlocked.Increment(
-            ref _contextMenuCaptureGeneration);
+        CapturedImage? stale;
+        long generation;
+        lock (_immediatePreCaptureLock)
+        {
+            generation = Interlocked.Increment(ref _contextMenuCaptureGeneration);
+            stale = _immediatePreCapturedScreen;
+            _immediatePreCapturedScreen = null;
+            _immediatePreCapturedActions.Clear();
+            _immediatePreCapturedAt = default;
+        }
         _ = Task.Run(() =>
         {
+            stale?.Dispose();
             try
             {
                 var deadline = Stopwatch.GetTimestamp() +
@@ -3562,19 +3313,13 @@ public sealed class GlobalHotKeyManager : IDisposable
                         return;
                     }
 
-                    if (IsTransientMenuWindowVisible() ||
-                        Volatile.Read(ref _lastRightButtonUpLikelyExplorer) != 0)
+                    if (IsTransientMenuWindowVisible())
                     {
-                        // Give the shell/XAML popup one compositor pass to
-                        // finish painting before taking the menu frame.
-                        Thread.Sleep(ContextMenuCaptureDelay);
-                        if (IsTransientMenuWindowVisible() ||
-                            Volatile.Read(ref _lastRightButtonUpLikelyExplorer) != 0)
-                        {
-                            snapshot = CaptureTransientUiScreen();
-                        }
+                        snapshot = CaptureSettledMenuFrame(
+                            () => generation == Volatile.Read(ref _contextMenuCaptureGeneration) && IsTransientMenuWindowVisible(),
+                            CaptureTransientUiScreen, Thread.Sleep);
 
-                        break;
+                        if (snapshot is not null) break;
                     }
 
                     Thread.Sleep(ContextMenuCapturePollInterval);
@@ -3592,7 +3337,7 @@ public sealed class GlobalHotKeyManager : IDisposable
                     return;
                 }
 
-                StoreImmediatePreCapturedScreen(snapshot, actions);
+                StoreImmediatePreCapturedScreen(snapshot, actions, generation);
             }
             catch
             {
@@ -3600,48 +3345,6 @@ public sealed class GlobalHotKeyManager : IDisposable
                 // interfere with normal global input handling.
             }
         });
-    }
-
-    private static bool IsExplorerTargetPoint(
-        NativeMethods.NativePoint point)
-    {
-        try
-        {
-            var window = NativeMethods.WindowFromPoint(point);
-            if (window == IntPtr.Zero)
-            {
-                return false;
-            }
-
-            var root = NativeMethods.GetAncestor(window, AncestorRoot);
-            if (root == IntPtr.Zero)
-            {
-                root = window;
-            }
-
-            var className = new System.Text.StringBuilder(128);
-            _ = NativeMethods.GetClassName(root, className, className.Capacity);
-            if (NativeMethods.GetWindowThreadProcessId(root, out var processId) == 0 ||
-                processId == 0)
-            {
-                return false;
-            }
-
-            using var process = Process.GetProcessById((int)processId);
-            if (!process.ProcessName.Equals("explorer", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            var rootClass = className.ToString();
-            return !rootClass.Equals("Progman", StringComparison.OrdinalIgnoreCase) &&
-                !rootClass.Equals("WorkerW", StringComparison.OrdinalIgnoreCase) &&
-                !rootClass.Equals("Shell_TrayWnd", StringComparison.OrdinalIgnoreCase);
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     private static bool IsSystemMenuForeground()
@@ -4070,7 +3773,7 @@ public sealed class GlobalHotKeyManager : IDisposable
             !isButtonDown &&
             !ShouldSuppressContextMenuGesture(isButtonDown))
         {
-            MarkRecentContextMenuGesture(point);
+            MarkRecentContextMenuGesture();
         }
 
         if (TryConsumeRecentMouseEvent(
@@ -4454,6 +4157,24 @@ public sealed class GlobalHotKeyManager : IDisposable
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
 
+        [DllImport("user32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetGUIThreadInfo(uint threadId, ref GuiThreadInfo info);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct GuiThreadInfo
+        {
+            public uint Size;
+            public uint Flags;
+            public IntPtr Active;
+            public IntPtr Focus;
+            public IntPtr Capture;
+            public IntPtr MenuOwner;
+            public IntPtr MoveSize;
+            public IntPtr Caret;
+            public NativeRect CaretBounds;
+        }
+
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool EnumWindows(EnumWindowsProcedure callback, IntPtr parameter);
@@ -4469,12 +4190,8 @@ public sealed class GlobalHotKeyManager : IDisposable
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool IsWindowVisible(IntPtr windowHandle);
 
-        [DllImport("user32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool PrintWindow(
-            IntPtr windowHandle,
-            IntPtr deviceContext,
-            uint flags);
+        [DllImport("dwmapi.dll")]
+        public static extern int DwmFlush();
 
         [DllImport("user32.dll")]
         public static extern IntPtr GetAncestor(

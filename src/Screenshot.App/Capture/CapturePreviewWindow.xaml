@@ -42,7 +42,7 @@
         <Style x:Key="PrimaryPreviewCommandButton" TargetType="Button" BasedOn="{StaticResource PreviewCommandButton}">
             <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
             <Setter Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
-            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="Foreground" Value="{DynamicResource AppOnAccentBrush}" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
         <Style x:Key="PreviewScrollViewerStyle" TargetType="ScrollViewer">
@@ -114,7 +114,7 @@
                         Background="{DynamicResource AppAccentBrush}"
                         BorderBrush="{DynamicResource AppAccentBrush}"
                         Click="OnConfirmClick"
-                        Foreground="#FFFFFF"
+                        Foreground="{DynamicResource AppOnAccentBrush}"
                         ToolTip="复制并关闭">
                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE73E;" />
                 </Button>

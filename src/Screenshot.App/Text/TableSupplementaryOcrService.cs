@@ -6,9 +6,16 @@ using System.Globalization;
 
 namespace Screenshot.App.Text;
 
-public static class TableSupplementaryOcrService
+public static partial class TableSupplementaryOcrService
 {
-    public static async Task<IReadOnlyList<OcrWordRegion>> RecognizeAsync(
+    public static Task<IReadOnlyList<OcrWordRegion>> RecognizeAsync(
+        CapturedImage image,
+        IReadOnlyList<OcrWordRegion>? primaryWords = null,
+        HighQualityOcrModelManager? modelManager = null,
+        CancellationToken cancellationToken = default) =>
+        Task.Run(() => RecognizeCoreAsync(image, primaryWords, modelManager, cancellationToken), cancellationToken);
+
+    private static async Task<IReadOnlyList<OcrWordRegion>> RecognizeCoreAsync(
         CapturedImage image,
         IReadOnlyList<OcrWordRegion>? primaryWords = null,
         HighQualityOcrModelManager? modelManager = null,
@@ -23,18 +30,13 @@ public static class TableSupplementaryOcrService
                 "zh",
                 StringComparison.OrdinalIgnoreCase)) ??
             (languages.Count > 0 ? languages[0] : null);
-        if (language is null)
+        cancellationToken.ThrowIfCancellationRequested();
+        var words = new List<OcrWordRegion>();
+        if (language is not null)
         {
-            return [];
+            var recognition = await OcrService.RecognizeAsync(image, language, cancellationToken);
+            if (recognition.IsSuccess) words.AddRange(recognition.Words);
         }
-
-        var recognition = await OcrService.RecognizeAsync(
-            image,
-            language,
-            cancellationToken);
-        var words = recognition.IsSuccess
-            ? recognition.Words.ToList()
-            : [];
 
         if (primaryWords is { Count: > 0 })
         {
@@ -53,7 +55,7 @@ public static class TableSupplementaryOcrService
                     atlasImage,
                     modelManager,
                     cancellationToken);
-                if (!atlasRecognition.IsSuccess)
+                if (!atlasRecognition.IsSuccess && language is not null)
                 {
                     atlasRecognition = await OcrService.RecognizeAsync(
                         atlasImage,
@@ -87,6 +89,9 @@ public static class TableSupplementaryOcrService
             }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
+        words.AddRange(await RecognizeSeparatedCellsAsync(image, primaryWords ?? [], words,
+            modelManager, language, cancellationToken));
         return words;
     }
 

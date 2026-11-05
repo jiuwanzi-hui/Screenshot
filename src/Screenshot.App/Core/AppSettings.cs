@@ -15,6 +15,8 @@ public enum AppTheme
     ForestNight,
     ObsidianGold,
     NeonDeep,
+    GlassMist,
+    GlassInk,
 }
 
 public enum WindowCloseBehavior
@@ -76,6 +78,11 @@ public enum AnnotationToolMode
     Brush,
     Mosaic,
     Text,
+    Line,
+    WavyLine,
+    RectangleMosaic,
+    DoubleArrow,
+    HollowDoubleArrow,
 }
 
 public enum CaptureToolbarFeature
@@ -97,6 +104,10 @@ public enum CaptureToolbarFeature
     PrivacyRedaction,
     PinImage,
     UndoRedo,
+    Line,
+    DoubleArrow,
+    Watermark,
+    AspectRatio,
 }
 
 public enum CaptureToolbarRowCount
@@ -140,7 +151,9 @@ public readonly record struct VideoRecordingAnnotationPreferences(
 public readonly record struct AnnotationToolSetting(
     string Tool,
     string Color,
-    double StrokeWidth);
+    double StrokeWidth,
+    string? Variant = null,
+    bool TextBackground = false);
 
 public enum TranslationMode
 {
@@ -152,8 +165,9 @@ public enum TranslationMode
 
 public enum TranslationProviderKind
 {
-    Online,
-    Offline,
+    Online = 0,
+    Offline = 1,
+    Public = 2,
 }
 
 public enum OfflineTranslationQuality
@@ -167,6 +181,7 @@ public enum OcrEngineMode
 {
     Windows,
     PaddleOcrV6,
+    QwenVisualOcr,
 }
 
 public enum RecognitionResultPresentationMode
@@ -178,13 +193,18 @@ public enum RecognitionResultPresentationMode
 public enum OfflineTranslationEngine
 {
     Mozilla,
+    // Persisted name retained for existing settings; the optional engine now
+    // uses the dedicated TranslateGemma multilingual model.
     QwenLargeModel,
+    HunyuanLightweight,
 }
 
 /// <summary>
 /// A named online AI translation configuration. Secrets are kept in the
 /// encrypted credential store and referenced by Id rather than serialized here.
 /// </summary>
+public enum OnlineModelPurpose { Automatic, TextTranslation, ImageQuestion, ImageGeneration }
+
 public sealed record AiTranslationProfile
 {
     public string Id { get; init; } = Guid.NewGuid().ToString("N");
@@ -193,6 +213,8 @@ public sealed record AiTranslationProfile
     public string Provider { get; init; } = "OpenAICompatible";
     public string Endpoint { get; init; } = string.Empty;
     public string Model { get; init; } = string.Empty;
+    public string AppId { get; init; } = string.Empty;
+    public OnlineModelPurpose Purpose { get; init; }
 
     // Cached UI state only.  The service is still checked in the background
     // on startup; these fields keep the last known result visible until that
@@ -214,7 +236,11 @@ public sealed record AppSettings
     // Version 13 adds a durable "last annotation tool" preference. Previous
     // configurations already remember arrow/shape variants, so they can be
     // upgraded without resetting the toolbar to its default rectangle.
-    public int SettingsVersion { get; init; } = 15;
+    // Version 17 adds the double-arrow tool once without resetting custom layouts.
+    // Version 18 adds the ordinary-capture watermark button; automatic stamping remains opt-in.
+    public int SettingsVersion { get; init; } = 19;
+
+    public WatermarkSettings Watermark { get; init; } = new();
 
     public string SaveDirectory { get; init; } = GetDefaultSaveDirectory();
 
@@ -290,7 +316,7 @@ public sealed record AppSettings
         Enum.GetValues<CaptureToolbarFeature>();
 
     public CaptureToolbarFeature[] CaptureToolbarFeatureOrder { get; init; } =
-        Enum.GetValues<CaptureToolbarFeature>();
+        DefaultCaptureToolbarFeatureOrder();
 
     public Dictionary<CaptureToolbarFeature, string> CaptureToolbarFeatureShortcuts { get; init; } = [];
 
@@ -338,6 +364,11 @@ public sealed record AppSettings
     public string OcrHotKey { get; init; } = "Ctrl+Alt+O";
 
     public string TextTranslationHotKey { get; init; } = string.Empty;
+    public string ImageQuestionHotKey { get; init; } = string.Empty;
+
+    public string RealtimeTranslationHotKey { get; init; } = string.Empty;
+
+    public RealtimeTranslationSettings RealtimeTranslation { get; init; } = new();
 
     public string PinHotKey { get; init; } = "Ctrl+Alt+P";
 
@@ -379,6 +410,10 @@ public sealed record AppSettings
 
     public OcrEngineMode OcrEngine { get; init; } = OcrEngineMode.Windows;
 
+    public bool AutoOcrAfterCapture { get; init; }
+
+    public bool EnableImageQuestion { get; init; } = true;
+
     public RecognitionResultPresentationMode RecognitionResultPresentation { get; init; } =
         RecognitionResultPresentationMode.Overlay;
 
@@ -387,6 +422,7 @@ public sealed record AppSettings
     public string TranslationEndpoint { get; init; } = string.Empty;
 
     public string TranslationTargetLanguage { get; init; } = "zh-Hans";
+    public string InterfaceLanguage { get; init; } = "zh-Hans";
 
     public string TranslationModel { get; init; } = "gpt-4.1-mini";
 
@@ -426,6 +462,20 @@ public sealed record AppSettings
 
     public bool SendTextToOnlineTranslation { get; init; }
 
+    internal static CaptureToolbarFeature[] DefaultCaptureToolbarFeatureOrder()
+    {
+        var features = Enum.GetValues<CaptureToolbarFeature>().ToList();
+        features.Remove(CaptureToolbarFeature.Line);
+        features.Insert(features.IndexOf(CaptureToolbarFeature.Brush), CaptureToolbarFeature.Line);
+        features.Remove(CaptureToolbarFeature.DoubleArrow);
+        features.Insert(features.IndexOf(CaptureToolbarFeature.Arrow) + 1, CaptureToolbarFeature.DoubleArrow);
+        features.Remove(CaptureToolbarFeature.Watermark);
+        features.Insert(features.IndexOf(CaptureToolbarFeature.PinImage), CaptureToolbarFeature.Watermark);
+        features.Remove(CaptureToolbarFeature.AspectRatio);
+        features.Insert(features.IndexOf(CaptureToolbarFeature.VideoRecording), CaptureToolbarFeature.AspectRatio);
+        return features.ToArray();
+    }
+
     public static AppSettings CreateDefault()
     {
         return new AppSettings();
@@ -436,8 +486,8 @@ public sealed record AppSettings
         if (SettingsVersion < 3)
         {
             return TranslationMode == TranslationMode.Offline
-                ? [TranslationProviderKind.Offline, TranslationProviderKind.Online]
-                : [TranslationProviderKind.Online, TranslationProviderKind.Offline];
+                ? [TranslationProviderKind.Offline, TranslationProviderKind.Online, TranslationProviderKind.Public]
+                : [TranslationProviderKind.Online, TranslationProviderKind.Offline, TranslationProviderKind.Public];
         }
 
         var providers = (TranslationProviderPriority ?? [])
@@ -503,11 +553,31 @@ public sealed record AppSettings
             visibleCaptureToolbarFeatures.Add(CaptureToolbarFeature.CopyTable);
         }
 
+        if (SettingsVersion < 16 && !visibleCaptureToolbarFeatures.Contains(CaptureToolbarFeature.Line))
+            visibleCaptureToolbarFeatures.Add(CaptureToolbarFeature.Line);
+
+        if (SettingsVersion < 17 && !visibleCaptureToolbarFeatures.Contains(CaptureToolbarFeature.DoubleArrow))
+            visibleCaptureToolbarFeatures.Add(CaptureToolbarFeature.DoubleArrow);
+
         var captureToolbarFeatureOrder =
             (CaptureToolbarFeatureOrder ?? defaults.CaptureToolbarFeatureOrder)
             .Where(Enum.IsDefined)
             .Distinct()
             .ToList();
+        if (SettingsVersion < 18 && !visibleCaptureToolbarFeatures.Contains(CaptureToolbarFeature.Watermark))
+            visibleCaptureToolbarFeatures.Add(CaptureToolbarFeature.Watermark);
+        if (SettingsVersion < 19 && !visibleCaptureToolbarFeatures.Contains(CaptureToolbarFeature.AspectRatio))
+            visibleCaptureToolbarFeatures.Add(CaptureToolbarFeature.AspectRatio);
+        if (!captureToolbarFeatureOrder.Contains(CaptureToolbarFeature.AspectRatio))
+        {
+            var actionIndex = captureToolbarFeatureOrder.IndexOf(CaptureToolbarFeature.VideoRecording);
+            captureToolbarFeatureOrder.Insert(actionIndex >= 0 ? actionIndex : captureToolbarFeatureOrder.Count, CaptureToolbarFeature.AspectRatio);
+        }
+        if (!captureToolbarFeatureOrder.Contains(CaptureToolbarFeature.Watermark))
+        {
+            var pinIndex = captureToolbarFeatureOrder.IndexOf(CaptureToolbarFeature.PinImage);
+            captureToolbarFeatureOrder.Insert(pinIndex >= 0 ? pinIndex : captureToolbarFeatureOrder.Count, CaptureToolbarFeature.Watermark);
+        }
         if (SettingsVersion < 15 &&
             !captureToolbarFeatureOrder.Contains(CaptureToolbarFeature.CopyTable))
         {
@@ -518,6 +588,16 @@ public sealed record AppSettings
                     ? textRecognitionIndex + 1
                     : captureToolbarFeatureOrder.Count,
                 CaptureToolbarFeature.CopyTable);
+        }
+        if (!captureToolbarFeatureOrder.Contains(CaptureToolbarFeature.Line))
+        {
+            var brushIndex = captureToolbarFeatureOrder.IndexOf(CaptureToolbarFeature.Brush);
+            captureToolbarFeatureOrder.Insert(brushIndex >= 0 ? brushIndex : captureToolbarFeatureOrder.Count, CaptureToolbarFeature.Line);
+        }
+        if (!captureToolbarFeatureOrder.Contains(CaptureToolbarFeature.DoubleArrow))
+        {
+            var arrowIndex = captureToolbarFeatureOrder.IndexOf(CaptureToolbarFeature.Arrow);
+            captureToolbarFeatureOrder.Insert(arrowIndex >= 0 ? arrowIndex + 1 : captureToolbarFeatureOrder.Count, CaptureToolbarFeature.DoubleArrow);
         }
         foreach (var feature in Enum.GetValues<CaptureToolbarFeature>())
         {
@@ -532,7 +612,7 @@ public sealed record AppSettings
             .Select(pair => new KeyValuePair<CaptureToolbarFeature, string>(
                 pair.Key,
                 NormalizeToolbarShortcut(pair.Value)))
-            .Where(pair => pair.Value.Length == 1)
+            .Where(pair => pair.Value.Length > 0)
             .GroupBy(pair => pair.Value)
             .Select(group => group.First())
             .ToDictionary(pair => pair.Key, pair => pair.Value);
@@ -557,6 +637,8 @@ public sealed record AppSettings
                     ? defaults.TranslationProvider
                     : profile.Provider.Trim(),
                 Endpoint = profile.Endpoint?.Trim() ?? string.Empty,
+                AppId = profile.AppId?.Trim() ?? string.Empty,
+                Purpose = Enum.IsDefined(profile.Purpose) ? profile.Purpose : OnlineModelPurpose.Automatic,
                 Model = string.IsNullOrWhiteSpace(profile.Model)
                     ? string.Empty
                     : profile.Model.Trim(),
@@ -582,7 +664,8 @@ public sealed record AppSettings
 
         return this with
         {
-            SettingsVersion = Math.Max(SettingsVersion, 15),
+            SettingsVersion = Math.Max(SettingsVersion, 19),
+            Watermark = (Watermark ?? new()).Normalize(),
             Theme = NormalizeTheme(Theme),
             CloseBehavior = Enum.IsDefined(CloseBehavior)
                 ? CloseBehavior
@@ -668,6 +751,10 @@ public sealed record AppSettings
             ScrollCaptureHotKey = ScrollCaptureHotKey?.Trim() ?? string.Empty,
             OcrHotKey = OcrHotKey?.Trim() ?? string.Empty,
             TextTranslationHotKey = TextTranslationHotKey?.Trim() ?? string.Empty,
+            ImageQuestionHotKey = ImageQuestionHotKey?.Trim() ?? string.Empty,
+            RealtimeTranslationHotKey = RealtimeTranslationHotKey?.Trim() ?? string.Empty,
+            RealtimeTranslation = (RealtimeTranslation ?? new()).Normalize(),
+            InterfaceLanguage = InterfaceLanguage is "en" or "fr" or "ru" or "es" or "ar" ? InterfaceLanguage : "zh-Hans",
             PinHotKey = PinHotKey?.Trim() ?? string.Empty,
             OpenSettingsHotKey = OpenSettingsHotKey?.Trim() ?? string.Empty,
             MouseLongPressMilliseconds = Math.Clamp(
@@ -754,12 +841,10 @@ public sealed record AppSettings
     private static string NormalizeToolbarShortcut(string? shortcut)
     {
         var value = shortcut?.Trim() ?? string.Empty;
-        return value.Length == 1 && IsAsciiDigit(value[0])
-            ? value.ToUpperInvariant()
+        return CaptureToolbarShortcut.TryNormalize(value, out var normalized)
+            ? normalized
             : string.Empty;
     }
-
-    private static bool IsAsciiDigit(char value) => value is >= '0' and <= '9';
 
     private static int NormalizeRetentionDays(int days)
     {
@@ -777,7 +862,9 @@ public sealed record AppSettings
             AppTheme.GinkgoPaper or
             AppTheme.ForestNight or
             AppTheme.ObsidianGold or
-            AppTheme.NeonDeep => theme,
+            AppTheme.NeonDeep or
+            AppTheme.GlassMist or
+            AppTheme.GlassInk => theme,
             _ => AppTheme.AuroraMist,
         };
     }

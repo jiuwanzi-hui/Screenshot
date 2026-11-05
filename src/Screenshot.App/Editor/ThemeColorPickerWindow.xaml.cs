@@ -2,6 +2,8 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Screenshot.App.Infrastructure;
+using Screenshot.App.Presentation;
 using WpfBrush = System.Windows.Media.Brush;
 using WpfColor = System.Windows.Media.Color;
 
@@ -31,6 +33,34 @@ public partial class ThemeColorPickerWindow : Window
     public event EventHandler<int[]>? PaletteChanged;
 
     public WpfBrush PreviewBrush => new SolidColorBrush(SelectedColor);
+
+    internal void ShowBelow(FrameworkElement anchor)
+    {
+        var origin = anchor.PointToScreen(new System.Windows.Point());
+        var corner = anchor.PointToScreen(new System.Windows.Point(anchor.ActualWidth, anchor.ActualHeight));
+        var reference = System.Drawing.Rectangle.FromLTRB((int)origin.X, (int)origin.Y, (int)corner.X, (int)corner.Y);
+        var workArea = MonitorGeometryService.GetWorkArea(reference);
+        var dpi = MonitorGeometryService.GetDpiScale(reference);
+        var anchorBounds = Owner is not null && MonitorGeometryService.TryGetWindowBounds(Owner, out var ownerBounds)
+            ? new Rect(origin.X, ownerBounds.Top, Math.Max(0, corner.X - origin.X), ownerBounds.Height)
+            : new Rect(origin, corner);
+        var bounds = new Rect(workArea.Left + 8, workArea.Top + 8, Math.Max(0, workArea.Width - 16), Math.Max(0, workArea.Height - 16));
+        ColorPicker.Measure(new System.Windows.Size(Width, double.PositiveInfinity));
+        var initial = ToolbarPopupPlacement.Below(anchorBounds,
+            new System.Windows.Size(Width * dpi.X, ColorPicker.DesiredSize.Height * dpi.Y), bounds);
+        WindowStartupLocation = WindowStartupLocation.Manual;
+        Left = initial.X / dpi.X;
+        Top = initial.Y / dpi.Y;
+        void PositionAfterLayout(object sender, RoutedEventArgs args)
+        {
+            Loaded -= PositionAfterLayout;
+            if (!MonitorGeometryService.TryGetWindowBounds(this, out var actual)) return;
+            var position = ToolbarPopupPlacement.Below(anchorBounds, new System.Windows.Size(actual.Width, actual.Height), bounds);
+            MonitorGeometryService.TryMoveWindow(this, (int)Math.Round(position.X), (int)Math.Round(position.Y));
+        }
+        Loaded += PositionAfterLayout;
+        Show();
+    }
 
     protected override void OnClosed(EventArgs e)
     {

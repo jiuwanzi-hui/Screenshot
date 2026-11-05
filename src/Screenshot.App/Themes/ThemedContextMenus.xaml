@@ -1,5 +1,33 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Explicitly replace WPF's menu-specific viewer, whose edge buttons
+         scroll on hover. Only the wheel, scrollbar and keyboard scroll here. -->
+    <Style x:Key="ThemedMenuScrollViewerStyle" TargetType="ScrollViewer">
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ScrollViewer">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <ScrollContentPresenter x:Name="PART_ScrollContentPresenter"
+                                                CanContentScroll="{TemplateBinding CanContentScroll}"
+                                                Content="{TemplateBinding Content}"
+                                                ContentTemplate="{TemplateBinding ContentTemplate}" />
+                        <ScrollBar x:Name="PART_VerticalScrollBar" Grid.Column="1"
+                                   Focusable="False" Orientation="Vertical"
+                                   Maximum="{TemplateBinding ScrollableHeight}"
+                                   ViewportSize="{TemplateBinding ViewportHeight}"
+                                   Value="{TemplateBinding VerticalOffset}"
+                                   Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="ThemedContextMenuStyle" TargetType="ContextMenu">
         <Setter Property="OverridesDefaultStyle" Value="True" />
         <Setter Property="Background" Value="Transparent" />
@@ -12,8 +40,8 @@
                     <Border x:Name="ContextMenuShell"
                             Margin="0,5,0,0"
                             Padding="5"
-                            Background="{DynamicResource AppPanelBackgroundBrush}"
-                            BorderBrush="{DynamicResource AppBorderBrush}"
+                            Background="{DynamicResource AppPopupBackgroundBrush}"
+                            BorderBrush="{DynamicResource AppControlEdgeBrush}"
                             BorderThickness="1"
                             CornerRadius="9"
                             SnapsToDevicePixels="True">
@@ -24,8 +52,25 @@
                                               ShadowDepth="5"
                                               Color="#001014" />
                         </Border.Effect>
-                        <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
+                        <ScrollViewer x:Name="MenuScrollViewer"
+                                      Style="{StaticResource ThemedMenuScrollViewerStyle}"
+                                      CanContentScroll="True"
+                                      HorizontalScrollBarVisibility="Disabled"
+                                      VerticalScrollBarVisibility="Auto">
+                            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Cycle" />
+                        </ScrollViewer>
                     </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="ThemedMenuSeparatorStyle" TargetType="Separator">
+        <Setter Property="Margin" Value="7,3" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Separator">
+                    <Border Height="1" Background="{DynamicResource AppSeparatorBrush}" />
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
@@ -51,6 +96,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsHighlighted" Value="True">
+                            <Setter Property="Foreground" Value="{DynamicResource AppSelectedControlForegroundBrush}" />
                             <Setter TargetName="MenuItemBackground"
                                     Property="Background"
                                     Value="{DynamicResource AppAccentMutedBrush}" />
@@ -60,11 +106,36 @@
                                     Property="Background"
                                     Value="{DynamicResource AppAccentBrush}" />
                             <Setter Property="Foreground"
-                                    Value="{DynamicResource ImageEditorToolbarSelectedIconBrush}" />
+                                    Value="{DynamicResource AppMenuCheckedForegroundBrush}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.45" />
                         </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="ToolbarInlineChoiceStyle" TargetType="ToggleButton">
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="ChoiceSurface" Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="6" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="ChoiceSurface" Property="Background" Value="{DynamicResource EditorToolbarButtonHoverBackgroundBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="ChoiceSurface" Property="Background" Value="{DynamicResource EditorToolbarButtonSelectedBackgroundBrush}" />
+                            <Setter TargetName="ChoiceSurface" Property="BorderBrush" Value="{DynamicResource EditorToolbarButtonSelectedBorderBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

@@ -6,17 +6,20 @@ namespace Screenshot.App.Capture;
 
 public partial class StartupFeedbackWindow : Window
 {
-    private StartupFeedbackWindow(string message)
+    private readonly int _visibleMilliseconds;
+
+    private StartupFeedbackWindow(string message, int visibleMilliseconds)
     {
         InitializeComponent();
+        _visibleMilliseconds = visibleMilliseconds;
         MessageText.Text = message;
         WindowStartupLocation = WindowStartupLocation.Manual;
         Loaded += OnLoaded;
     }
 
-    internal static Task ShowAsync(string message)
+    internal static Task ShowAsync(string message, int visibleMilliseconds = 1300)
     {
-        var window = new StartupFeedbackWindow(message);
+        var window = new StartupFeedbackWindow(message, visibleMilliseconds);
         window.Show();
         return window.Dispatcher.InvokeAsync(
             () => { }, DispatcherPriority.Loaded).Task.ContinueWith(
@@ -31,7 +34,7 @@ public partial class StartupFeedbackWindow : Window
         Top = workArea.Top + ((workArea.Height - ActualHeight) / 2);
         await Dispatcher.Yield(DispatcherPriority.Render);
         Toast.BeginAnimation(OpacityProperty, new DoubleAnimation(1, TimeSpan.FromMilliseconds(180)));
-        await Task.Delay(1300);
+        await Task.Delay(_visibleMilliseconds);
         Toast.BeginAnimation(OpacityProperty, new DoubleAnimation(0, TimeSpan.FromMilliseconds(220)));
         await Task.Delay(240);
         Close();

@@ -1,0 +1,61 @@
+<UserControl x:Class="Screenshot.App.Presentation.WatermarkSettingsControl"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+ FontSize="14" FontFamily="Microsoft YaHei UI" Foreground="{DynamicResource AppTextPrimaryBrush}">
+ <StackPanel>
+  <TextBlock Text="水印预设" FontSize="20" FontWeight="SemiBold" />
+  <TextBlock Text="图案、文字、时间和地点可分别摆放与缩放，预设会按截图尺寸适配。" TextWrapping="Wrap" Margin="0,6,0,16" Foreground="{DynamicResource AppTextSecondaryBrush}" />
+  <CheckBox x:Name="AutoApply" Content="普通截图自动添加水印" Style="{DynamicResource SettingsSwitch}" Checked="OnEdited" Unchecked="OnEdited" Margin="0,0,0,16" />
+  <TextBlock Text="水印文字" FontWeight="SemiBold" Margin="0,0,0,6" />
+  <TextBox x:Name="WatermarkText" MaxLength="300" AcceptsReturn="True" MinHeight="72" Padding="12,8" TextWrapping="Wrap" TextChanged="OnTextEdited" />
+  <WrapPanel Margin="0,14,0,10">
+   <CheckBox x:Name="IncludeTime" Content="拼接截图时间" MinWidth="190" Style="{DynamicResource SettingsSwitch}" Checked="OnEdited" Unchecked="OnEdited" VerticalAlignment="Center" Margin="0,0,16,6" />
+   <ComboBox x:Name="TimeFormat" Width="225" SelectionChanged="OnFormatChanged" Margin="0,0,0,6" />
+  </WrapPanel>
+  <CheckBox x:Name="IncludeLocation" Content="拼接地理位置" Style="{DynamicResource SettingsSwitch}" Checked="OnEdited" Unchecked="OnEdited" Margin="0,0,0,10" />
+  <StackPanel x:Name="LocationOptions" Margin="0,0,0,12">
+   <WrapPanel>
+    <ComboBox x:Name="LocationMode" Width="225" SelectionChanged="OnLocationModeChanged" Margin="0,0,16,6">
+     <ComboBoxItem Content="地点名称（城市／地区，联网）" />
+     <ComboBoxItem Content="经纬度（系统定位）" />
+     <ComboBoxItem Content="手动填写地点" />
+    </ComboBox>
+    <Button x:Name="LocateButton" Content="获取当前位置" Style="{DynamicResource SecondaryButton}" Click="OnLocateClick" Margin="0,0,0,6" />
+   </WrapPanel>
+   <TextBlock Text="手填地点（输入后立即使用，也作为定位失败时的备用地点）" TextWrapping="Wrap" Margin="0,6,0,6" />
+   <TextBox x:Name="ManualLocation" MaxLength="120" MinHeight="40" Padding="12,8" TextChanged="OnManualLocationEdited" />
+   <TextBlock Text="地点名称：读取 Windows 当前位置并发送经纬度至 BigDataCloud 查询城市／地区，需要联网；不保证街道门牌精度。经纬度模式不请求城市服务。定位或查询失败时使用手填地点。" TextWrapping="Wrap" FontSize="12" Margin="0,6,0,0" Foreground="{DynamicResource AppTextSecondaryBrush}" />
+  </StackPanel>
+  <DockPanel Margin="0,12,0,10">
+   <Button x:Name="ImportButton" DockPanel.Dock="Right" Content="导入图片" Style="{DynamicResource SecondaryButton}" Click="OnImportClick" />
+   <StackPanel>
+    <TextBlock Text="水印图案" FontWeight="SemiBold" />
+    <TextBlock Text="最多 3 张，每次选 1 张；支持透明 PNG、JPG、BMP。" FontSize="12" Margin="0,5,10,0" TextWrapping="Wrap" Foreground="{DynamicResource AppTextSecondaryBrush}" />
+   </StackPanel>
+  </DockPanel>
+  <WrapPanel x:Name="ImageSlots" />
+  <Button Content="不使用图片，仅使用文字信息" HorizontalAlignment="Left" Margin="0,8,0,12" Style="{DynamicResource SecondaryButton}" Click="OnClearImageClick" />
+  <TextBlock Text="预览与摆放" FontWeight="SemiBold" Margin="0,12,0,6" />
+  <TextBlock Text="分别点击图案、文字、时间或地点：拖动调整位置，拖动右下角方块调整图片或字号。方向键微调，加减键缩放，Esc 撤回本次拖动。" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource AppTextSecondaryBrush}" Margin="0,0,0,12" />
+  <WrapPanel Margin="0,0,0,10">
+   <TextBlock Text="调整元素" VerticalAlignment="Center" Margin="0,0,12,0" />
+   <ComboBox x:Name="ElementSelector" Width="150" SelectionChanged="OnElementChanged">
+    <ComboBoxItem Content="图案" /><ComboBoxItem Content="文字" /><ComboBoxItem Content="时间" /><ComboBoxItem Content="地点" />
+   </ComboBox>
+   <TextBlock x:Name="ElementHint" TextWrapping="Wrap" VerticalAlignment="Center" Margin="12,0,0,0" FontSize="12" Foreground="{DynamicResource AppTextSecondaryBrush}" />
+  </WrapPanel>
+  <ContentControl x:Name="PreviewHost" Height="290" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+  <Grid Margin="0,12,0,0">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="60"/></Grid.ColumnDefinitions>
+   <TextBlock Text="不透明度" VerticalAlignment="Center" Margin="0,0,14,0" />
+   <Slider x:Name="WatermarkOpacity" Grid.Column="1" Style="{DynamicResource MouseDurationSlider}" Minimum="10" Maximum="100" ValueChanged="OnSliderChanged" VerticalAlignment="Center" />
+   <TextBlock x:Name="OpacityLabel" Grid.Column="2" HorizontalAlignment="Right" VerticalAlignment="Center" />
+  </Grid>
+  <WrapPanel Margin="0,16,0,8">
+   <CheckBox x:Name="DarkText" Content="深色文字" MinWidth="145" Style="{DynamicResource SettingsSwitch}" Checked="OnEdited" Unchecked="OnEdited" VerticalAlignment="Center" Margin="0,0,16,0" />
+   <Button Content="重置所选元素" Style="{DynamicResource SecondaryButton}" Click="OnResetPositionClick" />
+  </WrapPanel>
+  <TextBlock x:Name="Status" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{DynamicResource AppTextSecondaryBrush}" />
+  <TextBlock Text="图片保存在本机，不会上传。预览和截图时按需加载，关闭后释放；定位仅在需要时读取，不在空闲时监听。" TextWrapping="Wrap" FontSize="12" Margin="0,10,0,0" Foreground="{DynamicResource AppTextSecondaryBrush}" />
+ </StackPanel>
+</UserControl>

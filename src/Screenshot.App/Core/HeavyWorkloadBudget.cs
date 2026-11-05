@@ -3,17 +3,18 @@ namespace Screenshot.App.Core;
 internal static class HeavyWorkloadBudget
 {
     private const int MaximumCpuThreads = 4;
+    // Evaluated only inside the short-lived OCR worker's computation thread.
+    private static readonly Lazy<int> NativeOcrThreads = new(() => ComputeResourceBudget.OcrThreads(ComputeResourceBudget.Capture()));
 
     internal static int CpuThreadCount =>
         CalculateCpuThreadCount(Environment.ProcessorCount);
 
     /// <summary>
-    /// Bounded foreground budget for a user-requested OCR operation. Four
-    /// native ONNX workers are enough to accelerate small screenshot crops,
-    /// while keeping input and compositor threads responsive on low-end CPUs.
+    /// Foreground OCR scales with CPU capacity. Large machines can use more
+    /// native workers; smaller machines retain headroom for input/rendering.
     /// </summary>
     internal static int OcrThreadCount =>
-        CalculateOcrThreadCount(Environment.ProcessorCount);
+        NativeOcrThreads.Value;
 
     /// <summary>
     /// Thread budget for a user-visible blocking operation such as
@@ -24,6 +25,10 @@ internal static class HeavyWorkloadBudget
     /// </summary>
     internal static int BurstCpuThreadCount =>
         CalculateBurstCpuThreadCount(Environment.ProcessorCount);
+
+    /// <summary>Bounded budget for native translation worker pools.</summary>
+    internal static int TranslationCpuThreadCount =>
+        CalculateCpuThreadCount(Environment.ProcessorCount);
 
     internal static int CalculateCpuThreadCount(int logicalProcessorCount)
     {
@@ -53,6 +58,15 @@ internal static class HeavyWorkloadBudget
             return 1;
         }
 
-        return Math.Min(4, Math.Max(2, logicalProcessorCount / 3));
+        // Conservative fallback when physical topology cannot be read. Normal
+        // operation uses ComputeResourceBudget and the Medium measurements.
+        return logicalProcessorCount switch
+        {
+            >= 32 => 12,
+            >= 24 => 8,
+            >= 16 => 6,
+            >= 12 => 4,
+            _ => 2,
+        };
     }
 }

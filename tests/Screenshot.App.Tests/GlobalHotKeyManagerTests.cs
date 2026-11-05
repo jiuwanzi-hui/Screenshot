@@ -8,6 +8,18 @@ namespace Screenshot.App.Tests;
 
 public sealed class GlobalHotKeyManagerTests
 {
+    // Simulated unit input must not inherit physical keys held in other apps
+    // or replay button events onto the user's desktop. Individual replay/key
+    // state tests can replace these callbacks with their own probes.
+    // Live pointer motion must not cancel synthetic holds while Win32 pumps
+    // messages. These tests feed the same input handlers directly.
+    private static GlobalHotKeyManager CreateIsolatedManager() => new(deferLowLevelInputHooks: true)
+    {
+        KeyboardKeyStateOverride = _ => false,
+        ReplayPrimaryMouseButtonOverride = (_, _) => { },
+        ReplayPrimaryMouseButtonUpOverride = _ => { },
+        ReplayMouseSideButtonOverride = _ => { },
+    };
     [Fact]
     public void DiscardsOrdinaryPreCaptureWhilePreviousOverlayIsSettling()
     {
@@ -26,7 +38,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             manager.SetCaptureOverlayActive(true);
 
             Assert.False(manager.ShouldSuppressContextMenuGestureForTest(
@@ -45,7 +57,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
 
             Assert.False(manager.ShouldSuppressContextMenuGestureForTest(
                 isButtonDown: false));
@@ -161,7 +173,7 @@ public sealed class GlobalHotKeyManagerTests
         {
             try
             {
-                using var manager = new GlobalHotKeyManager();
+                using var manager = CreateIsolatedManager();
                 var modifiers =
                     HotKeyModifiers.Control |
                     HotKeyModifiers.Alt |
@@ -217,8 +229,8 @@ public sealed class GlobalHotKeyManagerTests
         {
             try
             {
-                using var blocker = new GlobalHotKeyManager();
-                using var manager = new GlobalHotKeyManager();
+                using var blocker = CreateIsolatedManager();
+                using var manager = CreateIsolatedManager();
                 var modifiers =
                     HotKeyModifiers.Control |
                     HotKeyModifiers.Alt |
@@ -266,7 +278,7 @@ public sealed class GlobalHotKeyManagerTests
         {
             try
             {
-                using var manager = new GlobalHotKeyManager();
+                using var manager = CreateIsolatedManager();
                 var binding = new HotKeyBinding(
                     HotKeyAction.RegionCapture,
                     new HotKeyGesture(
@@ -317,7 +329,7 @@ public sealed class GlobalHotKeyManagerTests
         {
             try
             {
-                using var manager = new GlobalHotKeyManager();
+                using var manager = CreateIsolatedManager();
                 manager.HotKeyCaptureInputReceived += (_, eventArgs) =>
                     inputs.Add(eventArgs);
 
@@ -374,7 +386,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             HotKeyCaptureInputEventArgs? input = null;
             manager.HotKeyCaptureInputReceived += (_, eventArgs) =>
                 input = eventArgs;
@@ -436,7 +448,10 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            // This test feeds a synthetic hold at (0, 0). Live mouse input can
+            // cancel it while Win32 calls pump messages on the test dispatcher.
+            using var manager = new GlobalHotKeyManager(deferLowLevelInputHooks: true);
+            manager.ReplayPrimaryMouseButtonUpOverride = _ => { };
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -475,7 +490,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -514,7 +529,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -553,7 +568,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -592,7 +607,13 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = new GlobalHotKeyManager(deferLowLevelInputHooks: true)
+            {
+                // This unit test supplies raw modifier events below. Real keys
+                // held in another application must not alter its initial state.
+                KeyboardKeyStateOverride = _ => false,
+                ReplayPrimaryMouseButtonUpOverride = _ => { },
+            };
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -637,7 +658,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -679,7 +700,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             manager.ConfigureMouseLongPress(configuredMilliseconds);
 
             Assert.Equal(
@@ -693,7 +714,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             manager.ConfigureMouseLongPress(600);
             Assert.True(manager.Apply(
             [
@@ -730,7 +751,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             manager.ConfigureMouseLongPress(600);
             Assert.True(manager.Apply(
             [
@@ -768,7 +789,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             manager.ConfigureMouseLongPress(600);
             Assert.True(manager.Apply(
             [
@@ -806,7 +827,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             manager.ConfigureMouseLongPress(600);
             Assert.True(manager.Apply(
             [
@@ -841,7 +862,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             manager.ConfigureMouseLongPress(600);
             Assert.True(manager.Apply(
             [
@@ -875,7 +896,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -914,7 +935,7 @@ public sealed class GlobalHotKeyManagerTests
         using var released = new ManualResetEventSlim();
         WpfTestHost.Invoke(() =>
         {
-            manager = new GlobalHotKeyManager();
+            manager = CreateIsolatedManager();
             manager.ReplayPrimaryMouseButtonOverride = (_, _) =>
                 replayedClickCount++;
             Assert.True(manager.Apply(
@@ -971,7 +992,7 @@ public sealed class GlobalHotKeyManagerTests
         using var triggered = new ManualResetEventSlim();
         WpfTestHost.Invoke(() =>
         {
-            manager = new GlobalHotKeyManager();
+            manager = CreateIsolatedManager();
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -1007,7 +1028,7 @@ public sealed class GlobalHotKeyManagerTests
         using var triggered = new ManualResetEventSlim();
         WpfTestHost.Invoke(() =>
         {
-            manager = new GlobalHotKeyManager();
+            manager = CreateIsolatedManager();
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -1059,7 +1080,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -1096,7 +1117,7 @@ public sealed class GlobalHotKeyManagerTests
         var order = new List<string>();
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -1125,7 +1146,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -1162,7 +1183,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -1203,7 +1224,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -1237,7 +1258,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -1275,7 +1296,7 @@ public sealed class GlobalHotKeyManagerTests
         using var triggered = new ManualResetEventSlim();
         WpfTestHost.Invoke(() =>
         {
-            manager = new GlobalHotKeyManager();
+            manager = CreateIsolatedManager();
             Assert.True(manager.Apply(
             [
                 new HotKeyBinding(
@@ -1313,7 +1334,7 @@ public sealed class GlobalHotKeyManagerTests
         using var replayed = new ManualResetEventSlim();
         WpfTestHost.Invoke(() =>
         {
-            manager = new GlobalHotKeyManager();
+            manager = CreateIsolatedManager();
             manager.ConfigureMouseLongPress(700, sideButtonsUseLongPress: true);
             manager.ReplayMouseSideButtonOverride = virtualKey =>
             {
@@ -1356,7 +1377,7 @@ public sealed class GlobalHotKeyManagerTests
     {
         WpfTestHost.Invoke(() =>
         {
-            using var manager = new GlobalHotKeyManager();
+            using var manager = CreateIsolatedManager();
             manager.ConfigureMouseLongPress(600, sideButtonsUseLongPress: true);
             var replayedCount = 0;
             manager.ReplayMouseSideButtonOverride = _ => replayedCount++;
@@ -1393,7 +1414,7 @@ public sealed class GlobalHotKeyManagerTests
         using var replayed = new ManualResetEventSlim();
         WpfTestHost.Invoke(() =>
         {
-            manager = new GlobalHotKeyManager();
+            manager = CreateIsolatedManager();
             manager.ConfigureMouseLongPress(700, sideButtonsUseLongPress: true);
             manager.ReplayMouseSideButtonOverride = _ => replayed.Set();
             Assert.True(manager.Apply(

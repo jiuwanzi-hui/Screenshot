@@ -20,6 +20,14 @@ public static class OpenAiCompatibleEndpointResolver
         {
             path = path[..^"/responses".Length] + "/chat/completions";
         }
+        else if (path.EndsWith("/images/generations", StringComparison.OrdinalIgnoreCase))
+        {
+            path = path[..^"/images/generations".Length] + "/chat/completions";
+        }
+        else if (path.EndsWith("/images/edits", StringComparison.OrdinalIgnoreCase))
+        {
+            path = path[..^"/images/edits".Length] + "/chat/completions";
+        }
         else if (string.IsNullOrEmpty(path))
         {
             path = uri.Host.Equals(

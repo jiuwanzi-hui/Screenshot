@@ -18,7 +18,7 @@
         PreviewMouseRightButtonDown="OnPreviewMouseRightButtonDown"
         PreviewMouseRightButtonUp="OnPreviewMouseRightButtonUp">
     <Border x:Name="ProgressShell"
-            Background="{DynamicResource AppPanelBackgroundBrush}"
+            Background="{DynamicResource AppFloatingSurfaceBrush}"
             BorderBrush="{DynamicResource AppBorderBrush}"
             BorderThickness="1"
             CornerRadius="6">
@@ -65,6 +65,11 @@
                        Stretch="Uniform" />
             </Border>
 
+            <TextBlock x:Name="PreviewStatusText" Grid.Row="1" Margin="18,8" Padding="6"
+                       VerticalAlignment="Top" TextWrapping="Wrap" Visibility="Collapsed"
+                       Background="{DynamicResource AppFloatingSurfaceBrush}"
+                       Foreground="{DynamicResource AppTextPrimaryBrush}" IsHitTestVisible="False" />
+
             <StackPanel x:Name="ActionPanel"
                         Grid.Row="2"
                         Margin="12,10"
@@ -93,7 +98,7 @@
                         Background="{DynamicResource AppAccentBrush}"
                         BorderBrush="{DynamicResource AppAccentBrush}"
                         Click="OnCompleteClick"
-                        Foreground="#FFFFFF"
+                        Foreground="{DynamicResource AppOnAccentBrush}"
                         ToolTip="复制并完成滚动截图">
                     <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="14" Text="&#xE73E;" />
                 </Button>

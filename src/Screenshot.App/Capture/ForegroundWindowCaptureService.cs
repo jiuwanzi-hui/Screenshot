@@ -131,8 +131,20 @@ public static class ForegroundWindowCaptureService
     /// </summary>
     public static bool TryCreateScrollCaptureTargetFromSelection(
         ScreenRegion selectionRegion,
-        out ScrollCaptureTarget? target)
+        out ScrollCaptureTarget? target,
+        bool ignoreCaptureProcess = false)
     {
+        if (ignoreCaptureProcess)
+        {
+            target = null;
+            if (selectionRegion.Width < 32 || selectionRegion.Height < 64) return false;
+            var underlying = CaptureTargetWindowResolver.FindUnderlyingWindow(selectionRegion);
+            var root = GetRootWindowHandle(underlying);
+            if (root == IntPtr.Zero) return false;
+            var scroll = FindScrollTargetHandle(root, selectionRegion, selectionRegion, underlying);
+            target = new ScrollCaptureTarget(root, scroll, selectionRegion, SupportsVerticalScroll(scroll));
+            return true;
+        }
         return TryCreateScrollCaptureTarget(
             IntPtr.Zero,
             selectionRegion,
@@ -222,33 +234,64 @@ public static class ForegroundWindowCaptureService
     {
         ArgumentNullException.ThrowIfNull(target);
 
+        if (target.Context is { } context) return context.Capture(target);
+
+        if (target.FrameSource is { } source) return source.Capture(target);
+
+        // The selection's capture affinity is fixed for its entire lifetime.
+        // Sampling must not change any window's visibility or composition.
         var frame = CaptureRegion(target.CaptureRegion);
-        var previewRegion = target.PreviewRegionProvider?.Invoke();
-        if (previewRegion is not { } preview)
+        try
         {
+            foreach (var border in target.BorderRegions)
+                RestoreCoveredRegion(frame, target, border, isBorder: true);
+            if (target.PreviewRegionProvider?.Invoke() is { } preview)
+                RestoreCoveredRegion(frame, target, preview);
             return frame;
         }
+        catch { frame.Dispose(); throw; }
+    }
 
-        var overlap = ScreenRegion.Intersect(target.CaptureRegion, preview);
-        if (overlap.IsEmpty)
-        {
-            return frame;
-        }
+    private static void RestoreCoveredRegion(Bitmap frame, ScrollCaptureTarget target, ScreenRegion covered,
+        bool isBorder = false)
+    {
+        var overlap = ScreenRegion.Intersect(target.CaptureRegion, covered);
+        if (overlap.IsEmpty) return;
 
-        // Keep the preview HWND visible at all times. Replace only the pixels
-        // it covers by copying the exact screen-correlated rectangle from the
-        // underlying target's client DC. PrintWindow cannot be clipped into a
-        // small destination reliably and previously copied the window's left
-        // edge into this right-side patch.
+        // Keep the border and preview HWNDs visible. Read only their covered
+        // pixels at the same screen coordinates, including the context strip
+        // used to locate a small selection across blank page content.
         if (!TryCopyWindowClientRegion(target.ScrollTargetHandle, overlap, out var patch) &&
             !TryCopyWindowClientRegion(target.WindowHandle, overlap, out patch))
         {
-            return frame;
+            if (!isBorder) return;
+
+            // DWM draws native captions separately; a window DC can return
+            // black there. Retain their fixed pre-selection pixels, then
+            // overwrite the client portion with live content so a vertical
+            // strip crossing the caption never freezes scrolling page rows.
+            if (target.BorderBackdrop is { } backdrop)
+            {
+                var fixedPart = ScreenRegion.Intersect(overlap, backdrop.Region);
+                if (!fixedPart.IsEmpty)
+                {
+                    using var graphics = Graphics.FromImage(frame);
+                    graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+                    graphics.DrawImage(backdrop.Image,
+                        new Rectangle(fixedPart.X - target.CaptureRegion.X, fixedPart.Y - target.CaptureRegion.Y,
+                            fixedPart.Width, fixedPart.Height),
+                        new Rectangle(fixedPart.X - backdrop.Region.X, fixedPart.Y - backdrop.Region.Y,
+                            fixedPart.Width, fixedPart.Height), GraphicsUnit.Pixel);
+                }
+            }
+            if (!TryGetClientScreenRegion(target.WindowHandle, out var client)) return;
+            overlap = ScreenRegion.Intersect(overlap, client);
+            if (overlap.IsEmpty || !TryCopyWindowClientRegion(target.WindowHandle, overlap, out patch)) return;
         }
 
         if (patch is null)
         {
-            return frame;
+            return;
         }
 
         using (patch)
@@ -260,8 +303,6 @@ public static class ForegroundWindowCaptureService
                 overlap.X - target.CaptureRegion.X,
                 overlap.Y - target.CaptureRegion.Y);
         }
-
-        return frame;
     }
 
     private static bool TryCopyWindowClientRegion(
@@ -686,14 +727,15 @@ public static class ForegroundWindowCaptureService
     private static IntPtr FindScrollTargetHandle(
         IntPtr rootWindowHandle,
         ScreenRegion searchRegion,
-        ScreenRegion viewportReferenceRegion)
+        ScreenRegion viewportReferenceRegion,
+        IntPtr knownCandidate = default)
     {
         var screenPoint = new NativePoint
         {
             X = searchRegion.X + (searchRegion.Width / 2),
             Y = searchRegion.Y + (searchRegion.Height / 2),
         };
-        var candidate = NativeMethods.WindowFromPoint(screenPoint);
+        var candidate = knownCandidate != IntPtr.Zero ? knownCandidate : NativeMethods.WindowFromPoint(screenPoint);
         IntPtr fallbackCandidate = IntPtr.Zero;
 
         while (candidate != IntPtr.Zero && candidate != rootWindowHandle)

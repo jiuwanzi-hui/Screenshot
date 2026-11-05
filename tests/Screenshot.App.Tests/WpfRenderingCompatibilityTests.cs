@@ -4,6 +4,20 @@ namespace Screenshot.App.Tests;
 
 public sealed class WpfRenderingCompatibilityTests
 {
+    [Theory]
+    [InlineData(new[] { "SnapCut.exe", "--software-rendering" }, "--software-rendering")]
+    [InlineData(new[] { "SnapCut.exe", "--HARDWARE-RENDERING" }, "--hardware-rendering")]
+    [InlineData(new[] { "--hardware-rendering", "--software-rendering" }, "--software-rendering")]
+    [InlineData(new[] { "--SOFTWARE-RENDERING", "--hardware-rendering" }, "--software-rendering")]
+    [InlineData(new[] { "SnapCut.exe", "--background", "--updated", "4.1.7" }, null)]
+    [InlineData(new[] { "--software-rendering=false", "--hardware-rendering-extra" }, null)]
+    [InlineData(new string[0], null)]
+    public void ChildRenderingOverridePreservesExplicitChoiceAndExcludesUnrelatedArguments(
+        string[] arguments, string? expected)
+    {
+        Assert.Equal(expected, WpfRenderingCompatibility.GetExplicitRenderingArgument(arguments));
+    }
+
     [Fact]
     public void PhysicalDesktopOutputUsesHardwareRendering()
     {

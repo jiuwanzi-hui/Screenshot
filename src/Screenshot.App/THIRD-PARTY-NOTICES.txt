@@ -1,6 +1,13 @@
 SnapCut third-party notices
 ===========================
 
+Qwen3-VL-4B-Instruct (optional local visual OCR model)
+Copyright (c) Alibaba Cloud / Qwen contributors
+License: Apache License 2.0
+Source: https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct
+Official GGUF weights: https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF
+Model Q4_K_M and vision encoder F16 are downloaded separately, not bundled.
+
 BergamotTranslatorSharp
 Copyright (c) its contributors
 License: Mozilla Public License 2.0 (MPL-2.0)
@@ -39,7 +46,9 @@ Source: https://visualstudio.microsoft.com/license-terms/
 RapidOcrNet
 Copyright (c) its contributors
 License: Apache License 2.0
-Source: https://github.com/RapidAI/RapidOcrNet
+Source: https://github.com/BobLd/RapidOcrNet
+Windows runtime based on 3.0.0 commit 590d44b2efc7ecbef446c36bb6359ebbfcffeb50,
+with local CTC score-scan performance changes; original Apache-2.0 license retained.
 
 PaddleOCR and RapidOCR model files
 Copyright (c) PaddlePaddle and RapidAI contributors
@@ -47,26 +56,59 @@ License: Apache License 2.0
 Source: https://github.com/PaddlePaddle/PaddleOCR
 Source: https://github.com/RapidAI/RapidOCR
 
-Qwen2.5
-Copyright (c) Alibaba Cloud
-License: Apache License 2.0
-Source: https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct
+TranslateGemma (optional download, not bundled)
+Copyright (c) Google LLC
+License: Gemma Terms of Use: https://ai.google.dev/gemma/terms
+Model: https://huggingface.co/google/translategemma-4b-it
+GGUF quantization: https://huggingface.co/bullerwins/translategemma-4b-it-GGUF
 
 llama.cpp
 Copyright (c) llama.cpp contributors
 License: MIT
 Source: https://github.com/ggml-org/llama.cpp
 
-Optional offline translation models are not bundled with SnapCut. When the
-user confirms a download, the model files are fetched directly from Mozilla's
-official Firefox Translations model registry:
+Hy-MT2 1.8B Q4_K_M (optional lightweight model, not bundled)
+Copyright (C) 2026 Tencent. All rights reserved.
+License: Apache License 2.0; full terms in Licenses/Hy-MT2-1.8B.txt
+Model: https://huggingface.co/tencent/Hy-MT2-1.8B-GGUF
+Downloaded separately and verified by size and SHA-256. Existing TranslateGemma
+installations and the selected online/offline priority remain unchanged.
+
+Optional offline translation models are not bundled with SnapCut. TranslateGemma
+is downloaded from the linked GGUF repository or a mirror, with SHA-256 verification.
+The lightweight language packs use Mozilla's Firefox Translations model registry:
 https://storage.googleapis.com/moz-fx-translations-data--303e-prod-translations-data/db/models.json
 
-The optional PP-OCRv6 model files, Qwen2.5 model, and llama.cpp runtime are
-also not bundled. They are downloaded only after the user explicitly starts
-the corresponding download in settings. Their source and license information
-is listed above.
+The optional PP-OCRv6 model files are downloaded only after the user starts
+the corresponding download in settings. Windows packages include the verified
+llama.cpp runtime archive in OfflinePackages; models remain separate downloads.
+Their source and license information is listed above.
 
 The notices and license files of the projects above remain available from
 their source repositories. SnapCut does not claim ownership of those projects
 or model files.
+
+SharpCompress 0.50.4 (built-in ZIP / 7z updater)
+Source: https://github.com/adamhathcock/sharpcompress
+The MIT License (MIT)
+
+Copyright (c) 2014  Adam Hathcock
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+

@@ -147,8 +147,8 @@ public sealed class CaptureOverlayWindowTests
 
             try
             {
-                Assert.IsType<SharedColorPickerControl>(
-                    overlay.FindName("InlineSharedColorPicker"));
+                Assert.Null(overlay.FindName("InlineSharedColorPicker"));
+                Assert.Null(Assert.IsType<ContentControl>(overlay.FindName("InlineSharedColorHost")).Content);
                 Assert.Equal(
                     Visibility.Collapsed,
                     Assert.IsType<RadioButton>(
@@ -355,8 +355,8 @@ public sealed class CaptureOverlayWindowTests
         });
     }
 
-    [Fact]
-    public async Task RecordButtonClosesOverlayAndPublishesSelectedRegion()
+    [DesktopFact]
+    public async Task RecordButtonClosesOverlayAndPublishesSelectedRegionWithoutResettingReplacementState()
     {
         CaptureOverlayWindow? overlay = null;
         var started = new TaskCompletionSource<ScreenRegion>(
@@ -392,12 +392,13 @@ public sealed class CaptureOverlayWindowTests
                         return Task.CompletedTask;
                     },
                     InitialSelection = expected,
-                    CaptureClosed = () =>
-                    {
-                        pinnedImageManager.Dispose();
-                        closed.TrySetResult();
-                    },
+                    CaptureClosed = () => throw new InvalidOperationException("A mode hand-off must not reset the replacement session."),
                 });
+            overlay.Closed += (_, _) =>
+            {
+                pinnedImageManager.Dispose();
+                closed.TrySetResult();
+            };
 
             var recordButton = Assert.IsType<Button>(
                 overlay.FindName("RecordButton"));
@@ -935,12 +936,22 @@ public sealed class CaptureOverlayWindowTests
         });
     }
 
-    [Fact]
-    public void ContinuedRightButtonDragCompletesSelectionWithoutSecondDown()
+    [DesktopFact]
+    public async Task ContinuedRightButtonDragCompletesSelectionWithoutSecondDown()
     {
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         WpfTestHost.Invoke(() =>
         {
             _ = CaptureOverlayWindow.SelectAsync();
+            // SelectAsync constructs the overlay on the next dispatcher turn.
+            // Waiting for that turn avoids racing the deferred window creation.
+            _ = System.Windows.Threading.Dispatcher.CurrentDispatcher.BeginInvoke(
+                System.Windows.Threading.DispatcherPriority.ContextIdle,
+                new Action(() => ready.TrySetResult()));
+        });
+        await ready.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        WpfTestHost.Invoke(() =>
+        {
             var overlay = Application.Current.Windows
                 .OfType<CaptureOverlayWindow>()
                 .Last();
@@ -1049,13 +1060,11 @@ public sealed class CaptureOverlayWindowTests
                 var snapOutline = Assert.IsType<System.Windows.Shapes.Rectangle>(
                     overlay.FindName("WindowSnapRectangle"));
                 Assert.False(snapOutline.IsHitTestVisible);
-                _ = Assert.IsType<ScrollViewer>(
+                _ = Assert.IsAssignableFrom<ScrollViewer>(
                     overlay.FindName("InlineEmojiPalette"));
                 var emojiPanel = Assert.IsType<WrapPanel>(
                     overlay.FindName("InlineEmojiPanel"));
-                Assert.Equal(
-                    EmojiStickerCatalog.All.Count,
-                    emojiPanel.Children.Count);
+                Assert.Empty(emojiPanel.Children);
 
                 var undoButton = Assert.IsType<Button>(
                     overlay.FindName("InlineUndoButton"));
@@ -1504,7 +1513,7 @@ public sealed class CaptureOverlayWindowTests
                 Assert.True(editor.HasImage);
                 Assert.Equal(Visibility.Visible, editor.Visibility);
                 Assert.Equal(Visibility.Visible, tools.Visibility);
-                Assert.Equal(Visibility.Visible, options.Visibility);
+                Assert.Equal(Visibility.Collapsed, options.Visibility);
                 Assert.Equal(Visibility.Visible, resizeThumb.Visibility);
                 Assert.Empty(
                     Application.Current.Windows.OfType<ImageEditorWindow>());
@@ -1776,6 +1785,8 @@ public sealed class CaptureOverlayWindowTests
         var translationRequested = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var translationRequestCount = 0;
+        var previousTarget = TranslationTargetPreferences.Language ?? "zh-Hans";
+        string? requestedTarget = null;
 
         try
         {
@@ -1804,6 +1815,7 @@ public sealed class CaptureOverlayWindowTests
                         }),
                     TranslateTextAsync = _ =>
                     {
+                        requestedTarget = TranslationTargetPreferences.Language;
                         translationRequestCount++;
                         translationRequested.TrySetResult();
                         return Task.FromResult(new TranslationSegmentsResult(
@@ -1835,10 +1847,18 @@ public sealed class CaptureOverlayWindowTests
             {
                 var button = Assert.IsType<Button>(
                     overlay?.FindName("TranslateButton"));
+                button.ContextMenu.RaiseEvent(new RoutedEventArgs(ContextMenu.OpenedEvent));
+                var chinese = button.ContextMenu.Items.OfType<MenuItem>().Single(item => item.Tag as string == "zh-Hans");
+                chinese.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                Assert.Equal(0, translationRequestCount);
                 button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                var choices = Assert.IsType<Screenshot.App.Presentation.ToolbarOptionsRow>(overlay?.FindName("InlineActionAdjustments"));
+                Assert.Equal(Visibility.Collapsed, choices.Visibility);
+                Assert.Empty(choices.Children);
             });
 
             await translationRequested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal("zh-Hans", requestedTarget);
             WpfTestHost.Invoke(() =>
             {
                 var editor = Assert.IsType<ImageEditorCanvas>(
@@ -1846,7 +1866,8 @@ public sealed class CaptureOverlayWindowTests
                 var status = Assert.IsType<TextBlock>(
                     overlay?.FindName("CaptureStatusText"));
                 Assert.True(editor.HasTranslationOverlay);
-                Assert.Contains("复制和保存会包含译文", status.Text);
+                Assert.Contains("翻译完成", status.Text);
+                Assert.Contains("复制和保存会包含译文", Assert.IsType<TextBlock>(status.ToolTip).Text);
                 Assert.True(editor.CanUndo);
                 var selectableTranslation = Assert.IsType<Canvas>(
                     overlay?.FindName("OcrTextOverlay"));
@@ -1909,7 +1930,7 @@ public sealed class CaptureOverlayWindowTests
         }
         finally
         {
-            WpfTestHost.Invoke(() => overlay?.Close());
+            WpfTestHost.Invoke(() => { overlay?.Close(); TranslationTargetPreferences.Publish(previousTarget); });
         }
     }
 
@@ -2029,13 +2050,17 @@ public sealed class CaptureOverlayWindowTests
         }
     }
 
-    [Fact]
+    [DesktopFact]
     public async Task CompletedSelectionRunsTextRecognitionOnlyOnRequest()
     {
         CaptureOverlayWindow? overlay = null;
         Task? enterAndRecognizeTask = null;
         var legacyOcrStarted = false;
         var textRecognitionRequestCount = 0;
+        var shown = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        System.ComponentModel.DependencyPropertyDescriptor? visibility = null;
+        Canvas? observedOverlay = null;
+        EventHandler? onShown = null;
 
         try
         {
@@ -2081,7 +2106,7 @@ public sealed class CaptureOverlayWindowTests
                 Assert.NotNull(enterMethod);
                 updateMethod.Invoke(overlay, [new Rect(30, 30, 160, 100)]);
                 enterAndRecognizeTask = Assert.IsAssignableFrom<Task>(
-                    enterMethod.Invoke(overlay, null));
+                    enterMethod.Invoke(overlay, [false]));
             });
 
             await Assert.IsAssignableFrom<Task>(enterAndRecognizeTask)
@@ -2105,8 +2130,16 @@ public sealed class CaptureOverlayWindowTests
 
                 var ocrButton = Assert.IsType<Button>(
                     overlay?.FindName("OcrButton"));
+                observedOverlay = textOverlay;
+                visibility = System.ComponentModel.DependencyPropertyDescriptor.FromProperty(UIElement.VisibilityProperty, typeof(Canvas));
+                onShown = (_, _) => { if (textOverlay.Visibility == Visibility.Visible) shown.TrySetResult(); };
+                visibility.AddValueChanged(textOverlay, onShown);
                 ocrButton.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-                overlay?.UpdateLayout();
+            });
+            await shown.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            WpfTestHost.Invoke(() =>
+            {
+                var textOverlay = Assert.IsType<Canvas>(overlay?.FindName("OcrTextOverlay"));
                 var selectableText = Assert.Single(
                     textOverlay.Children.OfType<SelectableOcrTextOverlay>());
                 selectableText.SelectAllText();
@@ -2119,7 +2152,11 @@ public sealed class CaptureOverlayWindowTests
         }
         finally
         {
-            WpfTestHost.Invoke(() => overlay?.Close());
+            WpfTestHost.Invoke(() =>
+            {
+                if (observedOverlay is not null && onShown is not null) visibility?.RemoveValueChanged(observedOverlay, onShown);
+                overlay?.Close();
+            });
         }
     }
 
@@ -2178,11 +2215,25 @@ public sealed class CaptureOverlayWindowTests
                 Assert.NotNull(enterMethod);
                 updateMethod.Invoke(overlay, [new Rect(30, 30, 160, 100)]);
                 enterAndTranslateTask = Assert.IsAssignableFrom<Task>(
-                    enterMethod.Invoke(overlay, null));
+                    enterMethod.Invoke(overlay, [false]));
             });
 
             await Assert.IsAssignableFrom<Task>(enterAndTranslateTask)
                 .WaitAsync(TimeSpan.FromSeconds(5));
+
+            // Selection setup now returns before background recognition. Wait
+            // for the visible result rather than treating editor readiness as
+            // translation completion.
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            var translationVisible = false;
+            while (!translationVisible && DateTime.UtcNow < deadline)
+            {
+                WpfTestHost.Invoke(() => translationVisible =
+                    (overlay?.FindName("InlineEditorCanvas") as ImageEditorCanvas)
+                    ?.IsTranslationOverlayVisible == true);
+                if (!translationVisible) await Task.Delay(10);
+            }
+            Assert.True(translationVisible, "Deferred selection translation did not become visible.");
 
             WpfTestHost.Invoke(() =>
             {
@@ -2403,8 +2454,8 @@ public sealed class CaptureOverlayWindowTests
         }
     }
 
-    [Fact]
-    public async Task ScrollSelectionKeepsItsOutlineAndCanHideItDuringFrameCapture()
+    [DesktopFact]
+    public async Task ScrollSelectionKeepsItsOutlineAndExclusionStableDuringFrameCapture()
     {
         CaptureOverlayWindow? overlay = null;
         Task<ScrollCaptureSelection?>? selectionTask = null;
@@ -2456,6 +2507,16 @@ public sealed class CaptureOverlayWindowTests
                     overlay.FindName("SelectionRectangle"));
                 var frozenScreen = Assert.IsType<Image>(
                     overlay.FindName("FrozenScreenImage"));
+                Screenshot.App.Infrastructure.AppThemeManager.ApplySettingsPalette(overlay.Resources, AppTheme.GlassInk);
+                Assert.NotNull(outline.Stroke);
+                var alpha = outline.Stroke switch
+                {
+                    System.Windows.Media.SolidColorBrush solid => solid.Color.A,
+                    System.Windows.Media.GradientBrush gradient => gradient.GradientStops.Min(stop => stop.Color.A),
+                    _ => 0,
+                };
+                Assert.True(alpha > 0, "The fallback outline must have visible ink.");
+                Assert.All(selection.CaptureWindowHandles.Skip(2), handle => Assert.True(NativeMethods.IsWindowVisible(handle)));
                 var selectionLeft = Canvas.GetLeft(selectionRectangle);
                 var selectionTop = Canvas.GetTop(selectionRectangle);
                 var outlineLeft = Canvas.GetLeft(outline);
@@ -2464,7 +2525,8 @@ public sealed class CaptureOverlayWindowTests
                 Assert.True(NativeMethods.GetWindowDisplayAffinity(
                     windowHandle,
                     out var displayAffinity));
-                Assert.Equal(0u, displayAffinity);
+                Assert.Equal(0x11u, displayAffinity);
+                Assert.True(selection.SupportsContextCapture);
                 Assert.False(surface.IsHitTestVisible);
                 Assert.Equal(Visibility.Visible, outline.Visibility);
                 Assert.True(outline.Width > 0);
@@ -2482,6 +2544,20 @@ public sealed class CaptureOverlayWindowTests
                     outlineTop + outline.Height - outline.StrokeThickness >
                     selectionTop + selectionRectangle.Height);
             });
+
+            // The mask stays excluded, but the four native border strips must
+            // remain available to desktop/remote viewers between all samples.
+            var target = new ScrollCaptureTarget(
+                IntPtr.Zero, IntPtr.Zero, selection.CaptureRegion, false);
+            for (var sample = 0; sample < 12; sample++)
+            {
+                AssertStableCaptureWindows();
+                using var frame = await Task.Run(() =>
+                    ForegroundWindowCaptureService.CaptureScrollTargetRegion(target));
+                Assert.Equal(selection.CaptureRegion.Width, frame.Width);
+                Assert.Equal(selection.CaptureRegion.Height, frame.Height);
+                AssertStableCaptureWindows();
+            }
 
             await selection.SetVisibleAsync(isVisible: false);
             WpfTestHost.Invoke(() =>
@@ -2510,6 +2586,16 @@ public sealed class CaptureOverlayWindowTests
             selection?.Dispose();
             WpfTestHost.Invoke(() => overlay?.Close());
         }
+
+        void AssertStableCaptureWindows() => WpfTestHost.Invoke(() =>
+        {
+            foreach (var (handle, index) in selection!.CaptureWindowHandles.Select((handle, index) => (handle, index)))
+            {
+                Assert.True(NativeMethods.IsWindowVisible(handle));
+                Assert.True(NativeMethods.GetWindowDisplayAffinity(handle, out var affinity));
+                Assert.Equal(index < 2 ? 0x11u : 0u, affinity);
+            }
+        });
     }
 
     [Fact]
@@ -2651,6 +2737,9 @@ public sealed class CaptureOverlayWindowTests
 
     private static class NativeMethods
     {
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsWindowVisible(IntPtr windowHandle);
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool GetWindowDisplayAffinity(

@@ -17,6 +17,11 @@ public enum PrivacyDataKind
     AccountIdentifier,
     SecretValue,
     DocumentNumber,
+    BirthDate,
+    VehicleRegistration,
+    DeviceIdentifier,
+    TrackingNumber,
+    OrganizationIdentifier,
 }
 
 public sealed record PrivacyCandidate(
@@ -24,9 +29,11 @@ public sealed record PrivacyCandidate(
     string Value,
     Rect Bounds)
 {
+    internal bool HasWordBounds { get; init; }
+    internal Rect SourceBounds { get; init; }
     public string KindLabel => Kind switch
     {
-        PrivacyDataKind.PhoneNumber => "手机号",
+        PrivacyDataKind.PhoneNumber => "电话号码",
         PrivacyDataKind.EmailAddress => "邮箱",
         PrivacyDataKind.IdentityNumber => "身份证号",
         PrivacyDataKind.ApiKey => "API Key",
@@ -37,6 +44,11 @@ public sealed record PrivacyCandidate(
         PrivacyDataKind.AccountIdentifier => "账号",
         PrivacyDataKind.SecretValue => "密码/验证码",
         PrivacyDataKind.DocumentNumber => "证件号",
+        PrivacyDataKind.BirthDate => "出生日期",
+        PrivacyDataKind.VehicleRegistration => "车牌号",
+        PrivacyDataKind.DeviceIdentifier => "设备标识",
+        PrivacyDataKind.TrackingNumber => "订单/快递单号",
+        PrivacyDataKind.OrganizationIdentifier => "税号/信用代码",
         _ => "敏感信息",
     };
 
@@ -71,17 +83,9 @@ public static partial class PrivacyDetectionService
         }
 
         var candidates = new List<PrivacyCandidate>();
-        var sources = recognition.Words.Count > 0
-            ? recognition.Words.Select(word => new SourceText(
-                word.Text,
-                new Rect(word.X, word.Y, word.Width, word.Height)))
-            : recognition.Regions.Select(region => new SourceText(
-                region.Text,
-                new Rect(region.X, region.Y, region.Width, region.Height)));
-
-        foreach (var source in sources)
+        foreach (var word in recognition.Words)
         {
-            DetectInSource(source, candidates);
+            DetectInSource(CreateWordSource(word), candidates);
         }
 
         foreach (var source in BuildWordLineSources(recognition.Words))
@@ -95,16 +99,15 @@ public static partial class PrivacyDetectionService
         foreach (var region in recognition.Regions)
         {
             DetectInSource(
-                new SourceText(
-                    region.Text,
-                    new Rect(region.X, region.Y, region.Width, region.Height)),
+                CreateRegionSource(region, recognition.Words),
                 candidates);
         }
 
         return candidates
             .Where(candidate => candidate.Bounds.Width > 0 &&
                                 candidate.Bounds.Height > 0)
-            .OrderBy(candidate => candidate.Bounds.Top)
+            .OrderByDescending(candidate => candidate.HasWordBounds)
+            .ThenBy(candidate => candidate.Bounds.Top)
             .ThenBy(candidate => candidate.Bounds.Left)
             .Aggregate(
                 new List<PrivacyCandidate>(),
@@ -116,14 +119,16 @@ public static partial class PrivacyDetectionService
                                 Normalize(candidate.Value),
                                 StringComparison.OrdinalIgnoreCase) &&
                             (OverlapRatio(existing.Bounds, candidate.Bounds) > 0.55 ||
-                             VerticalOverlapRatio(
-                                 existing.Bounds,
-                                 candidate.Bounds) > 0.8)))
+                             (!candidate.HasWordBounds && existing.HasWordBounds &&
+                              candidate.SourceBounds.Contains(existing.Bounds)))))
                     {
                         unique.Add(candidate);
                     }
                     return unique;
-                });
+                })
+            .OrderBy(candidate => candidate.Bounds.Top)
+            .ThenBy(candidate => candidate.Bounds.Left)
+            .ToArray();
     }
 
     private static void DetectInSource(
@@ -167,6 +172,19 @@ public static partial class PrivacyDetectionService
             IsUsefulLabeledValue);
         AddMatches(DocumentRegex(), PrivacyDataKind.DocumentNumber,
             IsUsefulLabeledValue);
+        AddMatches(GroupedPhoneRegex(), PrivacyDataKind.PhoneNumber,
+            skipProtectedNumericRanges: true);
+        AddMatches(LandlineRegex(), PrivacyDataKind.PhoneNumber);
+        AddMatches(LabeledPhoneRegex(), PrivacyDataKind.PhoneNumber, IsUsefulPhoneNumber);
+        AddMatches(CredentialRegex(), PrivacyDataKind.ApiKey);
+        AddMatches(JwtRegex(), PrivacyDataKind.ApiKey);
+        AddMatches(Ipv6Regex(), PrivacyDataKind.IpAddress, IsValidIpv6);
+        AddMatches(MacAddressRegex(), PrivacyDataKind.DeviceIdentifier);
+        AddMatches(DeviceIdentifierRegex(), PrivacyDataKind.DeviceIdentifier);
+        AddMatches(BirthDateRegex(), PrivacyDataKind.BirthDate, IsValidBirthDate);
+        AddMatches(VehicleRegistrationRegex(), PrivacyDataKind.VehicleRegistration);
+        AddMatches(TrackingNumberRegex(), PrivacyDataKind.TrackingNumber);
+        AddMatches(OrganizationIdentifierRegex(), PrivacyDataKind.OrganizationIdentifier);
         return;
 
         void AddEmailMatches()
@@ -177,10 +195,7 @@ public static partial class PrivacyDetectionService
                 var (value, valueIndex) = SplitConcatenatedEmail(
                     group.Value,
                     group.Index);
-                candidates.Add(new PrivacyCandidate(
-                    PrivacyDataKind.EmailAddress,
-                    value,
-                    EstimateValueBounds(source, valueIndex, value.Length)));
+                AddCandidate(PrivacyDataKind.EmailAddress, value, valueIndex);
             }
         }
 
@@ -201,7 +216,17 @@ public static partial class PrivacyDetectionService
                 var leadingWhitespace = rawValue.Length - rawValue.TrimStart().Length;
                 var value = rawValue.Trim();
                 var valueIndex = valueGroup.Index + leadingWhitespace;
+                if (kind is PrivacyDataKind.PersonName or PrivacyDataKind.PostalAddress or
+                    PrivacyDataKind.AccountIdentifier or PrivacyDataKind.SecretValue or
+                    PrivacyDataKind.DocumentNumber)
+                {
+                    var following = FollowingFieldRegex().Match(source.Text, valueIndex);
+                    if (following.Success && following.Index < valueIndex + value.Length)
+                        value = value[..(following.Index - valueIndex)].TrimEnd(' ', '\t', ',', '，', ';', '；');
+                    value = TrimValueAtColumnGap(source, valueIndex, value);
+                }
                 var valueRange = new TextRange(valueIndex, value.Length);
+                if (value.Length == 0) continue;
                 if (validator?.Invoke(value) == false)
                 {
                     continue;
@@ -221,90 +246,19 @@ public static partial class PrivacyDetectionService
                     protectedNumericRanges.Add(valueRange);
                 }
 
-                candidates.Add(new PrivacyCandidate(
-                    kind,
-                    value,
-                    EstimateValueBounds(
-                        source,
-                        valueIndex,
-                        value.Length)));
+                AddCandidate(kind, value, valueIndex);
             }
         }
-    }
 
-    private static Rect EstimateValueBounds(
-        SourceText source,
-        int valueIndex,
-        int valueLength)
-    {
-        if (source.Text.Length == 0 || valueLength <= 0)
+        void AddCandidate(PrivacyDataKind kind, string value, int index)
         {
-            return source.Bounds;
-        }
-
-        var startRatio = Math.Clamp(
-            valueIndex / (double)source.Text.Length,
-            0,
-            1);
-        var endRatio = Math.Clamp(
-            (valueIndex + valueLength) / (double)source.Text.Length,
-            startRatio,
-            1);
-        var padding = Math.Min(2, source.Bounds.Height * 0.08);
-        var left = Math.Max(
-            source.Bounds.Left,
-            source.Bounds.Left + (source.Bounds.Width * startRatio) - padding);
-        var right = Math.Min(
-            source.Bounds.Right,
-            source.Bounds.Left + (source.Bounds.Width * endRatio) + padding);
-        return new Rect(
-            left,
-            source.Bounds.Top,
-            Math.Max(1, right - left),
-            source.Bounds.Height);
-    }
-
-    private static SourceText[] BuildWordLineSources(
-        IReadOnlyList<OcrWordRegion> words)
-    {
-        var lines = new List<List<OcrWordRegion>>();
-        foreach (var word in words
-                     .Where(word => !string.IsNullOrWhiteSpace(word.Text))
-                     .OrderBy(word => word.Y)
-                     .ThenBy(word => word.X))
-        {
-            var centerY = word.Y + (word.Height / 2);
-            var line = lines.FirstOrDefault(candidate =>
+            var bounds = EstimateValueBounds(source, index, value.Length, out var hasWordBounds);
+            candidates.Add(new PrivacyCandidate(kind, value, bounds)
             {
-                var top = candidate.Min(item => item.Y);
-                var bottom = candidate.Max(item => item.Y + item.Height);
-                var center = (top + bottom) / 2;
-                return Math.Abs(centerY - center) <=
-                    Math.Max(4, Math.Min(word.Height, bottom - top) * 0.65);
+                HasWordBounds = hasWordBounds,
+                SourceBounds = source.Bounds,
             });
-            if (line is null)
-            {
-                line = [];
-                lines.Add(line);
-            }
-
-            line.Add(word);
         }
-
-        return lines
-            .Where(line => line.Count > 1)
-            .Select(line =>
-            {
-                var ordered = line.OrderBy(word => word.X).ToArray();
-                var left = ordered.Min(word => word.X);
-                var top = ordered.Min(word => word.Y);
-                var right = ordered.Max(word => word.X + word.Width);
-                var bottom = ordered.Max(word => word.Y + word.Height);
-                return new SourceText(
-                    string.Concat(ordered.Select(word => word.Text.Trim())),
-                    new Rect(left, top, right - left, bottom - top));
-            })
-            .ToArray();
     }
 
     private static (string Value, int Index) SplitConcatenatedEmail(
@@ -514,19 +468,8 @@ public static partial class PrivacyDetectionService
                    right.Width * right.Height));
     }
 
-    private static double VerticalOverlapRatio(Rect left, Rect right)
-    {
-        var top = Math.Max(left.Top, right.Top);
-        var bottom = Math.Min(left.Bottom, right.Bottom);
-        if (bottom <= top)
-        {
-            return 0;
-        }
-
-        return (bottom - top) / Math.Max(1, Math.Min(left.Height, right.Height));
-    }
-
-    private sealed record SourceText(string Text, Rect Bounds);
+    private sealed record SourceText(string Text, Rect Bounds, SourceSpan[]? Spans = null);
+    private sealed record SourceSpan(int Start, string Text, Rect Bounds);
 
     private readonly record struct TextRange(int Start, int Length)
     {
@@ -542,7 +485,7 @@ public static partial class PrivacyDetectionService
     [GeneratedRegex(@"(?<value>(?:\+?86[\s-]?)?1[3-9]\d{9})")]
     private static partial Regex PhoneRegex();
 
-    [GeneratedRegex(@"(?<![A-Za-z0-9])(?<value>(?:sk|rk|pk)-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{24,}|(?:api[_-]?key|token|secret)\s*[:=]\s*[A-Za-z0-9_./+-]{12,})(?![A-Za-z0-9])", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?<![A-Za-z0-9])(?<value>(?:sk|rk|pk)-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[A-Z0-9]{16}|AIza[A-Za-z0-9_-]{24,})(?![A-Za-z0-9])", RegexOptions.IgnoreCase)]
     private static partial Regex ApiKeyRegex();
 
     [GeneratedRegex(@"(?<![\d.])(?<value>\d{1,3}(?:\.\d{1,3}){3})(?![\d.])")]
@@ -563,13 +506,13 @@ public static partial class PrivacyDetectionService
     [GeneratedRegex(@"(?:(?:家庭住址|户籍地址|户口地址|常住地址|常住地|现住址|现居地址|现居地|居住地址|居住地点|住宅地址|住所|住处|通讯地址|通信地址|收货地址|配送地址|寄送地址|取件地址|联系地址|详细地址|单位地址|公司地址|办公地址|办公地点|宿舍地址|出租屋地址|租房地址|开户地址|所在地址|所在地|地址|住址)(?:\s*(?:是|为|在|位于)\s*|\s*[:：=]\s*|\s+)|(?:我家住在|我家住|我家在|本人住在|本人居住在|现在住在|目前住在|现住在|现居于|住在|居住在|居住于|居所位于|住所位于|住处在|租住在|租住于|租房在|家住|家在|出租屋在|宿舍在|公司位于|单位位于|办公地点在)\s*)(?<value>[^\r\n]{4,100}?)(?=\s+(?:真实姓名|姓名|名字|联系人|收件人|手机号|电话|身份证号|邮箱|银行卡号|账号|账户|微信号|QQ号|密码|验证码|护照号|证件号)\s*(?:[:：=]|是|为)|$)", RegexOptions.IgnoreCase)]
     private static partial Regex AddressRegex();
 
-    [GeneratedRegex(@"(?:登录账号|支付宝账号|账号|账户|用户名|用户ID|微信号|QQ号)\s*[:：=]\s*(?<value>[A-Za-z0-9\u3400-\u4DBF\u4E00-\u9FFF_.@-]{3,64})", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?:登录账号|支付宝账号|账号|账户|用户名|用户ID|微信号|微信ID|QQ号|抖音号|快手号|小红书号|微博账号|学号|工号|员工编号|username|user[ _-]?id|telegram)\s*[:：=]\s*(?<value>[A-Za-z0-9\u3400-\u4DBF\u4E00-\u9FFF_.@-]{3,64})", RegexOptions.IgnoreCase)]
     private static partial Regex AccountRegex();
 
-    [GeneratedRegex(@"(?:支付密码|登录密码|密码|口令|验证码|校验码|动态码)\s*[:：=]\s*(?<value>[^\s,，;；]{4,64})", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?:支付密码|登录密码|密码|口令|验证码|校验码|动态码|提取码|恢复码|安全码|password|passwd|pwd|otp|verification[ _-]?code)\s*[:：=]\s*(?<value>[^\s,，;；]{4,64})", RegexOptions.IgnoreCase)]
     private static partial Regex SecretRegex();
 
-    [GeneratedRegex(@"(?:护照号码|护照号|证件号码|证件号|驾驶证号)\s*[:：=]\s*(?<value>[A-Za-z0-9]{5,24})", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(?:护照号码|护照号|证件号码|证件号|驾驶证号|驾驶证档案编号|社保号|社保卡号|医保卡号|居住证号|港澳通行证号|台湾通行证号|passport(?:[ _-]?(?:no|number))?)\s*[:：=]\s*(?<value>[A-Za-z0-9]{5,24})", RegexOptions.IgnoreCase)]
     private static partial Regex DocumentRegex();
 
 }

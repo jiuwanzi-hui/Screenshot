@@ -282,9 +282,9 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
 
         Assert.Equal(TranslationMode.Automatic, settings.TranslationMode);
         Assert.True(settings.SendTextToOnlineTranslation);
-        Assert.Equal(15, settings.SettingsVersion);
+        Assert.Equal(AppSettings.CreateDefault().SettingsVersion, settings.SettingsVersion);
         Assert.Equal(
-            [TranslationProviderKind.Online, TranslationProviderKind.Offline],
+            [TranslationProviderKind.Online, TranslationProviderKind.Offline, TranslationProviderKind.Public],
             settings.TranslationProviderPriority);
     }
 
@@ -387,11 +387,12 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
         var provider = new OfflineTranslationProvider(manager, detector);
         string[] segments =
         [
-            "翻译卡住/整页失败的问题已修好，Release 已启动。",
+            "翻译卡住/整页失败的问题已修好，发布版已启动。",
             "Load Diff",
             "Large diffs are hidden by default.",
             "Automatic click-scroll only; manual capture has its own fingerprint type.",
             "AutomaticViewportFingerprint",
+            "OCR Host 和 Core。",
         ];
 
         var result = await provider.TranslateSegmentsAsync(
@@ -406,6 +407,7 @@ public sealed class OfflineTranslationModelManagerTests : IDisposable
         Assert.Contains(detector.Inputs, input => input.Contains(
             "Large diffs are hidden by default.",
             StringComparison.Ordinal));
+        Assert.Contains(detector.Inputs, input => input.Contains("OCR Host 和 Core。", StringComparison.Ordinal));
     }
 
     [Fact]

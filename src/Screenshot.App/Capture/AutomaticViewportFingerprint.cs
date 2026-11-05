@@ -46,7 +46,7 @@ internal sealed class AutomaticViewportFingerprint
         SourceHeight = sourceHeight;
     }
 
-    public static AutomaticViewportFingerprint Create(Bitmap bitmap)
+    public static AutomaticViewportFingerprint Create(Bitmap bitmap, int fixedTopRows = 0, int fixedBottomRows = 0)
     {
         ArgumentNullException.ThrowIfNull(bitmap);
 
@@ -83,10 +83,13 @@ internal sealed class AutomaticViewportFingerprint
                 var right = source.Width >= 80
                     ? source.Width - Math.Clamp(source.Width / 80, 10, 24)
                     : source.Width;
-                var top = source.Height >= 120 ? source.Height / 8 : 0;
-                var bottom = source.Height >= 120
+                var hasFixedRegions = fixedTopRows > 0 || fixedBottomRows > 0;
+                var top = hasFixedRegions ? fixedTopRows : source.Height >= 120 ? source.Height / 8 : 0;
+                var bottom = hasFixedRegions ? source.Height - fixedBottomRows : source.Height >= 120
                     ? source.Height - Math.Min(24, source.Height / 30)
                     : source.Height;
+                var sampleMinimumY = hasFixedRegions ? fixedTopRows : 0;
+                var sampleMaximumY = source.Height - fixedBottomRows;
 
                 if (right - left < 3 || bottom - top < 3)
                 {
@@ -115,23 +118,23 @@ internal sealed class AutomaticViewportFingerprint
                             pixels,
                             stride,
                             source.Width,
-                            source.Height,
+                            sampleMaximumY,
                             x,
-                            y);
+                            y, sampleMinimumY);
                         var horizontalNeighbor = GetAverageColor(
                             pixels,
                             stride,
                             source.Width,
-                            source.Height,
+                            sampleMaximumY,
                             x + 3,
-                            y);
+                            y, sampleMinimumY);
                         var verticalNeighbor = GetAverageColor(
                             pixels,
                             stride,
                             source.Width,
-                            source.Height,
+                            sampleMaximumY,
                             x,
-                            y + 3);
+                            y + 3, sampleMinimumY);
                         var texture = Math.Min(
                             byte.MaxValue,
                             16 + GetColorDifference(color, horizontalNeighbor) +
@@ -147,7 +150,7 @@ internal sealed class AutomaticViewportFingerprint
                 return new AutomaticViewportFingerprint(
                     samples,
                     Math.Max(1, bottom - 2 - top),
-                    source.Height);
+                    source.Height - fixedTopRows - fixedBottomRows);
             }
             finally
             {
@@ -537,12 +540,13 @@ internal sealed class AutomaticViewportFingerprint
         int width,
         int height,
         int centerX,
-        int centerY)
+        int centerY,
+        int minimumY = 0)
     {
         const int radius = 2;
         var left = Math.Max(0, centerX - radius);
         var right = Math.Min(width - 1, centerX + radius);
-        var top = Math.Max(0, centerY - radius);
+        var top = Math.Max(minimumY, centerY - radius);
         var bottom = Math.Min(height - 1, centerY + radius);
         var red = 0;
         var green = 0;

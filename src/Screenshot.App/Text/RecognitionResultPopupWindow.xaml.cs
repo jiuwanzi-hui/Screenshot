@@ -9,21 +9,27 @@ namespace Screenshot.App.Text;
 public partial class RecognitionResultPopupWindow : Window
 {
     private readonly bool _closeAfterCopy;
+    internal bool WasClosed { get; private set; }
 
     public RecognitionResultPopupWindow(
         string title,
         string sourceText,
         string? translatedText,
-        bool closeAfterCopy = true)
+        bool closeAfterCopy = true,
+        string? notice = null)
     {
         _closeAfterCopy = closeAfterCopy;
         InitializeComponent();
+        Presentation.WindowShell.ConfigureChrome(this, captionHeight: 0);
+        Closed += (_, _) => { WasClosed = true; BusyRail.IsActive = false; };
+        PreviewMouseDown += (_, _) => Presentation.UiTransitions.Finish(Shell);
         // Do not let WPF present the window at its default location for one
         // compositor frame. Position it first, then reveal it in OnLoaded.
         Opacity = 0;
         WindowStartupLocation = WindowStartupLocation.Manual;
         Left = SystemParameters.WorkArea.Right - Width - 18;
         Top = SystemParameters.WorkArea.Bottom - Height - 18;
+        Title = title;
         TitleText.Text = title;
         ResultTextBox.Text = string.IsNullOrWhiteSpace(translatedText)
             ? sourceText
@@ -40,7 +46,43 @@ public partial class RecognitionResultPopupWindow : Window
         SourceText.Text = string.IsNullOrWhiteSpace(translatedText)
             ? "识别内容"
             : "译文 · 已保留原文段落顺序";
+        if (!string.IsNullOrWhiteSpace(notice))
+        {
+            SourceText.Text = notice;
+            SourceText.ToolTip = notice;
+        }
         Loaded += OnLoaded;
+    }
+
+    internal void ShowBusy(string title, string status)
+    {
+        Title = title;
+        TitleText.Text = title.Contains("翻译", StringComparison.Ordinal) ? "翻译" : "识别文字";
+        BusyText.Text = title;
+        SourceText.Text = status;
+        SourceText.ToolTip = status;
+        ResultTextBox.Visibility = Visibility.Collapsed;
+        BusyText.Visibility = Visibility.Visible;
+        CopyAllButton.IsEnabled = false;
+        BusyRail.IsActive = true;
+    }
+
+    internal void ShowResult(string title, string source, string? translation, string? notice)
+    {
+        if (WasClosed) return;
+        BusyRail.IsActive = false;
+        BusyText.Visibility = Visibility.Collapsed;
+        Title = title;
+        TitleText.Text = title;
+        ResultTextBox.Text = string.IsNullOrWhiteSpace(translation) ? source : translation;
+        ResultTextBox.Visibility = Visibility.Visible;
+        CopyAllButton.IsEnabled = true;
+        SourceText.Text = string.IsNullOrWhiteSpace(notice)
+            ? translation is null ? "本机识别 · 可选择文字复制" : "译文 · 保留原文段落顺序"
+            : notice;
+        SourceText.ToolTip = SourceText.Text;
+        Topmost = PinButton.IsChecked == true;
+        Presentation.UiTransitions.Reveal(ResultTextBox, milliseconds: 100);
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -51,6 +93,20 @@ public partial class RecognitionResultPopupWindow : Window
         Top = SystemParameters.WorkArea.Bottom - ActualHeight - 18;
         BeginAnimation(OpacityProperty, null);
         Opacity = 1;
+        Presentation.UiTransitions.Reveal(Shell, slide: true);
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        WasClosed = true;
+        BusyRail.IsActive = false;
+        Loaded -= OnLoaded;
+        ResultTextBox.Clear();
+        SourceText.Text = string.Empty;
+        SourceText.ToolTip = null;
+        BusyText.Text = string.Empty;
+        base.OnClosed(e);
+        Core.MemoryFootprint.TrimAfterHeavyOperation();
     }
 
     private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -111,37 +167,6 @@ public partial class RecognitionResultPopupWindow : Window
         catch
         {
             SourceText.Text = "剪贴板正被其他程序使用，请重试";
-        }
-    }
-
-    private void OnResizeThumbDragDelta(
-        object sender,
-        System.Windows.Controls.Primitives.DragDeltaEventArgs e)
-    {
-        var edge = (sender as FrameworkElement)?.Tag as string;
-        var deltaX = e.HorizontalChange;
-        var deltaY = e.VerticalChange;
-
-        if (edge is "TopLeft" or "BottomLeft")
-        {
-            var newWidth = Math.Max(MinWidth, Width - deltaX);
-            Left += Width - newWidth;
-            Width = newWidth;
-        }
-        else if (edge is "TopRight" or "BottomRight")
-        {
-            Width = Math.Max(MinWidth, Width + deltaX);
-        }
-
-        if (edge is "TopLeft" or "TopRight")
-        {
-            var newHeight = Math.Max(MinHeight, Height - deltaY);
-            Top += Height - newHeight;
-            Height = newHeight;
-        }
-        else if (edge is "BottomLeft" or "BottomRight")
-        {
-            Height = Math.Max(MinHeight, Height + deltaY);
         }
     }
 

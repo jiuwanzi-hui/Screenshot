@@ -155,7 +155,7 @@ public sealed class HotKeyCaptureBox : WpfTextBox
         }
 
         if (!TryCreateGesture(key, Keyboard.Modifiers, out var gesture) &&
-            !TryCreateStandaloneLetterGesture(key, Keyboard.Modifiers, out gesture))
+            !TryCreateStandaloneGesture(key, Keyboard.Modifiers, out gesture))
         {
             e.Handled = true;
             return;
@@ -173,13 +173,8 @@ public sealed class HotKeyCaptureBox : WpfTextBox
         // never allow committed text to reach the canvas behind this box.
         if (IsKeyboardFocusWithin)
         {
-            var text = e.Text?.Trim() ?? string.Empty;
-            if (text.Length == 1 && IsAsciiDigit(text[0]))
-            {
-                Text = text.ToUpperInvariant();
-                HotKeyCaptured?.Invoke(this, new HotKeyCapturedEventArgs(Text));
-            }
-
+            // Only physical key events carry a reliable modifier snapshot.
+            // A late IME TextInput must never replace Ctrl+1 with bare 1.
             e.Handled = true;
             return;
         }
@@ -231,16 +226,15 @@ public sealed class HotKeyCaptureBox : WpfTextBox
         return true;
     }
 
-    private bool TryCreateStandaloneLetterGesture(
+    private bool TryCreateStandaloneGesture(
         Key key,
         ModifierKeys keyboardModifiers,
         out HotKeyGesture gesture)
     {
         gesture = default;
-        if (!IsCompletionCaptureSetting && !IsToolbarFeatureCapture ||
-            keyboardModifiers != ModifierKeys.None ||
+        if (keyboardModifiers != ModifierKeys.None ||
             !TryGetVirtualKey(key, out var virtualKey) ||
-            !IsStandaloneToolbarDigitKey(virtualKey))
+            !AllowsStandaloneCapturedKey(virtualKey))
         {
             return false;
         }
@@ -258,9 +252,8 @@ public sealed class HotKeyCaptureBox : WpfTextBox
             return true;
         }
 
-        if ((IsCompletionCaptureSetting || IsToolbarFeatureCapture) &&
-            capturedGesture.Modifiers == HotKeyModifiers.None &&
-            IsStandaloneToolbarDigitKey(capturedGesture.VirtualKey))
+        if (capturedGesture.Modifiers == HotKeyModifiers.None &&
+            AllowsStandaloneCapturedKey(capturedGesture.VirtualKey))
         {
             gesture = capturedGesture.ToString();
             return true;
@@ -279,10 +272,10 @@ public sealed class HotKeyCaptureBox : WpfTextBox
     private bool IsToolbarFeatureCapture => Tag is CaptureToolbarFeature ||
         Enum.TryParse<CaptureToolbarFeature>(Tag?.ToString(), out _);
 
-    private static bool IsStandaloneToolbarDigitKey(uint virtualKey) =>
-        virtualKey is >= '0' and <= '9' or >= 0x60 and <= 0x69;
-
-    private static bool IsAsciiDigit(char value) => value is >= '0' and <= '9';
+    private bool AllowsStandaloneCapturedKey(uint virtualKey) =>
+        (IsCompletionCaptureSetting &&
+         HotKeyGesture.IsCompletionShortcutAllowed(new HotKeyGesture(HotKeyModifiers.None, virtualKey))) ||
+        (IsToolbarFeatureCapture && virtualKey is >= '0' and <= '9' or >= 0x60 and <= 0x69);
 
     public static bool TryFormatGesture(
         Key key,

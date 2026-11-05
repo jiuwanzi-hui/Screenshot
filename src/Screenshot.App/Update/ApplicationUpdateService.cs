@@ -80,7 +80,7 @@ public sealed record ApplicationReleaseHistoryResult(
     IReadOnlyList<ApplicationReleaseInfo> Releases,
     string Message);
 
-public sealed class ApplicationUpdateService : IDisposable
+public sealed partial class ApplicationUpdateService : IDisposable
 {
     private static readonly JsonSerializerOptions ManifestJsonOptions = new()
     {
@@ -104,7 +104,7 @@ public sealed class ApplicationUpdateService : IDisposable
     internal static readonly Uri DefaultGiteeReleaseHistoryUri = new(
         "https://gitee.com/api/v5/repos/wwangyunhui/screenshot/releases?per_page=20");
     internal static readonly Uri DefaultGitHubStaticReleaseHistoryUri = new(
-        "https://raw.githubusercontent.com/jiuwanzi-hui/Screenshot/main/updates/SnapCut-Releases.json");
+        "https://github.com/jiuwanzi-hui/Screenshot/releases/latest/download/SnapCut-Releases.json");
     internal static readonly Uri DefaultGiteeStaticReleaseHistoryUri = new(
         "https://gitee.com/wwangyunhui/screenshot/raw/main/updates/SnapCut-Releases.json");
 
@@ -120,6 +120,9 @@ public sealed class ApplicationUpdateService : IDisposable
     private readonly string _releaseHistoryCachePath;
     private readonly string? _bundledReleaseHistoryPath;
     private readonly bool _probeMirrorAssets;
+    internal TimeSpan DownloadReadTimeout { get; set; } = TimeSpan.FromSeconds(30);
+    internal TimeSpan DownloadRetryDelay { get; set; } = TimeSpan.FromSeconds(1);
+    internal TimeSpan MetadataRequestTimeout { get; set; } = TimeSpan.FromSeconds(5);
 
     public ApplicationUpdateService(
         HttpClient? httpClient = null,
@@ -257,36 +260,55 @@ public sealed class ApplicationUpdateService : IDisposable
             asset.FileName);
         var failures = new List<string>();
         Exception? lastFailure = null;
-        foreach (var downloadUri in asset.GetDownloadUris().Distinct())
+        if (File.Exists(destinationPath) && new FileInfo(destinationPath).Length == asset.Size)
         {
-            var partialPath = destinationPath + $".{Guid.NewGuid():N}.part";
-            try
+            await using var cached = File.OpenRead(destinationPath);
+            var cachedHash = Convert.ToHexString(await SHA256.HashDataAsync(cached, cancellationToken));
+            if (cachedHash.Equals(asset.Sha256, StringComparison.OrdinalIgnoreCase))
             {
-                await DownloadFromUriAsync(
-                    asset,
-                    downloadUri,
-                    partialPath,
-                    progress,
-                    cancellationToken);
-                File.Move(partialPath, destinationPath, overwrite: true);
                 progress?.Report(1);
                 return destinationPath;
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        }
+
+        const int maximumAttempts = 3;
+        for (var attempt = 0; attempt < maximumAttempts; attempt++)
+        {
+            if (attempt > 0)
             {
-                TryDeleteFile(partialPath);
-                throw;
+                await Task.Delay(DownloadRetryDelay * attempt, cancellationToken);
             }
-            catch (Exception exception) when (
-                exception is HttpRequestException or IOException or InvalidDataException or TaskCanceledException)
+            foreach (var downloadUri in asset.GetDownloadUris().Distinct())
             {
-                TryDeleteFile(partialPath);
-                lastFailure = exception;
-                failures.Add($"{GetMirrorName(downloadUri)}：{exception.Message}");
+                var partialPath = destinationPath + $".{Guid.NewGuid():N}.part";
+                try
+                {
+                    await DownloadFromUriAsync(
+                        asset,
+                        downloadUri,
+                        partialPath,
+                        progress,
+                        cancellationToken);
+                    File.Move(partialPath, destinationPath, overwrite: true);
+                    progress?.Report(1);
+                    return destinationPath;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    TryDeleteFile(partialPath);
+                    throw;
+                }
+                catch (Exception exception) when (
+                    exception is HttpRequestException or IOException or InvalidDataException or OperationCanceledException)
+                {
+                    TryDeleteFile(partialPath);
+                    lastFailure = exception;
+                    failures.Add($"第 {attempt + 1} 次 {GetMirrorName(downloadUri)}：{exception.Message}");
+                }
             }
         }
 
-        var message = "Gitee 和 GitHub 更新包均下载失败：" + string.Join("；", failures);
+        var message = "已自动尝试 3 轮，更新包仍下载失败；可直接再次点击升级，无需重启。" + string.Join("；", failures);
         if (lastFailure is InvalidDataException)
         {
             throw new InvalidDataException(message, lastFailure);
@@ -305,9 +327,7 @@ public sealed class ApplicationUpdateService : IDisposable
         {
             try
             {
-                var releaseItems = await ReadReleaseHistoryItemsAsync(
-                    source.StaticReleaseHistoryUri!,
-                    cancellationToken);
+                var releaseItems = await ReadStaticReleaseHistoryAsync(source, cancellationToken);
                 if (HasFormalRelease(releaseItems))
                 {
                     staticCandidates.Add(new ReleaseHistoryCandidate(
@@ -325,7 +345,7 @@ public sealed class ApplicationUpdateService : IDisposable
                 throw;
             }
             catch (Exception exception) when (
-                exception is HttpRequestException or JsonException or InvalidDataException or TaskCanceledException)
+                exception is HttpRequestException or JsonException or InvalidDataException or OperationCanceledException)
             {
                 failures.Add($"{GetMirrorName(source.Mirror)}静态清单：{exception.Message}");
             }
@@ -384,7 +404,7 @@ public sealed class ApplicationUpdateService : IDisposable
                 throw;
             }
             catch (Exception exception) when (
-                exception is HttpRequestException or JsonException or InvalidDataException or TaskCanceledException)
+                exception is HttpRequestException or JsonException or InvalidDataException or OperationCanceledException)
             {
                 failures.Add($"{GetMirrorName(source.Mirror)}：{exception.Message}");
             }
@@ -406,10 +426,13 @@ public sealed class ApplicationUpdateService : IDisposable
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, downloadUri);
         request.Headers.UserAgent.ParseAdd($"SnapCut/{AppMetadata.DisplayVersion}");
+        using var idleTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        idleTimeout.CancelAfter(DownloadReadTimeout);
         using var response = await _httpClient.SendAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
+            idleTimeout.Token);
+        idleTimeout.CancelAfter(Timeout.InfiniteTimeSpan);
         response.EnsureSuccessStatusCode();
         await using var source = await response.Content.ReadAsStreamAsync(cancellationToken);
         await using var destination = new FileStream(
@@ -424,7 +447,9 @@ public sealed class ApplicationUpdateService : IDisposable
         long total = 0;
         while (true)
         {
-            var read = await source.ReadAsync(buffer, cancellationToken);
+            idleTimeout.CancelAfter(DownloadReadTimeout);
+            var read = await source.ReadAsync(buffer, idleTimeout.Token);
+            idleTimeout.CancelAfter(Timeout.InfiniteTimeSpan);
             if (read == 0)
             {
                 break;
@@ -458,6 +483,9 @@ public sealed class ApplicationUpdateService : IDisposable
         Uri historyUri,
         CancellationToken cancellationToken)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(MetadataRequestTimeout);
+        cancellationToken = deadline.Token;
         using var request = new HttpRequestMessage(HttpMethod.Get, historyUri);
         request.Headers.UserAgent.ParseAdd($"SnapCut/{AppMetadata.DisplayVersion}");
         using var response = await _httpClient.SendAsync(
@@ -551,6 +579,7 @@ public sealed class ApplicationUpdateService : IDisposable
         return candidates
             .Where(candidate => HasFormalRelease(candidate.Releases))
             .OrderByDescending(candidate => GetLatestFormalReleaseVersion(candidate.Releases))
+            .ThenByDescending(candidate => candidate.SaveToCache)
             .ThenByDescending(candidate => GetFormalReleaseCount(candidate.Releases));
     }
 
@@ -683,18 +712,7 @@ public sealed class ApplicationUpdateService : IDisposable
                     manifestAsset.Name!);
                 try
                 {
-                    using var request = new HttpRequestMessage(HttpMethod.Get, manifestUri);
-                    request.Headers.UserAgent.ParseAdd($"SnapCut/{AppMetadata.DisplayVersion}");
-                    using var response = await _httpClient.SendAsync(
-                        request,
-                        HttpCompletionOption.ResponseHeadersRead,
-                        cancellationToken);
-                    response.EnsureSuccessStatusCode();
-                    await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-                    var manifest = await JsonSerializer.DeserializeAsync<UpdateManifest>(
-                        stream,
-                        ManifestJsonOptions,
-                        cancellationToken);
+                    var manifest = await ReadManifestAsync(manifestUri, version, cancellationToken);
                     var validated = ValidateManifest(manifest, source.Mirror);
                     if (ComparableVersion(validated.Version) != ComparableVersion(version))
                     {
@@ -722,7 +740,7 @@ public sealed class ApplicationUpdateService : IDisposable
                     throw;
                 }
                 catch (Exception exception) when (
-                    exception is HttpRequestException or JsonException or InvalidDataException or TaskCanceledException)
+                    exception is HttpRequestException or JsonException or InvalidDataException or OperationCanceledException)
                 {
                     manifestFailures.Add(exception.Message);
                 }
@@ -793,7 +811,8 @@ public sealed class ApplicationUpdateService : IDisposable
         string tagName,
         string? apiReleasePage)
     {
-        if (TryCreateTrustedUri(apiReleasePage, out var releasePage))
+        if (TryCreateTrustedUri(apiReleasePage, out var releasePage) &&
+            releasePage.Host.Equals(mirror == ApplicationUpdateMirror.Gitee ? "gitee.com" : "github.com", StringComparison.OrdinalIgnoreCase))
         {
             return releasePage;
         }
@@ -913,7 +932,7 @@ public sealed class ApplicationUpdateService : IDisposable
             throw;
         }
         catch (Exception exception) when (
-            exception is HttpRequestException or JsonException or InvalidDataException or TaskCanceledException)
+            exception is HttpRequestException or JsonException or InvalidDataException or OperationCanceledException)
         {
             return new ApplicationUpdateCheckResult(
                 false,
@@ -926,6 +945,15 @@ public sealed class ApplicationUpdateService : IDisposable
         UpdateSource source,
         Version currentVersion,
         CancellationToken cancellationToken)
+    {
+        if (_probeMirrorAssets && source.Mirror == ApplicationUpdateMirror.Gitee)
+            return await CheckGiteeReleaseAsync(source, currentVersion, cancellationToken);
+
+        return await CheckManifestSourceAsync(source, currentVersion, cancellationToken);
+    }
+
+    private async Task<ApplicationUpdateCheckResult> CheckManifestSourceAsync(
+        UpdateSource source, Version currentVersion, CancellationToken cancellationToken)
     {
         var manifest = await ReadManifestAsync(
             source.ManifestUri,
@@ -982,6 +1010,13 @@ public sealed class ApplicationUpdateService : IDisposable
             update.Portable.GitHubDownloadUri,
             timeoutSource.Token,
             cancellationToken);
+        // Use a working mirror immediately; do not make a reachable domestic
+        // download wait for an unreachable international host's probe timeout.
+        var first = await Task.WhenAny(giteeTask, githubTask);
+        if (await first)
+        {
+            timeoutSource.Cancel();
+        }
         await Task.WhenAll(giteeTask, githubTask);
         var giteeAvailable = await giteeTask;
         var githubAvailable = await githubTask;
@@ -1045,6 +1080,9 @@ public sealed class ApplicationUpdateService : IDisposable
         Version currentVersion,
         CancellationToken cancellationToken)
     {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(MetadataRequestTimeout);
+        cancellationToken = deadline.Token;
         using var request = new HttpRequestMessage(HttpMethod.Get, manifestUri);
         request.Headers.UserAgent.ParseAdd($"SnapCut/{NormalizeVersion(currentVersion)}");
         using var response = await _httpClient.SendAsync(
@@ -1099,7 +1137,9 @@ public sealed class ApplicationUpdateService : IDisposable
             version,
             releasePage,
             CreateAsset(manifest.Installer, installerNames, preferredMirror),
-            CreateAsset(manifest.Portable, portableNames, preferredMirror),
+            manifest.Portable7z is { } compact
+                ? CreateAsset(compact, [$"SnapCut-Portable-{displayVersion}-win-x64.7z"], preferredMirror)
+                : CreateAsset(manifest.Portable, portableNames, preferredMirror),
             preferredMirror);
     }
 
@@ -1108,23 +1148,7 @@ public sealed class ApplicationUpdateService : IDisposable
         Version currentVersion,
         CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            source.LatestReleaseUri);
-        request.Headers.UserAgent.ParseAdd(
-            $"SnapCut/{NormalizeVersion(currentVersion)}");
-        using var response = await _httpClient.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
-        response.EnsureSuccessStatusCode();
-        var finalUri = response.RequestMessage?.RequestUri;
-        var versionText = finalUri?.Segments.LastOrDefault()?.Trim('/');
-        if (!Version.TryParse(versionText?.TrimStart('v', 'V'), out var latestVersion))
-        {
-            throw new InvalidDataException(
-                $"无法从 {GetMirrorName(source.Mirror)} latest 地址识别最新版本。");
-        }
+        var (latestVersion, tag) = await ResolveLatestReleaseAsync(source, cancellationToken);
 
         if (ComparableVersion(latestVersion).CompareTo(
                 ComparableVersion(currentVersion)) <= 0)
@@ -1135,10 +1159,29 @@ public sealed class ApplicationUpdateService : IDisposable
                 $"当前已是最新版本 {NormalizeVersion(currentVersion)}（{GetMirrorName(source.Mirror)}）。");
         }
 
-        return new ApplicationUpdateCheckResult(
-            false,
-            null,
-            $"发现新版本 {NormalizeVersion(latestVersion)}，但该版本缺少在线更新清单，请稍后重试。");
+        var failures = new List<string>();
+        foreach (var name in new[] { "SnapCut-Update.json", "Screenshot-Update.json" })
+        {
+            try
+            {
+                var manifest = await ReadManifestAsync(CreateReleaseDownloadUri(source.Mirror, tag, name), currentVersion, cancellationToken);
+                if (manifest is null) continue;
+                var update = ValidateManifest(manifest, source.Mirror);
+                if (ComparableVersion(update.Version) != ComparableVersion(latestVersion))
+                    throw new InvalidDataException("更新清单版本与发行版本不一致。");
+                update = update with
+                {
+                    ReleasePage = CreateReleasePageUri(source.Mirror, tag, null),
+                    Installer = CreateHistoricalAsset(update.Installer, tag, source.Mirror),
+                    Portable = CreateHistoricalAsset(update.Portable, tag, source.Mirror),
+                };
+                return new(true, update, $"发现新版本 {NormalizeVersion(latestVersion)}（{GetMirrorName(source.Mirror)}）。");
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception e) when (e is HttpRequestException or JsonException or InvalidDataException or OperationCanceledException)
+            { failures.Add(e.Message); }
+        }
+        return new(false, null, $"发现新版本 {NormalizeVersion(latestVersion)}，但该版本缺少可用的在线更新清单，请稍后重试。" + string.Join("；", failures));
     }
 
     private static ApplicationUpdateAsset CreateAsset(
@@ -1239,6 +1282,9 @@ public sealed class ApplicationUpdateService : IDisposable
         public UpdateAssetManifest? Installer { get; init; }
 
         public UpdateAssetManifest? Portable { get; init; }
+
+        // Additive field: older clients continue reading the original ZIP entry.
+        public UpdateAssetManifest? Portable7z { get; init; }
     }
 
     private sealed class UpdateAssetManifest

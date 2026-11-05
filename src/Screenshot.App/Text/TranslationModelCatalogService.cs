@@ -27,6 +27,51 @@ public sealed record TranslationModelTestResult(
 
 public static class TranslationModelCatalogService
 {
+    internal static async Task<TranslationModelTestResult> TestAsync(Core.AiTranslationProfile profile,
+        string? apiKey, HttpClient client, CancellationToken cancellationToken = default)
+    {
+        if (!TranslationProviderFactory.IsPublicProvider(profile.Provider) &&
+            OnlineModelCapabilities.Resolve(profile) != Core.OnlineModelPurpose.TextTranslation)
+        {
+            return await Task.Run(async () =>
+            {
+                if (OnlineModelCapabilities.Resolve(profile) == Core.OnlineModelPurpose.ImageGeneration)
+                {
+                    var result = await ImageModelService.ProcessAsync(profile, apiKey, client, [], [],
+                        "Create one simple image of a blue circle on a white background.", cancellationToken, updateProfileHealth: false).ConfigureAwait(false);
+                    return new TranslationModelTestResult(result.IsSuccess && result.Images.Count > 0,
+                        result.IsSuccess ? $"图片生成测试成功：{profile.Model}，已验证返回图片；编辑能力请在问图中附图验证。" : result.Error ?? "图片测试未完成。");
+                }
+                var pixels = Enumerable.Repeat((byte)0, 32 * 32 * 4).ToArray();
+                for (var i = 0; i < pixels.Length; i += 4) { pixels[i + 2] = 255; pixels[i + 3] = 255; }
+                var image = System.Windows.Media.Imaging.BitmapSource.Create(32, 32, 96, 96,
+                    System.Windows.Media.PixelFormats.Bgra32, null, pixels, 128); image.Freeze();
+                using var credentials = new TestImageCredential(apiKey);
+                var reply = await new ImageQuestionService(client, credentials).AskWithImagesAsync(profile, [ImageQuestionService.EncodeImage(image)], [],
+                    "What is the main color of this image? Answer with one color name in English.", cancellationToken, updateProfileHealth: false).ConfigureAwait(false);
+                var valid = reply.IsSuccess && (reply.Text.Contains("red", StringComparison.OrdinalIgnoreCase) || reply.Text.Contains('红'));
+                return new TranslationModelTestResult(valid, valid ? $"图片识别测试成功：{profile.Model}。" : reply.Error ?? "接口有响应，但未正确识别测试图片；请检查模型是否支持图片输入。");
+            }, cancellationToken);
+        }
+        if (!TranslationProviderFactory.IsPublicProvider(profile.Provider))
+            return await TestAsync(profile.Endpoint, profile.Model, apiKey, client, cancellationToken);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(60));
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var result = await TranslationProviderFactory.CreateOnlineProvider(profile, apiKey, client).TranslateSegmentsAsync(
+                ["The meeting starts at 9:30.", "Please save this document."], "en", "zh-Hans", timeout.Token);
+            return result.IsSuccess && result.FailedSegmentIndices is not { Count: > 0 } && result.Segments.Count == 2
+                ? new(true, $"公共翻译测试成功：{watch.Elapsed.TotalSeconds:F2} 秒，两段译文均已校验。")
+                : TranslationModelTestResult.Failure(result.ErrorMessage ?? "公共翻译未通过完整性校验。");
+        }
+        catch (OperationCanceledException)
+        {
+            return TranslationModelTestResult.Failure(cancellationToken.IsCancellationRequested ? "翻译测试已取消。" : "公共翻译测试超时。");
+        }
+    }
+
     public static async Task<TranslationModelTestResult> TestAsync(
         string endpoint,
         string model,
@@ -53,57 +98,34 @@ public static class TranslationModelCatalogService
             return TranslationModelTestResult.Failure("请填写模型名称，例如 glm-4-flashx。");
         }
 
+        // Use the same request and validation as screenshot translation. A
+        // choices array (even an empty/reasoning-only answer) is not proof that
+        // the selected model can translate complete segments.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(60));
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, uri);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey.Trim());
-            request.Content = JsonContent.Create(new
-            {
-                model = model.Trim(),
-                messages = new[] { new { role = "user", content = "Reply with OK." } },
-                temperature = 0,
-                max_tokens = 4,
-            });
-            using var response = await httpClient.SendAsync(
-                request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-
-            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
-            {
-                return TranslationModelTestResult.Failure("模型测试失败：API Key 无效或无权限。");
-            }
-            if (response.StatusCode == HttpStatusCode.PaymentRequired)
-            {
-                return TranslationModelTestResult.Failure("模型可访问，但账户余额或额度不足。");
-            }
-            if (!response.IsSuccessStatusCode)
-            {
-                var error = OpenAiCompatibleTranslationProvider.ExtractProviderError(body);
-                return TranslationModelTestResult.Failure(
-                    string.IsNullOrWhiteSpace(error)
-                        ? $"模型测试失败（HTTP {(int)response.StatusCode}）。"
-                        : $"模型测试失败：{error}");
-            }
-
-            using var document = JsonDocument.Parse(body);
-            var hasChoice = document.RootElement.TryGetProperty("choices", out var choices) &&
-                            choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0;
-            return hasChoice
-                ? new TranslationModelTestResult(true, $"模型可用：{model.Trim()}")
-                : TranslationModelTestResult.Failure("接口返回成功，但没有返回 choices，无法确认模型可用。");
+            var provider = new OpenAiCompatibleTranslationProvider(endpoint, model, apiKey, httpClient);
+            var result = await provider.TranslateSegmentsAsync(
+                ["The meeting starts at 9:30.", "Please save this document."], "en", "zh-Hans", timeout.Token);
+            return result.IsSuccess && result.FailedSegmentIndices is not { Count: > 0 } &&
+                   result.Segments.Count == 2
+                ? new TranslationModelTestResult(true, $"翻译测试成功：{model.Trim()}，两段译文均已校验。")
+                : TranslationModelTestResult.Failure(result.ErrorMessage ?? "接口已连接，但分段翻译未通过校验。");
         }
         catch (OperationCanceledException)
         {
-            return TranslationModelTestResult.Failure("模型测试已取消。");
+            return TranslationModelTestResult.Failure(cancellationToken.IsCancellationRequested
+                ? "模型测试已取消。" : "翻译测试超过 60 秒，请检查服务响应速度。");
         }
-        catch (HttpRequestException)
-        {
-            return TranslationModelTestResult.Failure("无法连接模型接口，请检查地址和网络。");
-        }
-        catch (JsonException)
-        {
-            return TranslationModelTestResult.Failure("接口返回格式无法识别，不能确认模型可用。");
-        }
+    }
+
+    private sealed class TestImageCredential(string? key) : ITranslationCredentialStore, IDisposable
+    {
+        private string? _key = key;
+        public string? GetApiKey(string id) => _key;
+        public void SetApiKey(string id, string? value) => throw new NotSupportedException();
+        public void Dispose() => _key = null;
     }
 
     public static async Task<TranslationModelCatalogResult> FetchAsync(

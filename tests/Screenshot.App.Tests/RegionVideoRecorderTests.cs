@@ -58,10 +58,10 @@ public sealed class RegionVideoRecorderTests
     }
 
     [Theory]
-    [InlineData(50, 30)]
-    [InlineData(100, 46)]
-    [InlineData(150, 62)]
-    public void ActiveRecordingToolbarUsesComfortableVerticalPadding(
+    [InlineData(50, 60)]
+    [InlineData(100, 105)]
+    [InlineData(150, 151)]
+    public void ActiveRecordingToolbarFitsStatusAndAnnotationRows(
         double percent,
         double expectedHeight)
     {
@@ -73,10 +73,10 @@ public sealed class RegionVideoRecorderTests
     }
 
     [Theory]
-    [InlineData(50, 41)]
-    [InlineData(100, 68)]
-    [InlineData(150, 95)]
-    public void RecordingOptionsToolbarAlsoUsesComfortableVerticalPadding(
+    [InlineData(50, 36)]
+    [InlineData(100, 58)]
+    [InlineData(150, 80)]
+    public void CompactRecordingTransportAlsoUsesComfortableVerticalPadding(
         double percent,
         double expectedHeight)
     {
@@ -88,11 +88,11 @@ public sealed class RegionVideoRecorderTests
     }
 
     [Theory]
-    [InlineData(false, false, false, false, false)]
+    [InlineData(false, false, true, false, false)]
     [InlineData(true, false, true, true, false)]
     [InlineData(false, true, true, false, true)]
     [InlineData(true, true, true, true, true)]
-    public void CreatesAudioOptionsFromIndependentSourceSettings(
+    public void KeepsAudioTrackAvailableForIndependentLiveSourceSwitching(
         bool systemAudio,
         bool microphone,
         bool audioEnabled,
@@ -235,7 +235,7 @@ public sealed class RegionVideoRecorderTests
                 isChecked: false));
     }
 
-    [Fact]
+    [DesktopFact]
     public void ActiveRecordingToolCreatesVisibleHitTestSurface()
     {
         RecordingAnnotationOverlayWindow? overlay = null;
@@ -274,7 +274,7 @@ public sealed class RegionVideoRecorderTests
         }
     }
 
-    [Fact]
+    [DesktopFact]
     public void PassiveRecordingOverlaysAreNativeHitTestTransparent()
     {
         const int nonClientHitTestMessage = 0x0084;
@@ -345,7 +345,75 @@ public sealed class RegionVideoRecorderTests
         Assert.Equal(0, RecordingInputOverlayWindow.CalculateTrailOpacity(0, 0));
     }
 
-    [Fact]
+    [DesktopFact]
+    public async Task TakingScreenshotsDoesNotPauseOrStopRecording()
+    {
+        var screen = WinForms.Screen.PrimaryScreen ?? Assert.Single(WinForms.Screen.AllScreens);
+        var region = new ScreenRegion(screen.Bounds.Left + 40, screen.Bounds.Top + 40, 320, 240);
+        var directory = Path.Combine(Path.GetTempPath(), "SnapCut-Recording-Screenshot-Tests",
+            Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var recorder = new RegionVideoRecorder(region, directory,
+                recordSystemAudio: false, recordMicrophone: false);
+            recorder.Start();
+            await Task.Delay(800);
+            for (var i = 0; i < 3; i++)
+            {
+                using var screenshot = ScreenCaptureService.Capture(region);
+                Assert.Equal(region.Width, screenshot.Bitmap.Width);
+                Assert.Equal(region.Height, screenshot.Bitmap.Height);
+                Assert.Equal(RegionVideoRecorderState.Recording, recorder.State);
+                await Task.Delay(120);
+            }
+            var result = await recorder.StopAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.True(result.IsSuccess, result.ErrorMessage);
+            Assert.True(new FileInfo(result.FilePath!).Length > 1024);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [DesktopFact]
+    public async Task MutedRecordingCanEnableDisableAudioAndQueueChangesWhilePaused()
+    {
+        var screen = WinForms.Screen.PrimaryScreen ?? Assert.Single(WinForms.Screen.AllScreens);
+        var region = new ScreenRegion(screen.Bounds.Left + 40, screen.Bounds.Top + 40, 320, 240);
+        var directory = Path.Combine(Path.GetTempPath(), "SnapCut-Live-Audio-Tests", Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var recorder = new RegionVideoRecorder(region, directory, false, false);
+            await recorder.StartAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            await Task.Delay(400);
+            recorder.SetAudioSources(true, false);
+            await Task.Delay(500);
+            recorder.SetAudioSources(false, false);
+            recorder.Pause();
+            recorder.SetAudioSources(true, false);
+            recorder.Resume();
+            await Task.Delay(400);
+            if (RegionVideoRecorder.GetAudioInputDevices().Count > 0)
+            {
+                recorder.SetAudioSources(false, true);
+                await Task.Delay(400);
+                recorder.SetAudioSources(false, false);
+            }
+            var result = await recorder.StopAsync().WaitAsync(TimeSpan.FromSeconds(15));
+            Assert.True(result.IsSuccess, result.ErrorMessage);
+            var bytes = await File.ReadAllBytesAsync(result.FilePath!);
+            Assert.True(bytes.Length > 1024);
+            // The MP4 has an audio handler even though it started with both sources off.
+            Assert.True(bytes.AsSpan().IndexOf("soun"u8) >= 0);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    [DesktopFact]
     public async Task RecordsPausesResumesAndFinalizesMp4()
     {
         var screen = WinForms.Screen.PrimaryScreen ??
@@ -388,7 +456,7 @@ public sealed class RegionVideoRecorderTests
         }
     }
 
-    [Fact]
+    [DesktopFact]
     public async Task CancelDiscardsRecordedMp4()
     {
         var screen = WinForms.Screen.PrimaryScreen ??
@@ -423,7 +491,7 @@ public sealed class RegionVideoRecorderTests
         }
     }
 
-    [Fact]
+    [DesktopFact]
     public async Task VisibleAnnotationWindowIsCapturedBySingleDisplaySource()
     {
         var screen = WinForms.Screen.PrimaryScreen ??
@@ -596,26 +664,6 @@ public sealed class RegionVideoRecorderTests
             out _));
     }
 
-    [Fact]
-    public void DetectsUniformProtectedContentBlackFrame()
-    {
-        using var bitmap = new Bitmap(120, 80);
-        using var graphics = Graphics.FromImage(bitmap);
-        graphics.Clear(Color.Black);
-
-        Assert.True(RegionVideoRecorder.IsNearlyBlackFrame(bitmap));
-    }
-
-    [Fact]
-    public void DoesNotRejectANormalDarkSceneWithVisibleDetail()
-    {
-        using var bitmap = new Bitmap(120, 80);
-        using var graphics = Graphics.FromImage(bitmap);
-        graphics.Clear(Color.FromArgb(4, 4, 4));
-        graphics.FillRectangle(Brushes.White, 20, 20, 50, 12);
-
-        Assert.False(RegionVideoRecorder.IsNearlyBlackFrame(bitmap));
-    }
 }
 
 internal static class NativeMethods

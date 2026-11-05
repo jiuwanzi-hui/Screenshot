@@ -94,10 +94,10 @@ internal static class TranslationTextLayout
         TranslatedTextAnnotationRegion region)
     {
         var contentBounds = new WpfRect(
-            region.Bounds.X + 4,
-            region.Bounds.Y + 3,
-            Math.Max(8, region.Bounds.Width - 8),
-            Math.Max(8, region.Bounds.Height - 6));
+            region.Bounds.X + 2,
+            region.Bounds.Y + 1,
+            Math.Max(8, region.Bounds.Width - 4),
+            Math.Max(8, region.Bounds.Height - 2));
         var fontSize = FitFontSize(
             region.Text,
             contentBounds.Width,

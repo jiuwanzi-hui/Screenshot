@@ -9,7 +9,10 @@ public sealed record HighQualityOcrModelStatus(
     string InstallationDirectory,
     long DownloadSize,
     long InstalledSize,
-    long AvailableSpace);
+    long AvailableSpace)
+{
+    public bool HasArtisticModel { get; init; }
+}
 
 public sealed class HighQualityOcrModelManager : IDisposable
 {
@@ -38,7 +41,13 @@ public sealed class HighQualityOcrModelManager : IDisposable
             "ppocrv6_dict.txt",
             74_947,
             "b5f2bfe2bdd9448429e3e82b51c789775d9b42f2403d082b00662eb77e401c5d",
-            ["https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv6/rec/PP-OCRv6_rec_small/ppocrv6_dict.txt"]),
+            ["https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/paddle/PP-OCRv6/rec/PP-OCRv6_rec_medium/ppocrv6_dict.txt"]),
+        new("艺术字增强检测模型", "PP-OCRv6_det_medium.onnx", 62_119_454,
+            "92078b7355007ccfffcd4c8cd441a3afd4538904d06881b29a155e1e679907c2",
+            ["https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv6/det/PP-OCRv6_det_medium.onnx"]),
+        new("艺术字增强识别模型", "PP-OCRv6_rec_medium.onnx", 76_629_984,
+            "eef444829dbbe18d7fea59a3f6eb75647518d2b3a9568d27c92e42940204894b",
+            ["https://www.modelscope.cn/models/RapidAI/RapidOCR/resolve/v3.9.2/onnx/PP-OCRv6/rec/PP-OCRv6_rec_medium.onnx"]),
     ];
 
     private static readonly Lazy<HighQualityOcrModelManager> SharedManager =
@@ -53,9 +62,7 @@ public sealed class HighQualityOcrModelManager : IDisposable
         HttpClient? httpClient = null)
     {
         InstallationDirectory = Path.GetFullPath(
-            installationDirectory ?? Path.Combine(
-                AppMetadata.TranslationModelsDirectoryPath,
-                AppMetadata.HighQualityOcrModelDirectoryName));
+            installationDirectory ?? ResolveInstallationDirectory(AppMetadata.TranslationModelsDirectoryPath));
         _httpClient = httpClient ?? new HttpClient
         {
             Timeout = TimeSpan.FromHours(6),
@@ -66,6 +73,24 @@ public sealed class HighQualityOcrModelManager : IDisposable
     public static HighQualityOcrModelManager Shared => SharedManager.Value;
 
     public string InstallationDirectory { get; }
+
+    internal static string ResolveInstallationDirectory(string root)
+    {
+        var current = Path.Combine(root, AppMetadata.HighQualityOcrModelDirectoryName);
+        var small = Path.Combine(root, "PP-OCRv6-Small");
+        // Keep either existing installation in place. Both variants share the
+        // exact same orientation model and dictionary; no destructive migration.
+        return !HasFiles(current, ModelFiles.Take(4)) && !HasFiles(current, ModelFiles.Skip(4)) &&
+            HasFiles(small, ModelFiles.Take(4)) ? small : current;
+    }
+
+    private static bool HasFiles(string directory, IEnumerable<DownloadableModelFile> files) =>
+        files.All(file => ResumableModelDownloader.IsFileComplete(
+            directory.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, file));
+
+    internal bool HasArtisticModel => HasFiles(InstallationDirectory, ModelFiles.Skip(4));
+    internal string ArtisticDetectionModelPath => Path.Combine(InstallationDirectory, ModelFiles[4].FileName);
+    internal string ArtisticRecognitionModelPath => Path.Combine(InstallationDirectory, ModelFiles[5].FileName);
 
     public string DetectionModelPath => Path.Combine(
         InstallationDirectory,
@@ -86,18 +111,14 @@ public sealed class HighQualityOcrModelManager : IDisposable
     public HighQualityOcrModelStatus GetStatus()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var installed = ModelFiles.All(file =>
-            ResumableModelDownloader.IsFileComplete(
-                InstallationDirectory.TrimEnd(Path.DirectorySeparatorChar) +
-                Path.DirectorySeparatorChar,
-                file));
+        var installed = HasFiles(InstallationDirectory, ModelFiles.Take(4));
         var size = ModelFiles.Sum(file => file.Size);
         return new HighQualityOcrModelStatus(
             installed,
             InstallationDirectory,
-            installed ? 0 : size,
+            ModelFiles.Where(file => !HasFiles(InstallationDirectory, [file])).Sum(file => file.Size),
             size,
-            GetAvailableSpace());
+            GetAvailableSpace()) { HasArtisticModel = HasArtisticModel };
     }
 
     public async Task<(bool IsSuccess, string? ErrorMessage)> InstallAsync(

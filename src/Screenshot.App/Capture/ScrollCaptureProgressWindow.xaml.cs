@@ -32,21 +32,26 @@ public partial class ScrollCaptureProgressWindow : Window
         DoNotActivate;
     private const uint MonitorDefaultToNearest = 0x00000002;
     private bool _allowClose;
-    private bool _isClosed;
+    private volatile bool _isClosed;
+    private readonly object _previewSync = new();
     private bool _isRequestRaised;
     private bool _cancelAfterRightButtonUp;
     private ScrollCapturePreviewState? _pendingPreviewState;
     private int _previewUpdateScheduled;
+    private bool _previewPaintFailed;
     private double _maximumHeightDip;
     private double _workAreaTopDip;
     private double _workAreaBottomDip;
     private bool _captureExcluded;
     private ScreenRegion _captureRegion;
     private bool _captureRegionConfigured;
+    private ControlledScrollCaptureState _controlledState;
+    private ScrollCaptureDirection? _recoveryDirection;
 
     public ScrollCaptureProgressWindow()
     {
         InitializeComponent();
+        Presentation.UiTransitions.PrepareWindow(this, ProgressShell);
         SourceInitialized += OnSourceInitialized;
     }
 
@@ -163,7 +168,23 @@ public partial class ScrollCaptureProgressWindow : Window
     public void UpdatePreview(ScrollCapturePreviewState previewState)
     {
         ArgumentNullException.ThrowIfNull(previewState);
+        if (_isClosed)
+        {
+            return;
+        }
+
         PreviewImage.Source = previewState.Preview;
+        if (previewState.IsTrackingLost is { } trackingLost)
+        {
+            InstructionText.Text = trackingLost
+                ? "暂未接上画面，请缓慢回滚到已截取内容后继续。已截内容已保留。"
+                : previewState.IsCrossingBlank
+                    ? "正在经过空白区域，出现内容后继续拼接；纯空白间距按滚动距离估算。"
+                    : previewState.HasEstimatedBlankSpacing
+                        ? "已接续空白后的内容；纯空白间距按滚动距离估算，可继续上下滚动。"
+                        : "在选区内自由滚动鼠标滚轮，可随时上下往返；完成后点击对勾。";
+            InstructionText.ToolTip = InstructionText.Text;
+        }
         FrameCountText.Text =
             $"{previewState.FrameCount} 帧 · 上 {previewState.AddedAboveFrameCount} · " +
             $"下 {previewState.AddedBelowFrameCount} · " +
@@ -188,14 +209,19 @@ public partial class ScrollCaptureProgressWindow : Window
 
         // Header row (78) + action row (54) + image margins and border.
         const double ChromeHeight = 78 + 54 + 16;
-        var imagePaneWidth = Math.Max(80, ActualWidth - 36);
+        var imagePaneWidth = Math.Max(80, (ActualWidth > 1 ? ActualWidth : Width) - 36);
+        var currentHeight = ActualHeight > 1 ? ActualHeight : Height;
+        // Native pixel rounding / a smaller work area can put ActualHeight just
+        // above the limit. Math.Clamp otherwise throws and strands the queued
+        // preview update in its "scheduled" state forever.
+        if (currentHeight >= _maximumHeightDip) return;
         var aspect = previewState.PixelHeight / (double)previewState.PixelWidth;
         var desiredHeight = Math.Clamp(
             (imagePaneWidth * aspect) + ChromeHeight,
-            ActualHeight,
+            currentHeight,
             _maximumHeightDip);
 
-        if (desiredHeight <= ActualHeight + 4)
+        if (desiredHeight <= currentHeight + 4)
         {
             return;
         }
@@ -212,8 +238,24 @@ public partial class ScrollCaptureProgressWindow : Window
     public void QueuePreview(ScrollCapturePreviewState previewState)
     {
         ArgumentNullException.ThrowIfNull(previewState);
-        Interlocked.Exchange(ref _pendingPreviewState, previewState);
+        lock (_previewSync)
+        {
+            if (_isClosed) return;
+            Interlocked.Exchange(ref _pendingPreviewState, previewState);
+        }
         SchedulePreviewUpdate();
+    }
+
+    public void QueueRecoveryDirection(ScrollCaptureDirection? direction)
+    {
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(DispatcherPriority.Render, () => QueueRecoveryDirection(direction));
+            return;
+        }
+        if (_isClosed) return;
+        _recoveryDirection = direction;
+        QueueInteractionState(_controlledState);
     }
 
     public void QueueInteractionState(ControlledScrollCaptureState state)
@@ -231,6 +273,13 @@ public partial class ScrollCaptureProgressWindow : Window
             return;
         }
 
+        _controlledState = state;
+        if (_recoveryDirection is { } recovery)
+        {
+            StatusText.Text = recovery == ScrollCaptureDirection.Up ? "正在向上核对拼接位置" : "正在向下核对拼接位置";
+            InstructionText.Text = "单击暂停；接回已有内容后继续采集";
+            return;
+        }
         (StatusText.Text, InstructionText.Text) = state switch
         {
             ControlledScrollCaptureState.WaitingToStart =>
@@ -242,7 +291,7 @@ public partial class ScrollCaptureProgressWindow : Window
             ControlledScrollCaptureState.PausedDown =>
                 ("已暂停 · 向下阶段", "单击继续；双击返回并向上拼接"),
             ControlledScrollCaptureState.BottomReached =>
-                ("已到达底部", "双击截取区域，开始向上拼接"),
+                ("视口已停止向下移动", "单击重试继续；双击返回并向上拼接"),
             ControlledScrollCaptureState.PreparingReturnFromDown =>
                 ("正在停止向下滚动", "停稳后自动返回初始位置"),
             ControlledScrollCaptureState.ReturningToStart =>
@@ -264,7 +313,7 @@ public partial class ScrollCaptureProgressWindow : Window
             ControlledScrollCaptureState.PausedUpFirst =>
                 ("已暂停 · 向上阶段", "单击继续；双击返回并向下拼接"),
             ControlledScrollCaptureState.TopReached =>
-                ("已到达顶部", "双击截取区域，开始向下拼接"),
+                ("视口已停止向上移动", "单击重试继续；双击返回并向下拼接"),
             ControlledScrollCaptureState.PreparingReturnFromUp =>
                 ("正在停止向上滚动", "停稳后自动返回初始位置"),
             ControlledScrollCaptureState.ReturningDownToStart =>
@@ -280,11 +329,11 @@ public partial class ScrollCaptureProgressWindow : Window
             ControlledScrollCaptureState.PausedDownSecond =>
                 ("已暂停 · 向下采集", "单击继续"),
             ControlledScrollCaptureState.FinalTopReached =>
-                ("已到达顶部", "请选择编辑、完成或取消"),
+                ("视口已停止向上移动", "单击重试继续，或选择编辑、完成"),
             ControlledScrollCaptureState.FinalBottomReached =>
-                ("已到达底部", "请选择编辑、完成或取消"),
+                ("视口已停止向下移动", "单击重试继续，或选择编辑、完成"),
             ControlledScrollCaptureState.InputUnavailable =>
-                ("连续滚动输入不可用", "请选择编辑、完成或取消"),
+                ("滚动输入暂不可用", "单击重试；也可编辑或完成当前截图"),
             ControlledScrollCaptureState.Completing =>
                 ("正在生成滚动截图", "请稍候"),
             _ => (StatusText.Text, InstructionText.Text),
@@ -293,6 +342,7 @@ public partial class ScrollCaptureProgressWindow : Window
 
     private void SchedulePreviewUpdate()
     {
+        if (_isClosed || Dispatcher.HasShutdownStarted) return;
         if (Interlocked.CompareExchange(ref _previewUpdateScheduled, 1, 0) != 0)
         {
             return;
@@ -306,21 +356,37 @@ public partial class ScrollCaptureProgressWindow : Window
     private void ApplyLatestPreview()
     {
         var latest = Interlocked.Exchange(ref _pendingPreviewState, null);
-        if (latest is not null && IsVisible)
+        try
         {
-            // Keep preview painting independent from z-order changes. Calling
-            // SetWindowPos for every frame forces DWM to redraw any selection
-            // border underneath an overlapping preview and causes a visible
-            // flash on wide selections. Z-order is established when the
-            // window is shown and after owner transitions instead.
-            UpdatePreview(latest);
+            if (latest is not null && IsVisible)
+            {
+                UpdatePreview(latest);
+                if (_previewPaintFailed) { _previewPaintFailed = false; QueuePreviewStatus(null); }
+            }
         }
-
-        Interlocked.Exchange(ref _previewUpdateScheduled, 0);
+        catch (Exception)
+        {
+            _previewPaintFailed = true;
+            QueuePreviewStatus("预览暂时无法更新，正在重试；已截内容仍然保留。");
+        }
+        finally { Interlocked.Exchange(ref _previewUpdateScheduled, 0); }
         if (Volatile.Read(ref _pendingPreviewState) is not null)
         {
             SchedulePreviewUpdate();
         }
+    }
+
+    public void QueuePreviewStatus(string? message)
+    {
+        if (Dispatcher.HasShutdownStarted) return;
+        if (!Dispatcher.CheckAccess())
+        {
+            _ = Dispatcher.BeginInvoke(DispatcherPriority.Render, () => QueuePreviewStatus(message));
+            return;
+        }
+        if (_isClosed) return;
+        PreviewStatusText.Text = message;
+        PreviewStatusText.Visibility = string.IsNullOrEmpty(message) ? Visibility.Collapsed : Visibility.Visible;
     }
 
     public bool TryPositionOutside(ScreenRegion captureRegion)
@@ -399,8 +465,10 @@ public partial class ScrollCaptureProgressWindow : Window
 
     public bool ContainsScreenPoint(int x, int y)
     {
-        var windowHandle = new WindowInteropHelper(this).Handle;
+        // This callback runs on the input thread, independently of WPF layout.
+        var windowHandle = Interlocked.CompareExchange(ref _capturePreviewHandle, IntPtr.Zero, IntPtr.Zero);
         return windowHandle != IntPtr.Zero &&
+               NativeMethods.IsWindowVisible(windowHandle) &&
                NativeMethods.GetWindowRect(windowHandle, out var bounds) &&
                x >= bounds.Left &&
                y >= bounds.Top &&
@@ -410,7 +478,9 @@ public partial class ScrollCaptureProgressWindow : Window
 
     public ScreenRegion? GetScreenRegion()
     {
-        var windowHandle = new WindowInteropHelper(this).Handle;
+        // Sampling runs outside the dispatcher. Use the handle cached at
+        // SourceInitialized, never touch WPF properties or synchronously Invoke.
+        var windowHandle = Interlocked.CompareExchange(ref _capturePreviewHandle, IntPtr.Zero, IntPtr.Zero);
         if (windowHandle == IntPtr.Zero ||
             !NativeMethods.GetWindowRect(windowHandle, out var bounds))
         {
@@ -452,14 +522,33 @@ public partial class ScrollCaptureProgressWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        Interlocked.Exchange(ref _capturePreviewHandle, IntPtr.Zero);
         ClearScreenCaptureExclusion();
-        _isClosed = true;
+        lock (_previewSync)
+        {
+            _isClosed = true;
+            Interlocked.Exchange(ref _pendingPreviewState, null);
+        }
+        if (IsMouseCaptured)
+        {
+            ReleaseMouseCapture();
+        }
+
+        // Preview states contain frozen, full-resolution BitmapSources. The
+        // coordinator normally stops publishing before closing, but a queued
+        // render callback can otherwise keep the last tall preview alive with
+        // the closed window. Detach both the pending state and the visual
+        // binding immediately; the source is a transient preview, not output.
+        PreviewImage.Source = null;
         SourceInitialized -= OnSourceInitialized;
         base.OnClosed(e);
     }
 
+    private IntPtr _capturePreviewHandle;
+
     private void OnSourceInitialized(object? sender, EventArgs e)
     {
+        _capturePreviewHandle = new WindowInteropHelper(this).Handle;
         SourceInitialized -= OnSourceInitialized;
         // Leave capture affinity disabled while the preview is displayed so
         // remote-control clients such as UU can see it. The capture callback
@@ -674,6 +763,9 @@ public partial class ScrollCaptureProgressWindow : Window
 
     private static class NativeMethods
     {
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsWindowVisible(IntPtr windowHandle);
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool SetWindowDisplayAffinity(

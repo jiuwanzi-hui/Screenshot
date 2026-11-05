@@ -4,10 +4,11 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:editor="clr-namespace:Screenshot.App.Editor"
+        xmlns:pin="clr-namespace:Screenshot.App.Pin"
         mc:Ignorable="d"
         Title="钉图"
-        MinWidth="260"
-        MinHeight="140"
+        MinWidth="25"
+        MinHeight="25"
         AllowsTransparency="True"
         Background="Transparent"
         FontFamily="Microsoft YaHei UI"
@@ -16,6 +17,8 @@
         Topmost="True"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
         PreviewMouseMove="OnWindowPreviewMouseMove"
         PreviewMouseLeftButtonUp="OnWindowPreviewMouseLeftButtonUp"
         LostMouseCapture="OnWindowLostMouseCapture">
@@ -24,172 +27,19 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="../Themes/ThemedContextMenus.xaml" />
             </ResourceDictionary.MergedDictionaries>
-        <DrawingBrush x:Key="PinnedCheckerboardBrush"
-                      TileMode="Tile"
-                      Viewport="0,0,12,12"
-                      ViewportUnits="Absolute"
-                      Viewbox="0,0,12,12"
-                      ViewboxUnits="Absolute">
-            <DrawingBrush.Drawing>
-                <DrawingGroup>
-                    <GeometryDrawing Brush="#FFFFFFFF" Geometry="M0,0 H12 V12 H0 Z" />
-                    <GeometryDrawing Brush="#FF9C9C9C" Geometry="M0,0 H6 V6 H0 Z" />
-                    <GeometryDrawing Brush="#FF9C9C9C" Geometry="M6,6 H12 V12 H6 Z" />
-                </DrawingGroup>
-            </DrawingBrush.Drawing>
-        </DrawingBrush>
-        <Style x:Key="PinnedCommandButton" TargetType="Button">
-            <Setter Property="Height" Value="24" />
-            <Setter Property="MinWidth" Value="42" />
-            <Setter Property="Padding" Value="7,1" />
-            <Setter Property="Margin" Value="0,0,5,0" />
-            <Setter Property="Background" Value="{DynamicResource AppInputBackgroundBrush}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource AppSubtleBorderBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="Foreground" Value="{DynamicResource AppControlForegroundBrush}" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="CommandBorder"
-                                Padding="{TemplateBinding Padding}"
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="6">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="CommandBorder" Property="Background" Value="{DynamicResource AppAccentMutedBrush}" />
-                                <Setter TargetName="CommandBorder" Property="BorderBrush" Value="{DynamicResource AppAccentBrush}" />
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="CommandBorder" Property="Opacity" Value="0.72" />
-                            </Trigger>
-                            <Trigger Property="IsEnabled" Value="False">
-                                <Setter TargetName="CommandBorder" Property="Opacity" Value="0.42" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <Style x:Key="PinnedCloseButton" TargetType="Button">
-            <Setter Property="Width" Value="24" />
-            <Setter Property="Height" Value="24" />
-            <Setter Property="Padding" Value="0" />
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="{DynamicResource AppTextSecondaryBrush}" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="CloseBorder"
-                                Background="{TemplateBinding Background}"
-                                CornerRadius="6">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center" />
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="CloseBorder" Property="Background" Value="#D9C94B55" />
-                                <Setter Property="Foreground" Value="#FFFFFF" />
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="CloseBorder" Property="Opacity" Value="0.72" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <Style x:Key="PinnedOpacitySlider" TargetType="Slider">
-            <Setter Property="Width" Value="66" />
-            <Setter Property="Height" Value="24" />
-            <Setter Property="Cursor" Value="Arrow" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Slider">
-                        <Grid VerticalAlignment="Center">
-                            <Border Height="4"
-                                    Background="{DynamicResource ImageEditorSliderTrackBrush}"
-                                    CornerRadius="2" />
-                            <Track x:Name="PART_Track"
-                                   Height="14"
-                                   VerticalAlignment="Center">
-                                <Track.DecreaseRepeatButton>
-                                    <RepeatButton Command="{x:Static Slider.DecreaseLarge}"
-                                                  IsTabStop="False">
-                                        <RepeatButton.Template>
-                                            <ControlTemplate TargetType="RepeatButton">
-                                                <Border Height="4"
-                                                        VerticalAlignment="Center"
-                                                        Background="{DynamicResource AppAccentBrush}"
-                                                        CornerRadius="2" />
-                                            </ControlTemplate>
-                                        </RepeatButton.Template>
-                                    </RepeatButton>
-                                </Track.DecreaseRepeatButton>
-                                <Track.IncreaseRepeatButton>
-                                    <RepeatButton Command="{x:Static Slider.IncreaseLarge}"
-                                                  Background="Transparent"
-                                                  IsTabStop="False">
-                                        <RepeatButton.Template>
-                                            <ControlTemplate TargetType="RepeatButton">
-                                                <Border Background="Transparent" />
-                                            </ControlTemplate>
-                                        </RepeatButton.Template>
-                                    </RepeatButton>
-                                </Track.IncreaseRepeatButton>
-                                <Track.Thumb>
-                                    <Thumb Width="12"
-                                           Height="12"
-                                           Background="{DynamicResource AppAccentBrush}"
-                                           BorderBrush="{DynamicResource ImageEditorSliderThumbBorderBrush}"
-                                           BorderThickness="1"
-                                           Cursor="Hand">
-                                        <Thumb.Template>
-                                            <ControlTemplate TargetType="Thumb">
-                                                <Ellipse Fill="{TemplateBinding Background}"
-                                                         Stroke="{TemplateBinding BorderBrush}"
-                                                         StrokeThickness="{TemplateBinding BorderThickness}" />
-                                            </ControlTemplate>
-                                        </Thumb.Template>
-                                    </Thumb>
-                                </Track.Thumb>
-                            </Track>
-                        </Grid>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <Style x:Key="InvisibleResizeThumb" TargetType="Thumb">
-            <Setter Property="Background" Value="Transparent" />
-            <Setter Property="ForceCursor" Value="True" />
-            <Setter Property="Panel.ZIndex" Value="20" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Thumb">
-                        <Border Background="Transparent" />
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
         <Style x:Key="PinnedCropHandle" TargetType="Thumb">
             <Setter Property="Width" Value="12" />
             <Setter Property="Height" Value="12" />
-            <Setter Property="Background" Value="{DynamicResource AppAccentBrush}" />
+            <Setter Property="Background" Value="{DynamicResource SelectionBorderBrush}" />
             <Setter Property="Cursor" Value="Hand" />
             <Setter Property="Panel.ZIndex" Value="30" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Thumb">
-                        <Border Background="{TemplateBinding Background}"
+                        <Grid Background="Transparent"><Border Width="6" Height="6" HorizontalAlignment="Center" VerticalAlignment="Center" Background="{TemplateBinding Background}"
                                 BorderBrush="{DynamicResource ImageEditorSliderThumbBorderBrush}"
                                 BorderThickness="1"
-                                CornerRadius="3" />
+                                CornerRadius="1" /></Grid>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -199,12 +49,16 @@
     <Border x:Name="PinnedShell"
             ContextMenuOpening="OnPinnedShellContextMenuOpening"
             Margin="12"
-            Background="{DynamicResource AppPanelBackgroundBrush}"
+            Background="Transparent"
             BorderBrush="{DynamicResource AppBorderBrush}"
-            BorderThickness="1"
-            CornerRadius="8">
+            BorderThickness="0"
+            CornerRadius="0">
         <Border.ContextMenu>
             <ContextMenu Style="{StaticResource ThemedContextMenuStyle}">
+                <MenuItem x:Name="EditMenuItem" Click="OnEditClick" Header="编辑" Style="{StaticResource ThemedMenuItemStyle}" />
+                <MenuItem Click="OnCopyClick" Header="复制图片" Style="{StaticResource ThemedMenuItemStyle}" />
+                <MenuItem Click="OnSaveClick" Header="保存图片" Style="{StaticResource ThemedMenuItemStyle}" />
+                <Separator />
                 <MenuItem Click="OnOpenSettingsClick"
                           Header="打开设置"
                           Style="{StaticResource ThemedMenuItemStyle}" />
@@ -226,97 +80,15 @@
                 <MenuItem Click="OnCloseFromContextMenuClick"
                           Header="关闭钉图"
                           Style="{StaticResource ThemedMenuItemStyle}" />
+                <Separator />
+                <MenuItem x:Name="StatusMenuItem" Header="钉图" IsEnabled="False" MaxWidth="380" Style="{StaticResource ThemedMenuItemStyle}" />
             </ContextMenu>
         </Border.ContextMenu>
-        <Border.Effect>
-            <DropShadowEffect BlurRadius="18"
-                              Direction="0"
-                              Opacity="0.50"
-                              ShadowDepth="0"
-                              Color="#000000" />
-        </Border.Effect>
         <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition x:Name="PinnedHeaderRow" Height="30" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
-
-            <Border x:Name="PinnedHeader"
-                    Grid.Row="0"
-                    Background="{DynamicResource AppSidebarBackgroundBrush}"
-                    BorderBrush="{DynamicResource AppSeparatorBrush}"
-                    BorderThickness="0,0,0,1"
-                    CornerRadius="7,7,0,0"
-                    Cursor="SizeAll"
-                    PreviewMouseLeftButtonDown="OnHeaderMouseLeftButtonDown">
-                <DockPanel LastChildFill="True">
-                    <StackPanel DockPanel.Dock="Right"
-                                Margin="0,0,4,0"
-                                VerticalAlignment="Center"
-                                Orientation="Horizontal">
-                        <Button x:Name="CropButton"
-                                Click="OnCropClick"
-                                Style="{StaticResource PinnedCloseButton}"
-                                ToolTip="框选裁剪">
-                            <TextBlock FontFamily="Segoe MDL2 Assets"
-                                       FontSize="14"
-                                       Text="&#xE7A8;" />
-                        </Button>
-                        <Button x:Name="EditButton"
-                                Margin="3,0,5,0"
-                                Click="OnEditClick"
-                                Style="{StaticResource PinnedCloseButton}"
-                                ToolTip="标注编辑">
-                            <TextBlock FontFamily="Segoe MDL2 Assets"
-                                       FontSize="14"
-                                       Text="&#xE70F;" />
-                        </Button>
-                        <Button Click="OnCopyClick"
-                                Content="复制"
-                                Style="{StaticResource PinnedCommandButton}"
-                                ToolTip="复制图片" />
-                        <Button x:Name="TranslateButton"
-                                Click="OnTranslateClick"
-                                Content="翻译"
-                                Style="{StaticResource PinnedCommandButton}"
-                                ToolTip="翻译图片文字并覆盖显示" />
-                        <Slider Style="{StaticResource PinnedOpacitySlider}"
-                                Minimum="0.2"
-                                Maximum="1"
-                                SmallChange="0.1"
-                                Value="1"
-                                ValueChanged="OnOpacityValueChanged"
-                                ToolTip="透明度" />
-                        <Button Margin="5,0,0,0"
-                                Click="OnCloseClick"
-                                Style="{StaticResource PinnedCloseButton}"
-                                ToolTip="关闭">
-                            <TextBlock FontFamily="Segoe MDL2 Assets"
-                                       FontSize="12"
-                                       Text="&#xE711;" />
-                        </Button>
-                    </StackPanel>
-                    <StackPanel Margin="9,0,8,0"
-                                VerticalAlignment="Center"
-                                Orientation="Horizontal">
-                        <TextBlock x:Name="HeaderStatusText"
-                                   FontSize="12"
-                                   Foreground="{DynamicResource AppTextPrimaryBrush}"
-                                   TextTrimming="CharacterEllipsis"
-                                   Text="钉图" />
-                        <TextBlock Margin="7,0,0,0"
-                                   FontSize="11"
-                                   Foreground="{DynamicResource AppTextSecondaryBrush}"
-                                   Text="右键更多 | 滚轮缩放 | 中键按住拖动画面" />
-                    </StackPanel>
-                </DockPanel>
-            </Border>
-
             <Border x:Name="ImageSurface"
-                    Grid.Row="1"
-                    Background="{StaticResource PinnedCheckerboardBrush}"
-                    CornerRadius="0,0,7,7"
-                    Cursor="Arrow"
+                    Background="Transparent"
+                    CornerRadius="0"
+                    Cursor="SizeAll"
                     ClipToBounds="True"
                     PreviewMouseWheel="OnImageMouseWheel"
                     PreviewMouseLeftButtonDown="OnImageMouseLeftButtonDown"
@@ -325,15 +97,16 @@
                     LostMouseCapture="OnImageLostMouseCapture">
                 <Grid x:Name="ImageViewport"
                       SizeChanged="OnImageViewportSizeChanged">
-                    <Image x:Name="PinnedImage"
+                    <pin:PixelAlignedImage x:Name="PinnedImage"
                            Source="{Binding Preview}"
+                           RenderOptions.BitmapScalingMode="HighQuality"
                            Stretch="Uniform" />
-                    <Canvas x:Name="TextOverlay"
+                    <Canvas x:Name="TextOverlay" IsHitTestVisible="False"
                             Panel.ZIndex="20"
                             Background="{x:Null}" />
                     <ScrollViewer x:Name="InlineEditorViewport"
                           Panel.ZIndex="10"
-                          Background="{DynamicResource AppPanelBackgroundBrush}"
+                          Background="Transparent"
                           HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalContentAlignment="Center"
@@ -346,7 +119,7 @@
                         <Border x:Name="InlineEditorFrame"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
-                                Background="{StaticResource PinnedCheckerboardBrush}"
+                                Background="Transparent"
                                 ClipToBounds="True">
                             <editor:ImageEditorCanvas x:Name="InlineEditorCanvas"
                                                       HorizontalAlignment="Left"
@@ -364,7 +137,7 @@
                         <Path x:Name="CropMask" Fill="#99000000" IsHitTestVisible="False" />
                         <Rectangle x:Name="CropSelection"
                                    Fill="Transparent"
-                                   Stroke="{DynamicResource AppAccentBrush}"
+                                   Stroke="{DynamicResource SelectionBorderBrush}"
                                    StrokeDashArray="5,3"
                                    StrokeThickness="2"
                                    IsHitTestVisible="False" />
@@ -377,78 +150,13 @@
                 </Grid>
             </Border>
 
-            <Thumb x:Name="WindowResizeLeftThumb"
-                   Grid.Row="1"
-                   Width="8"
-                   HorizontalAlignment="Left"
-                   Cursor="SizeWE"
-                   DragDelta="OnResizeEdgeDragDelta"
-                   Style="{StaticResource InvisibleResizeThumb}"
-                   Tag="Left" />
-            <Thumb x:Name="WindowResizeRightThumb"
-                   Grid.Row="1"
-                   Width="8"
-                   HorizontalAlignment="Right"
-                   Cursor="SizeWE"
-                   DragDelta="OnResizeEdgeDragDelta"
-                   Style="{StaticResource InvisibleResizeThumb}"
-                   Tag="Right" />
-            <Thumb x:Name="WindowResizeTopThumb"
-                   Grid.Row="1"
-                   Height="8"
-                   VerticalAlignment="Top"
-                   Cursor="SizeNS"
-                   DragDelta="OnResizeEdgeDragDelta"
-                   Style="{StaticResource InvisibleResizeThumb}"
-                   Tag="Top" />
-            <Thumb x:Name="WindowResizeBottomThumb"
-                   Grid.Row="1"
-                   Height="8"
-                   VerticalAlignment="Bottom"
-                   Cursor="SizeNS"
-                   DragDelta="OnResizeEdgeDragDelta"
-                   Style="{StaticResource InvisibleResizeThumb}"
-                   Tag="Bottom" />
-            <Thumb x:Name="WindowResizeTopLeftThumb"
-                   Grid.Row="1"
-                   Width="14"
-                   Height="14"
-                   HorizontalAlignment="Left"
-                   VerticalAlignment="Top"
-                   Cursor="SizeNWSE"
-                   DragDelta="OnResizeEdgeDragDelta"
-                   Style="{StaticResource InvisibleResizeThumb}"
-                   Tag="TopLeft" />
-            <Thumb x:Name="WindowResizeTopRightThumb"
-                   Grid.Row="1"
-                   Width="14"
-                   Height="14"
-                   HorizontalAlignment="Right"
-                   VerticalAlignment="Top"
-                   Cursor="SizeNESW"
-                   DragDelta="OnResizeEdgeDragDelta"
-                   Style="{StaticResource InvisibleResizeThumb}"
-                   Tag="TopRight" />
-            <Thumb x:Name="WindowResizeBottomLeftThumb"
-                   Grid.Row="1"
-                   Width="14"
-                   Height="14"
-                   HorizontalAlignment="Left"
-                   VerticalAlignment="Bottom"
-                   Cursor="SizeNESW"
-                   DragDelta="OnResizeEdgeDragDelta"
-                   Style="{StaticResource InvisibleResizeThumb}"
-                   Tag="BottomLeft" />
-            <Thumb x:Name="WindowResizeBottomRightThumb"
-                   Grid.Row="1"
-                   Width="14"
-                   Height="14"
-                   HorizontalAlignment="Right"
-                   VerticalAlignment="Bottom"
-                   Cursor="SizeNWSE"
-                   DragDelta="OnResizeEdgeDragDelta"
-                   Style="{StaticResource InvisibleResizeThumb}"
-                   Tag="BottomRight" />
+            <pin:PinnedImageOutline x:Name="ImageOutline" Margin="-2" Panel.ZIndex="-1"
+                                    EdgeBrush="{DynamicResource SelectionBorderBrush}"
+                                    IsHitTestVisible="False" SnapsToDevicePixels="True" UseLayoutRounding="True">
+                <pin:PinnedImageOutline.Effect>
+                    <DropShadowEffect BlurRadius="14" ShadowDepth="2" Opacity="0.32" Color="#000000" />
+                </pin:PinnedImageOutline.Effect>
+            </pin:PinnedImageOutline>
         </Grid>
     </Border>
 </Window>

@@ -12,7 +12,6 @@ using Screenshot.App.Editor;
 using Screenshot.App.Infrastructure;
 using Screenshot.App.Text;
 using WpfBrushes = System.Windows.Media.Brushes;
-using WpfButtonBase = System.Windows.Controls.Primitives.ButtonBase;
 using WpfColor = System.Windows.Media.Color;
 using WpfMouseEventArgs = System.Windows.Input.MouseEventArgs;
 using WpfPoint = System.Windows.Point;
@@ -22,6 +21,8 @@ using WpfCursors = System.Windows.Input.Cursors;
 
 namespace Screenshot.App.Pin;
 
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001",
+    Justification = "The zoom frame subscription is disposed in OnClosed.")]
 public partial class PinnedImageGroupWindow : Window
 {
     private static readonly DrawingBrush CompositeCheckerboardBrush =
@@ -29,6 +30,7 @@ public partial class PinnedImageGroupWindow : Window
     private readonly Func<AppSettings>? _settingsProvider;
     private readonly Action<CapturedImage>? _copyImageToClipboardAndHistory;
     private bool _isClosed;
+    private readonly CancellationTokenSource _recognitionLifetime = new();
 
     private sealed record CompositionResult(
         BitmapSource Image,
@@ -42,6 +44,8 @@ public partial class PinnedImageGroupWindow : Window
     private Rect _renderedImageBounds;
     private WpfPoint? _cropDragStart;
     private bool _isEditorMode;
+    private int _editorChangeVersion;
+    private TranslatedTextAnnotationRegion[]? _pendingTranslatedRegions;
     private bool _isCropMode;
     private bool _hasCompositeEdits;
     private bool _applyingCompositeToMembers;
@@ -67,8 +71,7 @@ public partial class PinnedImageGroupWindow : Window
     private ContextMenu? _restoreContextMenu;
     private readonly NativeWindowDragTracker _windowDragTracker;
     private readonly DispatcherTimer _inlineZoomQualityTimer;
-    private WpfPoint _pendingInlineZoomPointer;
-    private int _pendingInlineZoomSteps;
+    private readonly WheelZoomFramePump _zoomFrames;
 
     public PinnedImageGroupWindow(
         IReadOnlyList<PinnedImageWindow> members,
@@ -86,6 +89,9 @@ public partial class PinnedImageGroupWindow : Window
                     virtualBounds.Width,
                     virtualBounds.Height));
         InitializeComponent();
+        InlineEditorCanvas.HistoryChanged += (_, _) => _editorChangeVersion++;
+        TranslationTargetPreferences.Changed += OnTranslationTargetChanged;
+        Closed += (_, _) => TranslationTargetPreferences.Changed -= OnTranslationTargetChanged;
         _inlineZoomQualityTimer = new DispatcherTimer(
             DispatcherPriority.Background,
             Dispatcher)
@@ -93,6 +99,7 @@ public partial class PinnedImageGroupWindow : Window
             Interval = TimeSpan.FromMilliseconds(120),
         };
         _inlineZoomQualityTimer.Tick += OnInlineZoomQualityTimerTick;
+        _zoomFrames = new WheelZoomFramePump(ApplyWheelZoom);
         _windowDragTracker = new NativeWindowDragTracker(this, EndWindowDrag);
         SetMembers(members);
     }
@@ -116,6 +123,7 @@ public partial class PinnedImageGroupWindow : Window
 
     internal void MinimizeTo(int stackIndex)
     {
+        CancelPendingInlineZoom();
         if (_isMinimized) return;
         _restoreBounds = new(Left, Top, Width, Height);
         _restoreMinWidth = MinWidth; _restoreMinHeight = MinHeight;
@@ -127,8 +135,6 @@ public partial class PinnedImageGroupWindow : Window
         Background = WpfBrushes.Transparent;
         GroupShell.BorderThickness = new Thickness(0);
         GroupShell.Background = WpfBrushes.Transparent;
-        GroupHeaderRow.Height = new GridLength(0);
-        GroupHeader.Visibility = Visibility.Collapsed;
         GroupCanvas.Background = WpfBrushes.Transparent;
         CompositeImage.Stretch = Stretch.UniformToFill;
         GroupCanvas.Cursor = WpfCursors.Arrow;
@@ -154,14 +160,12 @@ public partial class PinnedImageGroupWindow : Window
                 BackgroundProperty,
                 "AppPanelBackgroundBrush");
             GroupShell.ContextMenu = _restoreContextMenu;
-            GroupHeaderRow.Height = new GridLength(36);
-            GroupHeader.Visibility = Visibility.Visible;
             GroupCanvas.Background =
                 (System.Windows.Media.Brush)FindResource("PinnedCheckerboardBrush");
             CompositeImage.Stretch = Stretch.Uniform;
-            GroupCanvas.Cursor = WpfCursors.Arrow;
             GroupTextOverlay.Visibility = Visibility.Visible;
             _isMinimized = false; _restoreBounds = null;
+            UpdateImageCursor();
             MinimizedStateChanged?.Invoke(this, EventArgs.Empty);
         });
     }
@@ -185,6 +189,10 @@ public partial class PinnedImageGroupWindow : Window
             "The group does not contain a composite image.");
 
     internal bool IsInlineEditorVisible => _isEditorMode;
+    internal bool CanMoveImage => !_isEditorMode && !_isCropMode && !_isMinimized;
+
+    private void UpdateImageCursor() =>
+        GroupCanvas.Cursor = CanMoveImage ? WpfCursors.SizeAll : WpfCursors.Arrow;
 
     internal bool IsInlineCropVisible => _isCropMode;
 
@@ -200,6 +208,7 @@ public partial class PinnedImageGroupWindow : Window
         _editorToolbar?.HasCustomPosition == true;
 
     internal PinnedImageEditorToolbarWindow? EditorToolbar => _editorToolbar;
+    internal ImageEditorCanvas AnnotationCanvas => InlineEditorCanvas;
 
     internal void SetMembers(IReadOnlyList<PinnedImageWindow> members)
     {
@@ -220,7 +229,7 @@ public partial class PinnedImageGroupWindow : Window
         {
             RebuildCompositeFromMembers();
         }
-        HeaderStatusText.Text = _members.Count == 0
+        StatusMenuItem.Header = _members.Count == 0
             ? "钉图编组"
             : $"钉图编组 · {_members.Count} 张 · 组合编辑";
     }
@@ -228,7 +237,11 @@ public partial class PinnedImageGroupWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _isClosed = true;
-        _windowDragTracker.Stop();
+        _recognitionLifetime.Cancel();
+        _recognitionLifetime.Dispose();
+        _zoomFrames.Dispose();
+        _inlineZoomQualityTimer.Stop();
+        _windowDragTracker.Dispose();
         EndInlineEditorPanning();
         foreach (var member in _members)
         {
@@ -236,7 +249,18 @@ public partial class PinnedImageGroupWindow : Window
         }
         CloseEditorToolbar();
         ExitInlineEditor(discardChanges: true);
+        CompositeImage.Source = null;
+        GroupTextOverlay.Children.Clear();
+        _recognition = null;
+        _pendingTranslatedRegions = null;
         base.OnClosed(e);
+
+        // base.OnClosed synchronously lets the manager apply composite edits
+        // back to members. No full-size surface is needed after those handlers.
+        _compositePreview = null;
+        _memberBounds = [];
+        _members = [];
+        MemoryFootprint.TrimAfterHeavyOperation();
     }
 
     private void RebuildCompositeFromMembers()
@@ -259,6 +283,7 @@ public partial class PinnedImageGroupWindow : Window
         CompositeImage.Source = result.Image;
         ApplyCompositeWindowSize(result.Image);
         _recognition = null;
+        _pendingTranslatedRegions = null;
         GroupTextOverlay.Children.Clear();
     }
 
@@ -287,6 +312,7 @@ public partial class PinnedImageGroupWindow : Window
         _hasCompositeEdits = true;
         CompositeImage.Source = _compositePreview;
         _recognition = null;
+        _pendingTranslatedRegions = null;
         GroupTextOverlay.Children.Clear();
     }
 
@@ -318,6 +344,7 @@ public partial class PinnedImageGroupWindow : Window
         _hasCompositeEdits = true;
         CompositeImage.Source = cropped;
         _recognition = null;
+        _pendingTranslatedRegions = null;
         GroupTextOverlay.Children.Clear();
     }
 
@@ -407,18 +434,6 @@ public partial class PinnedImageGroupWindow : Window
             : new Int32Rect(left, top, right - left, bottom - top);
     }
 
-    private void OnHeaderMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.LeftButton == MouseButtonState.Pressed &&
-            !IsHeaderCommandSource(e.OriginalSource))
-        {
-            // Start native capture from the original button-down. Activating
-            // here can consume the first press as a focus change, requiring a
-            // second click before the group begins moving.
-            BeginWindowDrag(e);
-            e.Handled = true;
-        }
-    }
 
     private void ApplyCompositeWindowSize(BitmapSource image)
     {
@@ -428,41 +443,24 @@ public partial class PinnedImageGroupWindow : Window
         }
 
         var workArea = SystemParameters.WorkArea;
-        const double headerHeight = 36;
         const double horizontalBorder = 2;
         const double verticalBorder = 2;
         var maxContentWidth = Math.Max(1, workArea.Width * 0.92);
-        var maxContentHeight = Math.Max(1, workArea.Height * 0.90 - headerHeight);
+        var maxContentHeight = Math.Max(1, workArea.Height * 0.90);
         var scale = Math.Min(
             1,
             Math.Min(
                 maxContentWidth / image.PixelWidth,
                 maxContentHeight / image.PixelHeight));
         Width = Math.Max(MinWidth, Math.Min(maxContentWidth + horizontalBorder, image.PixelWidth * scale + horizontalBorder));
-        Height = Math.Max(MinHeight, Math.Min(maxContentHeight + headerHeight + verticalBorder, image.PixelHeight * scale + headerHeight + verticalBorder));
+        Height = Math.Max(MinHeight, Math.Min(maxContentHeight + verticalBorder, image.PixelHeight * scale + verticalBorder));
     }
 
-    private static bool IsHeaderCommandSource(object source)
-    {
-        var current = source as DependencyObject;
-        while (current is not null)
-        {
-            if (current is WpfButtonBase or Slider)
-            {
-                return true;
-            }
-
-            current = current is Visual or System.Windows.Media.Media3D.Visual3D
-                ? VisualTreeHelper.GetParent(current)
-                : LogicalTreeHelper.GetParent(current);
-        }
-
-        return false;
-    }
 
     private void BeginWindowDrag(MouseButtonEventArgs e)
     {
-        if (e.LeftButton != MouseButtonState.Pressed)
+        CancelPendingInlineZoom();
+        if (!CanMoveImage || e.LeftButton != MouseButtonState.Pressed)
         {
             return;
         }
@@ -507,6 +505,14 @@ public partial class PinnedImageGroupWindow : Window
 
     private void OnGroupCanvasMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        if (!_isMinimized && CanMoveImage && e.ChangedButton == MouseButton.Left && e.ClickCount == 2 &&
+            !PinnedImageWindow.IsSelectableTextSource(e.OriginalSource))
+        {
+            e.Handled = true;
+            EndWindowDrag();
+            OnCloseClick(sender, e);
+            return;
+        }
         if (_isMinimized)
         {
             PinnedWindowMinimization.CommitCurrentAnimation(this);
@@ -519,7 +525,9 @@ public partial class PinnedImageGroupWindow : Window
             GroupCanvas.Cursor = WpfCursors.SizeAll;
             _ = GroupCanvas.CaptureMouse();
             e.Handled = true;
+            return;
         }
+        if (CanMoveImage) BeginWindowDrag(e);
     }
 
     private void OnGroupCanvasMouseMove(object sender, WpfMouseEventArgs e)
@@ -587,6 +595,8 @@ public partial class PinnedImageGroupWindow : Window
 
     private void OnEditClick(object sender, RoutedEventArgs e)
     {
+        CancelPendingInlineZoom();
+        EndWindowDrag();
         if (_isEditorMode)
         {
             return;
@@ -597,6 +607,7 @@ public partial class PinnedImageGroupWindow : Window
         }
 
         var source = CompositePreview;
+        ResizeMode = ResizeMode.NoResize;
         _inlineEditorImage = CapturedImage.FromBitmapSource(source);
         var availableWidth = Math.Max(240, GroupCanvas.ActualWidth);
         var availableHeight = Math.Max(180, GroupCanvas.ActualHeight);
@@ -617,8 +628,9 @@ public partial class PinnedImageGroupWindow : Window
         GroupTextOverlay.Children.Clear();
         InlineEditorViewport.Visibility = Visibility.Visible;
         _isEditorMode = true;
+        UpdateImageCursor();
         ShowEditorToolbar(PinnedImageToolbarMode.Edit);
-        HeaderStatusText.Text = $"钉图编组 · {_members.Count} 张 · 正在编辑组合图";
+        StatusMenuItem.Header = $"钉图编组 · {_members.Count} 张 · 正在编辑组合图";
     }
 
     private void CommitInlineEditor()
@@ -643,6 +655,8 @@ public partial class PinnedImageGroupWindow : Window
         _inlineEditorImage?.Dispose();
         _inlineEditorImage = null;
         _isEditorMode = false;
+        UpdateImageCursor();
+        ResizeMode = ResizeMode.CanResizeWithGrip;
         InlineEditorViewport.Visibility = Visibility.Collapsed;
         CompositeImage.Visibility = Visibility.Visible;
         GroupTextOverlay.Children.Clear();
@@ -650,11 +664,12 @@ public partial class PinnedImageGroupWindow : Window
         {
             CloseEditorToolbar();
         }
-        HeaderStatusText.Text = $"钉图编组 · {_members.Count} 张 · 组合编辑";
+        StatusMenuItem.Header = $"钉图编组 · {_members.Count} 张 · 组合编辑";
     }
 
     private void OnCropClick(object sender, RoutedEventArgs e)
     {
+        EndWindowDrag();
         if (_isEditorMode)
         {
             CommitInlineEditor();
@@ -667,23 +682,27 @@ public partial class PinnedImageGroupWindow : Window
         var source = CompositePreview;
         _cropRect = new Int32Rect(0, 0, source.PixelWidth, source.PixelHeight);
         _isCropMode = true;
+        UpdateImageCursor();
+        ResizeMode = ResizeMode.NoResize;
         CropOverlay.Visibility = Visibility.Visible;
         UpdateRenderedImageBounds();
         UpdateCropSelection();
         ShowEditorToolbar(PinnedImageToolbarMode.Crop);
-        HeaderStatusText.Text = $"钉图编组 · {_members.Count} 张 · 框选裁剪组合图";
+        StatusMenuItem.Header = $"钉图编组 · {_members.Count} 张 · 框选裁剪组合图";
     }
 
     private void ExitCropMode()
     {
         _cropDragStart = null;
         _isCropMode = false;
+        UpdateImageCursor();
+        ResizeMode = ResizeMode.CanResizeWithGrip;
         CropOverlay.Visibility = Visibility.Collapsed;
         if (!_isEditorMode)
         {
             CloseEditorToolbar();
         }
-        HeaderStatusText.Text = _members.Count == 0
+        StatusMenuItem.Header = _members.Count == 0
             ? "钉图编组"
             : $"钉图编组 · {_members.Count} 张 · 组合编辑";
     }
@@ -890,6 +909,13 @@ public partial class PinnedImageGroupWindow : Window
             ? _members[0].CreateEditorToolbar(this)
             : new PinnedImageEditorToolbarWindow(this);
         _editorToolbar = toolbar;
+        toolbar.Closed += (_, _) =>
+        {
+            if (!ReferenceEquals(_editorToolbar, toolbar)) return;
+            _editorToolbar = null;
+            if (_isEditorMode) CommitInlineEditor();
+            else if (_isCropMode) ExitCropMode();
+        };
         toolbar.ToolSelected += tool =>
         {
             if (_isEditorMode)
@@ -931,6 +957,11 @@ public partial class PinnedImageGroupWindow : Window
         toolbar.CopyTableRequested += async (_, _) => await CopyTableAsync();
         toolbar.CopyTextRequested += async (_, _) => await CopyRecognizedTextAsync();
         toolbar.TranslateRequested += async (_, _) => await TranslateCurrentImageAsync();
+        toolbar.ImageQuestionRequested += async (_, _) =>
+        {
+            if (_members.Count == 0 || !await _members[0].ShowImageQuestionAsync(InlineEditorCanvas.RenderEditedImage(), this))
+                toolbar.SetTranslationProgress("没有配置在线 AI 模型，请先在设置 → 翻译中配置并启用支持图片的模型。");
+        };
         toolbar.PrivacyRequested += async (_, _) => await RedactPrivacyAsync();
         toolbar.ApplyRequested += (_, _) =>
         {
@@ -991,6 +1022,10 @@ public partial class PinnedImageGroupWindow : Window
             ? InlineEditorCanvas.RenderEditedImage()
             : CompositePreview;
 
+    private void OnSaveClick(object sender, RoutedEventArgs e) => SaveCurrentImage();
+
+
+
     private async void SaveCurrentImage()
     {
         var settings = _settingsProvider?.Invoke();
@@ -1014,12 +1049,12 @@ public partial class PinnedImageGroupWindow : Window
             var path = CaptureFileService.SaveAsPng(
                 GetCurrentToolbarImage(),
                 saveDirectory);
-            HeaderStatusText.Text =
+            StatusMenuItem.Header =
                 $"钉图编组 · 已保存 {System.IO.Path.GetFileName(path)}";
         }
         catch
         {
-            HeaderStatusText.Text = "钉图编组 · 保存失败";
+            StatusMenuItem.Header = "钉图编组 · 保存失败";
         }
         finally
         {
@@ -1031,8 +1066,13 @@ public partial class PinnedImageGroupWindow : Window
         }
     }
 
-    private async Task<OcrRecognitionResult> EnsureRecognitionAsync()
+    private Task<OcrRecognitionResult>? _imageRecognitionTask;
+    private Task<OcrRecognitionResult> EnsureRecognitionAsync() => _imageRecognitionTask is { IsCompleted: false }
+        ? _imageRecognitionTask : _imageRecognitionTask = RecognizeCurrentImageCoreAsync();
+
+    private async Task<OcrRecognitionResult> RecognizeCurrentImageCoreAsync()
     {
+        if (_isClosed) return OcrRecognitionResult.Failure("识别已取消");
         if (_recognition is { IsSuccess: true } cached)
         {
             return cached;
@@ -1044,67 +1084,93 @@ public partial class PinnedImageGroupWindow : Window
             return OcrRecognitionResult.Failure("编组中没有钉图");
         }
 
-        using var image = CapturedImage.FromBitmapSource(GetCurrentToolbarImage());
-        _recognition = await member.RecognizeImageAsync(image);
+        var composite = _compositePreview;
+        var pixels = GetCurrentToolbarImage();
+        using var image = await Task.Run(() => CapturedImage.FromBitmapSource(pixels));
+        if (_isClosed) return OcrRecognitionResult.Failure("识别已取消");
+        var recognition = await member.RecognizeImageAsync(image, _recognitionLifetime.Token);
+        if (_isClosed || !ReferenceEquals(composite, _compositePreview)) return OcrRecognitionResult.Failure("图片已改变，请重新识别");
+        _recognition = recognition;
         return _recognition;
     }
 
     private async Task ShowRecognizedTextAsync()
     {
-        HeaderStatusText.Text = "钉图编组 · 正在识别文字…";
+        StatusMenuItem.Header = "钉图编组 · 正在识别文字…";
         var recognition = await EnsureRecognitionAsync();
+        if (_isClosed) return;
         if (!recognition.IsSuccess || recognition.Regions.Count == 0)
         {
-            HeaderStatusText.Text = recognition.ErrorMessage ?? "钉图编组 · 未识别到文字";
+            StatusMenuItem.Header = recognition.ErrorMessage ?? "钉图编组 · 未识别到文字";
             return;
         }
 
         RenderSelectableTextOverlay(recognition.Regions);
-        HeaderStatusText.Text = "钉图编组 · 文字可选择复制";
+        StatusMenuItem.Header = "钉图编组 · 文字可选择复制";
     }
 
     private async Task CopyRecognizedTextAsync()
     {
-        HeaderStatusText.Text = "钉图编组 · 正在提取文字…";
+        StatusMenuItem.Header = "钉图编组 · 正在提取文字…";
         var recognition = await EnsureRecognitionAsync();
+        if (_isClosed) return;
         if (!recognition.IsSuccess || string.IsNullOrWhiteSpace(recognition.Text))
         {
-            HeaderStatusText.Text = recognition.ErrorMessage ?? "钉图编组 · 未识别到文字";
+            StatusMenuItem.Header = recognition.ErrorMessage ?? "钉图编组 · 未识别到文字";
             return;
         }
 
         try
         {
-            System.Windows.Clipboard.SetText(recognition.Text);
-            HeaderStatusText.Text = "钉图编组 · 文字已复制";
+            await ClipboardTextService.SetTextAsync(recognition.Text, _recognitionLifetime.Token);
+            if (!_isClosed) StatusMenuItem.Header = "钉图编组 · 文字已复制";
         }
-        catch (COMException)
+        catch (OperationCanceledException) { }
+        catch (Exception exception) when (exception is COMException or System.ComponentModel.Win32Exception)
         {
-            HeaderStatusText.Text = "钉图编组 · 剪贴板正忙";
+            if (!_isClosed) StatusMenuItem.Header = "钉图编组 · 剪贴板正忙，请重试";
         }
     }
 
     private async Task CopyTableAsync()
     {
-        HeaderStatusText.Text = "钉图编组 · 正在识别表格…";
+        if (_isClosed) return;
+        var cancellationToken = _recognitionLifetime.Token;
+        StatusMenuItem.Header = "钉图编组 · 正在识别表格…";
         var member = _members.Count > 0 ? _members[0] : null;
         if (member is null)
         {
-            HeaderStatusText.Text = "钉图编组 · 编组中没有钉图";
+            StatusMenuItem.Header = "钉图编组 · 编组中没有钉图";
             return;
         }
 
-        using var image = CapturedImage.FromBitmapSource(GetCurrentToolbarImage());
-        var recognition = await member.RecognizeImageAsync(image);
-        var table = TableRecognitionService.BuildTsv(
-            recognition,
-            image.Bitmap,
-            await TableSupplementaryOcrService.RecognizeAsync(
-                image,
-                recognition.Words));
+        var composite = _compositePreview;
+        var pixels = GetCurrentToolbarImage();
+        using var image = await Task.Run(() => CapturedImage.FromBitmapSource(pixels));
+        var recognition = await member.RecognizeImageAsync(image, cancellationToken);
+        if (_isClosed || !ReferenceEquals(composite, _compositePreview)) return;
+        IReadOnlyList<OcrWordRegion> supplementaryWords;
+        try
+        {
+            supplementaryWords = await TableSupplementaryOcrService.RecognizeAsync(
+                image, recognition.Words, cancellationToken: cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return;
+        }
+        if (_isClosed || !ReferenceEquals(composite, _compositePreview)) return;
+        ContentRecognitionResult table;
+        try
+        {
+            table = await Task.Run(() => TableRecognitionService.BuildTsv(
+                recognition, image.Bitmap, supplementaryWords, cancellationToken), cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
+        if (_isClosed || !ReferenceEquals(composite, _compositePreview)) return;
         if (!table.IsSuccess)
         {
-            HeaderStatusText.Text = table.ErrorMessage ?? "钉图编组 · 未识别到表格";
+            StatusMenuItem.Header = table.ErrorMessage ?? "钉图编组 · 未识别到表格";
             return;
         }
 
@@ -1112,22 +1178,47 @@ public partial class PinnedImageGroupWindow : Window
         {
             if (!string.IsNullOrWhiteSpace(table.ClipboardHtml))
             {
-                await ClipboardTextService.SetHtmlAsync(table.ClipboardHtml, table.Content);
+                await ClipboardTextService.SetHtmlAsync(table.ClipboardHtml, table.Content, cancellationToken);
             }
             else
             {
-                await ClipboardTextService.SetTextAsync(table.Content);
+                await ClipboardTextService.SetTextAsync(table.Content, cancellationToken);
             }
-            HeaderStatusText.Text = "钉图编组 · 表格已复制";
+            if (!_isClosed) StatusMenuItem.Header = "钉图编组 · 表格已复制";
         }
-        catch (COMException)
+        catch (OperationCanceledException) { }
+        catch (Exception exception) when (exception is COMException or System.ComponentModel.Win32Exception)
         {
-            HeaderStatusText.Text = "钉图编组 · 剪贴板正忙";
+            if (!_isClosed) StatusMenuItem.Header = "钉图编组 · 剪贴板正忙，请重试";
         }
     }
 
+    private void OnTranslationTargetChanged(object? sender, EventArgs e)
+    {
+        _pendingTranslatedRegions = null;
+        InlineEditorCanvas.ClearTranslationOverlay();
+        GroupTextOverlay.Children.Clear();
+    }
+
+    private bool _imageTranslationRunning;
     private async Task TranslateCurrentImageAsync()
     {
+        if (_imageTranslationRunning) return;
+        _imageTranslationRunning = true;
+        try { await TranslateCurrentImageCoreAsync(); }
+        finally { _imageTranslationRunning = false; }
+    }
+    private async Task TranslateCurrentImageCoreAsync()
+    {
+        var editVersion = _editorChangeVersion;
+        if (_pendingTranslatedRegions is { } ready)
+        {
+            _pendingTranslatedRegions = null;
+            GroupTextOverlay.Children.Clear();
+            InlineEditorCanvas.AddTranslationOverlay(ready);
+            _editorToolbar?.SetTranslationProgress("已添加翻译，可撤销。");
+            return;
+        }
         if (InlineEditorCanvas.HasTranslationOverlay)
         {
             InlineEditorCanvas.SetTranslationOverlayVisible(
@@ -1135,11 +1226,14 @@ public partial class PinnedImageGroupWindow : Window
             return;
         }
 
-        HeaderStatusText.Text = "钉图编组 · 正在翻译…";
+        var composite = _compositePreview;
+        var languageVersion = TranslationTargetPreferences.Version;
+        StatusMenuItem.Header = "钉图编组 · 正在翻译…";
         var recognition = await EnsureRecognitionAsync();
+        if (_isClosed || !_isEditorMode || !ReferenceEquals(composite, _compositePreview)) return;
         if (!recognition.IsSuccess)
         {
-            HeaderStatusText.Text = recognition.ErrorMessage ?? "钉图编组 · 识别失败";
+            StatusMenuItem.Header = recognition.ErrorMessage ?? "钉图编组 · 识别失败";
             return;
         }
 
@@ -1148,11 +1242,20 @@ public partial class PinnedImageGroupWindow : Window
         {
             return;
         }
-        var translation = await member.TranslateRecognitionAsync(recognition);
+        using var progress = TranslationProgress.Begin(message =>
+        {
+            if (_isClosed || !_isEditorMode || !ReferenceEquals(composite, _compositePreview) || languageVersion != TranslationTargetPreferences.Version) return;
+            StatusMenuItem.Header = message;
+            _editorToolbar?.SetTranslationProgress(message);
+        });
+        var translation = await member.TranslateRecognitionAsync(recognition, _recognitionLifetime.Token);
+        if (_isClosed || !_isEditorMode || !ReferenceEquals(composite, _compositePreview) || languageVersion != TranslationTargetPreferences.Version) return;
+        _editorToolbar?.SetTranslationProgress(translation.ErrorMessage ??
+            (translation.IsSuccess ? "翻译完成" : "翻译失败"));
         if (!translation.IsSuccess ||
             translation.Segments.Count != recognition.Regions.Count)
         {
-            HeaderStatusText.Text = translation.ErrorMessage ?? "钉图编组 · 翻译失败";
+            StatusMenuItem.Header = translation.ErrorMessage ?? "钉图编组 · 翻译失败";
             return;
         }
 
@@ -1166,24 +1269,30 @@ public partial class PinnedImageGroupWindow : Window
                         ? region.EstimatedFontSize
                         : region.Height * 0.78))).ToArray();
         GroupTextOverlay.Children.Clear();
+        if (editVersion != _editorChangeVersion || InlineEditorCanvas.IsTextInputActive)
+        {
+            _pendingTranslatedRegions = translated;
+            _editorToolbar?.SetTranslationProgress("翻译完成，点击译查看结果，可继续标注。");
+            return;
+        }
         InlineEditorCanvas.AddTranslationOverlay(translated);
-        HeaderStatusText.Text = "钉图编组 · 已添加翻译，可撤销";
+        StatusMenuItem.Header = "钉图编组 · 已添加翻译，可撤销";
     }
 
     private async Task RedactPrivacyAsync()
     {
-        HeaderStatusText.Text = "钉图编组 · 正在检测敏感信息…";
+        StatusMenuItem.Header = "钉图编组 · 正在检测敏感信息…";
         var recognition = await EnsureRecognitionAsync();
         if (!recognition.IsSuccess)
         {
-            HeaderStatusText.Text = recognition.ErrorMessage ?? "钉图编组 · 识别失败";
+            StatusMenuItem.Header = recognition.ErrorMessage ?? "钉图编组 · 识别失败";
             return;
         }
 
         var candidates = PrivacyDetectionService.Detect(recognition);
         if (candidates.Count == 0)
         {
-            HeaderStatusText.Text = "钉图编组 · 未检测到敏感信息";
+            StatusMenuItem.Header = "钉图编组 · 未检测到敏感信息";
             return;
         }
 
@@ -1195,14 +1304,14 @@ public partial class PinnedImageGroupWindow : Window
         if (confirmation.ShowDialog() != true ||
             confirmation.SelectedCandidates.Count == 0)
         {
-            HeaderStatusText.Text = "钉图编组 · 已取消隐私打码";
+            StatusMenuItem.Header = "钉图编组 · 已取消隐私打码";
             return;
         }
 
         GroupTextOverlay.Children.Clear();
         InlineEditorCanvas.AddMosaicRegions(
             confirmation.SelectedCandidates.Select(candidate => candidate.Bounds));
-        HeaderStatusText.Text =
+        StatusMenuItem.Header =
             $"钉图编组 · 已添加 {confirmation.SelectedCandidates.Count} 处隐私马赛克";
     }
 
@@ -1228,6 +1337,7 @@ public partial class PinnedImageGroupWindow : Window
             var textBox = new WpfTextBox
             {
                 Text = region.Text,
+                Tag = "UserContent",
                 Width = Math.Max(12, region.Width * scale + 2),
                 Height = Math.Max(16, region.Height * scale + 2),
                 Background = WpfBrushes.Transparent,
@@ -1248,7 +1358,7 @@ public partial class PinnedImageGroupWindow : Window
         }
     }
 
-    private void OnCopyClick(object sender, RoutedEventArgs e)
+    private async void OnCopyClick(object sender, RoutedEventArgs e)
     {
         try
         {
@@ -1261,17 +1371,15 @@ public partial class PinnedImageGroupWindow : Window
                 return;
             }
 
-            if (_isEditorMode)
-            {
-                System.Windows.Clipboard.SetImage(InlineEditorCanvas.RenderEditedImage());
-            }
-            else
-            {
-                System.Windows.Clipboard.SetImage(CompositePreview);
-            }
+            if (_isClosed) return;
+            await ClipboardImageService.SetImageAsync(
+                _isEditorMode ? InlineEditorCanvas.RenderEditedImage() : CompositePreview,
+                _recognitionLifetime.Token);
         }
-        catch (COMException)
+        catch (OperationCanceledException) { }
+        catch (Exception exception) when (exception is COMException or System.ComponentModel.Win32Exception)
         {
+            if (!_isClosed) StatusMenuItem.Header = "钉图编组 · 剪贴板正忙，请重试";
         }
     }
 
@@ -1473,9 +1581,6 @@ public partial class PinnedImageGroupWindow : Window
     private void OnCloseClick(object sender, RoutedEventArgs e) =>
         CloseGroupRequested?.Invoke(this, EventArgs.Empty);
 
-    private void OnOpacityValueChanged(
-        object sender,
-        RoutedPropertyChangedEventArgs<double> e) => Opacity = e.NewValue;
 
     private void OnCanvasMouseWheel(object sender, MouseWheelEventArgs e)
     {
@@ -1490,17 +1595,25 @@ public partial class PinnedImageGroupWindow : Window
             e.Handled = true;
             return;
         }
+        if (_isMinimized || e.Delta == 0) { e.Handled = true; return; }
         BeginInlineZoomInteraction();
-        var factor = e.Delta > 0 ? 1.08 : 1 / 1.08;
+        _zoomFrames.Queue(e.Delta, e.GetPosition(GroupCanvas));
+        e.Handled = true;
+    }
+
+    private void ApplyWindowZoom(double steps)
+    {
+        var factor = Math.Pow(1.08, steps);
         var previousWidth = Width;
         var previousHeight = Height;
         var nextWidth = Math.Clamp(previousWidth * factor, MinWidth, MaxWidth);
         var nextHeight = Math.Clamp(previousHeight * factor, MinHeight, MaxHeight);
-        Left -= (nextWidth - previousWidth) / 2;
-        Top -= (nextHeight - previousHeight) / 2;
-        Width = nextWidth;
-        Height = nextHeight;
-        e.Handled = true;
+        var bounds = new Rect(Left - (nextWidth - previousWidth) / 2,
+            Top - (nextHeight - previousHeight) / 2, nextWidth, nextHeight);
+        if (!MonitorGeometryService.TryResizeWindow(this, bounds))
+        {
+            Left = bounds.Left; Top = bounds.Top; Width = bounds.Width; Height = bounds.Height;
+        }
     }
 
     private void OnInlineEditorPreviewMouseDown(
@@ -1556,25 +1669,18 @@ public partial class PinnedImageGroupWindow : Window
     private void RequestInlineZoom(MouseWheelEventArgs e)
     {
         BeginInlineZoomInteraction();
-        _pendingInlineZoomPointer = e.GetPosition(InlineEditorViewport);
-        _pendingInlineZoomSteps = Math.Clamp(
-            _pendingInlineZoomSteps + Math.Sign(e.Delta),
-            -8,
-            8);
-        ApplyPendingInlineZoom();
+        _zoomFrames.Queue(e.Delta, e.GetPosition(InlineEditorViewport));
     }
 
-    private void ApplyPendingInlineZoom()
+    private void ApplyWheelZoom(double steps, WpfPoint pointer)
     {
-        if (!_isEditorMode || _pendingInlineZoomSteps == 0)
-        {
-            _pendingInlineZoomSteps = 0;
-            return;
-        }
+        if (_isClosed || _isCropMode || _isMinimized) return;
+        if (!_isEditorMode) { ApplyWindowZoom(steps); return; }
+        ApplyInlineZoom(steps, pointer);
+    }
 
-        var pointer = _pendingInlineZoomPointer;
-        var steps = _pendingInlineZoomSteps;
-        _pendingInlineZoomSteps = 0;
+    private void ApplyInlineZoom(double steps, WpfPoint pointer)
+    {
         var previousZoom = InlineEditorCanvas.Zoom;
         var contentX =
             (InlineEditorViewport.HorizontalOffset + pointer.X) / previousZoom;
@@ -1589,7 +1695,7 @@ public partial class PinnedImageGroupWindow : Window
             (contentX * InlineEditorCanvas.Zoom) - pointer.X);
         InlineEditorViewport.ScrollToVerticalOffset(
             (contentY * InlineEditorCanvas.Zoom) - pointer.Y);
-        HeaderStatusText.Text = $"钉图编组 · {_members.Count} 张 · 正在编辑 · {InlineEditorCanvas.Zoom * 100:0}%";
+        StatusMenuItem.Header = $"钉图编组 · {_members.Count} 张 · 正在编辑 · {InlineEditorCanvas.Zoom * 100:0}%";
     }
 
     private void BeginInlineZoomInteraction()
@@ -1612,6 +1718,7 @@ public partial class PinnedImageGroupWindow : Window
 
     private void OnInlineZoomQualityTimerTick(object? sender, EventArgs e)
     {
+        _zoomFrames.Flush();
         _inlineZoomQualityTimer.Stop();
         RenderOptions.SetBitmapScalingMode(
             InlineEditorCanvas,
@@ -1629,7 +1736,7 @@ public partial class PinnedImageGroupWindow : Window
 
     private void CancelPendingInlineZoom()
     {
-        _pendingInlineZoomSteps = 0;
+        _zoomFrames.Cancel();
         _inlineZoomQualityTimer.Stop();
         RenderOptions.SetBitmapScalingMode(
             InlineEditorCanvas,

@@ -59,7 +59,10 @@ public partial class ImageEditorWindow : Window
         AnnotationToolMode lastAnnotationTool = AnnotationToolMode.Rectangle,
         Action<AnnotationToolMode>? lastAnnotationToolChanged = null,
         Func<CapturedImage, Task<OcrRecognitionResult>>? recognizeTextAsync = null,
-        PngSaveLocationMode pngSaveLocationMode = PngSaveLocationMode.DefaultDirectory)
+        PngSaveLocationMode pngSaveLocationMode = PngSaveLocationMode.DefaultDirectory,
+        Func<CapturedImage, CancellationToken, Task<OcrRecognitionResult>>? recognizeTextWithCancellationAsync = null,
+        Func<OcrRecognitionResult, CancellationToken, Task<TranslationSegmentsResult>>? translateTextAsync = null,
+        Func<AppSettings>? settingsProvider = null)
     {
         ArgumentNullException.ThrowIfNull(capturedImage);
         ArgumentException.ThrowIfNullOrWhiteSpace(saveDirectory);
@@ -89,14 +92,27 @@ public partial class ImageEditorWindow : Window
         _customColorPaletteChanged = customColorPaletteChanged;
         _appliedImage = appliedImage;
         _recognizeTextAsync = recognizeTextAsync;
+        _recognizeWithCancellation = recognizeTextWithCancellationAsync ??
+            (recognizeTextAsync is null ? null : (image, _) => recognizeTextAsync(image));
+        _translateTextAsync = translateTextAsync;
+        _settingsProvider = settingsProvider;
 
         InitializeComponent();
+        Screenshot.App.Presentation.WindowShell.Attach(this, "截图编辑");
+        AnnotationVariantButton.Configure(DoubleArrowToolButton, EditorTool.DoubleArrow, SelectVariantTool, showLabel: false);
+        AnnotationVariantButton.Configure(LineToolButton, EditorTool.Line, SelectVariantTool, showLabel: false);
+        AnnotationVariantButton.Configure(MosaicToolButton, EditorTool.Mosaic, SelectVariantTool, showLabel: false);
+        NumberAnnotationOptions.Configure(NumberToolButton, () => EditorCanvas);
+        TextAnnotationOptions.Configure(TextToolButton, () => EditorCanvas);
+
+        Screenshot.App.Presentation.UiTransitions.PrepareWindow(this, EditorShell);
         ApplyButton.Visibility = _appliedImage is null
             ? Visibility.Collapsed
             : Visibility.Visible;
         CopyTableButton.Visibility = _recognizeTextAsync is null
             ? Visibility.Collapsed
             : Visibility.Visible;
+        InitializeTextActions();
         ApplyThemedContextMenu(ShapeToolButton.ContextMenu);
         ApplyThemedContextMenu(ArrowToolButton.ContextMenu);
         if (_selectedTool == EditorTool.CurvedArrow)
@@ -129,7 +145,6 @@ public partial class ImageEditorWindow : Window
         UpdateToolOptionPanels();
         _isInitializing = false;
         WindowPlacementService.Track(this, WindowPlacementKeys.ImageEditor);
-        PopulateEmojiPalette();
         EditorCanvas.HistoryChanged += OnEditorHistoryChanged;
         EditorCanvas.AnnotationSelectionChanged += OnAnnotationSelectionChanged;
 
@@ -141,6 +156,7 @@ public partial class ImageEditorWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _isClosed = true;
+        DisposeTextActions();
         if (!_isInitializing)
         {
             _lastAnnotationToolChanged?.Invoke(ToAnnotationToolMode(_selectedTool));
@@ -148,8 +164,12 @@ public partial class ImageEditorWindow : Window
         Loaded -= OnEditorLoaded;
         EditorCanvas.HistoryChanged -= OnEditorHistoryChanged;
         EditorCanvas.AnnotationSelectionChanged -= OnAnnotationSelectionChanged;
+        EditorCanvas.Reset();
+        DataContext = null;
         _capturedImage.Dispose();
         base.OnClosed(e);
+        if (System.Windows.Application.Current is { ShutdownMode: ShutdownMode.OnExplicitShutdown } app &&
+            ReferenceEquals(app.MainWindow, this)) app.MainWindow = null;
         Core.MemoryFootprint.TrimAfterHeavyOperation();
     }
 
@@ -191,6 +211,7 @@ public partial class ImageEditorWindow : Window
 
     private void OnEditorHistoryChanged(object? sender, EventArgs e)
     {
+        OnTextDocumentChanged();
         UpdateUndoRedoAvailability();
     }
 
@@ -201,9 +222,9 @@ public partial class ImageEditorWindow : Window
             : "可以开始编辑。";
     }
 
-    private void OnShapeMenuArrowMouseDown(
+    private void OnShapeMenuArrowClick(
         object sender,
-        MouseButtonEventArgs e)
+        RoutedEventArgs e)
     {
         if (ShapeToolButton.ContextMenu is not { } menu)
         {
@@ -217,9 +238,9 @@ public partial class ImageEditorWindow : Window
         e.Handled = true;
     }
 
-    private void OnArrowMenuArrowMouseDown(
+    private void OnArrowMenuArrowClick(
         object sender,
-        MouseButtonEventArgs e)
+        RoutedEventArgs e)
     {
         if (ArrowToolButton.ContextMenu is not { } menu)
         {
@@ -394,6 +415,17 @@ public partial class ImageEditorWindow : Window
         ShapeToolLabel.Text = isEllipse ? "椭圆" : "矩形";
     }
 
+    private void SelectVariantTool(EditorTool tool)
+    {
+        var button = tool is EditorTool.DoubleArrow or EditorTool.HollowDoubleArrow
+            ? DoubleArrowToolButton : tool is EditorTool.Line or EditorTool.WavyLine
+            ? LineToolButton : MosaicToolButton;
+        var alreadyChecked = button.IsChecked == true;
+        button.IsChecked = true;
+        if (alreadyChecked)
+            OnToolSelected(button, new RoutedEventArgs());
+    }
+
     private void OnToolSelected(object sender, RoutedEventArgs e)
     {
         if (_isInitializing)
@@ -434,7 +466,12 @@ public partial class ImageEditorWindow : Window
             AnnotationToolMode.Emoji => EditorTool.Emoji,
             AnnotationToolMode.Number => EditorTool.Number,
             AnnotationToolMode.Brush => EditorTool.Brush,
-            AnnotationToolMode.Mosaic => EditorTool.Mosaic,
+            AnnotationToolMode.Mosaic => AnnotationToolPreferences.GetVariant(EditorTool.Mosaic),
+            AnnotationToolMode.RectangleMosaic => EditorTool.RectangleMosaic,
+            AnnotationToolMode.DoubleArrow => AnnotationToolPreferences.GetVariant(EditorTool.DoubleArrow),
+            AnnotationToolMode.Line => AnnotationToolPreferences.GetVariant(EditorTool.Line),
+            AnnotationToolMode.HollowDoubleArrow => EditorTool.HollowDoubleArrow,
+            AnnotationToolMode.WavyLine => EditorTool.WavyLine,
             AnnotationToolMode.Text => EditorTool.Text,
             _ => EditorTool.Rectangle,
         };
@@ -449,16 +486,24 @@ public partial class ImageEditorWindow : Window
             EditorTool.Number => AnnotationToolMode.Number,
             EditorTool.Brush => AnnotationToolMode.Brush,
             EditorTool.Mosaic => AnnotationToolMode.Mosaic,
+            EditorTool.RectangleMosaic => AnnotationToolMode.RectangleMosaic,
+            EditorTool.DoubleArrow => AnnotationToolMode.DoubleArrow,
+            EditorTool.Line => AnnotationToolMode.Line,
+            EditorTool.HollowDoubleArrow => AnnotationToolMode.HollowDoubleArrow,
+            EditorTool.WavyLine => AnnotationToolMode.WavyLine,
             EditorTool.Text => AnnotationToolMode.Text,
             _ => AnnotationToolMode.Rectangle,
         };
 
     private WpfRadioButton GetToolButton(EditorTool tool) => tool switch
     {
+        EditorTool.Arrow or EditorTool.CurvedArrow => ArrowToolButton,
         EditorTool.Emoji => EmojiToolButton,
         EditorTool.Number => NumberToolButton,
         EditorTool.Brush => BrushToolButton,
-        EditorTool.Mosaic => MosaicToolButton,
+        EditorTool.Mosaic or EditorTool.RectangleMosaic => MosaicToolButton,
+        EditorTool.DoubleArrow or EditorTool.HollowDoubleArrow => DoubleArrowToolButton,
+        EditorTool.Line or EditorTool.WavyLine => LineToolButton,
         EditorTool.Text => TextToolButton,
         _ => ShapeToolButton,
     };
@@ -471,17 +516,22 @@ public partial class ImageEditorWindow : Window
         }
 
         var isEmoji = _selectedTool == EditorTool.Emoji;
+        if (isEmoji && EmojiPalettePanel.Children.Count == 0) PopulateEmojiPalette();
         EmojiPaletteScroll.Visibility = isEmoji ? Visibility.Visible : Visibility.Collapsed;
         StrokeOptionsPanel.Visibility = Visibility.Visible;
-        var colorVisibility = isEmoji ? Visibility.Collapsed : Visibility.Visible;
+        var colorVisibility = isEmoji || _selectedTool is EditorTool.Mosaic or EditorTool.RectangleMosaic
+            ? Visibility.Collapsed : Visibility.Visible;
+        StrokeWidthLabel.Text = _selectedTool == EditorTool.RectangleMosaic ? "颗粒" : "线宽";
         CyanColorButton.Visibility = colorVisibility;
         RedColorButton.Visibility = colorVisibility;
         LightColorButton.Visibility = colorVisibility;
         CustomColorButton.Visibility = colorVisibility;
+        if (colorVisibility == Visibility.Collapsed) AnnotationColorSwatch.ClosePickers(this);
     }
 
     private void ApplyToolStyleState()
     {
+        HideSelectableRecognition();
         if (!_isInitialized || EditorCanvas is null)
         {
             return;
@@ -638,16 +688,20 @@ public partial class ImageEditorWindow : Window
 
     private void UpdateStrokeWidthText(double? value = null)
     {
-        if (StrokeWidthText is null)
+        if (StrokeWidthText is null || StrokeWidthSlider is null)
         {
             return;
         }
 
-        var rawWidth = value ?? StrokeWidthSlider?.Value ?? 3;
+        var rawWidth = value ?? StrokeWidthSlider.Value;
         var displayedWidth = _selectedTool == EditorTool.Mosaic
             ? Math.Max(8, rawWidth * 4)
             : rawWidth;
-        StrokeWidthText.Text = $"{displayedWidth:0} px";
+        StrokeWidthText.Text = _selectedTool == EditorTool.RectangleMosaic
+            ? $"{Math.Clamp((int)Math.Round(rawWidth * 1.5), 4, 18)} px"
+            : $"{displayedWidth:0} px";
+        StrokeWidthSlider.ToolTip = _selectedTool == EditorTool.RectangleMosaic
+            ? "马赛克颗粒大小" : "线条/笔刷粗细";
     }
 
     private void OnEditorPreviewMouseWheel(object sender, MouseWheelEventArgs e)
@@ -663,6 +717,22 @@ public partial class ImageEditorWindow : Window
         UpdateEditorViewportSize();
         StatusText.Text = $"缩放 {EditorCanvas.Zoom * 100:0}%";
         e.Handled = true;
+    }
+
+    private void OnZoomOutClick(object sender, RoutedEventArgs e) => ChangeZoom(EditorCanvas.Zoom / 1.1);
+    private void OnZoomInClick(object sender, RoutedEventArgs e) => ChangeZoom(EditorCanvas.Zoom * 1.1);
+    private void OnZoomFitClick(object sender, RoutedEventArgs e)
+    {
+        if (!_isInitialized || _displayWidth <= 0 || _displayHeight <= 0) return;
+        ChangeZoom(Math.Min((EditorScrollViewer.ViewportWidth - 20) / _displayWidth,
+            (EditorScrollViewer.ViewportHeight - 20) / _displayHeight));
+    }
+
+    private void ChangeZoom(double zoom)
+    {
+        if (!_isInitialized) return;
+        EditorCanvas.SetZoom(zoom);
+        UpdateEditorViewportSize();
     }
 
     private void OnUndoClick(object sender, RoutedEventArgs e)
@@ -743,21 +813,8 @@ public partial class ImageEditorWindow : Window
 
     private void UpdateSelectedColorButton(WpfButton selectedButton)
     {
-        foreach (var button in new[]
-                 {
-                     CyanColorButton,
-                     RedColorButton,
-                     LightColorButton,
-                     CustomColorButton,
-                 })
-        {
-            button.BorderBrush = new SolidColorBrush(
-                WpfColor.FromArgb(0x8A, 0xE1, 0xD8, 0xD0));
-            button.BorderThickness = new Thickness(1);
-        }
-
-        selectedButton.BorderBrush = System.Windows.Media.Brushes.White;
-        selectedButton.BorderThickness = new Thickness(2);
+        AnnotationColorSwatch.Update(_selectedColor,
+            CustomColorButton, CyanColorButton, RedColorButton, LightColorButton);
     }
 
     private async void OnCopyClick(object sender, RoutedEventArgs e)
@@ -783,58 +840,12 @@ public partial class ImageEditorWindow : Window
         }
     }
 
-    private async void OnCopyTableClick(object sender, RoutedEventArgs e)
-    {
-        if (!_isInitialized || _recognizeTextAsync is null)
-        {
-            StatusText.Text = "编辑画布仍在准备中。";
-            return;
-        }
-
-        CopyTableButton.IsEnabled = false;
-        StatusText.Text = "正在识别表格…";
-        try
-        {
-            using var image = CapturedImage.FromBitmapSource(
-                EditorCanvas.RenderEditedImage());
-            var recognition = await _recognizeTextAsync(image);
-            var table = TableRecognitionService.BuildTsv(
-                recognition,
-                image.Bitmap,
-                await TableSupplementaryOcrService.RecognizeAsync(
-                    image,
-                    recognition.Words));
-            if (!table.IsSuccess)
-            {
-                StatusText.Text = table.ErrorMessage ?? "未识别到表格。";
-                return;
-            }
-
-            if (!string.IsNullOrWhiteSpace(table.ClipboardHtml))
-            {
-                await ClipboardTextService.SetHtmlAsync(table.ClipboardHtml, table.Content);
-            }
-            else
-            {
-                await ClipboardTextService.SetTextAsync(table.Content);
-            }
-            StatusText.Text = "表格已识别并复制。";
-        }
-        catch
-        {
-            StatusText.Text = "表格识别或复制失败，请重试。";
-        }
-        finally
-        {
-            if (!_isClosed)
-            {
-                CopyTableButton.IsEnabled = true;
-            }
-        }
-    }
+    private async void OnCopyTableClick(object sender, RoutedEventArgs e) =>
+        await RunTextActionAsync(ImageTextAction.CopyTable);
 
     private async void OnSaveClick(object sender, RoutedEventArgs e)
     {
+        using var featureActivity = Infrastructure.FeatureActivity.Begin();
         if (!_isInitialized)
         {
             StatusText.Text = "编辑画布仍在准备中。";
@@ -904,6 +915,8 @@ public partial class ImageEditorWindow : Window
 
     private void UpdateEditorViewportSize()
     {
+        UpdateRecognitionOverlaySize();
+        ZoomText.Text = $"{EditorCanvas.Zoom * 100:0}%";
         EditorViewport.Width = Math.Max(1, EditorCanvas.DisplayWidth);
         EditorViewport.Height = Math.Max(1, EditorCanvas.DisplayHeight);
     }

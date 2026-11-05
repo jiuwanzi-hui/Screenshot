@@ -37,7 +37,8 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
             });
     private readonly HookProcedure _hookProcedure;
     private IntPtr _hookHandle;
-    private bool _disposed;
+    private readonly Infrastructure.SessionInputThread? _inputThread;
+    private volatile bool _disposed;
     private volatile bool _blockNonWheelInput;
     private volatile bool _controlledCaptureInput;
     private volatile bool _throttledWheelInput;
@@ -46,6 +47,8 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
     private long _clickGeneration;
     private bool _rightButtonCancellationPending;
     private bool _leftButtonCapturePending;
+    private uint _blockedButtons;
+    private uint _previewButtons;
     private readonly object _clickSync = new();
     private uint _lastLeftButtonUpTime;
     private NativePoint _lastLeftButtonUpPoint;
@@ -56,6 +59,12 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
         Action<int>? wheelDetected = null,
         Func<int, int, bool>? allowBlockedInputAt = null,
         Action? cancelRequested = null)
+        : this(captureRegion, wheelDetected, allowBlockedInputAt, cancelRequested, installHook: true)
+    {
+    }
+
+    internal ScrollCaptureWheelMonitor(ScreenRegion captureRegion, Action<int>? wheelDetected,
+        Func<int, int, bool>? allowBlockedInputAt, Action? cancelRequested, bool installHook)
     {
         if (captureRegion.IsEmpty)
         {
@@ -67,19 +76,14 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
         _allowBlockedInputAt = allowBlockedInputAt;
         _cancelRequested = cancelRequested;
         _hookProcedure = OnMouseHook;
-        _hookHandle = NativeMethods.SetWindowsHookEx(
-            LowLevelMouseHook,
-            _hookProcedure,
-            NativeMethods.GetModuleHandle(moduleName: null),
-            threadId: 0);
-
-        if (_hookHandle == IntPtr.Zero)
+        if (!installHook) return;
+        _inputThread = new Infrastructure.SessionInputThread(() =>
         {
-            throw new Win32Exception(
-                Marshal.GetLastWin32Error(),
-                "无法监听长截图控制输入。");
-        }
-
+            _hookHandle = NativeMethods.SetWindowsHookEx(LowLevelMouseHook, _hookProcedure,
+                NativeMethods.GetModuleHandle(moduleName: null), threadId: 0);
+            if (_hookHandle == IntPtr.Zero)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "无法监听长截图控制输入。");
+        }, ReleaseHook);
     }
 
     public ChannelReader<int> WheelEvents => _wheelEvents.Reader;
@@ -152,15 +156,17 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
             _clickGeneration++;
         }
 
-        if (_hookHandle != IntPtr.Zero)
-        {
-            _ = NativeMethods.UnhookWindowsHookEx(_hookHandle);
-            _hookHandle = IntPtr.Zero;
-        }
-
+        ReleaseHook();
+        _inputThread?.Dispose();
 
         _wheelEvents.Writer.TryComplete();
         _pointerActions.Writer.TryComplete();
+    }
+
+    private void ReleaseHook()
+    {
+        var handle = Interlocked.Exchange(ref _hookHandle, IntPtr.Zero);
+        if (handle != IntPtr.Zero) _ = NativeMethods.UnhookWindowsHookEx(handle);
     }
 
     private IntPtr OnMouseHook(
@@ -205,6 +211,8 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
 
             if (captureRegion.Contains(hookData.Point.X, hookData.Point.Y))
             {
+                if (_allowBlockedInputAt?.Invoke(hookData.Point.X, hookData.Point.Y) == true)
+                    return NativeMethods.CallNextHookEx(_hookHandle, hookCode, message, hookDataPointer);
                 if (_throttledWheelInput &&
                     (hookData.Flags & InjectedMouseEvent) == 0)
                 {
@@ -260,10 +268,17 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
                     _wheelEvents.Writer.TryWrite(wheelDelta);
                 }
             }
+            else if (_blockNonWheelInput &&
+                     _allowBlockedInputAt?.Invoke(hookData.Point.X, hookData.Point.Y) != true)
+            {
+                // Manual capture may scroll only its selected viewport, not
+                // another app behind the dimmed area.
+                return new IntPtr(1);
+            }
         }
 
         if (hookCode >= 0 &&
-            _controlledCaptureInput &&
+            !_disposed && _controlledCaptureInput &&
             message.ToInt32() is LeftButtonDownMessage or LeftButtonUpMessage)
         {
             var hookData = Marshal.PtrToStructure<LowLevelMouseHookData>(
@@ -295,6 +310,7 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
                         hookData.Point.X,
                         hookData.Point.Y) == true)
                 {
+                    _previewButtons |= 1;
                     return NativeMethods.CallNextHookEx(
                         _hookHandle,
                         hookCode,
@@ -323,12 +339,14 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
         }
 
         if (hookCode >= 0 &&
-            _blockNonWheelInput &&
+            !_disposed && _blockNonWheelInput &&
             IsBlockedPointerMessage(message.ToInt32()))
         {
             var hookData = Marshal.PtrToStructure<LowLevelMouseHookData>(
                 hookDataPointer);
             var pointerMessage = message.ToInt32();
+            var button = GetButtonMask(pointerMessage);
+            var isRelease = pointerMessage is LeftButtonUpMessage or RightButtonUpMessage or 0x0208 or 0x020C;
 
             // Keep the hook alive through the complete right-click gesture.
             // Canceling on button-down disposed the hook before button-up and
@@ -337,6 +355,7 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
                 _rightButtonCancellationPending)
             {
                 _rightButtonCancellationPending = false;
+                _blockedButtons &= ~button;
                 try
                 {
                     _cancelRequested?.Invoke();
@@ -348,18 +367,35 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
                 return new IntPtr(1);
             }
 
+            // Keep each press/release pair with the surface where it started.
+            // Dragging out of the preview must still release its mouse capture;
+            // dragging a blocked press into it must not activate a button.
+            if (isRelease && (_blockedButtons & button) != 0)
+            {
+                _blockedButtons &= ~button;
+                return new IntPtr(1);
+            }
+            if (isRelease && (_previewButtons & button) != 0)
+            {
+                _previewButtons &= ~button;
+                return NativeMethods.CallNextHookEx(_hookHandle, hookCode, message, hookDataPointer);
+            }
+
             // Let the preview handle its own right click. Everywhere else the
             // complete gesture is reserved for canceling the capture.
             if (_allowBlockedInputAt?.Invoke(
                     hookData.Point.X,
                     hookData.Point.Y) == true)
             {
+                if (!isRelease) _previewButtons |= button;
                 return NativeMethods.CallNextHookEx(
                     _hookHandle,
                     hookCode,
                     message,
                     hookDataPointer);
             }
+
+            if (!isRelease) _blockedButtons |= button;
 
             if (pointerMessage == RightButtonDownMessage)
             {
@@ -445,7 +481,7 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
                 _clickGeneration++;
             }
 
-            _pointerActions.Writer.TryWrite(ScrollCapturePointerAction.Click);
+            _pointerActions.Writer.TryWrite(ScrollCapturePointerAction.Pause);
             return;
         }
 
@@ -501,11 +537,21 @@ public sealed class ScrollCaptureWheelMonitor : IDisposable
 
     private static bool IsBlockedPointerMessage(int message)
     {
-        // Right click is reserved for canceling the capture. All other pointer
-        // input must continue normally; globally swallowing the left button
-        // broke unrelated tools such as WeChat's screenshot selector.
-        return message is RightButtonDownMessage or RightButtonUpMessage;
+        // Reserve clicks for capture controls until the session is disposed.
+        // Movement and vertical wheel packets use their own fast paths.
+        return message is LeftButtonDownMessage or LeftButtonUpMessage or
+            RightButtonDownMessage or RightButtonUpMessage or
+            0x0207 or 0x0208 or 0x020B or 0x020C or 0x020E;
     }
+
+    private static uint GetButtonMask(int message) => message switch
+    {
+        LeftButtonDownMessage or LeftButtonUpMessage => 1,
+        RightButtonDownMessage or RightButtonUpMessage => 2,
+        0x0207 or 0x0208 => 4,
+        0x020B or 0x020C => 8,
+        _ => 0,
+    };
 
     internal static bool ShouldCompleteControlledClick(
         ScreenRegion captureRegion,

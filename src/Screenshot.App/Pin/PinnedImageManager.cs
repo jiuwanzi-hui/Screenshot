@@ -13,8 +13,11 @@ public sealed class PinnedImageManager : IDisposable
     private readonly List<PinnedImageWindow> _groupOrder = [];
     private readonly Func<CapturedImage, Task<OcrRecognitionResult>>?
         _recognizeTextAsync;
+    private readonly Func<CapturedImage, CancellationToken, Task<OcrRecognitionResult>>? _recognizeTextWithCancellationAsync;
     private readonly Func<OcrRecognitionResult, Task<TranslationSegmentsResult>>?
         _translateTextAsync;
+    private readonly Func<OcrRecognitionResult, CancellationToken, Task<TranslationSegmentsResult>>?
+        _translateTextWithCancellationAsync;
     private readonly Action? _openSettings;
     private readonly Func<AppSettings>? _settingsProvider;
     private readonly Action<string>? _customStrokeColorChanged;
@@ -45,10 +48,14 @@ public sealed class PinnedImageManager : IDisposable
         Action<ArrowToolMode>? arrowToolModeChanged = null,
         Action<ShapeToolMode>? shapeToolModeChanged = null,
         Action<AnnotationToolMode>? lastAnnotationToolChanged = null,
-        Action<CapturedImage>? copyImageToClipboardAndHistory = null)
+        Action<CapturedImage>? copyImageToClipboardAndHistory = null,
+        Func<CapturedImage, CancellationToken, Task<OcrRecognitionResult>>? recognizeTextWithCancellationAsync = null,
+        Func<OcrRecognitionResult, CancellationToken, Task<TranslationSegmentsResult>>? translateTextWithCancellationAsync = null)
     {
         _recognizeTextAsync = recognizeTextAsync;
+        _recognizeTextWithCancellationAsync = recognizeTextWithCancellationAsync;
         _translateTextAsync = translateTextAsync;
+        _translateTextWithCancellationAsync = translateTextWithCancellationAsync;
         _openSettings = openSettings;
         _settingsProvider = settingsProvider;
         _customStrokeColorChanged = customStrokeColorChanged;
@@ -78,7 +85,11 @@ public sealed class PinnedImageManager : IDisposable
 
     internal PinnedImageGroupWindow? GroupWindow => _groupWindow;
 
-    public void Pin(CapturedImage capturedImage)
+    public void Pin(CapturedImage capturedImage, int outputScalePercent = 100, OcrRecognitionResult? initialRecognition = null)
+        => _ = PinAndGetWindow(capturedImage, outputScalePercent, initialRecognition);
+
+    internal PinnedImageWindow PinAndGetWindow(CapturedImage capturedImage, int outputScalePercent = 100,
+        OcrRecognitionResult? initialRecognition = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(capturedImage);
@@ -97,8 +108,13 @@ public sealed class PinnedImageManager : IDisposable
                 _arrowStyleChanged,
                 _arrowToolModeChanged,
                 _shapeToolModeChanged,
-                _lastAnnotationToolChanged);
+                _lastAnnotationToolChanged,
+                outputScalePercent,
+                _recognizeTextWithCancellationAsync,
+                initialRecognition,
+                _translateTextWithCancellationAsync);
             AddAndShowWindow(window);
+            return window;
         }
         catch
         {
@@ -106,6 +122,7 @@ public sealed class PinnedImageManager : IDisposable
             {
                 DetachWindow(window);
                 _windows.Remove(window);
+                window.Close();
             }
 
             capturedImage.Dispose();
@@ -134,7 +151,10 @@ public sealed class PinnedImageManager : IDisposable
                 _arrowStyleChanged,
                 _arrowToolModeChanged,
                 _shapeToolModeChanged,
-                _lastAnnotationToolChanged)
+                _lastAnnotationToolChanged,
+                state.OutputScalePercent,
+                _recognizeTextWithCancellationAsync,
+                translateTextWithCancellationAsync: _translateTextWithCancellationAsync)
             {
                 PersistenceId = state.Id,
             };
@@ -165,6 +185,11 @@ public sealed class PinnedImageManager : IDisposable
         }
         _hasHiddenWindows = _windows.Count > 0;
         NotifyDisplayStateChanged();
+    }
+
+    internal void RefreshAutomaticOcrSetting()
+    {
+        foreach (var window in _windows) window.RefreshAutomaticOcrSetting();
     }
 
     public void ShowAll()
@@ -581,7 +606,7 @@ public sealed class PinnedImageManager : IDisposable
                 bounds.Left,
                 bounds.Top,
                 bounds.Width,
-                bounds.Height);
+                bounds.Height) { OutputScalePercent = window.OutputScalePercent };
             });
         _persistenceStore.SaveIndex(states);
     }

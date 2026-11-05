@@ -24,6 +24,8 @@
                      VerticalAlignment="Center"
                      Fill="{DynamicResource AppAccentBrush}" />
             <TextBlock x:Name="MessageText"
+                       MaxWidth="420"
+                       TextWrapping="Wrap"
                        Foreground="{DynamicResource AppTextPrimaryBrush}"
                        FontSize="14"
                        FontWeight="SemiBold"
