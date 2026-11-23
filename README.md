@@ -1,6 +1,6 @@
 # SnapCut · 简截
 
-[简体中文](#简体中文) | [English](#english)
+[简体中文](#简体中文) | [English](#english) | [操作说明书](docs/user-guide.md)
 
 [![GitHub release](https://img.shields.io/github/v/release/jiuwanzi-hui/Screenshot?style=flat-square&label=release)](https://github.com/jiuwanzi-hui/Screenshot/releases/latest)
 [![GitHub downloads](https://img.shields.io/github/downloads/jiuwanzi-hui/Screenshot/total?style=flat-square&label=downloads)](https://github.com/jiuwanzi-hui/Screenshot/releases)
